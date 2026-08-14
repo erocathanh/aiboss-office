@@ -1,0 +1,268 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import readline from 'node:readline';
+import { CAU_HINH } from './cau-hinh';
+
+/**
+ * ĐỌC KHO PHIÊN THẬT của Claude Code trên máy.
+ *
+ * Kho nằm ở `~/.claude/projects/<thư-mục-đã-mã-hoá>/<uuid>.jsonl`.
+ * Quy tắc mã hoá ĐO TẠI MÁY (⛔ không suy đoán):
+ *     `/` → `-`   và   `.` → `-`
+ *   ví dụ  /Users/erocathanh/.claude/projects
+ *       →  -Users-erocathanh--claude-projects        (dấu `--` là do `/.`)
+ *
+ * ⛔ KHÔNG gọi `claude --resume` rỗng rồi bóc chữ màn hình — đọc thẳng .jsonl sạch hơn.
+ *
+ * ⭐ Mỗi nhân sự có THƯ MỤC LÀM VIỆC RIÊNG (`agent-ws/<slug>`) ⇒ phiên của ai
+ *    nằm gọn kho của người đó, ⛔ không lẫn vào nhau.
+ */
+
+const GOC_KHO = path.join(os.homedir(), '.claude', 'projects');
+
+/** Ngưỡng coi là "đang chạy nơi khác" — lấy đúng ngưỡng sổ phiên của Owner: 5 phút. */
+export const NGUONG_SONG_PHUT = 5;
+
+export function thuMucAgent(maNhanSu: string): string {
+  // Chỉ nhận ký tự an toàn — ⛔ chặn đường leo thư mục (../).
+  const sach = maNhanSu.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!sach || sach !== maNhanSu) throw new Error('Mã nhân sự không hợp lệ.');
+  return path.join(CAU_HINH.thuMucLamViec, sach);
+}
+
+/** Mã hoá đường dẫn thành tên thư mục kho — đúng luật đã đo. */
+export function maHoaDuongDan(p: string): string {
+  return p.replace(/[/.]/g, '-');
+}
+
+export function khoPhienCua(maNhanSu: string): string {
+  return path.join(GOC_KHO, maHoaDuongDan(thuMucAgent(maNhanSu)));
+}
+
+export interface TomTatPhien {
+  ma: string;
+  /** Mốc sửa cuối (mili-giây). */
+  moc: number;
+  moc_doc: string;
+  /** Vài chữ đầu của tin cuối. */
+  tin_cuoi: string;
+  so_luot: number;
+  /** Đang chạy ở nơi khác → ⛔ KHÔNG cho nối vào. */
+  dang_chay: boolean;
+}
+
+interface DongPhien {
+  type?: string;
+  userType?: string;
+  timestamp?: string;
+  message?: { content?: unknown };
+}
+
+function bocChu(m: unknown): string {
+  if (typeof m === 'string') return m;
+  if (Array.isArray(m)) {
+    return m
+      .filter(
+        (x): x is { type: string; text: string } =>
+          typeof x === 'object' && x !== null && (x as { type?: string }).type === 'text',
+      )
+      .map((x) => x.text)
+      .join(' ');
+  }
+  return '';
+}
+
+/** Đọc ĐUÔI tệp cho nhanh — ⛔ đừng nuốt cả tệp có thể tới hàng chục MB. */
+function docDuoi(p: string, soByte = 256 * 1024): string {
+  const cd = fs.statSync(p).size;
+  const bd = Math.max(0, cd - soByte);
+  const fd = fs.openSync(p, 'r');
+  try {
+    const dem = Buffer.alloc(cd - bd);
+    fs.readSync(fd, dem, 0, dem.length, bd);
+    const s = dem.toString('utf8');
+    return bd > 0 ? s.slice(s.indexOf('\n') + 1) : s; // bỏ dòng đầu bị cắt dở
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Liệt kê mọi phiên của một nhân sự.
+ *
+ * `phienCuaTa` = { mã phiên ô đang giữ, mốc kết thúc lượt của ta } — để KHÔNG
+ * gắn nhãn "đang chạy nơi khác" lên chính phiên mà ô này vừa chạy xong.
+ * (Đã cắn thật lúc nghiệm thu: phiên đang mở bị tự gắn cờ rồi hoá ra bấm không được.)
+ */
+export function dsPhien(
+  maNhanSu: string,
+  phienCuaTa?: { ma: string | null; mocKetThuc: number | null },
+): TomTatPhien[] {
+  let kho: string;
+  try {
+    kho = khoPhienCua(maNhanSu);
+  } catch {
+    return [];
+  }
+  if (!fs.existsSync(kho)) return [];
+
+  const bayGio = Date.now();
+  const ra: TomTatPhien[] = [];
+
+  for (const t of fs.readdirSync(kho)) {
+    if (!t.endsWith('.jsonl')) continue;
+    const p = path.join(kho, t);
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(p);
+    } catch {
+      continue;
+    }
+    if (!st.isFile() || st.size === 0) continue;
+
+    let tinCuoi = '';
+    let soLuot = 0;
+    try {
+      for (const d of docDuoi(p).split('\n')) {
+        const s = d.trim();
+        if (!s.startsWith('{')) continue;
+        let j: DongPhien;
+        try {
+          j = JSON.parse(s) as DongPhien;
+        } catch {
+          continue;
+        }
+        if (j.type === 'user' && j.userType === 'external') {
+          soLuot += 1;
+          const c = bocChu(j.message?.content).trim();
+          if (c) tinCuoi = c;
+        }
+      }
+    } catch {
+      /* tệp hỏng thì bỏ qua, ⛔ đừng làm sập cả danh sách */
+    }
+
+    const ma = t.replace(/\.jsonl$/, '');
+    const phutTuoi = (bayGio - st.mtimeMs) / 60000;
+
+    // ⛔ LUẬT CỨNG: phiên vừa đổi trong 5 phút coi như ĐANG SỐNG ở terminal khác.
+    //    Hai tiến trình cùng ghi một tệp phiên = hỏng bản ghi.
+    let dang_chay = phutTuoi < NGUONG_SONG_PHUT;
+    // ...TRỪ khi người sửa cuối chính là TA và lượt của ta đã xong.
+    if (
+      dang_chay &&
+      phienCuaTa?.ma === ma &&
+      phienCuaTa.mocKetThuc !== null &&
+      st.mtimeMs <= phienCuaTa.mocKetThuc + 1000
+    ) {
+      dang_chay = false;
+    }
+
+    ra.push({
+      ma,
+      moc: st.mtimeMs,
+      moc_doc: new Date(st.mtimeMs).toLocaleString('vi-VN', { hour12: false }),
+      tin_cuoi: tinCuoi.slice(0, 90),
+      so_luot: soLuot,
+      dang_chay,
+    });
+  }
+
+  return ra.sort((a, b) => b.moc - a.moc);
+}
+
+export interface TinLichSu {
+  ai: 'toi' | 'ho';
+  chu: string;
+  gio: string;
+}
+
+/** Đọc LỊCH SỬ THẬT của một phiên — ⛔ không phải hội thoại mẫu. */
+export async function lichSuPhien(maNhanSu: string, maPhien: string): Promise<TinLichSu[]> {
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) throw new Error('Mã phiên không hợp lệ.');
+  const p = path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`);
+  if (!fs.existsSync(p)) return [];
+
+  const ra: TinLichSu[] = [];
+  const doc = readline.createInterface({
+    input: fs.createReadStream(p, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  });
+
+  for await (const d of doc) {
+    const s = d.trim();
+    if (!s.startsWith('{')) continue;
+    let j: DongPhien;
+    try {
+      j = JSON.parse(s) as DongPhien;
+    } catch {
+      continue;
+    }
+    const chu = bocChu(j.message?.content).trim();
+    if (!chu) continue;
+
+    if (j.type === 'user' && j.userType === 'external') {
+      ra.push({ ai: 'toi', chu, gio: gioNgan(j.timestamp) });
+    } else if (j.type === 'assistant') {
+      ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp) });
+    }
+  }
+  return ra;
+}
+
+function gioNgan(ts?: string): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/**
+ * Phiên này có THẬT trong kho của ĐÚNG nhân sự đó không.
+ * Chốt chặn: trình duyệt ⛔ không trỏ được sang phiên của dự án khác trên máy.
+ */
+export function coPhien(maNhanSu: string, maPhien: string): boolean {
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) return false;
+  try {
+    return fs.existsSync(path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`));
+  } catch {
+    return false;
+  }
+}
+
+/** Mốc sửa của tệp phiên, hoặc null nếu chưa có tệp. */
+export function mocTepPhien(maNhanSu: string, maPhien: string): number | null {
+  try {
+    return fs.statSync(path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Phiên này có đang được tiến trình KHÁC dùng không.
+ *
+ * 🪤 Chỉ nhìn mtime là SAI: sau khi CHÍNH TA chạy xong, tệp cũng vừa mới đổi
+ *    ⇒ câu hỏi thứ hai của Owner sẽ bị chính ta chặn. Đã cắn thật lúc nghiệm thu.
+ * ⇒ So thêm với `mocKetThucCuaTa` (mốc ghi lại ngay sau lượt của ta):
+ *      · tệp cũ hơn 5 phút            → chắc chắn rảnh
+ *      · tệp mới, nhưng ĐÚNG BẰNG mốc ta ghi → người sửa cuối là TA, đã xong → rảnh
+ *      · tệp mới, và MỚI HƠN mốc của ta      → có kẻ khác đang ghi → CHẶN
+ */
+export function dangChay(
+  maNhanSu: string,
+  maPhien: string,
+  mocKetThucCuaTa: number | null,
+): boolean {
+  const mtime = mocTepPhien(maNhanSu, maPhien);
+  if (mtime === null) return false;
+
+  if ((Date.now() - mtime) / 60000 >= NGUONG_SONG_PHUT) return false;
+
+  // Sai số 1 giây cho chênh lệch đồng hồ / ghi đệm.
+  if (mocKetThucCuaTa !== null && mtime <= mocKetThucCuaTa + 1000) return false;
+
+  return true;
+}

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Agent nạp luật từ đâu — và vì sao phiên blog hỏi lại</title>
+<style>
+ :root{--navy:#0a1929;--navy2:#102a43;--navy3:#16324f;--gold:#c89425;--gold2:#f1c768;
+       --kem:#faf7f0;--mo:#93a5b8;--do:#e5484d;--xanh:#3dd68c}
+ *{box-sizing:border-box}
+ body{margin:0;background:linear-gradient(160deg,var(--navy),var(--navy2));color:var(--kem);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.75}
+ .b{max-width:1000px;margin:0 auto;padding:44px 24px 90px}
+ .nhan{display:inline-block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);
+       border:1px solid rgba(200,148,37,.4);padding:5px 12px;border-radius:99px}
+ h1{font-size:clamp(25px,4vw,36px);margin:16px 0 8px;letter-spacing:-.02em;line-height:1.25}
+ h2{font-size:21px;margin:44px 0 10px;padding-top:22px;border-top:1px solid rgba(250,247,240,.1)}
+ h3{font-size:16.5px;margin:26px 0 8px;color:var(--gold2)}
+ .dan{color:var(--mo);font-size:15px;margin:0 0 6px}
+ p{margin:12px 0}
+ .hop{background:rgba(255,255,255,.05);border:1px solid rgba(250,247,240,.12);
+      border-radius:14px;padding:20px 22px;margin:20px 0}
+ .hop.do{border-color:rgba(229,72,77,.45);background:rgba(229,72,77,.07)}
+ .hop.xanh{border-color:rgba(61,214,140,.4);background:rgba(61,214,140,.06)}
+ .hop.vang{border-color:rgba(200,148,37,.45);background:rgba(200,148,37,.07)}
+ .hop b.tieu{display:block;font-size:16px;margin-bottom:6px}
+ code{background:rgba(255,255,255,.09);padding:1.5px 6px;border-radius:4px;
+      color:var(--gold2);font-size:.9em;font-family:ui-monospace,monospace}
+ pre{background:rgba(0,0,0,.34);border:1px solid rgba(250,247,240,.1);border-radius:10px;
+     padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.65;margin:14px 0}
+ pre code{background:none;padding:0;color:var(--kem)}
+ table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+ th,td{padding:9px 11px;border-bottom:1px solid rgba(250,247,240,.1);text-align:left;vertical-align:top}
+ th{color:var(--gold);font-weight:600;font-size:13px}
+ .sd{background:rgba(0,0,0,.28);border:1px solid rgba(250,247,240,.1);border-radius:14px;
+     padding:18px;margin:22px 0;overflow-x:auto}
+ .sd svg{display:block;min-width:660px;width:100%;height:auto}
+ ul{padding-left:20px} li{margin:7px 0}
+ .ok{color:var(--xanh)} .khong{color:var(--do)}
+ footer{color:var(--mo);font-size:13px;margin-top:50px;padding-top:18px;
+        border-top:1px solid rgba(250,247,240,.1)}
+</style>
+</head>
+<body><div class="b">
+
+<span class="nhan">Nội bộ · giải thích cơ chế</span>
+<h1>Agent nạp luật nhà từ đâu — và vì sao phiên blog phải hỏi lại</h1>
+<p class="dan">Đo tại máy ngày 14/08/2026 · <code>claude-web-funnel</code></p>
+
+<div class="hop vang">
+<b class="tieu">Câu hỏi gốc của Owner</b>
+Một phiên mở ở <code>~/claude-wp-blog</code> chào xong thì hỏi lại <i>“anh muốn em làm gì trước”</i>.
+Owner hỏi: <b>có phải vì thư mục đó chưa có CLAUDE.md riêng không?</b>
+<br><br>
+<b>Đáp gọn: đúng một nửa.</b> Nửa còn lại quan trọng hơn — và nó không nằm ở chỗ ta nghi.
+</div>
+
+<h2>① Luật nạp theo tầng, cộng dồn từ gốc xuống</h2>
+<p>Không phải “thư mục nào có thì nạp thư mục đó”. Mọi tầng từ gốc đi xuống chỗ đang đứng đều nạp, và <b>cộng dồn</b> — tầng gần chỗ đứng đọc sau cùng.</p>
+
+<div class="sd">
+<svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Sơ đồ ba tầng luật cộng dồn khi agent mở ở thư mục con">
+  <defs>
+    <marker id="mt" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,1 L8,4.5 L0,8 Z" fill="#c89425"/>
+    </marker>
+  </defs>
+
+  <text x="14" y="20" fill="#93a5b8" font-size="12">TẦNG NẠP (gốc → chỗ đứng)</text>
+
+  <!-- tầng 1 -->
+  <rect x="14" y="34" width="300" height="52" rx="9" fill="#16324f" stroke="#c89425" stroke-width="1.2"/>
+  <text x="30" y="55" fill="#f1c768" font-size="13.5" font-weight="700">① Toàn cục</text>
+  <text x="30" y="74" fill="#faf7f0" font-size="12" font-family="ui-monospace,monospace">~/.claude/CLAUDE.md</text>
+  <text x="326" y="66" fill="#3dd68c" font-size="12">✔ luôn nạp, mọi chỗ</text>
+
+  <line x1="164" y1="86" x2="164" y2="104" stroke="#c89425" stroke-width="1.4" marker-end="url(#mt)"/>
+
+  <!-- tầng 2 -->
+  <rect x="14" y="106" width="300" height="52" rx="9" fill="#16324f" stroke="#c89425" stroke-width="1.2"/>
+  <text x="30" y="127" fill="#f1c768" font-size="13.5" font-weight="700">② Luật nhà</text>
+  <text x="30" y="146" fill="#faf7f0" font-size="12" font-family="ui-monospace,monospace">~/CLAUDE.md · 15.227 bytes</text>
+  <text x="326" y="138" fill="#3dd68c" font-size="12">✔ nạp — vì chỗ đứng nằm DƯỚI ~/</text>
+
+  <line x1="164" y1="158" x2="164" y2="176" stroke="#c89425" stroke-width="1.4" marker-end="url(#mt)"/>
+
+  <!-- tầng 3 -->
+  <rect x="14" y="178" width="300" height="52" rx="9" fill="#132b45"
+        stroke="#e5484d" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="30" y="199" fill="#e5484d" font-size="13.5" font-weight="700">③ Luật của thư mục</text>
+  <text x="30" y="218" fill="#93a5b8" font-size="12" font-family="ui-monospace,monospace">~/claude-wp-blog/CLAUDE.md</text>
+  <text x="326" y="210" fill="#e5484d" font-size="12">✘ KHÔNG có — thư mục rỗng</text>
+
+  <!-- kết quả -->
+  <rect x="14" y="250" width="672" height="40" rx="9" fill="rgba(200,148,37,.12)" stroke="#c89425" stroke-width="1"/>
+  <text x="30" y="275" fill="#faf7f0" font-size="13">
+    ⇒ Agent BIẾT luật nhà (①+②) · nhưng KHÔNG biết dự án này là gì (③ trống) ⇒ phải hỏi lại
+  </text>
+</svg>
+</div>
+
+<h2>② Bằng chứng: nó ĐÃ đọc luật nhà</h2>
+<p>Ta không cần suy đoán — chính lời chào của nó đã tố cáo. Những thứ nó nhắc <b>chỉ có trong <code>~/CLAUDE.md</code></b>:</p>
+<table>
+<tr><th>Nó nói gì</th><th>Nguồn duy nhất</th></tr>
+<tr><td>“STATE.md 183KB vượt ngưỡng”</td><td>luật nhà, mục nề nếp mở phiên</td></tr>
+<tr><td>“ACTIVE.md 114 dòng đang chạy”</td><td>luật nhà, sổ đăng ký agent</td></tr>
+<tr><td>“45 memory chờ duyệt”</td><td>luật nhà, mục trí nhớ tự động</td></tr>
+<tr><td>“câu hỏi cần quyết phải lên trang round”</td><td>luật nhà + móc nhắc</td></tr>
+</table>
+<p><b class="ok">Đọc được thì mới nhắc được.</b> Nên “thiếu luật nhà” là chẩn đoán sai.</p>
+
+<h2>③ Chỗ hỏng thật — nó nằm ở nơi khác</h2>
+<div class="hop do">
+<b class="tieu">Nó không chào bằng <code>FROM: … / TO: …</code></b>
+Mà luật header nằm <b>ngay đầu</b> chính cái tệp nó vừa chứng minh là đã đọc.
+<br><br>
+⇒ <b>Nạp được luật không có nghĩa làm theo luật.</b> Nó nạp 15 KB, trích đúng phần sổ sách và trí nhớ, rồi bỏ qua dòng đầu tiên.
+</div>
+<p>Đây cùng một họ với những thứ đội đã trả giá suốt tuần: <b>“có mặt” không phải “đúng”</b>. Tệp có nạp — như bản vá có commit, như lệnh có trả về 200, như phép đếm có chạy — mà ruột vẫn sai. Luật viết trong tệp <b>không tự nhớ đúng lúc cần</b>; thứ cứu được là <b>phép kiểm bắt buộc</b>, không phải câu chữ hay hơn.</p>
+
+<h2>④ Còn một chỗ nữa: có thể mở nhầm chỗ</h2>
+<pre><code>thư mục ~/claude-wp-blog     rỗng hoàn toàn, tạo lúc 08:57 cùng ngày
+phiên claude-wp-blog cũ      cwd = /Users/erocathanh  (thư mục nhà, KHÔNG phải chỗ mới)
+kho mã blog trên máy         không có — 0 thư mục nào tên *blog*
+blog.erocathanh.com          WordPress trên hosting cPanel, quản QUA API, không có mã local</code></pre>
+<p>Nói cách khác: blog này <b>vốn không có thư mục mã</b> — nó sống trên máy chủ thuê, điều khiển bằng lệnh gọi. Thư mục rỗng vừa tạo không nối với việc cũ; phiên trước làm việc ngay ở thư mục nhà.</p>
+
+<h2>⑤ Ba hướng — đề xuất chọn Ⓐ</h2>
+
+<h3 class="ok">Ⓐ Đặt một tệp luật cho thư mục đó <span style="color:var(--mo);font-size:13px">(đề xuất)</span></h3>
+<p>Ghi vào <code>~/claude-wp-blog/CLAUDE.md</code>: blog nào · địa chỉ · nơi giữ chìa · ai đang phụ trách · việc đang dở · thứ không được đụng. Phiên sau mở ra là chạy, không phải hỏi.</p>
+<ul>
+<li>Rẻ nhất, làm một lần</li>
+<li>Đúng cách hệ luật vốn được thiết kế — tầng ③ sinh ra cho việc này</li>
+<li>Rủi ro: tệp lỗi thời thì dắt sai người sau ⇒ ghi <b>thứ bền</b>, đừng chép số đếm và trạng thái</li>
+</ul>
+
+<h3>Ⓑ Bỏ thư mục mới, quay về làm ở thư mục nhà</h3>
+<p>Giống phiên cũ. Được cái nối tiếp mạch, mất cái không có chỗ riêng để ghi việc blog — mọi thứ lẫn vào luật nhà vốn đã 15 KB.</p>
+
+<h3>Ⓒ Dựng hẳn kho cho blog</h3>
+<p>Chỉ đáng khi bắt đầu giữ nội dung/bài viết dưới dạng tệp. Hiện chưa có gì để giữ ⇒ dựng bây giờ là tạo thư mục rỗng thứ hai.</p>
+
+<h2>⑥ Việc đáng làm dù chọn hướng nào</h2>
+<div class="hop">
+<b class="tieu">Luật header đang bị bỏ qua âm thầm</b>
+Không riêng phiên này. Đã đọc mà vẫn quên nghĩa là <b>lời dặn không đủ</b> — cần một phép kiểm chạy được, hoặc một móc nhắc, thay vì thêm chữ vào tệp luật.
+<br><br>
+Đề: PM cân xem có nên thêm móc kiểm dòng chào ở đầu mỗi lượt trả lời hay không — và nếu có thì đặt ở đâu cho không thành phiền.
+</div>
+
+<footer>
+Trang nội bộ · dựng bởi <code>claude-web-funnel</code> · mọi số liệu đo tại máy 14/08/2026.<br>
+Thứ trên trang này là <b>cơ chế</b> — thứ bền. Số đếm và trạng thái cố ý không chép vào đây, vì chúng đổi theo giờ còn trang thì không ai đọc lại.
+</footer>
+
+</div></body>
+</html>

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Mẫu 07 — Bảng dữ liệu · Quản lý phòng ban AI</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --navy-0:#0a1929;
+    --navy-1:#0d2135;
+    --navy-2:#102a43;
+    --navy-3:#14314b;
+    --gold:#c89425;
+    --gold-2:#f1c768;
+    --kem:#faf7f0;
+    --kem-mo:rgba(250,247,240,.60);
+    --kem-mo-2:rgba(250,247,240,.38);
+    --luoi:rgba(250,247,240,.075);
+    --vien:rgba(200,148,37,.20);
+  }
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    background:var(--navy-0);
+    color:var(--kem);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,"Liberation Sans",sans-serif;
+    font-size:14px;line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column;min-height:100vh;
+  }
+
+  /* ---------- Thanh tiêu đề ---------- */
+  .thanh-tieu-de{
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:11px 20px;
+    background:linear-gradient(90deg,var(--navy-1),var(--navy-2));
+    border-bottom:1px solid var(--vien);
+    flex:0 0 auto;
+  }
+  .huy-hieu{
+    width:34px;height:34px;flex:0 0 34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(150deg,var(--gold-2),var(--gold));
+    color:#0a1929;font-weight:800;font-size:13px;
+  }
+  .tieu-de-chu h1{margin:0;font-size:15px;font-weight:700}
+  .tieu-de-chu p{margin:1px 0 0;font-size:11.5px;color:var(--kem-mo-2);text-transform:uppercase;letter-spacing:.5px}
+  .tieu-de-so{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .vien-so{
+    padding:5px 12px;border-radius:6px;border:1px solid var(--vien);
+    background:rgba(10,25,41,.5);font-size:12px;color:var(--kem-mo);
+  }
+  .vien-so b{color:var(--gold-2);font-variant-numeric:tabular-nums}
+
+  /* ---------- Vỏ ứng dụng ---------- */
+  .vo{display:grid;grid-template-columns:236px 1fr;flex:1 1 auto;min-height:0}
+
+  /* ---------- Cột trái ---------- */
+  .cot-trai{
+    background:var(--navy-1);border-right:1px solid var(--luoi);
+    padding:16px 12px;overflow-y:auto;
+    min-width:0; /* ô lưới mặc định min-width:auto -> dải cuộn ngang sẽ phình ra ngoài trang */
+  }
+  .cot-trai h3{
+    margin:0 0 10px 6px;font-size:11px;letter-spacing:1.1px;text-transform:uppercase;
+    color:var(--kem-mo-2);font-weight:600;
+  }
+  .muc-phong{
+    display:flex;align-items:center;gap:9px;width:100%;
+    padding:8px 10px;margin-bottom:3px;border:0;border-radius:8px;
+    background:transparent;color:var(--kem-mo);font:inherit;font-size:13px;
+    text-align:left;cursor:pointer;transition:background .14s ease,color .14s ease;
+  }
+  .muc-phong:hover{background:rgba(250,247,240,.06);color:var(--kem)}
+  .muc-phong.chon{background:rgba(200,148,37,.16);color:var(--kem);box-shadow:inset 2px 0 0 var(--gold-2)}
+  .muc-phong .ten-m{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .muc-phong .dem{
+    font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--kem-mo-2);
+    background:rgba(250,247,240,.07);border-radius:99px;padding:1px 8px;
+  }
+  .muc-phong.chon .dem{background:rgba(241,199,104,.22);color:var(--gold-2)}
+  .vach{height:1px;background:var(--luoi);margin:10px 6px}
+
+  /* ---------- Khu chính ---------- */
+  .khu-chinh{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--navy-0)}
+
+  .thanh-cong-cu{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:11px 16px;border-bottom:1px solid var(--luoi);
+    background:linear-gradient(180deg,rgba(16,42,67,.55),rgba(10,25,41,0));
+    flex:0 0 auto;
+  }
+  .o-tim{position:relative;flex:1 1 240px;max-width:340px}
+  .o-tim input{
+    width:100%;padding:8px 30px 8px 32px;border-radius:8px;
+    border:1px solid var(--luoi);background:var(--navy-2);color:var(--kem);
+    font:inherit;font-size:13px;outline:none;transition:border-color .15s ease,box-shadow .15s ease;
+  }
+  .o-tim input::placeholder{color:var(--kem-mo-2)}
+  .o-tim input:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(200,148,37,.16)}
+  .o-tim .kinh{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:13px;opacity:.55}
+  .o-tim .xoa{
+    position:absolute;right:6px;top:50%;transform:translateY(-50%);
+    border:0;background:transparent;color:var(--kem-mo-2);cursor:pointer;font-size:15px;
+    padding:2px 6px;border-radius:5px;display:none;
+  }
+  .o-tim .xoa:hover{color:var(--kem);background:rgba(250,247,240,.08)}
+
+  select{
+    padding:8px 10px;border-radius:8px;border:1px solid var(--luoi);
+    background:var(--navy-2);color:var(--kem);font:inherit;font-size:13px;outline:none;cursor:pointer;
+  }
+  select:focus{border-color:var(--gold)}
+  .nhan-nho{font-size:11.5px;color:var(--kem-mo-2);text-transform:uppercase;letter-spacing:.6px}
+  .dem-ket-qua{margin-left:auto;font-size:12.5px;color:var(--kem-mo);font-variant-numeric:tabular-nums}
+  .dem-ket-qua b{color:var(--gold-2)}
+  .nut-reset{
+    padding:7px 12px;border-radius:8px;border:1px solid var(--vien);
+    background:transparent;color:var(--kem-mo);font:inherit;font-size:12.5px;cursor:pointer;
+  }
+  .nut-reset:hover{background:rgba(200,148,37,.12);color:var(--kem)}
+
+  /* ---------- Bảng ---------- */
+  .khung-bang{flex:1 1 auto;overflow:auto;min-height:0}
+  table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
+  thead th{
+    position:sticky;top:0;z-index:5;
+    background:#0f2942;
+    padding:0;border-bottom:1px solid var(--vien);
+    text-align:left;white-space:nowrap;
+  }
+  thead th .nut-sap{
+    display:flex;align-items:center;gap:6px;width:100%;
+    padding:11px 14px;border:0;background:transparent;color:var(--kem-mo);
+    font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;
+    cursor:pointer;transition:color .14s ease,background .14s ease;
+  }
+  thead th .nut-sap:hover{color:var(--gold-2);background:rgba(200,148,37,.10)}
+  thead th.dang-sap .nut-sap{color:var(--gold-2)}
+  .mui-ten{font-size:10px;opacity:.35;transition:opacity .14s ease}
+  thead th.dang-sap .mui-ten{opacity:1}
+  th.stt,td.stt{
+    width:58px;text-align:right;color:var(--kem-mo-2);font-variant-numeric:tabular-nums;
+    font-size:12px;background:#0d2135;
+  }
+  th.stt{padding:11px 14px;font-size:11.5px;letter-spacing:.9px;text-transform:uppercase;font-weight:700}
+  tbody td{
+    padding:9px 14px;border-bottom:1px solid var(--luoi);
+    border-right:1px solid rgba(250,247,240,.04);
+    vertical-align:middle;
+  }
+  tbody td:last-child{border-right:0}
+  tbody tr:nth-child(even) td{background:rgba(250,247,240,.028)}
+  tbody tr:nth-child(even) td.stt{background:rgba(16,42,67,.55)}
+  tbody tr:hover td{background:rgba(200,148,37,.10)}
+  tbody tr:hover td.stt{background:rgba(200,148,37,.16);color:var(--gold-2)}
+
+  .ten-agent{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    font-size:13px;color:var(--kem);
+  }
+  .viet-tat{
+    display:inline-grid;place-items:center;min-width:30px;height:24px;padding:0 7px;
+    border-radius:6px;background:rgba(200,148,37,.16);border:1px solid rgba(200,148,37,.28);
+    color:var(--gold-2);font-size:11.5px;font-weight:700;letter-spacing:.5px;
+  }
+  .the-vai{
+    display:inline-block;padding:3px 10px;border-radius:99px;font-size:11.5px;
+    border:1px solid var(--luoi);background:rgba(250,247,240,.05);color:var(--kem-mo);white-space:nowrap;
+  }
+  .the-vai.truong{border-color:rgba(241,199,104,.42);background:rgba(241,199,104,.14);color:var(--gold-2);font-weight:600}
+  .o-phong{display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .o-phong .cham{width:8px;height:8px;border-radius:2px;flex:0 0 8px}
+  .trong{padding:46px 20px;text-align:center;color:var(--kem-mo-2);font-size:13.5px}
+
+  /* ---------- Đánh số trang ---------- */
+  .chan-trang{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 16px;border-top:1px solid var(--vien);
+    background:var(--navy-1);flex:0 0 auto;
+  }
+  .chan-trang .thong-tin{font-size:12.5px;color:var(--kem-mo);font-variant-numeric:tabular-nums}
+  .dieu-huong{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap}
+  .nut-trang{
+    min-width:32px;height:30px;padding:0 9px;border-radius:7px;
+    border:1px solid var(--luoi);background:var(--navy-2);color:var(--kem-mo);
+    font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer;
+    transition:all .14s ease;
+  }
+  .nut-trang:hover:not(:disabled){border-color:var(--gold);color:var(--kem)}
+  .nut-trang:disabled{opacity:.32;cursor:not-allowed}
+  .nut-trang.hien-tai{
+    background:linear-gradient(150deg,var(--gold-2),var(--gold));
+    color:#0a1929;font-weight:700;border-color:transparent;
+  }
+  .ba-cham{min-width:20px;text-align:center;color:var(--kem-mo-2);align-self:center;font-size:12.5px}
+
+  @media (max-width:900px){
+    .vo{grid-template-columns:1fr}
+    .cot-trai{
+      border-right:0;border-bottom:1px solid var(--luoi);
+      padding:10px 12px;overflow:visible;
+    }
+    .cot-trai h3,.vach{display:none}
+    /* các nút phòng ban nằm trong khối bọc -> chính khối bọc mới là dải cuộn ngang */
+    #danh-sach-phong{
+      display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;
+      padding-bottom:2px;-webkit-overflow-scrolling:touch;
+    }
+    .muc-phong{width:auto;flex:0 0 auto;margin-bottom:0;white-space:nowrap;border:1px solid var(--luoi)}
+    .muc-phong.chon{box-shadow:none;border-color:rgba(241,199,104,.45)}
+    .khung-bang{overflow-x:auto}
+    table{min-width:640px}
+  }
+  @media (max-width:620px){
+    .tieu-de-so{width:100%;margin-left:0}
+    .dem-ket-qua{margin-left:0;width:100%}
+  }
+</style>
+</head>
+<body>
+
+<header class="thanh-tieu-de">
+  <div class="huy-hieu">AI</div>
+  <div class="tieu-de-chu">
+    <h1>Mẫu 07 — Bảng dữ liệu</h1>
+    <p>Quản lý phòng ban AI · Eroca Thanh</p>
+  </div>
+  <div class="tieu-de-so">
+    <span class="vien-so">Tổng nhân sự <b id="dau-tong">—</b></span>
+    <span class="vien-so">Phòng ban <b id="dau-phong">—</b></span>
+  </div>
+</header>
+
+<div class="vo">
+  <aside class="cot-trai">
+    <h3>Phòng ban</h3>
+    <div id="danh-sach-phong"></div>
+    <div class="vach"></div>
+  </aside>
+
+  <section class="khu-chinh">
+    <div class="thanh-cong-cu">
+      <div class="o-tim">
+        <span class="kinh">🔍</span>
+        <input id="o-tim-kiem" type="search" placeholder="Tìm theo tên, viết tắt hoặc vai…" autocomplete="off">
+        <button class="xoa" id="nut-xoa-tim" title="Xoá ô tìm kiếm">×</button>
+      </div>
+
+      <span class="nhan-nho">Lọc phòng</span>
+      <select id="loc-phong"></select>
+
+      <span class="nhan-nho">Số dòng</span>
+      <select id="so-dong-trang">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="211">Tất cả</option>
+      </select>
+
+      <button class="nut-reset" id="nut-reset">Bỏ lọc</button>
+      <span class="dem-ket-qua" id="dem-ket-qua">—</span>
+    </div>
+
+    <div class="khung-bang">
+      <table>
+        <thead>
+          <tr>
+            <th class="stt">#</th>
+            <th data-cot="ten"><button class="nut-sap">Nhân sự <span class="mui-ten">▲</span></button></th>
+            <th data-cot="viet_tat"><button class="nut-sap">Viết tắt <span class="mui-ten">▲</span></button></th>
+            <th data-cot="vai"><button class="nut-sap">Vai <span class="mui-ten">▲</span></button></th>
+            <th data-cot="phong"><button class="nut-sap">Phòng ban <span class="mui-ten">▲</span></button></th>
+          </tr>
+        </thead>
+        <tbody id="than-bang"></tbody>
+      </table>
+      <div class="trong" id="khong-co" style="display:none">Không có nhân sự nào khớp bộ lọc hiện tại.</div>
+    </div>
+
+    <div class="chan-trang">
+      <span class="thong-tin" id="thong-tin-trang">—</span>
+      <div class="dieu-huong" id="dieu-huong"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ====== Dữ liệu nhúng thẳng (không tải từ mạng) ====== */
+const DU_LIEU = {"phong_ban":[{"ma":"ky-thuat","icon":"💻","ten":"Kỹ thuật & Hạ tầng","so_nhan_su":28},{"ma":"ai-agent","icon":"🧠","ten":"Bộ máy AI-agent","so_nhan_su":14},{"ma":"marketing","icon":"📣","ten":"Marketing & Nội dung","so_nhan_su":41},{"ma":"dao-tao","icon":"🎓","ten":"Đào tạo & Cohort","so_nhan_su":23},{"ma":"ban-hang","icon":"💰","ten":"Bán hàng & Phễu","so_nhan_su":15},{"ma":"studio","icon":"🎬","ten":"Studio Media","so_nhan_su":5},{"ma":"dieu-hanh","icon":"🏢","ten":"Điều hành & Quản trị","so_nhan_su":85}],"nhan_su":[{"ten":"claude-501","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"5"},{"ten":"claude-adskill-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"AB"},{"ten":"claude-adskill-build-17","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"AB"},{"ten":"claude-adskill-pm","phong":"ai-agent","vai":"Trưởng phòng","viet_tat":"AP"},{"ten":"claude-agent-boot-docs","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"AB"},{"ten":"claude-ai-content-os-landing","phong":"marketing","vai":"Chuyên viên","viet_tat":"AC"},{"ten":"claude-ai-content-os-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"AC"},{"ten":"claude-ai-funnel-wiki","phong":"marketing","vai":"Chuyên viên","viet_tat":"AF"},{"ten":"claude-ai-tmdt-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"AT"},{"ten":"claude-ai-tmdt-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"AT"},{"ten":"claude-ai-tmdt-review","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"AT"},{"ten":"claude-aiboss-landing-r4","phong":"marketing","vai":"Chuyên viên","viet_tat":"AL"},{"ten":"claude-aiboss-sales-reviewer","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"AS"},{"ten":"claude-aiboss-workshop-pm","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"AW"},{"ten":"claude-aiboss-workshop-pm-166","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"AW"},{"ten":"claude-aiboss-ws-sales-pm","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"AW"},{"ten":"claude-aiboss-ws-sales-pm-r1","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"AW"},{"ten":"claude-aiboss-ws-sales-pm-r2","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"AW"},{"ten":"claude-aicons-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"AP"},{"ten":"claude-aicontentos-pitch","phong":"marketing","vai":"Chuyên viên","viet_tat":"AP"},{"ten":"claude-aicos-landing","phong":"marketing","vai":"Chuyên viên","viet_tat":"AL"},{"ten":"claude-aicos-landing-47","phong":"marketing","vai":"Chuyên viên","viet_tat":"AL"},{"ten":"claude-aicos-landing-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"AL"},{"ten":"claude-aicos-offer268","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"AO"},{"ten":"claude-aicos-teaching-plan","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"AT"},{"ten":"claude-aicos-tuan5-pm","phong":"dao-tao","vai":"Trưởng phòng","viet_tat":"AT"},{"ten":"claude-aicos-wiki-zoom","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"AW"},{"ten":"claude-autopilot-pm","phong":"ai-agent","vai":"Trưởng phòng","viet_tat":"AP"},{"ten":"claude-autopilot-spine-exec","phong":"ai-agent","vai":"Thực thi","viet_tat":"AS"},{"ten":"claude-b2b-pipeline-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"BP"},{"ten":"claude-b2b-pipeline-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"BP"},{"ten":"claude-ban-do-may-exec","phong":"ky-thuat","vai":"Thực thi","viet_tat":"BD"},{"ten":"claude-bcls-auth-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"BA"},{"ten":"claude-bcls-orders-tab","phong":"ban-hang","vai":"Chuyên viên","viet_tat":"BO"},{"ten":"claude-bcls-platform-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"BP"},{"ten":"claude-bcls-platform-pm-r2","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"BP"},{"ten":"claude-bcls-policy-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"BP"},{"ten":"claude-bcls-token-quota","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"BT"},{"ten":"claude-bcls-token-quota-2","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"BT"},{"ten":"claude-bcls-token-quota-r2","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"BT"},{"ten":"claude-bcls-token-quota-r3","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"BT"},{"ten":"claude-booking-tech-filter","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"BT"},{"ten":"claude-bos-funnel-exec","phong":"ban-hang","vai":"Thực thi","viet_tat":"BF"},{"ten":"claude-bos-funnel-exec-2","phong":"ban-hang","vai":"Thực thi","viet_tat":"BF"},{"ten":"claude-bos-funnel-exec-r1","phong":"ban-hang","vai":"Thực thi","viet_tat":"BF"},{"ten":"claude-bos-funnel-pm","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"BF"},{"ten":"claude-bos-funnel-pm-r2","phong":"ban-hang","vai":"Trưởng phòng","viet_tat":"BF"},{"ten":"claude-bos-funnel-review","phong":"ban-hang","vai":"Kiểm định","viet_tat":"BF"},{"ten":"claude-bridge-cc-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"BC"},{"ten":"claude-bridge-cc-build-167","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"BC"},{"ten":"claude-cc","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"C"},{"ten":"claude-cc-tach-account-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"CT"},{"ten":"claude-cc-tach-account-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"CT"},{"ten":"claude-cc-tach-account-review","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"CT"},{"ten":"claude-ccui-allsessions-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"CA"},{"ten":"claude-ccui-deploy","phong":"ky-thuat","vai":"Vận hành","viet_tat":"CD"},{"ten":"claude-ccui-ocathanh-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"CO"},{"ten":"claude-ccui-ocathanh-build-retired","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"CO"},{"ten":"claude-ccui-ui-pm-296","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"CU"},{"ten":"claude-chain-embed","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"CE"},{"ten":"claude-chat-channels","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"CC"},{"ten":"claude-chat-comms-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"CC"},{"ten":"claude-chuyen-may-exec","phong":"ky-thuat","vai":"Thực thi","viet_tat":"CM"},{"ten":"claude-chuyen-may-moi-exe","phong":"ky-thuat","vai":"Chuyên viên","viet_tat":"CM"},{"ten":"claude-chuyen-may-pm","phong":"ky-thuat","vai":"Trưởng phòng","viet_tat":"CM"},{"ten":"claude-code","phong":"ky-thuat","vai":"Chuyên viên","viet_tat":"C"},{"ten":"claude-cohort-alpha","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CA"},{"ten":"claude-cohort-alpha-rule-ai-agent","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CA"},{"ten":"claude-cohort-chang-4","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CC"},{"ten":"claude-cohort-tuan-4","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CT"},{"ten":"claude-cohort-tuan-5","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CT"},{"ten":"claude-cohort-tuan-5-retired","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CT"},{"ten":"claude-cohort-zoom-email","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"CZ"},{"ten":"claude-colong-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"CE"},{"ten":"claude-colong-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"CP"},{"ten":"claude-content-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"CP"},{"ten":"claude-course-funnel-org","phong":"marketing","vai":"Chuyên viên","viet_tat":"CF"},{"ten":"claude-course-launch-exec","phong":"dao-tao","vai":"Thực thi","viet_tat":"CL"},{"ten":"claude-course-launch-pm","phong":"dao-tao","vai":"Trưởng phòng","viet_tat":"CL"},{"ten":"claude-course-launch-review","phong":"dao-tao","vai":"Kiểm định","viet_tat":"CL"},{"ten":"claude-crd-mac-audio","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"CM"},{"ten":"claude-crm-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"CB"},{"ten":"claude-crm-build-296","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"CB"},{"ten":"claude-crm-email-view","phong":"marketing","vai":"Chuyên viên","viet_tat":"CE"},{"ten":"claude-crm-guard-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"CG"},{"ten":"claude-crm-lead-guard","phong":"marketing","vai":"Chuyên viên","viet_tat":"CL"},{"ten":"claude-crm-mvp","phong":"marketing","vai":"Chuyên viên","viet_tat":"CM"},{"ten":"claude-crm-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"CP"},{"ten":"claude-crm-research","phong":"marketing","vai":"Chuyên viên","viet_tat":"CR"},{"ten":"claude-deposit-payment","phong":"ban-hang","vai":"Chuyên viên","viet_tat":"DP"},{"ten":"claude-dmarc-hardening","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"DH"},{"ten":"claude-dmarc-monitor","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"DM"},{"ten":"claude-do-luon","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"DL"},{"ten":"claude-do-luong-g1a","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"DL"},{"ten":"claude-do-luong-g5","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"DL"},{"ten":"claude-do-luong-g6","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"DL"},{"ten":"claude-do-luong-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"DL"},{"ten":"claude-do-luong-prd","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"DL"},{"ten":"claude-do-luong-review","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"DL"},{"ten":"claude-email-engine-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"EE"},{"ten":"claude-email-funnel-pm-206","phong":"marketing","vai":"Trưởng phòng","viet_tat":"EF"},{"ten":"claude-email-funnel-pm-296","phong":"marketing","vai":"Trưởng phòng","viet_tat":"EF"},{"ten":"claude-email-funnel-pm-r2","phong":"marketing","vai":"Trưởng phòng","viet_tat":"EF"},{"ten":"claude-email-marketing-salekit-1","phong":"marketing","vai":"Chuyên viên","viet_tat":"EM"},{"ten":"claude-email-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"EP"},{"ten":"claude-email-pm-r1","phong":"marketing","vai":"Trưởng phòng","viet_tat":"EP"},{"ten":"claude-en-vn-web","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"EV"},{"ten":"claude-en-vn-web-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"EV"},{"ten":"claude-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"E"},{"ten":"claude-general","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"G"},{"ten":"claude-giao-trinh-eeat","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"GT"},{"ten":"claude-glamorous-services-seed","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"GS"},{"ten":"claude-gstack-research-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"GR"},{"ten":"claude-hermes-pm","phong":"ai-agent","vai":"Trưởng phòng","viet_tat":"HP"},{"ten":"claude-homework-cohort-alpha","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"HC"},{"ten":"claude-i2global-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"IP"},{"ten":"claude-info-reel","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"IR"},{"ten":"claude-kaizen-auto","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"KA"},{"ten":"claude-khoahoc-exec","phong":"dao-tao","vai":"Thực thi","viet_tat":"KE"},{"ten":"claude-khoahoc-pm","phong":"dao-tao","vai":"Trưởng phòng","viet_tat":"KP"},{"ten":"claude-khoahoc-review","phong":"dao-tao","vai":"Kiểm định","viet_tat":"KR"},{"ten":"claude-kiro-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"KB"},{"ten":"claude-kiro-build-retired","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"KB"},{"ten":"claude-kiro-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"KP"},{"ten":"claude-landing-capture","phong":"marketing","vai":"Chuyên viên","viet_tat":"LC"},{"ten":"claude-lark-mcp","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"LM"},{"ten":"claude-lark-to-web","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"LT"},{"ten":"claude-leadmagnet-pm-206","phong":"marketing","vai":"Trưởng phòng","viet_tat":"LP"},{"ten":"claude-lich-deploy","phong":"ky-thuat","vai":"Vận hành","viet_tat":"LD"},{"ten":"claude-lm-builder-206","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"LB"},{"ten":"claude-lm-rotate-claude-exec","phong":"dieu-hanh","vai":"Thực thi","viet_tat":"LR"},{"ten":"claude-lm-rotate-claude-review","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"LR"},{"ten":"claude-lm-storyfit-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"LS"},{"ten":"claude-lm1-panel-embed","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"LP"},{"ten":"claude-lm6-rebuild","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"LR"},{"ten":"claude-loop-aicos","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"LA"},{"ten":"claude-loop-bcls-platform-report","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"LB"},{"ten":"claude-loop-reports","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"LR"},{"ten":"claude-loop-reports-ai-content-os","phong":"marketing","vai":"Chuyên viên","viet_tat":"LR"},{"ten":"claude-maracafi-ceo","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"MC"},{"ten":"claude-maracafi-strategy","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"MS"},{"ten":"claude-maracafi-strategy-r2","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"MS"},{"ten":"claude-marketing-exec","phong":"marketing","vai":"Thực thi","viet_tat":"ME"},{"ten":"claude-marketing-exec-r2","phong":"marketing","vai":"Thực thi","viet_tat":"ME"},{"ten":"claude-marketing-exec-r2-2672026","phong":"marketing","vai":"Thực thi","viet_tat":"ME"},{"ten":"claude-marketing-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"MP"},{"ten":"claude-marketing-review","phong":"marketing","vai":"Kiểm định","viet_tat":"MR"},{"ten":"claude-mcp-build-pm","phong":"ky-thuat","vai":"Trưởng phòng","viet_tat":"MB"},{"ten":"claude-mcp-review-246","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"MR"},{"ten":"claude-memory-eng","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"ME"},{"ten":"claude-multi-leadmagnet-hub","phong":"marketing","vai":"Chuyên viên","viet_tat":"ML"},{"ten":"claude-nail-ad-research","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"NA"},{"ten":"claude-nail-eng","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"NE"},{"ten":"claude-nail-eng-116","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"NE"},{"ten":"claude-nail-landing","phong":"marketing","vai":"Chuyên viên","viet_tat":"NL"},{"ten":"claude-nail-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"NP"},{"ten":"claude-nail-pm-116","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"NP"},{"ten":"claude-nail-pm-146","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"NP"},{"ten":"claude-nail-pm-166","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"NP"},{"ten":"claude-nail-pm-206","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"NP"},{"ten":"claude-nail-server-guard","phong":"ky-thuat","vai":"Chuyên viên","viet_tat":"NS"},{"ten":"claude-nail-wiki-ingest","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"NW"},{"ten":"claude-omni-ads-test","phong":"marketing","vai":"Chuyên viên","viet_tat":"OA"},{"ten":"claude-omnivoice-tts","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"OT"},{"ten":"claude-postpay-survey-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"PS"},{"ten":"claude-postpay-survey-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"PS"},{"ten":"claude-quan-ly-lop-hoc","phong":"dao-tao","vai":"Chuyên viên","viet_tat":"QL"},{"ten":"claude-reel-batch","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"RB"},{"ten":"claude-remote-setup-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"RS"},{"ten":"claude-review","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"R"},{"ten":"claude-sanskill-exec","phong":"ai-agent","vai":"Thực thi","viet_tat":"SE"},{"ten":"claude-sanskill-pm","phong":"ai-agent","vai":"Trưởng phòng","viet_tat":"SP"},{"ten":"claude-shop31k","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"S"},{"ten":"claude-skill-share","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"SS"},{"ten":"claude-skool-mcp-build","phong":"ky-thuat","vai":"Dựng hệ","viet_tat":"SM"},{"ten":"claude-skool-pm","phong":"dao-tao","vai":"Trưởng phòng","viet_tat":"SP"},{"ten":"claude-so10k-research","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"SR"},{"ten":"claude-social-research","phong":"marketing","vai":"Chuyên viên","viet_tat":"SR"},{"ten":"claude-social-research-r2","phong":"marketing","vai":"Chuyên viên","viet_tat":"SR"},{"ten":"claude-sonnet","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"S"},{"ten":"claude-sonnet-4-6","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"S4"},{"ten":"claude-speed-lead-exec","phong":"marketing","vai":"Thực thi","viet_tat":"SL"},{"ten":"claude-speed-lead-pm","phong":"marketing","vai":"Trưởng phòng","viet_tat":"SL"},{"ten":"claude-speed-lead-pm-r2","phong":"marketing","vai":"Trưởng phòng","viet_tat":"SL"},{"ten":"claude-subcription","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"S"},{"ten":"claude-swipe-ad","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"SA"},{"ten":"claude-toi-uu-lm10","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"TU"},{"ten":"claude-tong-hop","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"TH"},{"ten":"claude-tong-hop-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"TH"},{"ten":"claude-tong-quan-ai-agent","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"TQ"},{"ten":"claude-tro-ly-dieu-hanh","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"TL"},{"ten":"claude-tro-ly-rieng","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"TL"},{"ten":"claude-trung-oto-salepage","phong":"ban-hang","vai":"Chuyên viên","viet_tat":"TO"},{"ten":"claude-truong-hoc-online-pm","phong":"dao-tao","vai":"Trưởng phòng","viet_tat":"TH"},{"ten":"claude-veo-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"VP"},{"ten":"claude-viec-can-lam","phong":"dieu-hanh","vai":"Chuyên viên","viet_tat":"VC"},{"ten":"claude-web-deploy","phong":"ky-thuat","vai":"Vận hành","viet_tat":"WD"},{"ten":"claude-web-funnel","phong":"marketing","vai":"Chuyên viên","viet_tat":"WF"},{"ten":"claude-wiki-program-pm","phong":"dieu-hanh","vai":"Trưởng phòng","viet_tat":"WP"},{"ten":"claude-workshop-lich","phong":"ban-hang","vai":"Chuyên viên","viet_tat":"WL"},{"ten":"claude-wp-blog","phong":"marketing","vai":"Chuyên viên","viet_tat":"WB"},{"ten":"claude-ytm-fe","phong":"studio","vai":"Chuyên viên","viet_tat":"YF"},{"ten":"claude-ytm-fixes","phong":"ky-thuat","vai":"Chuyên viên","viet_tat":"YF"},{"ten":"claude-ytm-fixes-206","phong":"ky-thuat","vai":"Chuyên viên","viet_tat":"YF"},{"ten":"claude-ytm-fixes-207","phong":"ky-thuat","vai":"Chuyên viên","viet_tat":"YF"},{"ten":"claude-ytm-oauth-chrome","phong":"studio","vai":"Chuyên viên","viet_tat":"YO"},{"ten":"claude-ytm-pm","phong":"studio","vai":"Trưởng phòng","viet_tat":"YP"},{"ten":"claude-ytm-pm-206","phong":"studio","vai":"Trưởng phòng","viet_tat":"YP"},{"ten":"claude-ytm-reviewer","phong":"dieu-hanh","vai":"Kiểm định","viet_tat":"YR"},{"ten":"claude-ytm-setup-wizard","phong":"studio","vai":"Chuyên viên","viet_tat":"YS"},{"ten":"claude-zalo-bot","phong":"ai-agent","vai":"Chuyên viên","viet_tat":"ZB"}],"tong":211};
+
+const nhanSu = DU_LIEU.nhan_su;
+const phongBan = DU_LIEU.phong_ban;
+const TONG = nhanSu.length;
+const SO_PHONG = phongBan.length;
+
+const MAU_CUA_PHONG = ['#f1c768','#c89425','#e0b04a','#a87a1c','#d8a83c','#8f6614','#efd79b'];
+const tinPhong = {};
+phongBan.forEach((p,i) => tinPhong[p.ma] = { ten:p.ten, icon:p.icon, mau:MAU_CUA_PHONG[i % MAU_CUA_PHONG.length] });
+
+const demTheoPhong = {};
+for (const ns of nhanSu) demTheoPhong[ns.phong] = (demTheoPhong[ns.phong] || 0) + 1;
+
+document.getElementById('dau-tong').textContent = TONG.toLocaleString('vi-VN');
+document.getElementById('dau-phong').textContent = SO_PHONG.toLocaleString('vi-VN');
+
+/* ====== Trạng thái ====== */
+const trangThai = { tim:'', phong:'tat-ca', cot:'ten', chieu:1, trang:1, soDong:50 };
+
+/* ====== Cột trái + ô lọc ====== */
+const dsPhong = document.getElementById('danh-sach-phong');
+dsPhong.innerHTML =
+  `<button class="muc-phong chon" data-ma="tat-ca">
+     <span>🗂️</span><span class="ten-m">Tất cả phòng ban</span><span class="dem">${TONG}</span>
+   </button>` +
+  phongBan.map(p => `
+   <button class="muc-phong" data-ma="${p.ma}">
+     <span>${p.icon}</span><span class="ten-m">${p.ten}</span><span class="dem">${demTheoPhong[p.ma]||0}</span>
+   </button>`).join('');
+
+const ocLoc = document.getElementById('loc-phong');
+ocLoc.innerHTML = `<option value="tat-ca">Tất cả (${TONG})</option>` +
+  phongBan.map(p => `<option value="${p.ma}">${p.icon} ${p.ten} (${demTheoPhong[p.ma]||0})</option>`).join('');
+
+/* ====== Lọc + sắp xếp ====== */
+const boDau = s => s.normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+  .toLowerCase();
+
+function layDuLieu(){
+  const tu = boDau(trangThai.tim.trim());
+  let ds = nhanSu.filter(n => {
+    if (trangThai.phong !== 'tat-ca' && n.phong !== trangThai.phong) return false;
+    if (!tu) return true;
+    const kho = boDau(n.ten + ' ' + n.viet_tat + ' ' + n.vai + ' ' + (tinPhong[n.phong]?.ten || ''));
+    return kho.includes(tu);
+  });
+  const cot = trangThai.cot;
+  ds = ds.slice().sort((a,b) => {
+    const va = cot === 'phong' ? (tinPhong[a.phong]?.ten || a.phong) : a[cot];
+    const vb = cot === 'phong' ? (tinPhong[b.phong]?.ten || b.phong) : b[cot];
+    const r = String(va).localeCompare(String(vb), 'vi', { numeric:true, sensitivity:'base' });
+    return r * trangThai.chieu;
+  });
+  return ds;
+}
+
+/* ====== Vẽ bảng ====== */
+function ve(){
+  const ds = layDuLieu();
+  const tong = ds.length;
+  const soDong = trangThai.soDong;
+  const soTrang = Math.max(1, Math.ceil(tong / soDong));
+  if (trangThai.trang > soTrang) trangThai.trang = soTrang;
+  const dau = (trangThai.trang - 1) * soDong;
+  const phan = ds.slice(dau, dau + soDong);
+
+  document.getElementById('than-bang').innerHTML = phan.map((n,i) => {
+    const p = tinPhong[n.phong] || { ten:n.phong, icon:'•', mau:'#c89425' };
+    return `<tr>
+      <td class="stt">${dau + i + 1}</td>
+      <td><span class="ten-agent">${n.ten}</span></td>
+      <td><span class="viet-tat">${n.viet_tat}</span></td>
+      <td><span class="the-vai ${n.vai === 'Trưởng phòng' ? 'truong' : ''}">${n.vai}</span></td>
+      <td><span class="o-phong"><i class="cham" style="background:${p.mau}"></i>${p.icon} ${p.ten}</span></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('khong-co').style.display = tong ? 'none' : 'block';
+
+  const dangLoc = trangThai.tim.trim() !== '' || trangThai.phong !== 'tat-ca';
+  document.getElementById('dem-ket-qua').innerHTML = dangLoc
+    ? `Khớp <b>${tong}</b> / ${TONG} nhân sự`
+    : `Hiển thị toàn bộ <b>${TONG}</b> nhân sự`;
+
+  document.getElementById('thong-tin-trang').textContent = tong
+    ? `Dòng ${dau + 1}–${Math.min(dau + soDong, tong)} trên ${tong} · trang ${trangThai.trang}/${soTrang}`
+    : 'Không có dòng nào';
+
+  veDieuHuong(soTrang);
+
+  document.querySelectorAll('thead th[data-cot]').forEach(th => {
+    const dung = th.dataset.cot === trangThai.cot;
+    th.classList.toggle('dang-sap', dung);
+    th.querySelector('.mui-ten').textContent = dung ? (trangThai.chieu === 1 ? '▲' : '▼') : '▲';
+  });
+
+  document.querySelectorAll('.muc-phong').forEach(b =>
+    b.classList.toggle('chon', b.dataset.ma === trangThai.phong));
+  ocLoc.value = trangThai.phong;
+  document.getElementById('nut-xoa-tim').style.display = trangThai.tim ? 'block' : 'none';
+}
+
+function veDieuHuong(soTrang){
+  const t = trangThai.trang;
+  let cac = [];
+  if (soTrang <= 7) { for (let i=1;i<=soTrang;i++) cac.push(i); }
+  else {
+    cac.push(1);
+    if (t > 3) cac.push('…');
+    for (let i = Math.max(2, t-1); i <= Math.min(soTrang-1, t+1); i++) cac.push(i);
+    if (t < soTrang - 2) cac.push('…');
+    cac.push(soTrang);
+  }
+  const html =
+    `<button class="nut-trang" data-di="truoc" ${t===1?'disabled':''} title="Trang trước">‹</button>` +
+    cac.map(c => c === '…'
+      ? `<span class="ba-cham">…</span>`
+      : `<button class="nut-trang ${c===t?'hien-tai':''}" data-trang="${c}">${c}</button>`).join('') +
+    `<button class="nut-trang" data-di="sau" ${t===soTrang?'disabled':''} title="Trang sau">›</button>`;
+  const dh = document.getElementById('dieu-huong');
+  dh.innerHTML = html;
+  dh.querySelectorAll('button[data-trang]').forEach(b =>
+    b.onclick = () => { trangThai.trang = +b.dataset.trang; ve(); cuonLen(); });
+  dh.querySelectorAll('button[data-di]').forEach(b =>
+    b.onclick = () => {
+      trangThai.trang += (b.dataset.di === 'sau' ? 1 : -1);
+      if (trangThai.trang < 1) trangThai.trang = 1;
+      if (trangThai.trang > soTrang) trangThai.trang = soTrang;
+      ve(); cuonLen();
+    });
+}
+const cuonLen = () => { const k = document.querySelector('.khung-bang'); if (k) k.scrollTop = 0; };
+
+/* ====== Sự kiện ====== */
+document.querySelectorAll('thead th[data-cot]').forEach(th => {
+  th.querySelector('.nut-sap').onclick = () => {
+    const c = th.dataset.cot;
+    if (trangThai.cot === c) trangThai.chieu *= -1;
+    else { trangThai.cot = c; trangThai.chieu = 1; }
+    trangThai.trang = 1; ve();
+  };
+});
+
+document.getElementById('o-tim-kiem').addEventListener('input', e => {
+  trangThai.tim = e.target.value; trangThai.trang = 1; ve();
+});
+document.getElementById('nut-xoa-tim').onclick = () => {
+  trangThai.tim = ''; document.getElementById('o-tim-kiem').value = ''; trangThai.trang = 1; ve();
+};
+ocLoc.onchange = e => { trangThai.phong = e.target.value; trangThai.trang = 1; ve(); };
+document.getElementById('so-dong-trang').onchange = e => {
+  trangThai.soDong = +e.target.value; trangThai.trang = 1; ve();
+};
+dsPhong.querySelectorAll('.muc-phong').forEach(b =>
+  b.onclick = () => { trangThai.phong = b.dataset.ma; trangThai.trang = 1; ve(); cuonLen(); });
+document.getElementById('nut-reset').onclick = () => {
+  trangThai.tim = ''; trangThai.phong = 'tat-ca'; trangThai.trang = 1;
+  document.getElementById('o-tim-kiem').value = ''; ve(); cuonLen();
+};
+
+ve();
+</script>
+
+</body>
+</html>

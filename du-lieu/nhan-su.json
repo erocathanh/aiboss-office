@@ -1,0 +1,1315 @@
+{
+ "phong_ban": [
+  {
+   "ma": "ky-thuat",
+   "icon": "💻",
+   "ten": "Kỹ thuật & Hạ tầng",
+   "so_nhan_su": 28
+  },
+  {
+   "ma": "ai-agent",
+   "icon": "🧠",
+   "ten": "Bộ máy AI-agent",
+   "so_nhan_su": 14
+  },
+  {
+   "ma": "marketing",
+   "icon": "📣",
+   "ten": "Marketing & Nội dung",
+   "so_nhan_su": 41
+  },
+  {
+   "ma": "dao-tao",
+   "icon": "🎓",
+   "ten": "Đào tạo & Cohort",
+   "so_nhan_su": 23
+  },
+  {
+   "ma": "ban-hang",
+   "icon": "💰",
+   "ten": "Bán hàng & Phễu",
+   "so_nhan_su": 15
+  },
+  {
+   "ma": "studio",
+   "icon": "🎬",
+   "ten": "Studio Media",
+   "so_nhan_su": 5
+  },
+  {
+   "ma": "dieu-hanh",
+   "icon": "🏢",
+   "ten": "Điều hành & Quản trị",
+   "so_nhan_su": 85
+  }
+ ],
+ "nhan_su": [
+  {
+   "ten": "claude-501",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "5"
+  },
+  {
+   "ten": "claude-adskill-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "AB"
+  },
+  {
+   "ten": "claude-adskill-build-17",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "AB"
+  },
+  {
+   "ten": "claude-adskill-pm",
+   "phong": "ai-agent",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AP"
+  },
+  {
+   "ten": "claude-agent-boot-docs",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "AB"
+  },
+  {
+   "ten": "claude-ai-content-os-landing",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "AC"
+  },
+  {
+   "ten": "claude-ai-content-os-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AC"
+  },
+  {
+   "ten": "claude-ai-funnel-wiki",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "AF"
+  },
+  {
+   "ten": "claude-ai-tmdt-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "AT"
+  },
+  {
+   "ten": "claude-ai-tmdt-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AT"
+  },
+  {
+   "ten": "claude-ai-tmdt-review",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "AT"
+  },
+  {
+   "ten": "claude-aiboss-landing-r4",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "AL"
+  },
+  {
+   "ten": "claude-aiboss-sales-reviewer",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "AS"
+  },
+  {
+   "ten": "claude-aiboss-workshop-pm",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AW"
+  },
+  {
+   "ten": "claude-aiboss-workshop-pm-166",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AW"
+  },
+  {
+   "ten": "claude-aiboss-ws-sales-pm",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AW"
+  },
+  {
+   "ten": "claude-aiboss-ws-sales-pm-r1",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AW"
+  },
+  {
+   "ten": "claude-aiboss-ws-sales-pm-r2",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AW"
+  },
+  {
+   "ten": "claude-aicons-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AP"
+  },
+  {
+   "ten": "claude-aicontentos-pitch",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "AP"
+  },
+  {
+   "ten": "claude-aicos-landing",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "AL"
+  },
+  {
+   "ten": "claude-aicos-landing-47",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "AL"
+  },
+  {
+   "ten": "claude-aicos-landing-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AL"
+  },
+  {
+   "ten": "claude-aicos-offer268",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "AO"
+  },
+  {
+   "ten": "claude-aicos-teaching-plan",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "AT"
+  },
+  {
+   "ten": "claude-aicos-tuan5-pm",
+   "phong": "dao-tao",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AT"
+  },
+  {
+   "ten": "claude-aicos-wiki-zoom",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "AW"
+  },
+  {
+   "ten": "claude-autopilot-pm",
+   "phong": "ai-agent",
+   "vai": "Trưởng phòng",
+   "viet_tat": "AP"
+  },
+  {
+   "ten": "claude-autopilot-spine-exec",
+   "phong": "ai-agent",
+   "vai": "Thực thi",
+   "viet_tat": "AS"
+  },
+  {
+   "ten": "claude-b2b-pipeline-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "BP"
+  },
+  {
+   "ten": "claude-b2b-pipeline-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BP"
+  },
+  {
+   "ten": "claude-ban-do-may-exec",
+   "phong": "ky-thuat",
+   "vai": "Thực thi",
+   "viet_tat": "BD"
+  },
+  {
+   "ten": "claude-bcls-auth-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BA"
+  },
+  {
+   "ten": "claude-bcls-orders-tab",
+   "phong": "ban-hang",
+   "vai": "Chuyên viên",
+   "viet_tat": "BO"
+  },
+  {
+   "ten": "claude-bcls-platform-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BP"
+  },
+  {
+   "ten": "claude-bcls-platform-pm-r2",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BP"
+  },
+  {
+   "ten": "claude-bcls-policy-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "BP"
+  },
+  {
+   "ten": "claude-bcls-token-quota",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "BT"
+  },
+  {
+   "ten": "claude-bcls-token-quota-2",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "BT"
+  },
+  {
+   "ten": "claude-bcls-token-quota-r2",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "BT"
+  },
+  {
+   "ten": "claude-bcls-token-quota-r3",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "BT"
+  },
+  {
+   "ten": "claude-booking-tech-filter",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "BT"
+  },
+  {
+   "ten": "claude-bos-funnel-exec",
+   "phong": "ban-hang",
+   "vai": "Thực thi",
+   "viet_tat": "BF"
+  },
+  {
+   "ten": "claude-bos-funnel-exec-2",
+   "phong": "ban-hang",
+   "vai": "Thực thi",
+   "viet_tat": "BF"
+  },
+  {
+   "ten": "claude-bos-funnel-exec-r1",
+   "phong": "ban-hang",
+   "vai": "Thực thi",
+   "viet_tat": "BF"
+  },
+  {
+   "ten": "claude-bos-funnel-pm",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BF"
+  },
+  {
+   "ten": "claude-bos-funnel-pm-r2",
+   "phong": "ban-hang",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BF"
+  },
+  {
+   "ten": "claude-bos-funnel-review",
+   "phong": "ban-hang",
+   "vai": "Kiểm định",
+   "viet_tat": "BF"
+  },
+  {
+   "ten": "claude-bridge-cc-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "BC"
+  },
+  {
+   "ten": "claude-bridge-cc-build-167",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "BC"
+  },
+  {
+   "ten": "claude-cc",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "C"
+  },
+  {
+   "ten": "claude-cc-tach-account-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "CT"
+  },
+  {
+   "ten": "claude-cc-tach-account-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CT"
+  },
+  {
+   "ten": "claude-cc-tach-account-review",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "CT"
+  },
+  {
+   "ten": "claude-ccui-allsessions-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "CA"
+  },
+  {
+   "ten": "claude-ccui-deploy",
+   "phong": "ky-thuat",
+   "vai": "Vận hành",
+   "viet_tat": "CD"
+  },
+  {
+   "ten": "claude-ccui-ocathanh-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "CO"
+  },
+  {
+   "ten": "claude-ccui-ocathanh-build-retired",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "CO"
+  },
+  {
+   "ten": "claude-ccui-ui-pm-296",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CU"
+  },
+  {
+   "ten": "claude-chain-embed",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "CE"
+  },
+  {
+   "ten": "claude-chat-channels",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "CC"
+  },
+  {
+   "ten": "claude-chat-comms-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CC"
+  },
+  {
+   "ten": "claude-chuyen-may-exec",
+   "phong": "ky-thuat",
+   "vai": "Thực thi",
+   "viet_tat": "CM"
+  },
+  {
+   "ten": "claude-chuyen-may-moi-exe",
+   "phong": "ky-thuat",
+   "vai": "Chuyên viên",
+   "viet_tat": "CM"
+  },
+  {
+   "ten": "claude-chuyen-may-pm",
+   "phong": "ky-thuat",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CM"
+  },
+  {
+   "ten": "claude-code",
+   "phong": "ky-thuat",
+   "vai": "Chuyên viên",
+   "viet_tat": "C"
+  },
+  {
+   "ten": "claude-cohort-alpha",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CA"
+  },
+  {
+   "ten": "claude-cohort-alpha-rule-ai-agent",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CA"
+  },
+  {
+   "ten": "claude-cohort-chang-4",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CC"
+  },
+  {
+   "ten": "claude-cohort-tuan-4",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CT"
+  },
+  {
+   "ten": "claude-cohort-tuan-5",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CT"
+  },
+  {
+   "ten": "claude-cohort-tuan-5-retired",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CT"
+  },
+  {
+   "ten": "claude-cohort-zoom-email",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "CZ"
+  },
+  {
+   "ten": "claude-colong-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "CE"
+  },
+  {
+   "ten": "claude-colong-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CP"
+  },
+  {
+   "ten": "claude-content-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CP"
+  },
+  {
+   "ten": "claude-course-funnel-org",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "CF"
+  },
+  {
+   "ten": "claude-course-launch-exec",
+   "phong": "dao-tao",
+   "vai": "Thực thi",
+   "viet_tat": "CL"
+  },
+  {
+   "ten": "claude-course-launch-pm",
+   "phong": "dao-tao",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CL"
+  },
+  {
+   "ten": "claude-course-launch-review",
+   "phong": "dao-tao",
+   "vai": "Kiểm định",
+   "viet_tat": "CL"
+  },
+  {
+   "ten": "claude-crd-mac-audio",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "CM"
+  },
+  {
+   "ten": "claude-crm-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "CB"
+  },
+  {
+   "ten": "claude-crm-build-296",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "CB"
+  },
+  {
+   "ten": "claude-crm-email-view",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "CE"
+  },
+  {
+   "ten": "claude-crm-guard-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CG"
+  },
+  {
+   "ten": "claude-crm-lead-guard",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "CL"
+  },
+  {
+   "ten": "claude-crm-mvp",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "CM"
+  },
+  {
+   "ten": "claude-crm-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CP"
+  },
+  {
+   "ten": "claude-crm-research",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "CR"
+  },
+  {
+   "ten": "claude-deposit-payment",
+   "phong": "ban-hang",
+   "vai": "Chuyên viên",
+   "viet_tat": "DP"
+  },
+  {
+   "ten": "claude-dmarc-hardening",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "DH"
+  },
+  {
+   "ten": "claude-dmarc-monitor",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "DM"
+  },
+  {
+   "ten": "claude-do-luon",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-do-luong-g1a",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-do-luong-g5",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-do-luong-g6",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-do-luong-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-do-luong-prd",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-do-luong-review",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "DL"
+  },
+  {
+   "ten": "claude-email-engine-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "EE"
+  },
+  {
+   "ten": "claude-email-funnel-pm-206",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "EF"
+  },
+  {
+   "ten": "claude-email-funnel-pm-296",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "EF"
+  },
+  {
+   "ten": "claude-email-funnel-pm-r2",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "EF"
+  },
+  {
+   "ten": "claude-email-marketing-salekit-1",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "EM"
+  },
+  {
+   "ten": "claude-email-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "EP"
+  },
+  {
+   "ten": "claude-email-pm-r1",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "EP"
+  },
+  {
+   "ten": "claude-en-vn-web",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "EV"
+  },
+  {
+   "ten": "claude-en-vn-web-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "EV"
+  },
+  {
+   "ten": "claude-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "E"
+  },
+  {
+   "ten": "claude-general",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "G"
+  },
+  {
+   "ten": "claude-giao-trinh-eeat",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "GT"
+  },
+  {
+   "ten": "claude-glamorous-services-seed",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "GS"
+  },
+  {
+   "ten": "claude-gstack-research-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "GR"
+  },
+  {
+   "ten": "claude-hermes-pm",
+   "phong": "ai-agent",
+   "vai": "Trưởng phòng",
+   "viet_tat": "HP"
+  },
+  {
+   "ten": "claude-homework-cohort-alpha",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "HC"
+  },
+  {
+   "ten": "claude-i2global-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "IP"
+  },
+  {
+   "ten": "claude-info-reel",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "IR"
+  },
+  {
+   "ten": "claude-kaizen-auto",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "KA"
+  },
+  {
+   "ten": "claude-khoahoc-exec",
+   "phong": "dao-tao",
+   "vai": "Thực thi",
+   "viet_tat": "KE"
+  },
+  {
+   "ten": "claude-khoahoc-pm",
+   "phong": "dao-tao",
+   "vai": "Trưởng phòng",
+   "viet_tat": "KP"
+  },
+  {
+   "ten": "claude-khoahoc-review",
+   "phong": "dao-tao",
+   "vai": "Kiểm định",
+   "viet_tat": "KR"
+  },
+  {
+   "ten": "claude-kiro-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "KB"
+  },
+  {
+   "ten": "claude-kiro-build-retired",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "KB"
+  },
+  {
+   "ten": "claude-kiro-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "KP"
+  },
+  {
+   "ten": "claude-landing-capture",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "LC"
+  },
+  {
+   "ten": "claude-lark-mcp",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "LM"
+  },
+  {
+   "ten": "claude-lark-to-web",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "LT"
+  },
+  {
+   "ten": "claude-leadmagnet-pm-206",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "LP"
+  },
+  {
+   "ten": "claude-lich-deploy",
+   "phong": "ky-thuat",
+   "vai": "Vận hành",
+   "viet_tat": "LD"
+  },
+  {
+   "ten": "claude-lm-builder-206",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "LB"
+  },
+  {
+   "ten": "claude-lm-rotate-claude-exec",
+   "phong": "dieu-hanh",
+   "vai": "Thực thi",
+   "viet_tat": "LR"
+  },
+  {
+   "ten": "claude-lm-rotate-claude-review",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "LR"
+  },
+  {
+   "ten": "claude-lm-storyfit-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "LS"
+  },
+  {
+   "ten": "claude-lm1-panel-embed",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "LP"
+  },
+  {
+   "ten": "claude-lm6-rebuild",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "LR"
+  },
+  {
+   "ten": "claude-loop-aicos",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "LA"
+  },
+  {
+   "ten": "claude-loop-bcls-platform-report",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "LB"
+  },
+  {
+   "ten": "claude-loop-reports",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "LR"
+  },
+  {
+   "ten": "claude-loop-reports-ai-content-os",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "LR"
+  },
+  {
+   "ten": "claude-maracafi-ceo",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "MC"
+  },
+  {
+   "ten": "claude-maracafi-strategy",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "MS"
+  },
+  {
+   "ten": "claude-maracafi-strategy-r2",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "MS"
+  },
+  {
+   "ten": "claude-marketing-exec",
+   "phong": "marketing",
+   "vai": "Thực thi",
+   "viet_tat": "ME"
+  },
+  {
+   "ten": "claude-marketing-exec-r2",
+   "phong": "marketing",
+   "vai": "Thực thi",
+   "viet_tat": "ME"
+  },
+  {
+   "ten": "claude-marketing-exec-r2-2672026",
+   "phong": "marketing",
+   "vai": "Thực thi",
+   "viet_tat": "ME"
+  },
+  {
+   "ten": "claude-marketing-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "MP"
+  },
+  {
+   "ten": "claude-marketing-review",
+   "phong": "marketing",
+   "vai": "Kiểm định",
+   "viet_tat": "MR"
+  },
+  {
+   "ten": "claude-mcp-build-pm",
+   "phong": "ky-thuat",
+   "vai": "Trưởng phòng",
+   "viet_tat": "MB"
+  },
+  {
+   "ten": "claude-mcp-review-246",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "MR"
+  },
+  {
+   "ten": "claude-memory-eng",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "ME"
+  },
+  {
+   "ten": "claude-multi-leadmagnet-hub",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "ML"
+  },
+  {
+   "ten": "claude-nail-ad-research",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "NA"
+  },
+  {
+   "ten": "claude-nail-eng",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "NE"
+  },
+  {
+   "ten": "claude-nail-eng-116",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "NE"
+  },
+  {
+   "ten": "claude-nail-landing",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "NL"
+  },
+  {
+   "ten": "claude-nail-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "NP"
+  },
+  {
+   "ten": "claude-nail-pm-116",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "NP"
+  },
+  {
+   "ten": "claude-nail-pm-146",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "NP"
+  },
+  {
+   "ten": "claude-nail-pm-166",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "NP"
+  },
+  {
+   "ten": "claude-nail-pm-206",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "NP"
+  },
+  {
+   "ten": "claude-nail-server-guard",
+   "phong": "ky-thuat",
+   "vai": "Chuyên viên",
+   "viet_tat": "NS"
+  },
+  {
+   "ten": "claude-nail-wiki-ingest",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "NW"
+  },
+  {
+   "ten": "claude-omni-ads-test",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "OA"
+  },
+  {
+   "ten": "claude-omnivoice-tts",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "OT"
+  },
+  {
+   "ten": "claude-postpay-survey-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "PS"
+  },
+  {
+   "ten": "claude-postpay-survey-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "PS"
+  },
+  {
+   "ten": "claude-quan-ly-lop-hoc",
+   "phong": "dao-tao",
+   "vai": "Chuyên viên",
+   "viet_tat": "QL"
+  },
+  {
+   "ten": "claude-reel-batch",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "RB"
+  },
+  {
+   "ten": "claude-remote-setup-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "RS"
+  },
+  {
+   "ten": "claude-review",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "R"
+  },
+  {
+   "ten": "claude-sanskill-exec",
+   "phong": "ai-agent",
+   "vai": "Thực thi",
+   "viet_tat": "SE"
+  },
+  {
+   "ten": "claude-sanskill-pm",
+   "phong": "ai-agent",
+   "vai": "Trưởng phòng",
+   "viet_tat": "SP"
+  },
+  {
+   "ten": "claude-shop31k",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "S"
+  },
+  {
+   "ten": "claude-skill-share",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "SS"
+  },
+  {
+   "ten": "claude-skool-mcp-build",
+   "phong": "ky-thuat",
+   "vai": "Dựng hệ",
+   "viet_tat": "SM"
+  },
+  {
+   "ten": "claude-skool-pm",
+   "phong": "dao-tao",
+   "vai": "Trưởng phòng",
+   "viet_tat": "SP"
+  },
+  {
+   "ten": "claude-so10k-research",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "SR"
+  },
+  {
+   "ten": "claude-social-research",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "SR"
+  },
+  {
+   "ten": "claude-social-research-r2",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "SR"
+  },
+  {
+   "ten": "claude-sonnet",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "S"
+  },
+  {
+   "ten": "claude-sonnet-4-6",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "S4"
+  },
+  {
+   "ten": "claude-speed-lead-exec",
+   "phong": "marketing",
+   "vai": "Thực thi",
+   "viet_tat": "SL"
+  },
+  {
+   "ten": "claude-speed-lead-pm",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "SL"
+  },
+  {
+   "ten": "claude-speed-lead-pm-r2",
+   "phong": "marketing",
+   "vai": "Trưởng phòng",
+   "viet_tat": "SL"
+  },
+  {
+   "ten": "claude-subcription",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "S"
+  },
+  {
+   "ten": "claude-swipe-ad",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "SA"
+  },
+  {
+   "ten": "claude-toi-uu-lm10",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "TU"
+  },
+  {
+   "ten": "claude-tong-hop",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "TH"
+  },
+  {
+   "ten": "claude-tong-hop-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "TH"
+  },
+  {
+   "ten": "claude-tong-quan-ai-agent",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "TQ"
+  },
+  {
+   "ten": "claude-tro-ly-dieu-hanh",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "TL"
+  },
+  {
+   "ten": "claude-tro-ly-rieng",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "TL"
+  },
+  {
+   "ten": "claude-trung-oto-salepage",
+   "phong": "ban-hang",
+   "vai": "Chuyên viên",
+   "viet_tat": "TO"
+  },
+  {
+   "ten": "claude-truong-hoc-online-pm",
+   "phong": "dao-tao",
+   "vai": "Trưởng phòng",
+   "viet_tat": "TH"
+  },
+  {
+   "ten": "claude-veo-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "VP"
+  },
+  {
+   "ten": "claude-viec-can-lam",
+   "phong": "dieu-hanh",
+   "vai": "Chuyên viên",
+   "viet_tat": "VC"
+  },
+  {
+   "ten": "claude-web-deploy",
+   "phong": "ky-thuat",
+   "vai": "Vận hành",
+   "viet_tat": "WD"
+  },
+  {
+   "ten": "claude-web-funnel",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "WF"
+  },
+  {
+   "ten": "claude-wiki-program-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "WP"
+  },
+  {
+   "ten": "claude-workshop-lich",
+   "phong": "ban-hang",
+   "vai": "Chuyên viên",
+   "viet_tat": "WL"
+  },
+  {
+   "ten": "claude-wp-blog",
+   "phong": "marketing",
+   "vai": "Chuyên viên",
+   "viet_tat": "WB"
+  },
+  {
+   "ten": "claude-ytm-fe",
+   "phong": "studio",
+   "vai": "Chuyên viên",
+   "viet_tat": "YF"
+  },
+  {
+   "ten": "claude-ytm-fixes",
+   "phong": "ky-thuat",
+   "vai": "Chuyên viên",
+   "viet_tat": "YF"
+  },
+  {
+   "ten": "claude-ytm-fixes-206",
+   "phong": "ky-thuat",
+   "vai": "Chuyên viên",
+   "viet_tat": "YF"
+  },
+  {
+   "ten": "claude-ytm-fixes-207",
+   "phong": "ky-thuat",
+   "vai": "Chuyên viên",
+   "viet_tat": "YF"
+  },
+  {
+   "ten": "claude-ytm-oauth-chrome",
+   "phong": "studio",
+   "vai": "Chuyên viên",
+   "viet_tat": "YO"
+  },
+  {
+   "ten": "claude-ytm-pm",
+   "phong": "studio",
+   "vai": "Trưởng phòng",
+   "viet_tat": "YP"
+  },
+  {
+   "ten": "claude-ytm-pm-206",
+   "phong": "studio",
+   "vai": "Trưởng phòng",
+   "viet_tat": "YP"
+  },
+  {
+   "ten": "claude-ytm-reviewer",
+   "phong": "dieu-hanh",
+   "vai": "Kiểm định",
+   "viet_tat": "YR"
+  },
+  {
+   "ten": "claude-ytm-setup-wizard",
+   "phong": "studio",
+   "vai": "Chuyên viên",
+   "viet_tat": "YS"
+  },
+  {
+   "ten": "claude-zalo-bot",
+   "phong": "ai-agent",
+   "vai": "Chuyên viên",
+   "viet_tat": "ZB"
+  }
+ ],
+ "tong": 211
+}

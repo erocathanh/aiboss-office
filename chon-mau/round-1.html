@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Round 1 — Chọn kiến trúc app Phòng ban AI</title>
+<style>
+ :root{--navy:#0a1929;--navy2:#102a43;--navy3:#16324f;--gold:#c89425;--gold2:#f1c768;--kem:#faf7f0;--mo:#93a5b8}
+ *{box-sizing:border-box}
+ body{margin:0;background:linear-gradient(160deg,var(--navy),var(--navy2));color:var(--kem);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.7}
+ .b{max-width:900px;margin:0 auto;padding:40px 24px 80px}
+ .nhan{display:inline-block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);
+       border:1px solid rgba(200,148,37,.4);padding:5px 12px;border-radius:99px}
+ h1{font-size:clamp(24px,4vw,34px);margin:16px 0 6px;letter-spacing:-.02em}
+ .gio{color:var(--mo);font-size:13.5px;margin:0 0 28px}
+ .cau{background:rgba(255,255,255,.05);border:1px solid rgba(250,247,240,.12);border-radius:14px;
+      padding:22px;margin:26px 0}
+ .cau h2{margin:0 0 6px;font-size:19px}
+ .cau .vs{color:var(--mo);font-size:14px;margin:0 0 18px}
+ .opt{display:block;background:rgba(255,255,255,.04);border:1px solid rgba(250,247,240,.14);
+      border-radius:11px;padding:15px 17px;margin:10px 0;cursor:pointer;transition:.15s}
+ .opt:hover{border-color:var(--gold)}
+ .opt.chon{border-color:var(--gold2);background:rgba(200,148,37,.13)}
+ .opt input{margin-right:9px}
+ .opt b{font-size:15.5px}
+ .opt .kq{display:block;color:var(--mo);font-size:13.5px;margin-top:6px}
+ .de{display:inline-block;font-size:11px;color:var(--navy);background:var(--gold2);
+     border-radius:4px;padding:1px 7px;margin-left:7px;font-weight:700}
+ table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+ th,td{padding:8px 10px;border-bottom:1px solid rgba(250,247,240,.1);text-align:left}
+ th{color:var(--gold);font-weight:600}
+ .ghi{background:rgba(255,255,255,.04);border-left:3px solid var(--gold);padding:13px 16px;
+      border-radius:0 9px 9px 0;margin:16px 0;font-size:14px}
+ .do{border-left-color:#e5484d}
+ textarea{width:100%;min-height:120px;background:rgba(0,0,0,.35);color:var(--kem);
+          border:1px solid rgba(250,247,240,.16);border-radius:10px;padding:13px;
+          font-family:ui-monospace,monospace;font-size:13px;margin-top:12px}
+ button{background:var(--gold);color:var(--navy);border:0;border-radius:9px;padding:12px 22px;
+        font-size:15px;font-weight:700;cursor:pointer;margin-top:12px}
+ button:hover{background:var(--gold2)}
+ code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:4px;color:var(--gold2);font-size:.92em}
+</style>
+</head>
+<body><div class="b">
+ <span class="nhan">Round 1 · nội bộ</span>
+ <h1>Chọn kiến trúc — App web “Phòng ban AI”</h1>
+ <p class="gio" id="gio">Gửi lúc: —</p>
+ <div style="background:linear-gradient(90deg,rgba(200,148,37,.22),rgba(200,148,37,.05));border:1px solid #c89425;border-radius:12px;padding:16px 20px;margin:0 0 26px"><div style="font-size:20px;font-weight:800;color:#f1c768">✅ ĐÃ QUYẾT LÚC 00:09 · 14/08/2026</div><div style="color:#93a5b8;font-size:14px;margin-top:4px">Owner đã chốt cả 3 câu. Trang này giữ lại làm bằng chứng — ⛔ không hỏi lại.</div></div>
+
+ <div class="ghi">Đã xong 3 mũi nghiên cứu: <b>cc.erocathanh.com</b> · <b>openclaw</b> · <b>Hermes tự khai</b>.
+ Bản đầy đủ: <code>~/idea/inbox/phong-ban-ai-app/CHON-KIEN-TRUC.md</code>.
+ Trang này chỉ hỏi những gì <b>chỉ anh quyết được</b>.</div>
+
+ <div class="cau" data-ma="A">
+  <h2>① Mỗi ô hiện gì?</h2>
+  <p class="vs">Câu này đổi cả khối lượng công việc, nên phải chốt trước khi viết dòng mã đầu tiên.</p>
+  <table>
+   <tr><th></th><th>Ⓐ Khung chat</th><th>Ⓑ Terminal thô</th></tr>
+   <tr><td>Người dùng thấy</td><td>bong bóng hỏi–đáp</td><td>y hệt cửa sổ Terminal</td></tr>
+   <tr><td>Giả-lập terminal</td><td>không cần</td><td>bắt buộc</td></tr>
+   <tr><td>Bộ vẽ ~636 KB</td><td>không</td><td>có — <b>giấy phép chưa rõ</b></td></tr>
+   <tr><td>Khớp mẫu 09 vừa duyệt</td><td>✅ vốn là khung chat</td><td>❌ làm lại giao diện</td></tr>
+   <tr><td>Công sức</td><td>nhẹ hơn nhiều bậc</td><td>nặng</td></tr>
+  </table>
+  <label class="opt chon" style="border-color:#f1c768;background:rgba(200,148,37,.16)"><input type="radio" name="A" value="Ⓐ khung chat"><b>Ⓐ Khung chat</b><span style="display:inline-block;font-size:11px;font-weight:800;color:#0a1929;background:#f1c768;border-radius:4px;padding:1px 8px;margin-left:8px">✔ ĐÃ CHỌN</span><span class="de">đề xuất</span>
+   <span class="kq">Giữ đúng mẫu 09 anh vừa chọn. Chạy agent bằng chế độ không-tương-tác rồi đọc từng dòng kết quả — nhẹ, không cần giả-lập terminal, không dính bộ vẽ chưa rõ giấy phép.</span></label>
+  <label class="opt"><input type="radio" name="A" value="Ⓑ terminal thô"><b>Ⓑ Terminal thô</b>
+   <span class="kq">Nhìn được agent gõ lệnh thật — hợp khi dạy học hoặc soi lỗi. Đổi lại: bỏ giao diện mẫu 09, gánh thêm giả-lập terminal, và phải tra nguồn bộ vẽ trước khi dùng.</span></label>
+  <label class="opt"><input type="radio" name="A" value="Ⓐ trước, Ⓑ thêm sau"><b>Ⓐ trước — Ⓑ thêm sau nếu cần</b>
+   <span class="kq">Dựng khung chat trước cho chạy được, để ngỏ đường thêm chế độ terminal về sau.</span></label>
+ </div>
+
+ <div class="cau" data-ma="B">
+  <h2>② Bật lớp chặn cho <code>cc.erocathanh.com</code> trước hay sau?</h2>
+  <p class="vs">Đo được: trang gốc trả 200 không chuyển hướng ⇒ chỉ còn <b>một</b> lớp bảo vệ. Tài liệu ghi “nên bật” từ 28/6 — <b>~46 ngày chưa bấm</b>. Sau cửa đó là phiên dòng lệnh thật trên máy anh.</p>
+  <div class="ghi do">App mới sẽ là <b>cửa thứ hai vào cùng cái máy</b>. Em nghĩ nên đóng cửa đang hở trước khi mở thêm cửa mới — nhưng đây là việc anh tự bấm trong bảng Cloudflare Zero Trust, em không đụng cài đặt bảo mật tài khoản.</div>
+  <label class="opt"><input type="radio" name="B" value="bật lớp chặn TRƯỚC"><b>Bật trước, rồi mới dựng app</b><span class="de">đề xuất</span>
+   <span class="kq">Em soạn sẵn các bước để anh bấm cho nhanh.</span></label>
+  <label class="opt"><input type="radio" name="B" value="dựng app song song, bật sau"><b>Dựng app song song, bật sau</b>
+   <span class="kq">Nhanh hơn, nhưng cửa cũ vẫn hở trong lúc dựng.</span></label>
+  <label class="opt chon" style="border-color:#f1c768;background:rgba(200,148,37,.16)"><input type="radio" name="B" value="để tôi tự lo, đừng nhắc"><b>Anh tự lo — đừng nhắc nữa</b><span style="display:inline-block;font-size:11px;font-weight:800;color:#0a1929;background:#f1c768;border-radius:4px;padding:1px 8px;margin-left:8px">✔ ĐÃ CHỌN</span>
+   <span class="kq">Em ghi nhận và thôi nêu lại.</span></label>
+ </div>
+
+ <div class="cau" data-ma="C">
+  <h2>③ Vòng đầu dựng tới đâu là đủ?</h2>
+  <p class="vs">Để em biết lúc nào được dừng mà trình anh xem.</p>
+  <label class="opt chon" style="border-color:#f1c768;background:rgba(200,148,37,.16)"><input type="radio" name="C" value="1 agent chạy thật trước"><b>Một agent chạy thật trước</b><span style="display:inline-block;font-size:11px;font-weight:800;color:#0a1929;background:#f1c768;border-radius:4px;padding:1px 8px;margin-left:8px">✔ ĐÃ CHỌN</span><span class="de">đề xuất</span>
+   <span class="kq">Một ô, nói chuyện thật với một agent, gửi được nhận được. Chạy thông rồi mới nhân lên 2–4 ô.</span></label>
+  <label class="opt"><input type="radio" name="C" value="đủ 4 ô ngay"><b>Đủ 4 ô song song ngay</b>
+   <span class="kq">Trình một lần cho trọn, nhưng hỏng ở đâu thì khó lần ra hơn.</span></label>
+ </div>
+
+ <textarea id="them" style="display:none" placeholder="Anh muốn nói thêm gì thì gõ đây (không bắt buộc)…"></textarea>
+ 
+ <textarea id="ra" style="display:none"></textarea>
+
+<script>
+document.getElementById('gio').textContent =
+  'Gửi lúc: ' + new Date().toLocaleString('vi-VN',{dateStyle:'full',timeStyle:'short'});
+document.querySelectorAll('.opt').forEach(o=>o.addEventListener('click',()=>{
+  o.parentElement.querySelectorAll('.opt').forEach(x=>x.classList.remove('chon'));
+  o.classList.add('chon');
+}));
+function tao(){
+  const g = n => (document.querySelector(`input[name="${n}"]:checked`)||{}).value || '(chưa chọn)';
+  const them = document.getElementById('them').value.trim();
+  const t = [
+    'ROUND 1 — kiến trúc app Phòng ban AI · Owner quyết lúc ' + new Date().toLocaleString('vi-VN'),
+    '① Mỗi ô hiện gì:        ' + g('A'),
+    '② Lớp chặn cc:          ' + g('B'),
+    '③ Vòng đầu tới đâu:     ' + g('C'),
+    them ? '④ Owner nói thêm:      ' + them : '',
+    '',
+    '→ Sau khi nhận: STAMP tiêu đề round-1 thành «✅ ĐÃ QUYẾT LÚC <giờ>» + gắn badge «✔ ĐÃ CHỌN» vào từng mục đã tick.',
+    '→ Rồi mới bắt tay dựng, và báo tiến độ về kênh phối hợp.'
+  ].filter(Boolean).join('\n');
+  const ra = document.getElementById('ra');
+  ra.style.display='block'; ra.value=t; ra.select();
+  navigator.clipboard.writeText(t).then(
+    ()=>{document.querySelector('button').textContent='✅ Đã copy — dán vào chat cho em';},
+    ()=>{document.querySelector('button').textContent='Copy tay giúp em (đã bôi sẵn)';});
+}
+</script>
+</div></body>
+</html>

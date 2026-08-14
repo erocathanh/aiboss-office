@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Round 2 — Đặt tên dự án trước khi dọn sang kho chính</title>
+<style>
+ :root{--navy:#0a1929;--navy2:#102a43;--gold:#c89425;--gold2:#f1c768;--kem:#faf7f0;--mo:#93a5b8}
+ *{box-sizing:border-box}
+ body{margin:0;background:linear-gradient(160deg,var(--navy),var(--navy2));color:var(--kem);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.75}
+ .b{max-width:920px;margin:0 auto;padding:42px 24px 90px}
+ .nhan{display:inline-block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);
+       border:1px solid rgba(200,148,37,.4);padding:5px 12px;border-radius:99px}
+ h1{font-size:clamp(24px,4vw,34px);margin:16px 0 6px;letter-spacing:-.02em}
+ .gio{color:var(--mo);font-size:13.5px;margin:0 0 26px}
+ .cau{background:rgba(255,255,255,.05);border:1px solid rgba(250,247,240,.12);border-radius:14px;
+      padding:22px;margin:26px 0}
+ .cau h2{margin:0 0 6px;font-size:19px}
+ .cau .vs{color:var(--mo);font-size:14px;margin:0 0 16px}
+ .opt{display:block;background:rgba(255,255,255,.04);border:1px solid rgba(250,247,240,.14);
+      border-radius:11px;padding:15px 17px;margin:10px 0;cursor:pointer;transition:.15s}
+ .opt:hover{border-color:var(--gold)}
+ .opt.chon{border-color:var(--gold2);background:rgba(200,148,37,.13)}
+ .opt input{margin-right:9px}
+ .opt b{font-size:15.5px}
+ .opt .ma{font-family:ui-monospace,monospace;color:var(--gold2);font-size:13px;margin-left:8px}
+ .opt .kq{display:block;color:var(--mo);font-size:13.5px;margin-top:6px}
+ .opt .uu{display:block;font-size:13px;margin-top:5px}
+ .de{display:inline-block;font-size:11px;color:var(--navy);background:var(--gold2);
+     border-radius:4px;padding:1px 7px;margin-left:7px;font-weight:700}
+ .ghi{background:rgba(255,255,255,.04);border-left:3px solid var(--gold);padding:13px 16px;
+      border-radius:0 9px 9px 0;margin:16px 0;font-size:14px}
+ pre{background:rgba(0,0,0,.34);border:1px solid rgba(250,247,240,.1);border-radius:10px;
+     padding:13px 15px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+ code{background:rgba(255,255,255,.08);padding:1.5px 6px;border-radius:4px;color:var(--gold2);font-size:.9em}
+ pre code{background:none;padding:0;color:var(--kem)}
+ textarea{width:100%;min-height:110px;background:rgba(0,0,0,.35);color:var(--kem);
+          border:1px solid rgba(250,247,240,.16);border-radius:10px;padding:13px;
+          font-family:ui-monospace,monospace;font-size:13px;margin-top:12px}
+ button{background:var(--gold);color:var(--navy);border:0;border-radius:9px;padding:12px 22px;
+        font-size:15px;font-weight:700;cursor:pointer;margin-top:12px}
+ button:hover{background:var(--gold2)}
+</style>
+</head>
+<body><div class="b">
+ <span class="nhan">Round 2 · nội bộ</span>
+ <h1>Đặt tên dự án trước khi dọn sang kho chính</h1>
+ <p class="gio" id="gio">Gửi lúc: —</p>
+ <div style="background:linear-gradient(90deg,rgba(200,148,37,.22),rgba(200,148,37,.05));border:1px solid #c89425;border-radius:12px;padding:16px 20px;margin:0 0 26px"><div style="font-size:20px;font-weight:800;color:#f1c768">✅ ĐÃ QUYẾT LÚC 09:10 · 14/08/2026</div><div style="color:#93a5b8;font-size:14px;margin-top:4px">Owner đã chốt cả 3 câu. Trang giữ lại làm bằng chứng — ⛔ không hỏi lại.</div></div>
+
+ <div class="ghi">
+ Owner chốt: dự án đã chạy tốt, hết thử nghiệm ⇒ dọn sang <code>~/Projects/</code> và đưa lên GitHub riêng tư.
+ Luật nhà: <b>thư mục trong <code>~/Projects/</code> phải có kho GitHub kèm</b>, nên hai việc này đi cùng nhau.
+ <br><br>
+ ⚠️ Hỏi tên <b>trước</b> khi dọn, vì dọn xong mới đổi tên là phải sửa lại đường dẫn ở nhiều nơi lần thứ hai.
+ </div>
+
+ <div class="cau" data-ma="A">
+  <h2>① Tên dự án</h2>
+  <p class="vs">Tên này sẽ thành tên thư mục, tên kho GitHub, và tên gọi trong mọi sổ sách về sau. Ngắn, gõ được, đọc ra việc.</p>
+
+  <label class="opt chon" style="border-color:#f1c768;background:rgba(200,148,37,.16)"><input type="radio" name="A" value="phong-ban-ai"><b>Phòng ban AI</b><span style="display:inline-block;font-size:11px;font-weight:800;color:#0a1929;background:#f1c768;border-radius:4px;padding:1px 8px;margin-left:8px">✔ ĐÃ CHỌN</span><span class="ma">phong-ban-ai</span>
+   <span class="kq">Giữ nguyên tên đang dùng — mọi ghi chép hiện có đều gọi vậy.</span>
+   <span class="uu">👍 không phải sửa gì · 👎 nghe như sơ đồ tổ chức, chưa nói được đây là <i>chỗ làm việc</i></span></label>
+
+  <label class="opt"><input type="radio" name="A" value="ban-lam-viec-ai"><b>Bàn làm việc AI</b><span class="ma">ban-lam-viec-ai</span><span class="de">đề xuất</span>
+   <span class="kq">Bám đúng câu Owner định nghĩa nó: <i>“app tôi thay cho terminal”</i>.</span>
+   <span class="uu">👍 đọc là hiểu ngay dùng để làm gì · 👎 dài hơn một chữ</span></label>
+
+  <label class="opt"><input type="radio" name="A" value="dieu-phoi-ai"><b>Điều phối AI</b><span class="ma">dieu-phoi-ai</span>
+   <span class="kq">Nhấn vào phần khó nhất: một người lái nhiều trợ lý cùng lúc.</span>
+   <span class="uu">👍 nói đúng chỗ giá trị · 👎 nghe hơi trừu tượng, dễ lẫn với việc điều phối của PM</span></label>
+
+  <label class="opt"><input type="radio" name="A" value="xuong-ai"><b>Xưởng AI</b><span class="ma">xuong-ai</span>
+   <span class="kq">Ngắn nhất. Nơi cả đội AI ngồi làm.</span>
+   <span class="uu">👍 gõ nhanh, dễ nhớ · 👎 mơ hồ — “xưởng” không nói được là chỗ trò chuyện hay chỗ sản xuất</span></label>
+ </div>
+
+ <div class="cau" data-ma="B">
+  <h2>② Hai thư mục này gộp làm một kho, hay tách đôi?</h2>
+  <p class="vs">Hiện đang có hai thư mục, nội dung khác hẳn nhau:</p>
+  <pre><code>phong-ban-ai-app       app chạy thật — Next.js, nối vào Claude Code trên máy
+phong-ban-ai-mockup    10 mẫu giao diện + trang round + trang giải thích luật nạp
+                       (đang phát trên địa chỉ nội bộ, Owner đang xem)</code></pre>
+
+  <label class="opt chon" style="border-color:#f1c768;background:rgba(200,148,37,.16)"><input type="radio" name="B" value="gộp 1 kho"><b>Gộp thành một kho</b><span style="display:inline-block;font-size:11px;font-weight:800;color:#0a1929;background:#f1c768;border-radius:4px;padding:1px 8px;margin-left:8px">✔ ĐÃ CHỌN</span><span class="de">đề xuất</span>
+   <span class="kq">App nằm ở gốc, mấy trang chọn mẫu và round vào một thư mục con.</span>
+   <span class="uu">👍 một dự án một chỗ, lịch sử quyết định nằm cạnh mã · 👎 kho hơi tạp, có cả mẫu đã bị loại</span></label>
+
+  <label class="opt"><input type="radio" name="B" value="tách 2 kho"><b>Tách hai kho riêng</b>
+   <span class="kq">Kho mã sạch; mấy trang mẫu và round ở kho khác.</span>
+   <span class="uu">👍 kho mã gọn · 👎 hai nơi phải nhớ, và trang round dễ thành mồ côi như đã từng xảy ra</span></label>
+
+  <label class="opt"><input type="radio" name="B" value="chỉ move app, mockup để lại"><b>Chỉ dọn app — phần mẫu để nguyên chỗ cũ</b>
+   <span class="kq">Phần mẫu đã xong việc của nó (Owner đã chọn mẫu 09).</span>
+   <span class="uu">👍 nhanh nhất · 👎 địa chỉ nội bộ đang phát vẫn trỏ chỗ cũ, sau này khó lần</span></label>
+ </div>
+
+ <div class="cau" data-ma="C">
+  <h2>③ Đưa lên GitHub ngay bây giờ chứ?</h2>
+  <p class="vs">Tạo kho là việc chạm ra ngoài máy, nên em hỏi thay vì tự làm.</p>
+  <label class="opt chon" style="border-color:#f1c768;background:rgba(200,148,37,.16)"><input type="radio" name="C" value="tạo repo private + push ngay"><b>Tạo kho riêng tư và đẩy lên ngay</b><span style="display:inline-block;font-size:11px;font-weight:800;color:#0a1929;background:#f1c768;border-radius:4px;padding:1px 8px;margin-left:8px">✔ ĐÃ CHỌN</span><span class="de">đề xuất</span>
+   <span class="kq">Đúng luật nhà: thư mục trong <code>~/Projects/</code> phải có kho kèm. Riêng tư nên không ai ngoài thấy.</span></label>
+  <label class="opt"><input type="radio" name="C" value="chỉ ghi lịch sử tại máy, chưa đẩy"><b>Chỉ ghi lịch sử tại máy, chưa đẩy lên</b>
+   <span class="kq">Dọn chỗ trước, lên mạng sau. Đổi lại: nằm trong <code>~/Projects/</code> mà chưa có kho là lệch luật nhà.</span></label>
+ </div>
+
+ <textarea id="them" style="display:none" placeholder="Anh muốn đặt tên khác, hoặc dặn thêm gì thì gõ đây…"></textarea>
+ 
+ <textarea id="ra" style="display:none"></textarea>
+
+<script>
+document.getElementById('gio').textContent =
+  'Gửi lúc: ' + new Date().toLocaleString('vi-VN',{dateStyle:'full',timeStyle:'short'});
+document.querySelectorAll('.opt').forEach(function(o){
+  o.addEventListener('click', function(){
+    o.parentElement.querySelectorAll('.opt').forEach(function(x){ x.classList.remove('chon'); });
+    o.classList.add('chon');
+  });
+});
+function tao(){
+  function g(n){
+    var el = document.querySelector('input[name="' + n + '"]:checked');
+    return el ? el.value : '(chưa chọn)';
+  }
+  var them = document.getElementById('them').value.trim();
+  var d = new Date().toLocaleString('vi-VN');
+  var t = [
+    'ROUND 2 — đặt tên + dọn sang kho chính · Owner quyết lúc ' + d,
+    '① Tên dự án:        ' + g('A'),
+    '② Gộp hay tách:     ' + g('B'),
+    '③ GitHub:           ' + g('C'),
+    them ? '④ Owner dặn thêm:   ' + them : '',
+    '',
+    'Sau khi nhận: STAMP tiêu đề round-2 thành «ĐÃ QUYẾT LÚC <giờ>» + gắn badge «ĐÃ CHỌN» vào từng mục đã tick.',
+    'Rồi mới dọn thư mục, và báo tiến độ về kênh phối hợp.'
+  ].filter(Boolean).join('\n');
+  var ra = document.getElementById('ra');
+  ra.style.display = 'block'; ra.value = t; ra.select();
+  navigator.clipboard.writeText(t).then(
+    function(){ document.querySelector('button').textContent = '✅ Đã copy — dán vào chat cho em'; },
+    function(){ document.querySelector('button').textContent = 'Copy tay giúp em (đã bôi sẵn)'; }
+  );
+}
+</script>
+</div></body>
+</html>
