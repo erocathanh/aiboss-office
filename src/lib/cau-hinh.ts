@@ -44,11 +44,36 @@ export const CAU_HINH = {
    */
   thuMucLamViec: process.env.THU_MUC_AGENT ?? os.homedir(),
 
-  /** Mô hình. Mặc định sonnet cho rẻ — opus đắt gấp bội cho việc trò chuyện. */
-  moHinh: process.env.MO_HINH_CLAUDE ?? 'sonnet',
+  /**
+   * Mô hình. Owner chốt 14/08/2026: ghế phải chạy **OPUS**, ⛔ không phải sonnet —
+   * *«như em»* (đúng thứ Owner đang dùng ở terminal).
+   *
+   * ⭐ Dùng BÍ DANH `opus`, ⛔ đừng ghim tên đầy đủ: bí danh luôn trỏ bản opus MỚI NHẤT.
+   *    Ghim tên đầy đủ = đóng băng ở một bản; bản mới ra thì ghế vẫn chạy bản cũ mà
+   *    ⛔ KHÔNG ai biết — hỏng âm thầm, đúng kiểu khó phát hiện nhất.
+   * 💸 Đắt hơn sonnet nhiều. Owner biết trước và chọn vậy — ⛔ đừng tự hạ xuống cho rẻ.
+   */
+  moHinh: process.env.MO_HINH_CLAUDE ?? 'opus',
 
-  /** Trần tiền cho MỖI lượt. Chốt chặn cứng ở tầng tiến trình. */
-  tranTienMoiLuot: soThuc('TRAN_TIEN_MOI_LUOT_USD', 0.5),
+  /**
+   * Mức nỗ lực suy nghĩ — Owner chốt: CAO NHẤT.
+   * Mức hợp lệ (đo tại `claude --help`, bản 2.1.232): low · medium · high · xhigh · max.
+   */
+  mucNoLuc: process.env.MUC_NO_LUC ?? 'max',
+
+  /**
+   * Trần tiền cho MỖI lượt. **0 = KHÔNG GIỚI HẠN** (Owner chốt 14/08/2026).
+   *
+   * 🔴 Vì sao bỏ: trần 0,5 USD CẮT NGANG ghế ÔNG TRÙM giữa lúc nó đang rà tình hình —
+   *    đo thật: một lượt «nắm tình hình» ăn 1.176.716 token, lượt sau 210.342 token
+   *    rồi báo «Reached maximum budget ($0.5)». Việc chưa xong mà đã bị chặt.
+   *
+   * ⚠️ ĐỔI LẠI: gỡ trần là gỡ **phanh cuối cùng ở tầng tiến trình**. Một lượt chạy hoang
+   *    (agent lặp vòng, nuốt tệp khổng lồ) sẽ chạy tới khi nào xong mới thôi.
+   *    Thứ còn giữ ta: `soLuotMoiPhut` (chặn dồn lượt) + số token hiện ngay dưới ô chat
+   *    + nút dừng. ⇒ **Người canh thay máy canh** — nhìn số, thấy lạ thì dừng tay.
+   */
+  tranTienMoiLuot: soThuc('TRAN_TIEN_MOI_LUOT_USD', 0),
 
   /** Chặn mức dùng: số lượt tối đa mỗi phút cho mỗi khách. */
   soLuotMoiPhut: soNguyen('SO_LUOT_MOI_PHUT', 6),
@@ -56,8 +81,21 @@ export const CAU_HINH = {
   /** Trần lượt đang chạy đồng thời cho cả máy chủ. */
   tranDongThoi: soNguyen('TRAN_DONG_THOI', 3),
 
-  /** Cắt tiến trình nếu quá lâu (mili-giây). */
-  hanGio: soNguyen('HAN_GIO_MS', 120_000),
+  /**
+   * Ngưỡng **IM LẶNG** (mili-giây) — chém ghế khi nó ⛔ không nhả chữ nào suốt bấy lâu.
+   *
+   * ⚠️ ĐỌC KỸ: đây ⛔ KHÔNG phải trần tổng thời gian. Chừng nào ghế còn tuôn chữ thì
+   *    đồng hồ còn được đặt lại (`chay-agent.ts` → `datLaiDongHo`), chạy bao lâu cũng được.
+   *
+   * 🔴 Vì sao đổi (14/08): bản cũ hẹn CỨNG 120 giây kể từ lúc sinh tiến trình. Đo tại
+   *    bản ghi ghế ÔNG TRÙM — hai lượt khác hẳn đề tài cùng chết ở **117 giây**, trong đó
+   *    có đúng câu MỞ MÀN của kịch bản quay. Ghế nặng (opus + nỗ lực cao nhất + nạp trọn
+   *    luật nhà) đọc vài phút là bình thường; chính kịch bản ghi *«mỗi ô 30 giây–3 phút»*.
+   *    ⇒ Trần cứng biến việc-chạy-đúng thành lỗi, mà lời báo lỗi lại đổ cho câu hỏi của
+   *    người dùng ⇒ Owner đi sửa nhầm chỗ. Đây là kiểu hỏng đắt nhất: **máy nói sai thủ phạm**.
+   * 📌 10 phút im lặng = treo thật (kể cả khi đang chạy một lệnh dài không in gì).
+   */
+  hanGio: soNguyen('HAN_GIO_MS', 600_000),
 
   /** Độ dài câu hỏi tối đa. */
   toiDaKyTu: soNguyen('TOI_DA_KY_TU', 4000),

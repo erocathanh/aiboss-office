@@ -4,7 +4,10 @@ import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT } from '@/lib/doc-phien';
+import { dangKyViec, xoaViec } from '@/lib/kho-tien-trinh';
+import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
+import { traChuoi } from '@/lib/tra-chuoi';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
 export const dynamic = 'force-dynamic';
@@ -64,9 +67,24 @@ export async function POST(req: NextRequest) {
    */
   let matBanGhi = false;
   if (maPhienCu && !coPhien(maNhanSu, maPhienCu)) {
-    matBanGhi = true;
-    maPhienCu = null;
-    datO(maO, maNhanSu, null); // xoá liên kết hỏng
+    /**
+     * ⚠️ MỘT MẪU ĐƠN ⛔ KHÔNG ĐỦ để tuyên một phiên là mất.
+     * Luật nhà: sống hay chết phải đo 2 mẫu CÁCH NHAU — một mẫu dễ bắt nhầm đúng
+     * lúc tệp đang được thay/đổi tên. ⇒ Đo lại sau 1,5 giây rồi mới kết luận.
+     * Nhánh này chỉ chạy trong ca hiếm nên 1,5 giây ⛔ không làm chậm đường thường.
+     */
+    ghiVetMatLienKet(maO, maNhanSu, maPhienCu, false);
+    await new Promise((r) => setTimeout(r, 1500));
+    if (!coPhien(maNhanSu, maPhienCu)) {
+      matBanGhi = true;
+      maPhienCu = null; // ⛔ không `--resume` mù (bẫy openclaw) — nhưng ⇩
+      /**
+       * ⛔ ĐÃ BỎ `datO(maO, maNhanSu, null)`.
+       * Xoá liên kết là hành động KHÔNG LÙI ĐƯỢC, mà bằng chứng chỉ là phép đo tệp.
+       * Ca 17/08: Owner mất cả chuỗi làm việc, phải nối tay lại từ dòng lệnh.
+       * ⇒ Giữ liên kết trong sổ: lượt này mở phiên mới, nhưng Owner vẫn NỐI LẠI được.
+       */
+    }
   }
 
   // ⛔ LUẬT CỨNG: ⛔ TUYỆT ĐỐI KHÔNG resume phiên ĐANG CHẠY ở terminal khác.
@@ -91,8 +109,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  /**
+   * 🔴 ⛔ ĐÃ BỎ `req.signal.addEventListener('abort', () => huy.abort())` (17/08/2026).
+   *
+   * `req.signal` là tín hiệu ngắt CỦA TRÌNH DUYỆT. Nối nó vào bộ huỷ nghĩa là:
+   * Owner đóng tab · khoá màn điện thoại · rớt wifi ⇒ `SIGTERM` vào `claude`.
+   * Owner nói thẳng app này THAY CHO TERMINAL — mà terminal thì đóng cửa sổ
+   * ⛔ không giết việc đang chạy.
+   *
+   * ⇒ Bộ huỷ này giờ CHỈ dùng cho lệnh dừng RÕ RÀNG. "Mất kết nối" ⛔ KHÔNG phải
+   *   "tôi muốn dừng" — cùng một họ với chốt `xoa_lien_ket` ở `/api/o`.
+   */
   const huy = new AbortController();
-  req.signal.addEventListener('abort', () => huy.abort());
+  let pidDangChay: number | null = null;
 
   moLuot();
   let daDong = false;
@@ -120,17 +149,50 @@ export async function POST(req: NextRequest) {
           dieu.enqueue(goi({
             loai: 'mat-ban-ghi',
             thong_diep:
-              'Không tìm thấy bản ghi phiên cũ trên đĩa — đã bỏ liên kết và mở PHIÊN MỚI. ' +
-              'Ngữ cảnh trước đó KHÔNG còn.',
+              'Không đọc được bản ghi phiên cũ (đã đo 2 lần) — lượt này mở PHIÊN MỚI. ' +
+              'Liên kết cũ vẫn GIỮ trong sổ: bấm chọn lại phiên là nối về được.',
           }));
         }
 
+        /**
+         * 🔎 CHẶN NGAY TẠI Ô GÕ (Owner chốt round-122 · Q2=A).
+         *
+         * Câu loại «tôi đã nói/giao/gửi… CHƯA» ⇒ app TỰ TRA chuỗi đời của ghế rồi ĐÍNH
+         * kết quả + ĐỘ PHỦ vào câu hỏi. Vì sao ⛔ không để ghế tự nhớ: fork chỉ giữ **8,4%**
+         * (đo 805/9.616 dòng) ⇒ ghế «⛔ không nhớ» là chuyện THƯỜNG, và nết mặc định của nó là
+         * đáp «dạ chưa ạ» — **sai tự tin**, mà Owner ⛔ KHÔNG có cách kiểm. Kiểu sai phá lòng tin.
+         * ⭐ Sống NGOÀI cửa sổ ngữ cảnh ⇒ ⛔ không mất khi nén, ⛔ không cần hook.
+         */
+        let cauGui = cauHoi;
+        try {
+          const tra = traChuoi(maNhanSu, maPhienCu, cauHoi);
+          if (tra) {
+            cauGui = cauHoi + String.fromCharCode(10, 10) + tra.loi_dan;
+            dieu.enqueue(goi({
+              loai: 'tra-chuoi', do_phu: tra.do_phu, so_tang: tra.so_tang,
+              so_khop: tra.khop.length, tu_khoa: tra.tu_khoa,
+            }));
+          }
+        } catch {
+          /* tra hỏng thì ⛔ ĐỪNG chặn lượt chat — cứ gửi câu gốc */
+        }
         for await (const mau of chayAgent({
-          cauHoi,
+          cauHoi: cauGui,
           maPhienCu,
           thuMuc: thuMucAgent(maNhanSu),
-          loiDan: loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong),
+          // 👑 Ghế có LINH HỒN RIÊNG (ÔNG TRÙM) thì ⛔ KHÔNG nhét qua lời dặn hệ thống nữa —
+          //    linh hồn được chép sẵn thành `CLAUDE.md` trong THƯ MỤC GHẾ, và Claude Code
+          //    TỰ NẠP theo chỗ đứng (đúng cơ chế cascade — xem chon-mau/luat-nap.html).
+          //    Cách này hơn ở chỗ: sửa linh hồn = sửa 1 tệp, ⛔ không phải đẩy lại app;
+          //    và phiên mở từ terminal ở cùng thư mục cũng nhận đúng vai.
+          loiDan: ns.soul ? undefined : loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong),
           tinHieuHuy: huy.signal,
+          // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT.
+          chayNen: true,
+          khiSinh: (pid) => {
+            pidDangChay = pid;
+            dangKyViec(maO, pid, maNhanSu); // để nút DỪNG còn giết được
+          },
         })) {
           if (mau.loai === 'phien') {
             // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
@@ -152,10 +214,27 @@ export async function POST(req: NextRequest) {
         );
       } finally {
         clearInterval(nhip);
-        // ⭐ Ghi mốc "lượt của TA vừa xong" để lượt SAU không bị chính ta chặn nhầm.
+        /**
+         * ⭐ Ghi mốc "lượt của TA vừa xong" để lượt SAU ⛔ không bị chính ta chặn nhầm.
+         *
+         * 🔴 Ca thật 14/08: lấy mốc ĐÚNG LÚC NÀY là **đo trước khi việc xong** —
+         *    `claude` nhận SIGTERM ⛔ không chết ngay, còn xả bản ghi thêm tới 51 giây
+         *    (đo được). Mốc lấy sớm ⇒ lượt sau bị bộ canh phán "đang chạy ở terminal
+         *    khác" trong khi ⛔ không có terminal nào ⇒ ghế câm giữa buổi quay.
+         * ⇒ Lấy ngay MỘT lần (để có mốc nếu máy chủ tắt đột ngột), rồi **lấy lại**
+         *    vài nhịp sau cho tới khi tệp thôi đổi. Luôn giữ mốc MỚI NHẤT.
+         */
+        if (pidDangChay !== null) xoaViec(maO, pidDangChay); // việc xong ⇒ rút khỏi sổ
         if (maPhienDaDung) {
-          const m = mocTepPhien(maNhanSu, maPhienDaDung);
-          if (m !== null) ghiMocKetThuc(maO, m);
+          const maP = maPhienDaDung;
+          const ghiLai = () => {
+            const m = mocTepPhien(maNhanSu, maP);
+            if (m !== null) ghiMocKetThuc(maO, m);
+          };
+          ghiLai();
+          for (const cho of [1_500, 5_000, 15_000]) {
+            setTimeout(ghiLai, cho).unref?.();
+          }
         }
         dongMotLan();
         try {
@@ -166,7 +245,12 @@ export async function POST(req: NextRequest) {
       }
     },
     cancel() {
-      huy.abort();
+      /**
+       * Trình duyệt bỏ luồng (đóng tab · khoá màn · rớt mạng).
+       * ⛔ TUYỆT ĐỐI KHÔNG `huy.abort()` ở đây — xem chú thích chỗ khai `huy`.
+       * Chỉ ngừng ĐƯỜNG XEM; việc bên dưới chạy tiếp và tự ghi vào bản ghi phiên,
+       * nên mở lại app là đọc được đầy đủ.
+       */
       dongMotLan();
     },
   });

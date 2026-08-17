@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Phòng ban AI — Eroca Thanh',
+  title: 'AIBOSS.VN — Phòng ban AI',
   description: 'Nói chuyện thật với trợ lý AI qua trình duyệt.',
   robots: { index: false, follow: false }, // web NỘI BỘ
 };

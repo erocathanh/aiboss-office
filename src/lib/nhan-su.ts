@@ -13,6 +13,10 @@ export interface NhanSu {
   ten: string;
   /** Nhãn dễ hiểu — thứ hiện làm dòng CHÍNH cho người xem. */
   nhan: string;
+  /** 👑 Ghim đầu danh sách · ⛔ không có nút tắt · luôn chiếm ô 1 khi chia 2/4 ô. */
+  ghim?: boolean;
+  /** Đường dẫn tệp linh hồn — nạp làm lời dặn hệ thống cho phiên của ghế này. */
+  soul?: string;
   phong: string;
   ten_phong: string;
   vai: string;
@@ -34,14 +38,27 @@ export function boDau(s: string): string {
 const PHONG: PhongBan[] = (duLieu as { phong_ban: PhongBan[] }).phong_ban;
 const tenPhongTheoMa = new Map(PHONG.map((p) => [p.ma, p.ten]));
 
-const coNhan = datNhanHangLoat(
-  (duLieu as { nhan_su: Array<{ ten: string; phong: string; vai: string; viet_tat: string }> })
-    .nhan_su,
-);
+type NhanSuTho = {
+  ten: string; phong: string; vai: string; viet_tat: string;
+  /** Nhãn VIẾT TAY — có thì thắng nhãn máy tự sinh. */
+  nhan?: string;
+  /** 👑 Ghim đầu danh sách · ⛔ không tắt được · ô 1 ở mọi chế độ chia ô. */
+  ghim?: boolean;
+  /** Đường dẫn tệp linh hồn — nạp làm lời dặn hệ thống cho phiên của ghế này. */
+  soul?: string;
+};
+
+const THO = (duLieu as { nhan_su: NhanSuTho[] }).nhan_su;
+const coNhan = datNhanHangLoat(THO);
+const thoTheoTen = new Map(THO.map((n) => [n.ten, n]));
 
 const DS: NhanSu[] = coNhan.map((n) => ({
   ten: n.ten,
-  nhan: n.nhan,
+  // ⭐ Nhãn viết tay trong dữ liệu THẮNG nhãn máy sinh — «ÔNG TRÙM» phải hiện đúng chữ đó,
+  //    ⛔ không để bộ sinh nhãn dịch slug thành thứ khác.
+  nhan: thoTheoTen.get(n.ten)?.nhan ?? n.nhan,
+  ghim: thoTheoTen.get(n.ten)?.ghim === true,
+  soul: thoTheoTen.get(n.ten)?.soul,
   phong: n.phong,
   ten_phong: tenPhongTheoMa.get(n.phong) ?? n.phong,
   vai: n.vai,
@@ -58,7 +75,13 @@ export function dsPhongBan(): PhongBan[] {
 }
 
 export function dsNhanSu(): NhanSu[] {
-  return DS;
+  // 👑 Ghế ghim luôn đứng ĐẦU, bất kể lọc theo phòng nào — Owner chốt 14/08.
+  return [...DS].sort((a, b) => Number(b.ghim ?? false) - Number(a.ghim ?? false));
+}
+
+/** 👑 Ghế ghim đầu — dùng cho luật “ô 1 luôn là nó” ở chế độ chia 2/4 ô. */
+export function gheGhim(): NhanSu | undefined {
+  return DS.find((n) => n.ghim);
 }
 
 export function timNhanSu(ten: string): NhanSu | undefined {

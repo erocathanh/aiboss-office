@@ -93,7 +93,10 @@
   min-height: 36px; max-height: 120px;
   border-radius: 9px; padding: 8px 13px;
   border: 1px solid var(--vien-2); background: rgba(250, 247, 240, 0.05);
-  color: var(--kem); font-size: 13px; font-family: inherit; line-height: 1.5;
+  /* 🔴 16px LÀ NGƯỠNG CHỐNG ZOOM — ⛔ ĐỪNG HẠ (đo 17/08/2026).
+     iOS Safari và Chrome Android TỰ PHÓNG TO trang khi chạm ô chữ < 16px
+     ⇒ nút «Gửi»/«⏭ Xếp» bị đẩy khỏi màn. Owner cắn đúng lỗi này hai lần. */
+  color: var(--kem); font-size: 16px; font-family: inherit; line-height: 1.5;
   outline: none;
 }
 .soan textarea::placeholder { color: var(--kem-mo-2); }
@@ -103,6 +106,11 @@
 }
 .soan textarea[disabled] { opacity: 0.5; }
 .soan { align-items: flex-end; }
+
+/* Chia 2 / 4 ô: ô soạn phải thấp lại cho khớp nhịp thu nhỏ của bản mẫu 09.
+   ⚠️ mau09.css chỉ chỉnh `.soan input` — ta dùng `textarea` nên phải chỉnh riêng. */
+.bc-2 .soan textarea { font-size: 16px; min-height: 34px; max-height: 96px; }   /* ⛔ KHÔNG hạ — xem ghi chú chống zoom trên */
+.bc-4 .soan textarea { font-size: 16px; min-height: 30px; max-height: 76px; padding: 6px 10px; }   /* ⛔ KHÔNG hạ */
 
 /* Nhãn "đang chạy thật" ở đầu khu — thay nhãn "bản mẫu" của mockup. */
 .nhan-that {

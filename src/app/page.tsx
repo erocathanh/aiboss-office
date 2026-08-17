@@ -15,6 +15,10 @@ export default function Trang() {
     vai: n.vai,
     viet_tat: n.viet_tat,
     tim: n.tim,
+    // 👑 PHẢI mang sang giao diện — thiếu trường này thì UI ⛔ không biết ghế nào được ghim,
+    //    và ÔNG TRÙM rơi tuột xuống giữa danh sách (đo thật: vị trí 126/212).
+    //    ⛔ Đừng đưa `soul` ra đây — đường dẫn tệp là chuyện phía máy chủ.
+    ghim: n.ghim ?? false,
   }));
 
   return <UngDung phongBan={dsPhongBan()} nhanSu={nhanSu} tong={tongSo()} />;

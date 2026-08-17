@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Chấm điểm giao diện — app phòng ban AI</title>
+<style>
+  /* Bảng màu: lấy đúng bộ nhà (Navy/Gold/Cream). ⛔ Không đẻ gu lạ. */
+  :root{
+    --nen:#0a1929; --nen2:#102a43; --nen3:#0d2136;
+    --vang:#f1c768; --vang-dam:#c89425; --kem:#faf7f0;
+    --chu:#d6dee7; --chu-mo:#93a7bb;
+    --do:#ff8f7a; --cam:#ffc06b; --xanh:#7fd6a0;
+    --vien:#1d3853;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--nen); color:var(--chu);
+    /* ⛔ KHÔNG 100vh — thanh địa chỉ điện thoại ẩn/hiện làm nhảy layout */
+    min-height:100dvh;
+    font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+    font-size:16px; line-height:1.62;
+    /* bớt phẳng: một lớp sáng rất nhẹ, ⛔ không phải gradient tím-xanh kiểu AI */
+    background-image:radial-gradient(900px 500px at 15% -10%, #12314e 0%, transparent 60%);
+  }
+  .khung{max-width:900px;margin:0 auto;padding:28px 18px 72px}
+
+  header{padding:8px 0 22px;border-bottom:1px solid var(--vien);margin-bottom:26px}
+  .nhan{font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--vang-dam);font-weight:600}
+  h1{font-size:clamp(25px,6.4vw,38px);line-height:1.14;letter-spacing:-.02em;margin:.32em 0 .22em;color:var(--kem);text-wrap:balance}
+  .phu{color:var(--chu-mo);font-size:14.5px;margin:0}
+
+  /* điểm tổng */
+  .tong{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center;
+        background:var(--nen2);border:1px solid var(--vien);border-radius:var(--r);padding:18px 20px;margin:22px 0 30px}
+  .so{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;
+      font-size:clamp(38px,11vw,54px);line-height:1;color:var(--vang);font-weight:600;letter-spacing:-.03em}
+  .so small{font-size:.42em;color:var(--chu-mo);font-weight:400;letter-spacing:0}
+  .tong p{margin:0;font-size:14.5px;color:var(--chu-mo)}
+
+  h2{font-size:19px;letter-spacing:-.01em;color:var(--kem);margin:34px 0 12px;font-weight:600}
+  h2 .stt{color:var(--vang-dam);font-family:ui-monospace,monospace;font-size:.82em;margin-right:8px}
+
+  /* bảng điểm — Grid, ⛔ không tính phần trăm bằng flex */
+  .hang{display:grid;grid-template-columns:1fr auto;gap:6px 14px;align-items:baseline;
+        padding:13px 0;border-bottom:1px solid var(--vien)}
+  .hang:last-child{border-bottom:0}
+  .ten{font-weight:600;color:var(--kem);font-size:15.5px}
+  .diem{font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:15px;font-weight:600;white-space:nowrap}
+  .d-te{color:var(--do)} .d-tb{color:var(--cam)} .d-on{color:var(--xanh)}
+  .vach{grid-column:1/-1;height:6px;border-radius:99px;background:#0a2137;overflow:hidden}
+  .vach i{display:block;height:100%;border-radius:99px}
+  .ghi{grid-column:1/-1;font-size:13.5px;color:var(--chu-mo);margin-top:2px}
+  code{font-family:ui-monospace,monospace;font-size:.9em;background:#0a2137;padding:1px 6px;border-radius:6px;color:var(--vang)}
+
+  .the{background:var(--nen3);border:1px solid var(--vien);border-left:3px solid var(--vang-dam);
+       border-radius:10px;padding:15px 17px;margin:13px 0}
+  .the.nang{border-left-color:var(--do)}
+  .the.tot{border-left-color:var(--xanh)}
+  .the h3{margin:0 0 7px;font-size:15.5px;color:var(--kem);font-weight:600}
+  .the p{margin:7px 0 0;font-size:14.5px}
+  .the p:first-of-type{margin-top:0}
+  pre{background:#081726;border:1px solid var(--vien);border-radius:9px;padding:12px 13px;overflow-x:auto;
+      font-family:ui-monospace,monospace;font-size:12.6px;line-height:1.66;color:#b9cbdd;margin:11px 0}
+
+  ul{margin:9px 0;padding-left:19px} li{margin:6px 0;font-size:14.6px}
+
+  /* nút: vùng chạm ≥44px · có phản hồi khi BẤM (⛔ hover vô nghĩa trên điện thoại) */
+  .nut{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 20px;
+       border-radius:11px;border:1px solid var(--vien);background:var(--nen2);color:var(--kem);
+       font-size:15px;font-weight:600;text-decoration:none;cursor:pointer;
+       transition:transform .16s ease,background .2s ease,border-color .2s ease}
+  .nut:hover{background:#14385c;border-color:#2b5580}
+  .nut:active{transform:scale(.975)}
+  .nut:focus-visible{outline:2px solid var(--vang);outline-offset:3px}
+  .nut.chinh{background:var(--vang-dam);border-color:var(--vang);color:#1a1206}
+  .nut.chinh:active{transform:scale(.975)}
+  .hang-nut{display:flex;flex-wrap:wrap;gap:11px;margin:20px 0 4px}
+
+  footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--vien);font-size:13.4px;color:var(--chu-mo)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:520px){ .khung{padding:20px 15px 60px} .tong{grid-template-columns:1fr;gap:10px} }
+</style>
+</head>
+<body>
+<main class="khung">
+
+<header>
+  <div class="nhan">Chấm độc lập · thước: skill taste</div>
+  <h1>Giao diện app phòng ban AI đang ở đâu</h1>
+  <p class="phu">Người chấm: <strong>claude-web-funnel</strong> · 18/08/2026 · đo trên cây nguồn bản đang chạy thật</p>
+</header>
+
+<section class="tong">
+  <div class="so">41<small>/100</small></div>
+  <p>Ba nhóm thấp nhất — <strong style="color:var(--kem)">icon · mobile · phản hồi khi bấm</strong> — trùng khít ba chỗ anh chê bằng mắt. Anh nhìn mà trúng đúng chỗ máy đo ra.</p>
+</section>
+
+<h2><span class="stt">01</span>Bảng điểm</h2>
+
+<div class="hang">
+  <span class="ten">Icon</span><span class="diem d-te">2/10</span>
+  <span class="vach"><i style="width:20%;background:var(--do)"></i></span>
+  <span class="ghi">0 thư viện icon · <strong>28 emoji</strong> trong một tệp · <strong>3 SVG vẽ tay</strong></span>
+</div>
+<div class="hang">
+  <span class="ten">Mobile</span><span class="diem d-te">3/10</span>
+  <span class="vach"><i style="width:30%;background:var(--do)"></i></span>
+  <span class="ghi">chỉ 2 điểm gãy (640 · 1040) · <strong>0 vùng chạm ≥44px</strong> · <code>100vh</code> 3 chỗ</span>
+</div>
+<div class="hang">
+  <span class="ten">Tương tác</span><span class="diem d-te">3/10</span>
+  <span class="vach"><i style="width:30%;background:var(--do)"></i></span>
+  <span class="ghi"><code>:hover</code> 13 chỗ nhưng <code>:active</code> = <strong>0</strong>, <code>:focus-visible</code> = <strong>0</strong></span>
+</div>
+<div class="hang">
+  <span class="ten">Chữ</span><span class="diem d-tb">4/10</span>
+  <span class="vach"><i style="width:40%;background:var(--cam)"></i></span>
+  <span class="ghi">font hệ thống — đúng thứ thước gọi là “browser default”. Cộng: có <code>ui-monospace</code> cho mã</span>
+</div>
+<div class="hang">
+  <span class="ten">Trạng thái chờ / trống / lỗi</span><span class="diem d-tb">4/10</span>
+  <span class="vach"><i style="width:40%;background:var(--cam)"></i></span>
+  <span class="ghi">0 khung xương chờ — trong khi agent chạy <strong>73 giây</strong> là chuyện thường ở app này</span>
+</div>
+<div class="hang">
+  <span class="ten">Mã &amp; tiếp cận</span><span class="diem d-tb">5/10</span>
+  <span class="vach"><i style="width:50%;background:var(--cam)"></i></span>
+  <span class="ghi"><code>aria-</code> chỉ 6 chỗ · 0 <code>prefers-reduced-motion</code></span>
+</div>
+<div class="hang">
+  <span class="ten">Màu &amp; bề mặt</span><span class="diem d-on">6/10</span>
+  <span class="vach"><i style="width:60%;background:var(--xanh)"></i></span>
+  <span class="ghi">nền <code>#0a1929</code> navy ám — <strong>đúng chuẩn</strong>. Trừ: có accent thứ hai (xanh lá) · bề mặt phẳng tuyệt đối</span>
+</div>
+<div class="hang">
+  <span class="ten">Bố cục</span><span class="diem d-on">6/10</span>
+  <span class="vach"><i style="width:60%;background:var(--xanh)"></i></span>
+  <span class="ghi">CSS Grid 14 chỗ · <code>max-width</code> 10 chỗ — nhưng <code>height:100vh</code> còn 3 chỗ</span>
+</div>
+
+<h2><span class="stt">02</span>Ba lỗi nặng nhất</h2>
+
+<div class="the nang">
+  <h3>① <code>height:100vh</code> — đây chính là bệnh anh đang gặp</h3>
+<pre>mau09.css:21    height:100vh;overflow:hidden;
+mau09.css:54    height:calc(100vh - var(--cao-de));
+mau09.css:412   height:100vh;height:100dvh;overflow:hidden   ← chỗ này ĐÃ đúng</pre>
+  <p>Trên điện thoại, thanh địa chỉ ẩn/hiện khi cuộn ⇒ <code>100vh</code> đổi giá trị ⇒ <strong>layout nhảy</strong>. Dòng 412 chứng minh người viết đã biết cách đúng, chỉ chưa áp cho hai chỗ kia.</p>
+  <p><strong>Sửa hai dòng CSS.</strong> Rẻ nhất, tác động lớn nhất.</p>
+</div>
+
+<div class="the nang">
+  <h3>② Icon: 28 emoji + 3 hình tự vẽ, 0 thư viện</h3>
+  <p>Emoji có một tật vật lý: <strong>mỗi hệ điều hành vẽ một kiểu</strong>. Hình vương miện trên iPhone khác trên Samsung khác trên máy tính — mà anh dùng <strong>cả ba</strong>. Nên “icon hiển thị” bị chê là có lý do thật, không phải chuyện gu.</p>
+  <p>Sửa: cài <strong>một</strong> thư viện icon, thay dần emoji ở nút chức năng, độ dày nét thống nhất. Đây là thêm phụ thuộc mới nên cần anh gật.</p>
+</div>
+
+<div class="the nang">
+  <h3>③ Không có phản hồi khi bấm</h3>
+  <p><code>:hover</code> <strong>vô nghĩa trên điện thoại</strong> — ngón tay không rê. Anh bấm nút mà không thấy gì động đậy ⇒ cảm giác máy đơ ⇒ bấm lại lần hai. Đây là một phần của cái anh gọi “không mobile-friendly lắm”.</p>
+  <p>Sửa: thêm hiệu ứng lún nhẹ khi bấm + viền rõ khi chọn bằng bàn phím. Khoảng 10 dòng CSS, không đụng logic.</p>
+</div>
+
+<h2><span class="stt">03</span>Thứ đang làm ĐÚNG — xin đừng sửa</h2>
+<div class="the tot">
+  <ul>
+    <li>Nền <code>#0a1929</code> là navy ám, <strong>không phải đen thuần</strong> — thước chê <code>#000000</code>, app này làm đúng ngay từ đầu.</li>
+    <li>Dùng CSS Grid thay vì tính phần trăm bằng flex.</li>
+    <li><code>ui-monospace</code> cho mã phiên và số — đúng chuẩn giao diện nhiều dữ liệu.</li>
+    <li>Không có <code>alert()</code>, không có <code>z-index:9999</code> — hai tật rất phổ biến, app này sạch.</li>
+    <li>Bảng màu Navy/Gold/Cream khớp bộ nhận diện nhà.</li>
+  </ul>
+</div>
+
+<h2><span class="stt">04</span>Việc tiếp, xếp theo giá trên công</h2>
+<div class="the">
+  <ul>
+    <li>Vùng chạm <strong>≥44×44px</strong> cho mọi nút — công thấp, lợi cao (ngón cái trên Z-Fold).</li>
+    <li>Thêm điểm gãy <strong>768px</strong> — Z-Fold mở ra rơi đúng khoảng trống giữa 640 và 1040.</li>
+    <li>Bỏ accent thứ hai (xanh lá) hoặc gộp về một họ màu.</li>
+    <li>Đổi font sang một bộ có cá tính — ấn tượng đầu đổi rõ nhất.</li>
+    <li>Khung xương chờ khi agent đang nghĩ, thay vì màn hình im.</li>
+    <li>Một lớp hạt rất nhẹ trên nền để bớt phẳng.</li>
+  </ul>
+</div>
+
+<h2><span class="stt">05</span>Giới hạn của bản chấm này — đọc trước khi tin</h2>
+<div class="the">
+  <p><strong>1. Đọc mã, chưa nhìn bằng mắt trên máy thật.</strong> Chưa mở trên Z-Fold. Có lỗi thị giác mà tìm-trong-mã không thấy được.</p>
+  <p><strong>2. Thang điểm do chính tôi đặt</strong> (8 nhóm × 10). Thước gốc cho <em>danh sách kiểm</em>, không cho thang điểm — tôi quy ra số để so sánh được. Nên <strong>41/100 dùng để so trước/sau</strong>, đừng đọc như điểm thi.</p>
+  <p><strong>3. Đếm bằng cách tìm chuỗi có thể sót.</strong> Số 0 nghĩa là “không tìm thấy theo cách tôi tìm”, không phải “chắc chắn không có”.</p>
+  <p><strong>4. Một số tiêu chí không áp cho app công cụ.</strong> Ví dụ “thiếu khoảng thở” là lỗi nặng với trang bán hàng, nhưng bảng điều khiển dày đặc lại đúng. Ranh giới đó do tôi tự vạch.</p>
+</div>
+
+<h2><span class="stt">06</span>Trang này tự nó là một mẫu thử</h2>
+<div class="the tot">
+  <p>Tôi dựng nó bằng đúng mấy luật vừa chấm, để anh soi ngược lại tôi:</p>
+  <ul>
+    <li><code>min-height:100dvh</code>, <strong>không</strong> <code>100vh</code> — cuộn trên điện thoại không nhảy.</li>
+    <li>Mọi nút cao <strong>≥46px</strong>, có lún nhẹ khi bấm, có viền rõ khi chọn bằng bàn phím.</li>
+    <li>CSS Grid, có giới hạn bề ngang, số dùng phông đều nét.</li>
+    <li><strong>Không một emoji nào</strong> làm biểu tượng chức năng — thay bằng chữ và màu.</li>
+    <li>Tôn trọng cài đặt “giảm chuyển động” của máy.</li>
+  </ul>
+  <p>Nếu trang này đọc trên điện thoại mà vẫn khó chịu chỗ nào — <strong>chỗ đó là lỗi của tôi</strong>, nói tôi sửa.</p>
+</div>
+
+<div class="hang-nut">
+  <a class="nut chinh" href="/">Về app phòng ban</a>
+  <a class="nut" href="/demo/round-1.html">Xem trang cũ để đối chiếu</a>
+</div>
+
+<footer>
+  Bản chấm gốc dạng văn bản: <code>~/idea/inbox/phong-ban-ai-boss/CHAM-DIEM-GIAO-DIEN-app-phong-ban-2026-08-18.md</code><br>
+  Trang nội bộ · có lớp mật khẩu · không cho máy tìm kiếm lập chỉ mục.
+</footer>
+
+</main>
+</body>
+</html>

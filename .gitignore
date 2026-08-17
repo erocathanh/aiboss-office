@@ -20,3 +20,6 @@ next-env.d.ts
 # ── phần chọn mẫu (gộp vào kho 14/08/2026 theo round-2) ──
 chon-mau/.vercel/
 chon-mau/node_modules/
+
+# ban sao luu tam truoc khi sua — git da la lich su roi, khong can luu them
+*.truoc-*

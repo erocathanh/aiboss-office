@@ -45,6 +45,63 @@
  ],
  "nhan_su": [
   {
+   "ten": "claude-eroca-boss",
+   "phong": "dieu-hanh",
+   "vai": "Ông trùm",
+   "viet_tat": "ÔT",
+   "nhan": "ÔNG TRÙM",
+   "ghim": true,
+   "soul": "/Users/erocathanh/idea/inbox/aiboss-business-os-org/demo-soul/soul-eroca-boss.md"
+  },
+  {
+   "ten": "claude-marketing",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "ND",
+   "nhan": "📣 Nội dung",
+   "soul": "/Users/erocathanh/claude-marketing/CLAUDE.md"
+  },
+  {
+   "ten": "claude-ketoan",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "KT",
+   "nhan": "💰 Kế toán",
+   "soul": "/Users/erocathanh/claude-ketoan/CLAUDE.md"
+  },
+  {
+   "ten": "claude-cskh",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "CS",
+   "nhan": "🎧 Chăm khách",
+   "soul": "/Users/erocathanh/claude-cskh/CLAUDE.md"
+  },
+  {
+   "ten": "claude-sales",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "BH",
+   "nhan": "🛒 Bán hàng",
+   "soul": "/Users/erocathanh/claude-sales/CLAUDE.md"
+  },
+  {
+   "ten": "claude-web-demo",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "WB",
+   "nhan": "🌐 Web",
+   "soul": "/Users/erocathanh/claude-web-demo/CLAUDE.md"
+  },
+  {
+   "ten": "claude-phong-ban-pm",
+   "phong": "dieu-hanh",
+   "vai": "Trưởng phòng",
+   "viet_tat": "PB",
+   "nhan": "PM phòng ban AI",
+   "soul": "/Users/erocathanh/claude-phong-ban-pm/CLAUDE.md"
+  },
+  {
    "ten": "claude-501",
    "phong": "dieu-hanh",
    "vai": "Chuyên viên",
@@ -1311,5 +1368,5 @@
    "viet_tat": "ZB"
   }
  ],
- "tong": 211
+ "tong": 218
 }

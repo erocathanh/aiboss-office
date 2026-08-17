@@ -1,0 +1,61 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Sổ Tay 1 Người — trang xem thử (đang dựng khung) · Bản mẫu demo</title>
+<style>
+:root{--navy:#0f1b2d;--navy2:#16273f;--gold:#c9a24b;--cream:#f5efe0;--muted:#9db0c6}
+*{box-sizing:border-box}body{margin:0;background:var(--navy);color:var(--cream);font-family:-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.6}
+.wrap{max-width:760px;margin:0 auto;padding:28px 20px 60px}
+.badge{display:inline-block;background:rgba(201,162,75,.15);color:var(--gold);border:1px solid var(--gold);border-radius:999px;padding:3px 12px;font-size:12px;font-weight:600;letter-spacing:.03em}
+.eyebrow{color:var(--gold);font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:22px 0 6px}
+h1{font-size:26px;line-height:1.25;margin:12px 0 4px}h2{font-size:19px;margin:26px 0 8px;color:#fff}
+.card{background:var(--navy2);border:1px solid rgba(201,162,75,.25);border-radius:14px;padding:18px 20px;margin:14px 0}
+.price{font-size:34px;font-weight:800;color:var(--gold)}.strike{color:var(--muted);text-decoration:line-through;font-size:20px;margin-left:8px}
+.muted{color:var(--muted);font-size:14px}.q{font-weight:700;color:#fff}
+.btn{display:inline-block;background:var(--gold);color:var(--navy);font-weight:800;padding:13px 26px;border-radius:10px;text-decoration:none;margin-top:14px}
+.btn.wait{background:transparent;color:var(--muted);border:1px dashed rgba(255,255,255,.25);font-weight:600}
+ul{padding-left:20px}li{margin:6px 0}
+.slot{border:1px dashed rgba(201,162,75,.55);border-radius:14px;padding:18px 20px;margin:14px 0;background:rgba(201,162,75,.04)}
+.slot .tag{display:inline-block;color:var(--gold);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+.slot p{margin:6px 0;color:var(--muted);font-size:14px}
+.line{height:10px;border-radius:6px;background:rgba(255,255,255,.07);margin:9px 0}
+.line.s{width:55%}.line.m{width:78%}
+.foot{margin-top:34px;border-top:1px solid rgba(255,255,255,.12);padding-top:14px;color:var(--muted);font-size:13px}
+</style></head><body><div class="wrap"><span class="badge">Bản mẫu demo · đang dựng khung, chờ nguyên liệu</span>
+<main>
+
+<p class="eyebrow">Gói mẫu · Sổ Tay 1 Người</p>
+<h1>Sổ Tay 1 Người</h1>
+<p class="muted">Trang xem thử. Khung đã sẵn — ba chỗ dưới đây chờ nguyên liệu của đội đổ về là hiện đủ.</p>
+
+<h2>Bài giới thiệu</h2>
+<!-- GHÉP: bài -->
+<div class="slot" id="cho-bai">
+  <span class="tag">Chỗ chừa · bài giới thiệu</span>
+  <p>Chờ bản đã qua soi duyệt. Ghép vào ngay tại đây.</p>
+  <div class="line"></div><div class="line m"></div><div class="line s"></div>
+</div>
+<!-- /GHÉP: bài -->
+
+<h2>Giá gói</h2>
+<!-- GHÉP: giá -->
+<div class="slot" id="cho-gia">
+  <span class="tag">Chỗ chừa · khối giá</span>
+  <p>Chờ con số chốt từ bên tính giá. Chưa điền số nào ở lượt này.</p>
+  <div class="line s"></div><div class="line m"></div>
+</div>
+<!-- /GHÉP: giá -->
+
+<h2>Khách hay hỏi</h2>
+<!-- GHÉP: câu hỏi khách -->
+<div class="slot" id="cho-hoi-dap">
+  <span class="tag">Chỗ chừa · 3 câu hỏi khách</span>
+  <p>Chờ 3 câu khách hay hỏi kèm câu trả lời. Mỗi câu một thẻ.</p>
+  <div class="line m"></div><div class="line"></div><div class="line m"></div>
+</div>
+<!-- /GHÉP: câu hỏi khách -->
+
+<h2 id="chot">Đặt mua</h2>
+<p class="muted">Nút đặt mua đã đặt sẵn chỗ — bật lên khi giá và lời chốt về.</p>
+<a class="btn wait" href="#chot">Đang chờ nguyên liệu — nút sẽ bật ở lượt sau</a>
+
+</main>
+<div class="foot">Trang kết quả mô phỏng cho demo đội AI · Eroca Thanh · lượt 1: dựng khung, chưa có nội dung thật.</div>
+</div></body></html>

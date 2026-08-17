@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline';
@@ -148,14 +149,13 @@ export function dsPhien(
 
     // ⛔ LUẬT CỨNG: phiên vừa đổi trong 5 phút coi như ĐANG SỐNG ở terminal khác.
     //    Hai tiến trình cùng ghi một tệp phiên = hỏng bản ghi.
+    // ⚠️ Luật ở đây PHẢI khớp `dangChay()` bên dưới — hai chỗ lệch nhau thì danh sách
+    //    hiện một đằng, cổng chặn làm một nẻo (đã cắn: đo bằng danh sách tưởng cổng còn hỏng).
     let dang_chay = phutTuoi < NGUONG_SONG_PHUT;
-    // ...TRỪ khi người sửa cuối chính là TA và lượt của ta đã xong.
-    if (
-      dang_chay &&
-      phienCuaTa?.ma === ma &&
-      phienCuaTa.mocKetThuc !== null &&
-      st.mtimeMs <= phienCuaTa.mocKetThuc + 1000
-    ) {
+    if (dang_chay && phienCoTienTrinhSong(ma)) {
+      dang_chay = true; // sờ tận tay có tiến trình cầm ⇒ bận thật
+    } else if (dang_chay && phienCuaTa?.ma === ma && phienCuaTa.mocKetThuc !== null) {
+      // Ta sở hữu phiên này ⇒ mốc-sửa-tệp ⛔ không còn quyền chặn (xem lý do ở `dangChay`).
       dang_chay = false;
     }
 
@@ -251,6 +251,28 @@ export function mocTepPhien(maNhanSu: string, maPhien: string): number | null {
  *      · tệp mới, nhưng ĐÚNG BẰNG mốc ta ghi → người sửa cuối là TA, đã xong → rảnh
  *      · tệp mới, và MỚI HƠN mốc của ta      → có kẻ khác đang ghi → CHẶN
  */
+/**
+ * Có tiến trình NÀO đang sống mà cầm đúng mã phiên này không.
+ *
+ * ⭐ Đây là BẰNG CHỨNG THẬT, khác hẳn phép suy từ mốc-sửa-tệp. Mốc tệp chỉ nói
+ *    "vừa có ai đó ghi", ⛔ không nói ai — mà "ai" mới là thứ ta cần biết.
+ * ⚠️ Đo được KHÔNG có ⇒ chắc chắn rảnh (⛔ không tiến trình nào giữ). Đo được CÓ
+ *    ⇒ chắc chắn bận. Phiên mở KHÔNG kèm `--resume` thì mã ⛔ không nằm trong dòng
+ *    lệnh — nên đây là bằng chứng MỘT CHIỀU: thấy là chắc, ⛔ không thấy chưa đủ kết luận.
+ */
+export function phienCoTienTrinhSong(maPhien: string): boolean {
+  if (!maPhien) return false;
+  try {
+    const ra = execFileSync('ps', ['ax', '-o', 'command='], {
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return ra.includes(maPhien);
+  } catch {
+    return false; // ⛔ đo không được thì ⛔ đừng bịa "đang bận" — trả về để nhánh dưới quyết.
+  }
+}
+
 export function dangChay(
   maNhanSu: string,
   maPhien: string,
@@ -259,10 +281,29 @@ export function dangChay(
   const mtime = mocTepPhien(maNhanSu, maPhien);
   if (mtime === null) return false;
 
+  // ⛔ CHẶN CỨNG: sờ tận tay có tiến trình đang cầm phiên này ⇒ bận, khỏi bàn.
+  if (phienCoTienTrinhSong(maPhien)) return true;
+
   if ((Date.now() - mtime) / 60000 >= NGUONG_SONG_PHUT) return false;
 
-  // Sai số 1 giây cho chênh lệch đồng hồ / ghi đệm.
-  if (mocKetThucCuaTa !== null && mtime <= mocKetThucCuaTa + 1000) return false;
+  /**
+   * 🔴 Ca thật 14/08 — bộ canh này TỰ KHOÁ GHẾ CỦA CHÍNH NÓ.
+   *
+   * Đo tại chỗ: sổ ghi ta chạy xong lúc 13:39:05, nhưng tệp phiên còn bị ghi tới
+   * 13:39:56 — **chậm 51 giây**, trong khi ngưỡng tha chỉ 1 giây. ⇒ Lượt sau của
+   * Owner bị chặn bằng câu "đang chạy ở terminal khác", mà terminal đó ⛔ KHÔNG hề
+   * tồn tại. Owner đứng trước máy quay, ghế câm.
+   *
+   * 📌 Vì sao chậm: ta lấy mốc ngay khi vòng đọc kết thúc, nhưng `claude` nhận
+   *    SIGTERM ⛔ không chết ngay — nó còn xả nốt bản ghi (kể cả dòng
+   *    «[Request interrupted by user]»). Lấy mốc lúc đó = **đo trước khi việc xong**.
+   *
+   * ⇒ Sổ đã ghi nhận TA sở hữu phiên này (`mocKetThucCuaTa !== null`) thì mốc-sửa-tệp
+   *   ⛔ KHÔNG còn quyền chặn — chỉ bằng chứng tiến trình sống ở trên mới chặn được.
+   *   Bỏ hẳn phép so mốc mong manh, ⛔ đừng nới ngưỡng rồi lại trúng ca chậm hơn.
+   */
+  if (mocKetThucCuaTa !== null) return false;
 
+  // ⛔ Ta ⛔ không có sổ về phiên này (ô vừa được gán, hoặc sổ mất) ⇒ giữ nết thận trọng cũ.
   return true;
 }

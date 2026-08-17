@@ -467,3 +467,246 @@
   background:rgba(0,0,0,.25); border-radius:7px; padding:8px 11px;
   word-break:break-word;               /* mã phiên dài ⛔ không được đẩy khung phình ra */
 }
+
+/* ───────── Markdown trong bong bóng chat (thêm 14/08/2026) ───────── */
+.bong b.tieu-md{display:block;margin:10px 0 4px;color:var(--vang-sang);font-size:1.02em}
+.bong b.tieu-md:first-child{margin-top:0}
+.bong ul{margin:6px 0;padding-left:20px}
+.bong li{margin:3px 0}
+.bong code{
+  background:rgba(255,255,255,.1); padding:1px 5px; border-radius:4px;
+  font-family:ui-monospace,monospace; font-size:.88em; color:var(--vang-sang);
+  word-break:break-word;                /* đường dẫn dài ⛔ không được phá khung */
+}
+.bong pre{
+  background:rgba(0,0,0,.34); border:1px solid rgba(250,247,240,.1);
+  border-radius:8px; padding:9px 11px; margin:8px 0;
+  overflow-x:auto;                      /* mã dài cuộn TRONG khối, ⛔ không đẩy cả trang */
+  font-size:.86em; line-height:1.55;
+}
+.bong pre code{background:none;padding:0;color:var(--kem)}
+.bong i{color:var(--kem);opacity:.92}
+
+/* ───────── 🔔 Nhãn «ai đánh thức» (thêm 14/08/2026 — cổng /api/danh-thuc) ─────────
+   Câu do ghế KHÁC gửi sang phải NHÌN LÀ BIẾT, ⛔ đừng để lẫn với câu Owner gõ tay. */
+.nhan-danh-thuc{
+  display:block; width:fit-content; max-width:100%; margin:0 0 5px;
+  font-size:10px; font-weight:700; letter-spacing:.3px; line-height:1.5;
+  color:var(--vang-sang); background:rgba(200,148,37,.16);
+  border:1px solid rgba(200,148,37,.45); border-radius:99px; padding:2px 9px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+/* Hàng của "tôi" lật ngược chiều (row-reverse) ⇒ đẩy nhãn về mép phải cho thẳng bong bóng. */
+.toi .nhan-danh-thuc{margin-left:auto}
+
+/* 🧬 Khối fork — hiện khi phiên dán vào thuộc THƯ MỤC KHÁC (round-122, 15/08) */
+.khoi-fork { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.khoi-fork .nut-chu { align-self: flex-start; }
+.ghi-chu-fork { font-size: 12px; line-height: 1.5; opacity: .72; }
+
+/* ───────── 📱 Vá màn GẬP / màn hẹp (17/08/2026 · claude-phong-ban-pm) ─────────
+   Ca thật: Owner mở app qua LAN 192.168.68.153:4319 trên Samsung Z-Fold 6 (Chrome)
+   → MẤT hẳn ba nút chia ô, và dòng trả lời của agent bị cắt mất một ít bên TRÁI.
+
+   GỐC ① — nút bị ĐẨY ra ngoài rồi bị CẮT, ⛔ không phải "bị ẩn":
+     `.de-khu` là flex và ⛔ KHÔNG cho xuống dòng (mặc định nowrap). Trong nó có
+     <span class="nhan-that">● Nối thẳng Claude Code trên máy</span> — class này
+     ⛔ KHÔNG có MỘT dòng style nào trong CSS (đo: 0 lần khớp `.nhan-that`), nên nó
+     ⛔ không co, ⛔ không cắt bằng dấu …, cứ chiếm chỗ theo độ dài chữ. `.nhan-khu`
+     cũng `white-space:nowrap`. ⇒ `.nhom-bo-cuc` (margin-left:auto, flex:none) bị đẩy
+     khỏi khung, mà `.cot-3.mo-khu` có `overflow:hidden` ⇒ nút bị CẮT MẤT và
+     ⛔ KHÔNG cuộn tới được. Trên màn rộng ⛔ không thấy vì còn thừa chỗ.
+
+   GỐC ② — mất mép TRÁI là do CUỘN NGANG, ⛔ không phải padding thiếu:
+     `.bang-tin` có `overflow-y:auto`. Theo chuẩn CSS, khi một trục là `auto` thì trục
+     còn lại `visible` bị tính thành `auto` ⇒ khung tin cuộn ngang được. Hễ có nội
+     dung rộng hơn một nhịp là nó lệch, và thứ biến mất là MÉP TRÁI.
+
+   📌 Nguyên tắc chọn cách vá: màn hẹp thì NHÃN nhường chỗ cho CÔNG CỤ.
+      Nút chia ô là thứ Owner BẤM; hai nhãn kia chỉ để ĐỌC. ⛔ Đừng bao giờ ẩn nút.
+*/
+.nhan-that{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:11px;color:var(--kem-mo-2);
+}
+.de-khu{flex-wrap:wrap;row-gap:6px}   /* hết chỗ thì XUỐNG DÒNG, ⛔ đừng đẩy nút ra ngoài */
+.bang-tin{overflow-x:hidden}          /* ⛔ không cho cuộn ngang ⇒ mép trái ⛔ không mất được */
+.bong{overflow-wrap:anywhere}         /* đường dẫn/chuỗi dài tự ngắt, ⛔ không nở khung */
+
+@media (max-width:1040px){
+  /* 🔴 SỬA 17/08 (Owner: «tên App bị mất»): bản trước tôi ẩn CẢ HAI nhãn để cứu nút
+     chia ô. Cứu được nút nhưng NUỐT LUÔN TÊN APP — chữa một lỗi đẻ một lỗi.
+     ⇒ Nay chỉ ẩn câu dài; TÊN APP giữ lại và cho CO ĐƯỢC (min-width:0 + …)
+       nên nó ⛔ không bao giờ đẩy nút ra ngoài khung nữa. */
+  .de-khu .nhan-that{display:none}
+  .de-khu .ten-app{max-width:38vw}
+  .nhom-bo-cuc{margin-left:auto;flex:none}
+  .nut-bc{width:38px;height:32px}     /* ngón tay bấm, ⛔ không phải con trỏ chuột */
+  .nut-bc svg{width:21px;height:16px}
+}
+
+/* 🛑 Nút DỪNG — chỉ hiện khi ô đang chạy (17/08/2026 · claude-phong-ban-pm).
+   Đỏ nhạt để phân biệt với mấy nút trung tính, ⛔ không đỏ gắt vì đây ⛔ không phải nút phá. */
+.nut-dung{color:#f3a3a3;border-color:rgba(220,120,120,.42);background:rgba(220,120,120,.12)}
+.nut-dung:hover{color:#ffd9d9;border-color:rgba(220,120,120,.7);background:rgba(220,120,120,.22)}
+.nut-dung:active{transform:translateY(1px)}
+
+/* ⌨️ Con trỏ đánh máy — nhấp nháy ở cuối bong bóng ĐANG chảy chữ.
+   (17/08/2026 · claude-phong-ban-pm — Owner: «chữ bắn ra đều và mượt như đánh máy»)
+   Dùng ::after nên ⛔ không đụng vào chuỗi chữ ⇒ chép chữ ⛔ không dính ký tự rác. */
+.bong.dang-chay::after{
+  content:'';display:inline-block;vertical-align:-2px;margin-left:2px;
+  width:2px;height:1em;background:var(--vang-sang);
+  animation:nhay-con-tro 1.05s steps(2,start) infinite;
+}
+@keyframes nhay-con-tro{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+/* Owner bật «giảm chuyển động» ⇒ con trỏ đứng yên, ⛔ không nhấp nháy. */
+@media (prefers-reduced-motion:reduce){
+  .bong.dang-chay::after{animation:none;opacity:.85}
+}
+
+/* ¶ Chế độ HIỆN RANH GIỚI MẨU (17/08/2026 · claude-phong-ban-pm).
+   Owner muốn nhìn thấy nhịp mẩu máy chủ bắn về ⇒ mỗi mẩu một dòng, in thô. */
+.bong.tho{white-space:pre-wrap;word-break:break-word;font-variant-ligatures:none}
+.nut-mau{font-size:15px;line-height:1}
+.nut-mau.bat{color:#0a1929;background:linear-gradient(140deg,var(--vang-sang),var(--vang));border-color:var(--vang)}
+
+/* 📊 BẢNG trong bong bóng trả lời (17/08/2026 · claude-phong-ban-pm).
+   📱 Khung cuộn riêng: bảng rộng CUỘN TRONG NÓ, ⛔ không đẩy cả ô chat
+   (bài học «mép trái biến mất» trên máy gập). */
+.cuon-bang{overflow-x:auto;margin:8px 0;-webkit-overflow-scrolling:touch}
+.bang-md{border-collapse:collapse;font-size:.94em;min-width:100%}
+.bang-md th,.bang-md td{
+  border:1px solid var(--vien-2);padding:5px 9px;vertical-align:top;
+  white-space:normal;overflow-wrap:anywhere;
+}
+.bang-md th{background:rgba(200,148,37,.14);color:var(--vang-sang);font-weight:650;white-space:nowrap}
+.bang-md tbody tr:nth-child(even) td{background:rgba(250,247,240,.03)}
+
+/* ⏭ Dải HÀNG CHỜ — câu Owner gõ trong lúc ghế đang trả lời (17/08/2026). */
+.dai-hang-cho{
+  display:flex;align-items:center;gap:8px;min-width:0;
+  padding:5px 14px;font-size:11.5px;color:var(--kem-mo);
+  background:rgba(200,148,37,.07);border-top:1px solid rgba(200,148,37,.2);
+}
+.so-cho{
+  flex:none;font-weight:700;color:var(--vang-sang);
+  background:rgba(200,148,37,.16);border:1px solid rgba(200,148,37,.35);
+  border-radius:99px;padding:1px 8px;
+}
+.chu-cho{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+
+/* ═══ 📱 Ô GÕ trên điện thoại (17/08/2026 · claude-phong-ban-pm) ═══
+   🔴 GỐC ĐO ĐƯỢC: CSS cũ chỉ có `.soan input` — mà ô gõ là <textarea> ⇒ ⛔ KHÔNG rule nào
+   áp vào nó. Textarea rơi về cỡ chữ mặc định của trình duyệt (<16px), và iOS/Chrome Android
+   TỰ PHÓNG TO trang khi chạm vào ô chữ nhỏ hơn 16px ⇒ nút Gửi bị đẩy khỏi màn.
+   ⇒ Ghim 16px. ⛔ ĐỪNG hạ xuống cho "gọn" — hạ là zoom quay lại ngay. */
+.soan{align-items:flex-end}          /* ô cao lên thì nút Gửi bám đáy, ⛔ không trôi giữa */
+.soan textarea{
+  flex:1;min-width:0;border-radius:9px;padding:9px 12px;
+  border:1px solid var(--vien-2);background:rgba(250,247,240,.05);
+  color:var(--kem);font-family:inherit;outline:none;resize:none;
+  font-size:16px;line-height:1.45;max-height:168px;overflow-y:auto;
+}
+.soan textarea::placeholder{color:var(--kem-mo-2);font-size:13px}
+.soan textarea:focus{
+  border-color:rgba(200,148,37,.5);box-shadow:0 0 0 3px rgba(200,148,37,.11);
+  min-height:calc(3 * 1.45em + 18px);   /* chạm vào ⇒ mở sẵn 3 hàng cho dễ gõ dài */
+}
+.bc-4 .soan textarea{font-size:16px;padding:7px 10px}   /* ⛔ vẫn 16px — zoom ⛔ không tha ô nhỏ */
+
+/* ═══ ⛶ MỘT Ô TRỌN KHUNG ═══ */
+.nut-toan.bat{color:#0a1929;background:linear-gradient(140deg,var(--vang-sang),var(--vang));border-color:var(--vang)}
+.luoi.toan-man{grid-template-columns:1fr;grid-template-rows:1fr;grid-auto-rows:auto}
+.luoi.toan-man .o-chat{display:none}
+.luoi.toan-man .o-chat.toan{display:flex;grid-column:1/-1;grid-row:1/-1}
+@media (max-width:1040px){
+  .luoi.toan-man{grid-auto-rows:1fr}
+  .luoi.toan-man .o-chat.toan{display:flex}
+}
+
+/* ℹ THẺ HỒ SƠ ghế — thay vạch trạng thái cũ (17/08/2026 · claude-phong-ban-pm).
+   Vạch cũ chạy suốt dưới ô chat và chiếm mất chỗ đặt nút; giờ chỉ hiện khi bấm ℹ. */
+.nut-hoso.bat{color:#0a1929;background:linear-gradient(140deg,var(--vang-sang),var(--vang));border-color:var(--vang)}
+.the-ho-so{
+  flex:none;display:flex;flex-direction:column;gap:5px;
+  padding:9px 13px;font-size:12px;color:var(--kem-mo);
+  border-top:1px solid rgba(200,148,37,.22);background:rgba(200,148,37,.06);
+}
+.hs-hang{display:flex;gap:9px;align-items:baseline;min-width:0}
+.hs-nhan{flex:none;width:88px;color:var(--kem-mo-2);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+.hs-gia{min-width:0;flex:1;overflow-wrap:anywhere;color:var(--kem)}
+.hs-gia code{background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;color:var(--vang-sang);font-size:.92em}
+
+
+/* 🔢 Ô SỐ — nay là icon số ô (@phosphor-icons, bộ ưu tiên của skill `taste`),
+   thay nhãn chữ «Ô 1/2/3/4» mà Owner chê xấu (17/08/2026). */
+.so-o{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:2px;line-height:0;border-radius:7px;
+  background:rgba(200,148,37,.14);border:1px solid rgba(200,148,37,.32);
+  color:var(--vang-sang);
+}
+.luoi.bc-1 .so-o{display:none}   /* 1 ô thì số là thừa — giữ luật cũ */
+
+
+/* 🔢ℹ SỐ Ô KIÊM NÚT HỒ SƠ (17/08/2026 · claude-phong-ban-pm).
+   Owner: «ghép icon i vào cạnh số 2 cho gọn và dễ bấm».
+   Gộp hai chức năng ⇒ bớt một nút trên thanh chật, và vùng chạm rộng hơn nút tròn. */
+.nut-so{
+  position:relative;display:inline-flex;align-items:center;gap:1px;
+  padding:3px 5px 3px 4px;line-height:0;cursor:pointer;font-family:inherit;
+  border-radius:8px;border:1px solid rgba(200,148,37,.32);
+  background:rgba(200,148,37,.14);color:var(--vang-sang);
+  min-height:30px;                     /* 📱 vùng chạm cho ngón tay, ⛔ đừng nhỏ hơn */
+}
+.nut-so:hover{border-color:rgba(200,148,37,.6);background:rgba(200,148,37,.24)}
+.nut-so:active{transform:translateY(1px)}
+.nut-so .dau-i{opacity:.72}
+.nut-so.bat{color:#0a1929;background:linear-gradient(140deg,var(--vang-sang),var(--vang));border-color:var(--vang)}
+.nut-so.bat .dau-i{opacity:1}
+.luoi.bc-1 .nut-so{display:inline-flex}   /* 1 ô vẫn cần cửa vào hồ sơ ⇒ ⛔ đừng ẩn như số cũ */
+
+
+/* ⋯ MENU XỔ góc phải ô (17/08/2026 · claude-phong-ban-pm).
+   Owner: «ít khi bấm nút đóng ô» ⇒ gom việc ÍT DÙNG vào đây, thanh chỉ giữ việc THƯỜNG DÙNG.
+   📌 Chia việc theo TẦN SUẤT BẤM, ⛔ không theo "nút nào cũng phải thấy". */
+.boc-menu{position:relative;flex:none;display:inline-flex}
+.nut-menu.bat{color:#0a1929;background:linear-gradient(140deg,var(--vang-sang),var(--vang));border-color:var(--vang)}
+
+/* Chạm ra ngoài là đóng — ⛔ đừng bắt bấm đúng nút mới đóng được (khó trên điện thoại). */
+.man-che{
+  position:fixed;inset:0;z-index:70;border:0;padding:0;
+  background:transparent;cursor:default;
+}
+.menu-xo{
+  position:absolute;top:calc(100% + 6px);right:0;z-index:71;min-width:212px;
+  display:flex;flex-direction:column;padding:5px;
+  background:var(--navy-2);border:1px solid var(--vien-2);border-radius:11px;
+  box-shadow:0 14px 34px rgba(0,0,0,.5);
+}
+.muc-menu{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:9px 10px;border:0;border-radius:8px;cursor:pointer;
+  background:transparent;color:var(--kem);font:inherit;font-size:13px;text-align:left;
+  min-height:38px;                    /* 📱 vùng chạm ngón tay */
+}
+.muc-menu:hover{background:rgba(200,148,37,.14);color:var(--vang-sang)}
+.muc-menu:active{transform:translateY(1px)}
+.muc-menu.nguy{color:#f0a6a6}
+.muc-menu.nguy:hover{background:rgba(220,120,120,.16);color:#ffd9d9}
+.vach-menu{height:1px;margin:4px 6px;background:var(--vien)}
+
+/* «Về danh bạ» chỉ có nghĩa ở màn hẹp (màn rộng thì danh bạ luôn hiện bên trái). */
+.muc-menu.chi-man-hep{display:none}
+@media (max-width:1040px){ .muc-menu.chi-man-hep{display:flex} }
+
+
+/* 🏷 TÊN APP trên thanh khu trao đổi (Owner đặt 17/08/2026: AIBOSS.VN).
+   ⚠️ PHẢI co được: nhãn ⛔ không co chính là thứ đẩy nút chia ô khỏi khung sáng nay. */
+.ten-app{
+  min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:12.5px;font-weight:800;letter-spacing:.6px;
+  color:var(--vang-sang);text-transform:none;
+}
