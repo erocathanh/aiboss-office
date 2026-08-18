@@ -178,3 +178,32 @@
      `.cuon-bang` với cột còn đọc được — cuộn tại chỗ là cách AI-READ §108 cho phép. */
   .bang-md th, .bang-md td { min-width: 5.5em; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   🛑 VIỆC ① — NÚT DỪNG XUỐNG BÊN TRÁI NÚT GỬI (18/08/2026 · claude-aiboss-app-exe)
+   Owner: «nút stop hiện ngay sau khi bấm nút gửi và nằm BÊN TRÁI NÚT GỬI lúc AI đang chạy».
+
+   📐 VÌ SAO PHẢI CÓ LỚP RIÊNG, ⛔ không tái dùng `.nut-tron`:
+      .nut-tron        30×30px (mau09:277)  |  .nut-gui        height 36px (mau09:343)
+      .bc-4 .nut-tron  26×26px (mau09:375)  |  .bc-4 .nut-gui  height 30px (mau09:384)
+      ⇒ tái dùng thẳng là nút ◼ THẤP HƠN nút Gửi 6px (bc-1/bc-2) và 4px (bc-4).
+      Owner đòi «⛔ đừng bé hơn nút Gửi» ⇒ lớp này ghim ĐÚNG chiều cao của `.nut-gui`.
+
+   ♻️ MÀU vẫn để `.nut-dung` (mau09:550) lo — MỘT nguồn duy nhất cho sắc đỏ.
+      ⇒ ở đây dùng `border-width`/`border-style` RIÊNG LẺ, ⛔ KHÔNG dùng lối viết gộp
+        `border:` — lối gộp sẽ xoá luôn `border-color` của `.nut-dung` (globals đọc SAU).
+
+   👆 Vùng chạm: 36×36 (bc-1/bc-2) · 30×30 (bc-4) ⇒ ⛔ không dưới 30px, và ⛔ không bé
+      hơn nút Gửi ở bất cứ bố cục nào.
+   ⚓ `.soan{align-items:flex-end}` (mau09:605 · globals:108) đã có ⇒ ô gõ cao lên tới
+      168px thì nút vẫn BÁM ĐÁY thẳng hàng nút Gửi, ⛔ không trôi ra giữa.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nut-dung-soan {
+  flex: none;
+  height: 36px; width: 36px; padding: 0;
+  border-radius: 9px; cursor: pointer;
+  border-width: 1px; border-style: solid;   /* màu viền: .nut-dung lo */
+  display: flex; align-items: center; justify-content: center;
+  font-family: inherit; font-size: 13px;
+}
+.bc-4 .nut-dung-soan { height: 30px; width: 30px; border-radius: 7px; }

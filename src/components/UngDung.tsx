@@ -1226,24 +1226,6 @@ export default function UngDung({
                           aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
                         />
                       </button>
-                      {/**
-                        * 🛑 NÚT DỪNG TRỞ LẠI THANH (Owner 18/08: «nãy tôi bấm dừng khi bạn
-                        * đang làm» — nó nằm trong menu là mất HAI chạm đúng lúc gấp nhất).
-                        * 📌 Sửa lại quyết định của chính tôi hôm qua: tôi xếp Dừng vào menu
-                        *    theo nguyên tắc «thanh giữ việc thường dùng». Nguyên tắc đúng,
-                        *    áp sai chỗ — Dừng ⛔ không phải việc thường dùng mà là việc GẤP,
-                        *    và nó chỉ hiện khi đang chạy nên lúc rảnh ⛔ không chiếm chỗ.
-                        */}
-                      {o.dangChay && (
-                        <button
-                          className="nut-tron nut-dung" type="button"
-                          onClick={() => dungViec(i)}
-                          title="Dừng việc đang chạy ở ô này"
-                          aria-label="Dừng việc đang chạy"
-                        >
-                          <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
-                        </button>
-                      )}
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => datToanMan(toanMan === i ? null : i)}
@@ -1526,6 +1508,28 @@ export default function UngDung({
                             ? 'Đang trả lời — cứ gõ, gửi là xếp hàng'
                             : boCuc === 1 ? `Nhắn cho ${o.ns.nhan}… (Enter để gửi)` : `Nhắn cho ${o.ns.nhan}…`}
                         />
+                        {/**
+                          * 🛑 NÚT DỪNG — Owner 18/08: «nút stop hiện ngay sau khi bấm nút gửi
+                          *    và nằm BÊN TRÁI NÚT GỬI lúc AI đang chạy».
+                          * 📌 Trước nó nằm trên thanh đề `.de-o`; đã GỠ HẲN khỏi đó — hai chỗ
+                          *    cùng một việc là chỗ để trạng thái lệch nhau mà ⛔ không ai thấy.
+                          * ⛔ TUYỆT ĐỐI KHÔNG `disabled` (khác nút Gửi): nó chỉ hiện lúc đang
+                          *    chạy, mà đang chạy thì LUÔN phải bấm được.
+                          * 📐 Lớp riêng `nut-dung-soan`, cao BẰNG nút Gửi (36px · bc-4 30px).
+                          *    ⛔ Đừng tái dùng `.nut-tron` — nó 30/26px, đo cho THANH ĐỀ,
+                          *    dùng ở đây là thấp hơn nút Gửi 6px (bc-1/2) và 4px (bc-4).
+                          * ♻️ Dùng lại `dungViec(i)` sẵn có, ⛔ không viết hàm mới.
+                          */}
+                        {o.dangChay && (
+                          <button
+                            className="nut-dung nut-dung-soan" type="button"
+                            onClick={() => dungViec(i)}
+                            title="Dừng việc đang chạy ở ô này"
+                            aria-label="Dừng việc đang chạy"
+                          >
+                            <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
+                          </button>
+                        )}
                         <button
                           className="nut-gui" type="button"
                           onClick={() => gui(i)} disabled={!o.soan.trim()}
