@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
  */
 import {
   NumberOne, NumberTwo, NumberThree, NumberFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
-  Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List,
+  Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
 } from '@phosphor-icons/react/dist/ssr';
 import { dungMarkdown } from '@/lib/dung-markdown';
 
@@ -961,6 +961,22 @@ export default function UngDung({
           <div className="vach" />
           <div className="o-so"><b>{tong.truong_phong}</b><span>Trưởng phòng</span></div>
         </div>
+        {/**
+          * 💬 QUAY LẠI KHU CHAT (Owner 18/08: «về danh bạ xong ⛔ không có nút quay lại ô chat»).
+          * Tôi thêm đường ĐI mà quên đường VỀ ⇒ Owner kẹt ở danh bạ, chỉ thoát được bằng
+          * cách chọn lại một ghế — mà đôi khi Owner chỉ muốn xem danh bạ rồi quay lại chỗ cũ.
+          * Chỉ hiện ở màn hẹp và CHỈ khi đang đứng ở danh bạ.
+          */}
+        {anKhu && (
+          <button
+            className="nut-tron nut-ve-chat" type="button"
+            onClick={() => datAnKhu(false)}
+            title="Quay lại khu trò chuyện"
+            aria-label="Quay lại khu trò chuyện"
+          >
+            <ChatCircleDots size={17} weight={DAM_ICON} aria-hidden="true" />
+          </button>
+        )}
       </header>
 
       <div className="khung">
@@ -1306,15 +1322,6 @@ export default function UngDung({
                               >
                                 <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
                                 Dán lệnh resume
-                              </button>
-                              {/* ← Đường THOÁT trên màn hẹp. ⛔ Bỏ hẳn là Owner kẹt trong khu chat,
-                                  ⛔ không về được danh bạ ⇒ giữ, chỉ dời vào menu. CSS ẩn ở màn rộng. */}
-                              <button
-                                className="muc-menu chi-man-hep" type="button" role="menuitem"
-                                onClick={() => { capNhat(i, { moMenu: false }); datAnKhu(true); }}
-                              >
-                                <ArrowLeft size={15} weight={DAM_ICON} aria-hidden="true" />
-                                Về danh bạ
                               </button>
                               {i > 0 && (
                                 <>

@@ -771,3 +771,9 @@
   .nut-danh-ba{display:inline-flex}
   .de-khu .ten-app{max-width:30vw}   /* nhường chỗ cho nút, tên vẫn cắt bằng … */
 }
+
+
+/* 💬 Nút QUAY LẠI KHU CHAT trên thanh trên cùng — chỉ màn hẹp (18/08/2026).
+   Cặp với nút ☰ mở danh bạ: có đường ĐI thì phải có đường VỀ. */
+.nut-ve-chat{display:none;flex:none;margin-left:10px}
+@media (max-width:1040px){ .nut-ve-chat{display:inline-flex} }
