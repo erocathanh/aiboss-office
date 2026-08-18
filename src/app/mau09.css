@@ -710,3 +710,44 @@
   font-size:12.5px;font-weight:800;letter-spacing:.6px;
   color:var(--vang-sang);text-transform:none;
 }
+
+
+/* 🚦 ĐÈN TRẠNG THÁI PHIÊN trên nút số ô (17/08/2026 · claude-phong-ban-pm).
+   Owner: «icon đang active màu xanh / mất kết nối màu xám để biết có đang kết nối phiên».
+   📌 Mỗi màu neo vào một SỰ THẬT ĐO ĐƯỢC, ⛔ không có màu nào là trang trí:
+      cam nháy = luồng vừa đứt · xanh nháy = đang chảy chữ · xanh = có phiên · xám = chưa nối. */
+.den-o{
+  position:absolute;top:-3px;right:-3px;
+  width:9px;height:9px;border-radius:50%;
+  border:1.5px solid var(--navy-2);   /* viền theo nền để đèn tách khỏi nút */
+}
+.den-tat{background:rgba(250,247,240,.32)}
+.den-noi{background:#3fb27f;box-shadow:0 0 6px rgba(63,178,127,.75)}
+.den-chay{background:#5fe0a4;box-shadow:0 0 8px rgba(95,224,164,.9);animation:tho-den 1.1s ease-in-out infinite}
+.den-dut{background:#e0724a;box-shadow:0 0 8px rgba(224,114,74,.9);animation:tho-den .8s ease-in-out infinite}
+@keyframes tho-den{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* Owner bật «giảm chuyển động» ⇒ đèn đứng yên, vẫn phân biệt được bằng MÀU. */
+@media (prefers-reduced-motion:reduce){
+  .den-chay,.den-dut{animation:none}
+}
+
+
+/* 🔢 Số ô sau khi BỎ KHUNG VUÔNG (Owner 17/08: «đưa ra khỏi cái box để chữ to hẳn»).
+   Icon số nay là số TRẦN nên nền nút phải nhạt đi — ⛔ đừng để hai lớp khung chồng nhau
+   (khung của icon + khung của nút) làm số trông nhỏ lại. */
+.nut-so{padding:2px 5px 2px 3px;background:rgba(200,148,37,.09);border-color:rgba(200,148,37,.26)}
+.nut-so:hover{background:rgba(200,148,37,.2);border-color:rgba(200,148,37,.55)}
+.nut-so .dau-i{opacity:.8}
+.nut-so.bat .dau-i{opacity:1}
+
+
+/* ℹ Chữ i kiểu ĐẶC (Owner xin thử 17/08): nền tròn đặc nên phải giảm độ mờ đi,
+   ⛔ nếu không nó át cả con số bên cạnh — mà số mới là thứ Owner cần thấy trước. */
+.nut-so .dau-i{opacity:.62}
+.nut-so:hover .dau-i{opacity:.9}
+.nut-so.bat .dau-i{opacity:1}
+
+
+/* 👑 → icon vương miện của bộ (Owner 17/08). Căn theo dòng chữ để ⛔ không nhảy chân chữ. */
+.vuong-mien{vertical-align:-2px;margin-right:3px;color:var(--vang-sang);flex:none}

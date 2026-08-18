@@ -7,8 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
  * Dùng bản `ssr` cho hợp Next. Độ đậm thống nhất `bold` — ⛔ đừng trộn nhiều độ đậm.
  */
 import {
-  NumberSquareOne, NumberSquareTwo, NumberSquareThree, NumberSquareFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
-  Stop, Plus, ClipboardText, ArrowLeft,
+  NumberOne, NumberTwo, NumberThree, NumberFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
+  Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown,
 } from '@phosphor-icons/react/dist/ssr';
 import { dungMarkdown } from '@/lib/dung-markdown';
 
@@ -84,7 +84,8 @@ const KHOA_BO_CUC = 'phong-ban-ai.bo-cuc';
 const KHOA_TIEU_DIEM = 'phong-ban-ai.tieu-diem';
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
-const ICON_SO_O = [NumberSquareOne, NumberSquareTwo, NumberSquareThree, NumberSquareFour];
+// Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
+const ICON_SO_O = [NumberOne, NumberTwo, NumberThree, NumberFour];
 const DAM_ICON = 'bold' as const;   // ⛔ MỘT độ đậm cho cả dự án
 
 const MAU_PHONG = ['#c89425', '#5b8def', '#3fb27f', '#e0724a', '#9b6bd6', '#d94f70', '#4bb3c4'];
@@ -114,6 +115,12 @@ interface OChat {
   /** ⋯ Mở menu xổ ở góc phải ô (các việc ÍT DÙNG + đóng ô). */
   moMenu: boolean;
   /**
+   * 🔴 Luồng vừa ĐỨT bất thường (mạng rớt · máy chủ tắt · khoá màn giữa chừng).
+   * Owner 17/08 xin đèn báo «đang nối / mất kết nối» ⇒ đèn phải dựa vào SỰ THẬT ĐO ĐƯỢC,
+   * ⛔ không phải suy từ việc ô có phiên hay chưa.
+   */
+  matKetNoi: boolean;
+  /**
    * ⏭ HÀNG CHỜ — câu Owner gõ trong lúc ghế đang trả lời.
    * Owner 17/08: *«khi ai agent trả lời tôi vẫn chat tiếp và bấm gửi, nó nhồi vào
    * hàng chờ, ai agent gửi xong là nó gửi tiếp — giống trên terminal»*.
@@ -129,7 +136,7 @@ const O_TRONG: OChat = {
   // ¶ MẶC ĐỊNH TẮT (đổi 17/08/2026 sau phản hồi thật của Owner).
   // Bật mặc định ⇒ mọi câu in THÔ ⇒ Owner thấy nguyên dấu ** và tưởng markdown hỏng.
   // Tính năng giữ nguyên, chỉ đổi mặc định: cần xem nhịp mẩu thì bấm ¶.
-  hienMau: false, hangCho: [], moHoSo: false, moMenu: false,
+  hienMau: false, hangCho: [], moHoSo: false, moMenu: false, matKetNoi: false,
 };
 
 /**
@@ -626,7 +633,7 @@ export default function UngDung({
     capNhat(i, (cu) => ({
       // ⛔ Câu do ghế khác đánh thức thì ⛔ KHÔNG được xoá bản nháp Owner đang gõ dở.
       ...(tuGo ? { soan: '' } : {}),
-      chiPhi: null, token: null, dangChay: true,
+      chiPhi: null, token: null, dangChay: true, matKetNoi: false,   // gửi được ⇒ đèn về xanh
       tin: [...cu.tin, { ai: 'toi', chu: cauHoi, gio: gioBayGio(), ...(tuAi ? { tu_ai: tuAi } : {}) }],
     }));
 
@@ -920,7 +927,9 @@ export default function UngDung({
   const nhanCua = useCallback(
     (slug: string) => {
       const n = nhanSu.find((x) => x.ten === slug);
-      return n ? `${n.ghim ? '👑 ' : ''}${n.nhan}` : slug;
+      // Hàm này trả về CHUỖI (nhãn «… đánh thức») nên ⛔ không gắn icon vào được.
+      // ⇒ Bỏ emoji thay vì để lẫn một 👑 lạc lõng giữa các icon bộ; tên ghế đã đủ nghĩa.
+      return n ? n.nhan : slug;
     },
     [nhanSu],
   );
@@ -1061,7 +1070,11 @@ export default function UngDung({
           <div className="de-khu">
             <span className="nhan-khu ten-app" title="AIBOSS.VN — phòng ban AI của Eroca Thanh">AIBOSS.VN</span>
             <span className="nhan-that">● Nối thẳng Claude Code trên máy</span>
-            {nhacO1 && <span className="nhan-mau" title={nhacO1}>👑 {nhacO1}</span>}
+            {nhacO1 && (
+              <span className="nhan-mau" title={nhacO1}>
+                <Crown size={12} weight={DAM_ICON} aria-hidden="true" className="vuong-mien" /> {nhacO1}
+              </span>
+            )}
             <div className="nhom-bo-cuc">
               <button
                 className={`nut-bc${boCuc === 1 ? ' chon' : ''}`} type="button" data-bc="1"
@@ -1111,8 +1124,9 @@ export default function UngDung({
                       <button
                         className="nut-tron nut-lui" type="button"
                         onClick={() => datAnKhu(true)} title="Quay lại danh bạ"
+                        aria-label="Quay lại danh bạ"
                       >
-                        ←
+                        <ArrowLeft size={17} weight={DAM_ICON} aria-hidden="true" />
                       </button>
                       <div className="anh-o trong-o">—</div>
                       <div className="tt-o">
@@ -1120,7 +1134,7 @@ export default function UngDung({
                         <div className="ma-ky-thuat">Chưa chọn nhân sự</div>
                       </div>
                       <span className="so-o" title={`Ô ${i + 1}`} aria-label={`Ô ${i + 1}`}>
-                        {(() => { const IconSo = ICON_SO_O[i] ?? NumberSquareOne;
+                        {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
                           return <IconSo size={17} weight={DAM_ICON} aria-hidden="true" />; })()}
                       </span>
                     </div>
@@ -1136,7 +1150,12 @@ export default function UngDung({
                       <div className="anh-o">{o.ns.viet_tat}</div>
                       <div className="tt-o">
                         {/* ⭐ nhãn to · slug nhỏ mờ */}
-                        <b title={o.ns.nhan}>{i === 0 ? '👑 ' : ''}{o.ns.nhan}</b>
+                        <b title={o.ns.nhan}>
+                          {/* 👑 → icon bộ (skill taste §3.D: hạn chế emoji, dùng glyph thư viện).
+                              Giữ nguyên NGHĨA «ghế trùm», chỉ đổi cách vẽ. */}
+                          {i === 0 && <Crown size={14} weight={DAM_ICON} aria-label="Ghế trùm" className="vuong-mien" />}
+                          {o.ns.nhan}
+                        </b>
                         <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
                       </div>
                       {/**
@@ -1154,9 +1173,26 @@ export default function UngDung({
                         aria-label={`Ô ${i + 1} — hồ sơ ghế`}
                         aria-pressed={o.moHoSo}
                       >
-                        {(() => { const IconSo = ICON_SO_O[i] ?? NumberSquareOne;
+                        {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
                           return <IconSo size={17} weight={DAM_ICON} aria-hidden="true" />; })()}
-                        <Info size={11} weight={DAM_ICON} aria-hidden="true" className="dau-i" />
+                        <Info size={15} weight={DAM_ICON} aria-hidden="true" className="dau-i" />
+                        {/**
+                          * 🚦 ĐÈN TRẠNG THÁI (Owner 17/08). Gắn vào chính nút số ô ⇒ ⛔ không tốn
+                          * thêm chỗ trên thanh vốn chỉ còn 3 thứ.
+                          * Bốn mức, mỗi mức dựa vào một SỰ THẬT ĐO ĐƯỢC — ⛔ không đèn trang trí:
+                          *   cam nhấp nháy = luồng vừa ĐỨT (matKetNoi)
+                          *   xanh nhấp nháy = ĐANG chảy chữ (dangChay)
+                          *   xanh = có phiên, rảnh
+                          *   xám = CHƯA nối phiên nào
+                          */}
+                        <span
+                          className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
+                          title={o.matKetNoi ? 'Mất kết nối — luồng vừa đứt, gửi lại để nối'
+                            : o.dangChay ? 'Đang chạy — chữ đang về'
+                            : o.phienHienTai ? 'Đã nối phiên — sẵn sàng'
+                            : 'Chưa nối phiên nào'}
+                          aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
+                        />
                       </button>
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
@@ -1165,7 +1201,11 @@ export default function UngDung({
                         aria-label="Xem trọn khung"
                         aria-pressed={toanMan === i}
                       >
-                        {toanMan === i ? '⛶' : '⛶'}
+                        {/* Icon ĐỔI THEO TRẠNG THÁI: đang trọn khung thì mũi tên thu vào,
+                            chưa thì mũi tên mở ra — nhìn là biết bấm sẽ ra sao. */}
+                        {toanMan === i
+                          ? <CornersIn size={18} weight={DAM_ICON} aria-hidden="true" />
+                          : <CornersOut size={18} weight={DAM_ICON} aria-hidden="true" />}
                       </button>
                       {/**
                         * ⋯ MENU XỔ — gom việc ÍT DÙNG (Owner 17/08: «tôi ít khi bấm nút đóng ô;

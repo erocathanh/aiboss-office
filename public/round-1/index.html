@@ -1,0 +1,78 @@
+<!-- Round 1 — phong-ban-ai. Dựng từ khuôn ~/Development/bos-funnel-site/_khuon-round/index.html
+     ⚠️ ĐÃ BỎ 2 dòng &lt;script src="/menu-data.js"> và "/menu.js": hai tệp đó thuộc bos-funnel-site,
+        app phong-ban-ai KHÔNG có ⇒ giữ lại chỉ đẻ hai lỗi 404. Luật J2b (cấm xoá include) áp cho
+        round của bos-funnel-site, ⛔ không áp cho dự án này. Ghi rõ ở đây để người sau khỏi tưởng tôi ẩu. -->
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Round 1 — commit &amp; deploy phong-ban-ai</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0f1b2d;color:#f5efe0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.6}
+.wrap{max-width:860px;margin:0 auto;padding:0 18px}
+#bar{position:sticky;top:0;background:#0b1524;border-bottom:1px solid rgba(201,162,75,.35);padding:10px 0;z-index:9}
+#bar b{color:#c9a24b}
+.stamp-build{font:12px/1.6 ui-monospace,Menlo,monospace;color:#b9ad99;background:rgba(201,162,75,.08);border-bottom:1px solid rgba(201,162,75,.25);padding:.45rem .9rem}
+.stamp-build b{color:#c9a24b;font-weight:700}
+.hero{padding:22px 0 6px}.kick{color:#c9a24b;font-weight:700;font-size:13px}
+h1{font-size:23px;line-height:1.3;margin:8px 0 6px}.lede{color:#9db0c6}
+h2{font-size:17px;margin:26px 0 4px;color:#c9a24b}
+.opt{display:block;background:#16273f;border:2px solid rgba(201,162,75,.35);border-radius:12px;padding:13px 16px;margin:10px 0;cursor:pointer}
+.opt input{margin-right:8px}.q{color:#9db0c6;font-size:14px}
+.uu{color:#8fd4a8}.nhuoc{color:#e9a9a9}
+.card{background:#16273f;border:1px solid rgba(201,162,75,.3);border-radius:14px;padding:14px 18px;margin:14px 0}
+textarea{width:100%;min-height:100px;background:#0b1524;color:#f5efe0;border:1px solid rgba(201,162,75,.35);border-radius:10px;padding:10px;font-family:ui-monospace,monospace;font-size:16px}
+button{background:#c9a24b;color:#0f1b2d;font-weight:800;border:0;border-radius:10px;padding:12px 22px;cursor:pointer;margin-top:8px;font-size:15px}
+footer{color:#9db0c6;font-size:13px;padding:24px 0 44px}
+</style></head><body>
+<div id="bar"><div class="wrap"><b>Round 1 — commit &amp; deploy</b></div></div>
+<div class="stamp-build">🛠 <b>DỰNG:</b> claude-phong-ban-pm · <b>SỔ/CÂU:</b> claude-phong-ban-pm · <b>ĐẶT LÚC:</b> 23:05 17/08/2026 London · <b>ĐẨY:</b> chạy tại máy (public/), ⛔ chưa lên mạng</div>
+<header class="hero"><div class="wrap">
+  <span class="kick">Round 1 · giờ gửi 23:05 17/08/2026 London · tick 20 giây</span>
+  <h1>Cả ngày làm việc chưa commit lần nào — và có cần deploy không?</h1>
+  <p class="lede">Đo lúc 23:05 17/08/2026: kho <code>phong-ban-ai</code> có đúng <b>1 commit</b> (<code>init</code>) và <b>29 tệp đang treo</b>. Toàn bộ việc hôm nay chưa có bản ghi nào.</p>
+</div></header>
+<section><div class="wrap">
+
+  <h2>Câu 1 — Commit ngay chứ?</h2>
+  <label class="opt"><input type="radio" name="q1" value="A" checked><b>Ⓐ Tách hai commit: PM commit mã, web-funnel commit hạ tầng (Khuyến nghị)</b><br>
+    <span class="q"><span class="uu">Ưu:</span> sau này truy vết biết ai đụng gì; mỗi người chịu trách nhiệm phần mình.<br>
+    <span class="nhuoc">Nhược:</span> phải chờ hai bên, lâu hơn một nhịp.</span></label>
+  <label class="opt"><input type="radio" name="q1" value="B"><b>Ⓑ Một commit gộp, ai làm trước thì làm</b><br>
+    <span class="q"><span class="uu">Ưu:</span> nhanh nhất, xong ngay trong một lượt.<br>
+    <span class="nhuoc">Nhược:</span> 29 tệp của hai người trong một commit — hỏng thì không lần được nguyên nhân.</span></label>
+  <label class="opt"><input type="radio" name="q1" value="C"><b>Ⓒ Khoan commit, để sau</b><br>
+    <span class="q"><span class="uu">Ưu:</span> không tốn lượt nào lúc này.<br>
+    <span class="nhuoc">Nhược:</span> cả ngày làm vẫn nằm trong thư mục; máy hỏng hoặc lỡ tay hoàn tác là mất trắng.</span></label>
+  <div class="card q"><b>Góc nhìn đội:</b> em đã kiểm an toàn — <code>.gitignore</code> chặn đúng <code>.env*</code>, sổ phiên <code>.trang-thai/</code>, cấu hình Vercel; <code>chay-lan.sh</code> đọc mật khẩu từ tệp ngoài chứ không ghi thẳng ⇒ commit không lộ gì. Một tệp rác sẽ bỏ qua: <code>chay-lan.sh.truoc-ghim-node-*</code>.</div>
+
+  <h2>Câu 2 — Có deploy app lên mạng không?</h2>
+  <label class="opt"><input type="radio" name="q2" value="A" checked><b>Ⓐ KHÔNG deploy — giữ chạy tại máy, vào qua Tailscale (Khuyến nghị)</b><br>
+    <span class="q"><span class="uu">Ưu:</span> anh đã vào được cả khi ra khỏi nhà qua <code>openclaw.tailcd520a.ts.net:8443</code>; app chạy lệnh thật trên máy nên để trong mạng riêng là an toàn nhất; đúng điều anh đã chốt hôm 14/8.<br>
+    <span class="nhuoc">Nhược:</span> máy ở nhà phải bật; người ngoài mạng Tailscale không vào được.</span></label>
+  <label class="opt"><input type="radio" name="q2" value="B"><b>Ⓑ Deploy lên Vercel nội bộ (có mật khẩu)</b><br>
+    <span class="q"><span class="uu">Ưu:</span> vào được mọi lúc, không phụ thuộc máy ở nhà.<br>
+    <span class="nhuoc">Nhược:</span> <b>app này chạy lệnh thật trên máy anh</b> — đưa lên mạng nghĩa là ai qua được lớp mật khẩu là chạy được lệnh. Và Vercel không nối được tới máy ở nhà, nên phần chat sẽ không hoạt động.</span></label>
+  <label class="opt"><input type="radio" name="q2" value="C"><b>Ⓒ Chưa quyết, bàn sau</b><br>
+    <span class="q"><span class="uu">Ưu:</span> không phải nghĩ lúc này.<br>
+    <span class="nhuoc">Nhược:</span> câu này treo thì mỗi lần em báo cáo lại phải nhắc lại.</span></label>
+  <div class="card q"><b>Góc nhìn đội:</b> em nghiêng Ⓐ. Hồ sơ ghi anh đã chốt «chưa deploy, chạy tại máy trước», và Tailscale đã giải quyết đúng nhu cầu «vào được khi ra khỏi nhà» mà không phải mở app ra Internet.</div>
+
+  <div class="card"><b>Chốt:</b> tick hai câu → bấm nút → dán khối vào chat cho em.<br>
+    <textarea id="note" placeholder="Ghi chú thêm (không bắt buộc)…"></textarea><br>
+    <button onclick="buildText()">📋 Tạo &amp; sao chép quyết định</button>
+    <textarea id="out"></textarea>
+  </div>
+</div></section>
+<footer><div class="wrap">Round 1 · phong-ban-ai nội bộ · nguồn: đo git lúc 23:05 17/08/2026 London · dựng bởi claude-phong-ban-pm</div></footer>
+<script>
+function buildText(){
+  var v1=(document.querySelector('input[name="q1"]:checked')||{}).value||"CHƯA TICK";
+  var v2=(document.querySelector('input[name="q2"]:checked')||{}).value||"CHƯA TICK";
+  var n1={"A":"Ⓐ Tách hai commit (PM mã · web-funnel hạ tầng)","B":"Ⓑ Một commit gộp","C":"Ⓒ Khoan commit"};
+  var n2={"A":"Ⓐ KHÔNG deploy — giữ chạy tại máy + Tailscale","B":"Ⓑ Deploy Vercel nội bộ","C":"Ⓒ Chưa quyết"};
+  var note=document.getElementById('note').value.trim();
+  var now=new Date();
+  var hh=("0"+now.getHours()).slice(-2)+":"+("0"+now.getMinutes()).slice(-2)+" "+("0"+now.getDate()).slice(-2)+"-"+("0"+(now.getMonth()+1)).slice(-2);
+  var t="# ROUND 1 — commit & deploy phong-ban-ai\n(giờ chốt: "+hh+")\n\nCâu 1 (commit): "+(n1[v1]||v1)+"\nCâu 2 (deploy): "+(n2[v2]||v2)+(note?"\n\nGhi chú: "+note:"");
+  t+="\n\n⚠️ NHẮC: (1) PM STAMP round-1 «✅ ĐÃ QUYẾT LÚC "+hh+"» + badge ✔ tại từng option đã chọn. (2) PM giao thi hành theo hướng đã chốt, không ôm việc.";
+  var o=document.getElementById('out');o.value=t;o.select();try{document.execCommand('copy')}catch(e){}
+}
+</script>
+</body></html>
