@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
   NumberOne, NumberTwo, NumberThree, NumberFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
   Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
-  CaretUp, CaretDown,
+  CaretUp, CaretDown, ArrowsClockwise,
 } from '@phosphor-icons/react/dist/ssr';
 import { dungMarkdown } from '@/lib/dung-markdown';
 
@@ -318,6 +318,32 @@ export default function UngDung({
       capNhat(i, { tin: Array.isArray(j.lich_su) ? j.lich_su : [], noiTiep: true });
     } catch { capNhat(i, { tin: [] }); } finally { capNhat(i, { dangNap: false }); }
   }, [capNhat]);
+
+  /**
+   * 🔄 NẠP LẠI đoạn chat của MỘT ô — "F5 riêng cho ô này" (Owner 18/08).
+   *
+   * Vì sao cần: ghế ghi thêm tin từ chỗ khác (cổng đánh thức · terminal · ghế khác gọi sang)
+   * thì trang đang mở ⛔ KHÔNG tự biết. Trước đây muốn thấy phải tải lại CẢ trang —
+   * mà tải cả trang thì MỌI ô cùng nạp lại, và câu đang gõ dở ở ô khác bay mất.
+   *
+   * 🔒 BỐN CHỐT (mỗi cái là một đường hỏng đã được nêu trước khi gõ):
+   *   ① `o.dangChay` ⇒ ⛔ KHÔNG nạp. Nạp giữa lúc chữ đang chảy = đè mất khúc vừa về.
+   *      Chốt ở CẢ hai đầu: nút bị khoá, và hàm này tự chặn lần nữa (nút khoá vẫn có thể
+   *      bị gọi bằng bàn phím / lệnh, ⛔ đừng tin mỗi lớp giao diện).
+   *   ② ⛔ KHÔNG đụng `soan` và `hangCho` ⇒ câu Owner đang gõ dở và hàng chờ CÒN NGUYÊN.
+   *      Được miễn phí vì `capNhat` là GỘP (`{...o, ...vá}`), ⛔ không phải thay cả ô.
+   *   ③ ⛔ TUYỆT ĐỐI ⛔ không đụng `daKhoiPhuc` — nó là ref DÙNG CHUNG, chỉ cho khôi phục
+   *      MỘT LẦN lúc mở app. Đụng vào là lần mở sau khôi phục sai.
+   *   ④ Nạp ĐÚNG ô được bấm: lấy chỉ số `i` truyền vào, ⛔ KHÔNG dùng ô đang chọn (`tieuDiem`).
+   *
+   * ✅ ⛔ KHÔNG ghi sổ ô: `napLichSu` chỉ gọi `capNhat`, ⛔ không hề POST `/api/o`.
+   *    (Đã đọc tận nơi trước khi gõ — vì ca chiều 18/08 mất liên kết ô 2 đúng vì một chỗ ghi sổ ngoài ý.)
+   */
+  const napLaiChat = useCallback(async (i: number) => {
+    const o = dsORef.current[i];
+    if (!o?.ns || !o.phienHienTai || o.dangChay) return;   // chốt ②: nút khoá rồi vẫn chặn lần nữa
+    await napLichSu(i, o.ns.ten, o.phienHienTai);
+  }, [napLichSu]);
 
   /**
    * Ghi sổ ô. `xoaLienKet` = KHAI Ý ĐỊNH xoá mã phiên đang có.
@@ -1313,6 +1339,23 @@ export default function UngDung({
                                 {o.dsPhien.length === 0
                                   ? 'Chưa có phiên nào'
                                   : `Danh sách phiên (${o.dsPhien.length})`}
+                              </button>
+                              {/* 🔄 NẠP LẠI ĐOẠN CHAT của RIÊNG ô này (Owner 18/08: «giống kiểu F5
+                                  trình duyệt… nút load thì CHỈ load mới chat của ô mình bấm»).
+                                  ⛔ Khoá khi ô đang chạy (nạp giữa lúc chữ đang chảy = mất chữ) và khi
+                                  ô chưa có phiên (⛔ không có gì để nạp). Nhãn NÓI RÕ vì sao khoá —
+                                  nút mờ mà ⛔ không nói lý do thì Owner bấm hoài rồi tưởng app hỏng. */}
+                              <button
+                                className="muc-menu" type="button" role="menuitem"
+                                disabled={o.dangChay || !o.phienHienTai}
+                                onClick={() => { capNhat(i, { moMenu: false }); void napLaiChat(i); }}
+                              >
+                                <ArrowsClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
+                                {o.dangChay
+                                  ? 'Đang chạy — nạp lại sau'
+                                  : !o.phienHienTai
+                                    ? 'Chưa có phiên để nạp lại'
+                                    : 'Nạp lại đoạn chat'}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"

@@ -261,3 +261,9 @@
   /* sàn 320px xuống CHÍNH Ô ⇒ ô CHƯA thu vẫn đủ cao để đọc */
   .luoi:has(.o-chat.thu-khung) .o-chat:not(.thu-khung) { min-height: 320px; }
 }
+
+/* 🔒 Mục menu bị KHOÁ — `.muc-menu` (mau09:689) ⛔ CHƯA có kiểu cho trạng thái này.
+   Thiếu nó thì mục khoá trông y hệt mục bấm được: Owner chạm, ⛔ không có gì xảy ra,
+   và ⛔ không có cách nào biết vì sao. Nhãn đã nói lý do — kiểu này để MẮT thấy trước khi chạm. */
+.muc-menu[disabled] { opacity: 0.42; cursor: default; }
+.muc-menu[disabled]:hover { background: none; color: inherit; }
