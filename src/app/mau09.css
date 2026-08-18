@@ -762,3 +762,12 @@
 }
 .bong a.lien-md:hover{color:#ffd98a;text-decoration-thickness:2px}
 .bong a.lien-md:active{opacity:.8}
+
+
+/* ☰ Nút mở DANH BẠ cạnh tên app — CHỈ màn hẹp (18/08/2026).
+   Màn rộng thì danh bạ luôn nằm bên trái nên nút này thừa. */
+.nut-danh-ba{display:none;flex:none;width:30px;height:28px}
+@media (max-width:1040px){
+  .nut-danh-ba{display:inline-flex}
+  .de-khu .ten-app{max-width:30vw}   /* nhường chỗ cho nút, tên vẫn cắt bằng … */
+}

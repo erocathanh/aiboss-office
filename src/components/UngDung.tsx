@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
  */
 import {
   NumberOne, NumberTwo, NumberThree, NumberFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
-  Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown,
+  Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List,
 } from '@phosphor-icons/react/dist/ssr';
 import { dungMarkdown } from '@/lib/dung-markdown';
 
@@ -1068,6 +1068,22 @@ export default function UngDung({
         {/* ===== Cột 3 — khu trao đổi, chia 1 / 2 / 4 ô ===== */}
         <section className={`cot cot-3${anKhu ? '' : ' mo-khu'}`}>
           <div className="de-khu">
+            {/**
+              * ☰ MỞ DANH BẠ trên màn hẹp (Owner 18/08: «mobile chỗ AIBOSS.VN thiếu menu
+              * bấm để mở ra các menu tìm phòng ban như trên máy tính»).
+              * Vì sao thiếu: màn ≤1040px thì khu trao đổi PHỦ TOÀN MÀN, che mất cột danh bạ
+              * và cột phòng ban. Trước đó đường về chỉ nằm trong menu ⋯ của TỪNG Ô — Owner
+              * ⛔ không tìm ra, mà đó lại là đường DUY NHẤT để đổi ghế trên điện thoại.
+              * ⇒ Đặt ngay cạnh tên app: chỗ mắt nhìn đầu tiên. Màn rộng thì ẩn (danh bạ luôn hiện).
+              */}
+            <button
+              className="nut-tron nut-danh-ba" type="button"
+              onClick={() => datAnKhu(true)}
+              title="Mở danh bạ — tìm phòng ban, đổi ghế"
+              aria-label="Mở danh bạ"
+            >
+              <List size={17} weight={DAM_ICON} aria-hidden="true" />
+            </button>
             <span className="nhan-khu ten-app" title="AIBOSS.VN — phòng ban AI của Eroca Thanh">AIBOSS.VN</span>
             <span className="nhan-that">● Nối thẳng Claude Code trên máy</span>
             {nhacO1 && (
