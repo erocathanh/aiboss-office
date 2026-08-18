@@ -1202,16 +1202,22 @@ export default function UngDung({
                         *    áp sai chỗ — Dừng ⛔ không phải việc thường dùng mà là việc GẤP,
                         *    và nó chỉ hiện khi đang chạy nên lúc rảnh ⛔ không chiếm chỗ.
                         */}
-                      {o.dangChay && (
-                        <button
-                          className="nut-tron nut-dung" type="button"
-                          onClick={() => dungViec(i)}
-                          title="Dừng việc đang chạy ở ô này"
-                          aria-label="Dừng việc đang chạy"
-                        >
-                          <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
-                        </button>
-                      )}
+                      {/**
+                        * 🛑 LUÔN HIỆN, ⛔ không ẩn khi rảnh (Owner 18/08: «chưa thấy nút dừng»).
+                        * Bản trước tôi cho ẩn lúc ô rảnh cho gọn — nhưng Owner ⛔ không biết nút
+                        * NẰM ĐÂU cho tới lúc cần gấp, mà lúc gấp thì ⛔ không kịp đi tìm.
+                        * ⇒ Rảnh: hiện MỜ + ⛔ không bấm được. Đang chạy: sáng lên, bấm được.
+                        *   Chỗ ngồi của nút cố định ⇒ tay quen, ⛔ không phải nhìn mới bấm đúng.
+                        */}
+                      <button
+                        className={`nut-tron nut-dung${o.dangChay ? ' song' : ''}`} type="button"
+                        onClick={() => dungViec(i)}
+                        disabled={!o.dangChay}
+                        title={o.dangChay ? 'Dừng việc đang chạy ở ô này' : 'Ô này ⛔ không chạy gì — ⛔ không có gì để dừng'}
+                        aria-label="Dừng việc đang chạy"
+                      >
+                        <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
+                      </button>
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => datToanMan(toanMan === i ? null : i)}

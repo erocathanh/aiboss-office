@@ -762,3 +762,12 @@
 }
 .bong a.lien-md:hover{color:#ffd98a;text-decoration-thickness:2px}
 .bong a.lien-md:active{opacity:.8}
+
+
+/* 🛑 Nút Dừng LUÔN có mặt (18/08/2026): rảnh thì mờ và ⛔ không bấm được,
+   đang chạy thì sáng lên. Chỗ ngồi cố định ⇒ lúc gấp ⛔ không phải đi tìm nút. */
+.nut-dung{color:rgba(243,163,163,.42);border-color:rgba(220,120,120,.18);background:rgba(220,120,120,.05)}
+.nut-dung[disabled]{cursor:default;opacity:.55}
+.nut-dung[disabled]:hover{color:rgba(243,163,163,.42);border-color:rgba(220,120,120,.18);background:rgba(220,120,120,.05)}
+.nut-dung.song{color:#f3a3a3;border-color:rgba(220,120,120,.55);background:rgba(220,120,120,.16);opacity:1}
+.nut-dung.song:hover{color:#ffd9d9;border-color:rgba(220,120,120,.85);background:rgba(220,120,120,.28)}
