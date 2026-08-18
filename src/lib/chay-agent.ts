@@ -113,6 +113,16 @@ function dichLoi(tho: string): string {
   if (/stop_reason=tool_use|ede_diagnostic/i.test(t)) {
     return (
       '⚠️ Lượt này dừng giữa lúc trợ lý đang dùng một công cụ.\n\n' +
+      /**
+       * 🔴 DÒNG TRẤN AN ĐẶT TRÊN CÙNG (Owner 18/08: «đọc đỡ sợ»).
+       * Ca thật: ghế PM chạy BÊN TRONG chính app này, nên khi nó khởi động lại máy chủ
+       * là nó GIẾT đúng tiến trình đang phục vụ lượt chat ⇒ câu trả lời đứt ngang.
+       * ⇒ Đây là nguyên nhân LÀNH và HAY GẶP NHẤT ở nhà mình — nói TRƯỚC, ⛔ đừng để
+       *   Owner đọc ba đoạn kỹ thuật rồi mới biết «à, chỉ là khởi động lại».
+       */
+      '🔄 **Nếu vừa có ai khởi động lại máy chủ (dựng bản mới) thì đây là chuyện BÌNH THƯỜNG** — ' +
+      'máy chủ tắt vài giây nên lượt đang chạy bị cắt. **Chờ ~5 giây rồi gửi lại câu vừa rồi là xong**, ' +
+      '⛔ không mất gì cả.\n\n' +
       '**Nguyên nhân hay gặp NHẤT là bị cắt ngang** — máy chủ chém tiến trình, ' +
       'hoặc bạn bấm dừng. Ghế nặng (opus + nỗ lực cao nhất) đọc lâu là chuyện thường; ' +
       'nếu vừa thấy dòng ⏱️ báo im lặng ở trên thì **thủ phạm là ngưỡng im-lặng, ' +

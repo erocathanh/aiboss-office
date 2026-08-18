@@ -1194,6 +1194,24 @@ export default function UngDung({
                           aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
                         />
                       </button>
+                      {/**
+                        * 🛑 NÚT DỪNG TRỞ LẠI THANH (Owner 18/08: «nãy tôi bấm dừng khi bạn
+                        * đang làm» — nó nằm trong menu là mất HAI chạm đúng lúc gấp nhất).
+                        * 📌 Sửa lại quyết định của chính tôi hôm qua: tôi xếp Dừng vào menu
+                        *    theo nguyên tắc «thanh giữ việc thường dùng». Nguyên tắc đúng,
+                        *    áp sai chỗ — Dừng ⛔ không phải việc thường dùng mà là việc GẤP,
+                        *    và nó chỉ hiện khi đang chạy nên lúc rảnh ⛔ không chiếm chỗ.
+                        */}
+                      {o.dangChay && (
+                        <button
+                          className="nut-tron nut-dung" type="button"
+                          onClick={() => dungViec(i)}
+                          title="Dừng việc đang chạy ở ô này"
+                          aria-label="Dừng việc đang chạy"
+                        >
+                          <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
+                        </button>
+                      )}
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => datToanMan(toanMan === i ? null : i)}
@@ -1236,18 +1254,6 @@ export default function UngDung({
                               {/* 🛑 DỪNG lên ĐẦU MENU — việc gấp nhất phải ở chỗ ngón tay tới trước.
                                   ⚠️ Đánh đổi Owner cần biết: dừng gấp nay mất HAI chạm (⋯ rồi Dừng),
                                      trước là một. Đổi lại thanh chỉ còn 2 nút như Owner muốn. */}
-                              {o.dangChay && (
-                                <>
-                                  <button
-                                    className="muc-menu nguy" type="button" role="menuitem"
-                                    onClick={() => { capNhat(i, { moMenu: false }); void dungViec(i); }}
-                                  >
-                                    <Stop size={15} weight={DAM_ICON} aria-hidden="true" />
-                                    Dừng việc đang chạy
-                                  </button>
-                                  <div className="vach-menu" />
-                                </>
-                              )}
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => capNhat(i, { moHoSo: !o.moHoSo, moMenu: false })}
