@@ -11,6 +11,8 @@ h1{font-size:23px;line-height:1.3;margin:8px 0 6px}.lede{color:#9db0c6}
 h2{font-size:17px;margin:26px 0 6px;color:#c9a24b}
 .card{background:#16273f;border:1px solid rgba(201,162,75,.3);border-radius:14px;padding:14px 18px;margin:14px 0}
 .chep{background:#0b1524;border:1px solid rgba(201,162,75,.4);border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo,monospace;color:#f5efe0}
+button{background:#c9a24b;color:#0f1b2d;font-weight:800;border:0;border-radius:10px;padding:12px 22px;cursor:pointer;margin:10px 0 4px;font-size:15px}
+#bao{color:#8fd4a8;font-weight:700;margin-left:10px}
 footer{color:#9db0c6;font-size:13px;padding:24px 0 44px}
 .buoc{color:#8fd4a8;font-weight:700}
 ol{padding-left:22px}li{margin:6px 0}
@@ -57,6 +59,8 @@ B3. báo một dòng NGẮN lên chính ô này để Owner biết bạn đã s�
   Phải hẹn tách rời: nohup zsh -c 'sleep 45; launchctl kickstart -k gui/$(id -u)/com.eroca.phong-ban-lan' &
 · tsc: ĐẾM dòng 'error TS'. ⛔ Đừng `| head && echo sạch` — nó in «sạch» DÙ CÓ LỖI.</div>
 
+  <button onclick="chepO4()">📋 Sao chép khối cho Ô 4</button><span id="bao"></span>
+
   <h2>🔢 Thứ tự anh làm</h2>
   <div class="card"><ol>
     <li>Chép khối trên → dán vào <b>ô 4</b> → gửi. Nó đọc luật rồi báo sẵn sàng và đứng chờ.</li>
@@ -66,4 +70,22 @@ B3. báo một dòng NGẮN lên chính ô này để Owner biết bạn đã s�
 
 </div></section>
 <footer><div class="wrap">Round 3 · phong-ban-ai nội bộ · dựng bởi claude-phong-ban-pm · 15:01 18/08/2026 London</div></footer>
+<script>
+function chepO4(){
+  var t = document.getElementById('o4').innerText;
+  var xong = function(){ document.getElementById('bao').textContent = '✅ đã chép — dán vào ô 4'; };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(t).then(xong, thuCachCu);
+  } else { thuCachCu(); }
+  function thuCachCu(){
+    /* Đường LAN là http nên clipboard bị chặn ⇒ phải có đường lùi, ⛔ đừng để Owner bấm mà ⛔ không có gì xảy ra. */
+    var o = document.createElement('textarea');
+    o.value = t; o.style.position='fixed'; o.style.opacity='0';
+    document.body.appendChild(o); o.select();
+    try { document.execCommand('copy'); xong(); }
+    catch(e){ document.getElementById('bao').textContent = '⚠️ ⛔ không chép được — bôi đen khối trên rồi chép tay'; }
+    document.body.removeChild(o);
+  }
+}
+</script>
 </body></html>
