@@ -119,3 +119,62 @@
   background: rgba(74, 222, 128, 0.12); color: #86efac;
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   📱 VIỆC ⓪ — VÁ TRÀN PHẢI ở bong bóng AI trả lời (18/08/2026 · claude-aiboss-app-exe)
+   Owner: «ô trả lời bị tràn bên phải che mất chữ» ⇒ ⛔ không đọc hết tin ⇒ ⛔ không quyết được việc.
+
+   🔬 ĐO TẠI NGUỒN (Chrome thật qua playwright, trang thật localhost:4319, 687 dòng tin THẬT,
+      bề rộng 344px = Z-Fold gập). ⛔ Không suy từ mã — mấy vòng trước neo sai vì suy.
+
+   🔴 GỐC — nằm ở CẤU TRÚC, ⛔ không ở bảng cũng ⛔ không ở khối mã:
+      Mỗi dòng tin là:  div.dong-tin  ▸  div.anh-nho  +  MỘT THẺ DIV VÔ DANH  ▸  div.bong
+      Thẻ div vô danh đó (UngDung.tsx:1442) là flex item mà ⛔ KHÔNG có lớp CSS nào —
+      đo được `min-width: auto` ⇒ theo chuẩn flexbox nó ⛔ KHÔNG co xuống dưới bề rộng
+      nội-dung-tối-thiểu của chính nó. `.dong-tin{max-width:min(80%,540px)}` = 250px ở màn 344,
+      nhưng con nó ĐO ĐƯỢC 603px (bảng 5 cột) · 727px (khối mã) · 1140px (bảng 12 cột).
+      ⇒ `.bong{max-width:100%}` tính theo thẻ đã nở 603px ⇒ vô tác dụng.
+      ⇒ `.cuon-bang{overflow-x:auto}` ⛔ KHÔNG BAO GIỜ kích hoạt, vì ⛔ không ai ép bề rộng nó.
+      ⇒ `.bang-tin{overflow-x:hidden}` (mau09:533) mới là lớp XÉN: đo 1156/344.
+         Nó GIẤU tràn chứ ⛔ không chữa — nên Owner thấy CHỮ CỤT, ⛔ không thấy thanh cuộn,
+         ⛔ không thấy báo lỗi. Đây đúng là thứ AI-READ dặn ⛔ đừng thêm lớp thứ tám.
+
+   ✅ HAI DÒNG `min-width:0` sẵn có ĐẶT NHẦM CHỖ — cả hai đều ⛔ KHÔNG phải flex item ấy:
+      mau09:789 `.dong-tin{min-width:0}`  ·  mau09:303 `.bong{min-width:0}`
+
+   🧪 ĐỐI CHỨNG DƯƠNG (bắt buộc, vì mọi số 0 đều phải chứng minh thước còn sống):
+      bảng 12 cột LUÔN hiện ra trong phép đo ⇒ thước sống. Sau vá nó CUỘN trong khung
+      (349/190, overflowX=auto) thay vì phá khung ⇒ đúng «cuộn tại chỗ», ⛔ không phải bị xén.
+
+   📊 SỐ ĐO 344px — dòng tin TRÀN / phần tử bị XÉN:
+      nguyên trạng  10 / 12      chỉ 2 dòng xuống-hàng  1 / 3      bản này  0 / 0
+      («0 / 0» = ⛔ không còn phần tử nào tràn mà ⛔ không cuộn được. Phần còn tràn là
+       `.cuon-bang` của bảng 12 cột, và nó `overflow-x:auto` ⇒ LÀNH.)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ① GỐC — trả lại quyền CO cho thẻ bọc vô danh giữa `.dong-tin` và `.bong`.
+      Từ đây `.bong{max-width:100%}` mới có nghĩa, và `.cuon-bang`/`pre` mới cuộn được thật.
+      An toàn với hai thẻ con còn lại: `.anh-nho` có `flex:none` (⛔ không co dù cho phép),
+      `.cham-go` (ba chấm đang gõ) rộng ~46px, ⛔ chưa bao giờ chạm trần. */
+.dong-tin > div { min-width: 0; }
+
+/* ② Màn hẹp: cho chữ XUỐNG HÀNG thay vì nhét vào khung cuộn ngang.
+      Điện thoại ⛔ KHÔNG hiện thanh cuộn ⇒ chữ còn đó mà Owner với ⛔ không tới,
+      nhìn y hệt bị cắt. Xuống hàng thì đọc thẳng, ⛔ không phải kéo.
+      🔴 Mốc 1040px, ⛔ KHÔNG phải 520px: bố cục điện thoại của app đổi ở 1040
+      (`.cot-3.mo-khu` phủ toàn màn). Đo ở 884px (Z-Fold MỞ) với mốc 520px:
+      vẫn 3 dòng tràn · 5 phần tử bị xén ⇒ mốc 520 bỏ sót đúng máy Owner đang cầm.
+      Máy tính (>1040px) giữ nguyên `nowrap` cho bảng đẹp — ⛔ không đụng thứ đang đúng. */
+@media (max-width: 1040px) {
+  .bang-md th { white-space: normal; }                            /* tiêu đề bảng chịu xuống hàng */
+  .bong pre { white-space: pre-wrap; overflow-wrap: anywhere; }   /* lệnh dài chịu xuống hàng */
+
+  /* 🔴 SÀN BỀ RỘNG CỘT — thêm sau khi NHÌN ẢNH CHỤP, ⛔ không phải sau khi đọc số.
+     Bản chỉ có hai dòng trên cho số đo ĐẸP (bảng 218px, ⛔ không tràn một điểm nào)
+     nhưng ẢNH cho thấy bảng 5 cột bị bóp còn ~35px/cột ⇒ mỗi chữ rơi xuống MỘT KÝ TỰ
+     mỗi dòng («Tràn phải bong bóng» thành cột chữ dọc). Tiêu đề cũng vỡ: «c kiểm» «g th ái».
+     ⇒ Đúng thứ AI-READ §104 cấm: «Owner mất đường đọc là hỏng, dù số đo có đẹp».
+     Sàn 5,5em ⇒ bảng ÍT CỘT vẫn vừa khung và đọc được; bảng NHIỀU CỘT thì cuộn trong
+     `.cuon-bang` với cột còn đọc được — cuộn tại chỗ là cách AI-READ §108 cho phép. */
+  .bang-md th, .bang-md td { min-width: 5.5em; }
+}
