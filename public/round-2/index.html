@@ -1,0 +1,146 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Round 2 — đổi tên app + khởi tạo hai ghế mới</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0f1b2d;color:#f5efe0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.6}
+.wrap{max-width:880px;margin:0 auto;padding:0 18px}
+#bar{position:sticky;top:0;background:#0b1524;border-bottom:1px solid rgba(201,162,75,.35);padding:10px 0;z-index:9}
+#bar b{color:#c9a24b}
+.stamp-build{font:12px/1.6 ui-monospace,Menlo,monospace;color:#b9ad99;background:rgba(201,162,75,.08);border-bottom:1px solid rgba(201,162,75,.25);padding:.45rem .9rem}
+.stamp-build b{color:#c9a24b;font-weight:700}
+.hero{padding:22px 0 6px}.kick{color:#c9a24b;font-weight:700;font-size:13px}
+h1{font-size:23px;line-height:1.3;margin:8px 0 6px}.lede{color:#9db0c6}
+h2{font-size:17px;margin:28px 0 4px;color:#c9a24b}
+.opt{display:block;background:#16273f;border:2px solid rgba(201,162,75,.35);border-radius:12px;padding:12px 15px;margin:9px 0;cursor:pointer}
+.opt input{margin-right:8px}.q{color:#9db0c6;font-size:14px}
+.uu{color:#8fd4a8}.nhuoc{color:#e9a9a9}
+.card{background:#16273f;border:1px solid rgba(201,162,75,.3);border-radius:14px;padding:14px 18px;margin:14px 0}
+textarea{width:100%;min-height:96px;background:#0b1524;color:#f5efe0;border:1px solid rgba(201,162,75,.35);border-radius:10px;padding:10px;font-family:ui-monospace,monospace;font-size:16px}
+button{background:#c9a24b;color:#0f1b2d;font-weight:800;border:0;border-radius:10px;padding:12px 22px;cursor:pointer;margin-top:8px;font-size:15px}
+.chep{background:#0b1524;border:1px solid rgba(201,162,75,.4);border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo,monospace;color:#f5efe0}
+footer{color:#9db0c6;font-size:13px;padding:24px 0 44px}
+.buoc{color:#8fd4a8;font-weight:700}
+</style></head><body>
+<div id="bar"><div class="wrap"><b>Round 2 — đổi tên app + khởi tạo hai ghế mới</b></div></div>
+<div class="stamp-build">🛠 <b>DỰNG:</b> claude-phong-ban-pm · <b>SỔ/CÂU:</b> claude-phong-ban-pm · <b>ĐẶT LÚC:</b> 13:23 18/08/2026 London · <b>ĐẨY:</b> chạy tại máy (public/), ⛔ chưa lên mạng</div>
+<header class="hero"><div class="wrap">
+  <span class="kick">Round 2 · giờ gửi 13:23 18/08/2026 London · tick ~1 phút</span>
+  <h1>Đổi tên <code>phong-ban-ai</code> → <code>aiboss-app</code>: sáu điều cần anh chốt</h1>
+  <p class="lede">Anh giao PM mới viết tài liệu đổi tên cho thợ code thi hành. Sáu câu dưới là những chỗ <b>máy không tự quyết được</b> — chốt xong em mới đưa vào tài liệu. Cuối trang có <b>hai khối copy</b> để anh dán vào ô 2 và ô 4.</p>
+</div></header>
+<section><div class="wrap">
+
+  <h2>Câu 1 — Tên thư mục trong <code>~/Projects/</code></h2>
+  <label class="opt"><input type="radio" name="q1" value="A" checked><b>Ⓐ <code>aiboss-app</code> (như anh nói)</b><br>
+    <span class="q"><span class="uu">Ưu:</span> ngắn, khớp tên app AIBOSS.<br><span class="nhuoc">Nhược:</span> không nói rõ đây là app chat nhiều ghế.</span></label>
+  <label class="opt"><input type="radio" name="q1" value="B"><b>Ⓑ <code>aiboss-app-chat</code></b><br>
+    <span class="q"><span class="uu">Ưu:</span> sau này có app AIBOSS khác thì không lẫn.<br><span class="nhuoc">Nhược:</span> dài hơn, gõ nhiều hơn.</span></label>
+
+  <h2>Câu 2 — Kho GitHub <code>erocathanh/phong-ban-ai</code></h2>
+  <label class="opt"><input type="radio" name="q2" value="A" checked><b>Ⓐ Đổi luôn tên kho thành <code>aiboss-app</code></b><br>
+    <span class="q"><span class="uu">Ưu:</span> đồng bộ mọi nơi, không còn tên cũ.<br><span class="nhuoc">Nhược:</span> phải sửa remote ở máy; GitHub có chuyển hướng nhưng đường dẫn cũ trong tài liệu sẽ lệch.</span></label>
+  <label class="opt"><input type="radio" name="q2" value="B"><b>Ⓑ Giữ tên kho cũ, chỉ đổi thư mục ở máy</b><br>
+    <span class="q"><span class="uu">Ưu:</span> ít rủi ro nhất, không đụng gì trên mạng.<br><span class="nhuoc">Nhược:</span> tên máy và tên kho lệch nhau — người sau dễ nhầm.</span></label>
+
+  <h2>Câu 3 — Khoá lưu bố cục trong trình duyệt <code>phong-ban-ai.bo-cuc</code></h2>
+  <label class="opt"><input type="radio" name="q3" value="A" checked><b>Ⓐ Giữ khoá cũ (khuyến nghị)</b><br>
+    <span class="q"><span class="uu">Ưu:</span> anh <b>không mất</b> bố cục 1/2/4 ô đang dùng; đổi khoá chẳng được lợi gì nhìn thấy được.<br><span class="nhuoc">Nhược:</span> tên khoá còn chữ cũ — chỉ máy đọc, anh không thấy.</span></label>
+  <label class="opt"><input type="radio" name="q3" value="B"><b>Ⓑ Đổi sang <code>aiboss-app.bo-cuc</code></b><br>
+    <span class="q"><span class="uu">Ưu:</span> sạch tuyệt đối.<br><span class="nhuoc">Nhược:</span> anh <b>mất bố cục đang dùng</b>, phải đặt lại tay — trên cả hai đường LAN và Tailscale (hai gốc riêng).</span></label>
+
+  <h2>Câu 4 — Nhãn dịch vụ chạy nền <code>com.eroca.phong-ban-lan</code></h2>
+  <label class="opt"><input type="radio" name="q4" value="A" checked><b>Ⓐ Giữ nhãn cũ, chỉ sửa đường dẫn bên trong (khuyến nghị)</b><br>
+    <span class="q"><span class="uu">Ưu:</span> ít bước nhất, khó gãy nhất. Đây là chỗ <b>gãy là app chết lúc khởi động máy</b>.<br><span class="nhuoc">Nhược:</span> nhãn còn tên cũ.</span></label>
+  <label class="opt"><input type="radio" name="q4" value="B"><b>Ⓑ Đổi nhãn thành <code>com.eroca.aiboss-app-lan</code></b><br>
+    <span class="q"><span class="uu">Ưu:</span> sạch hẳn.<br><span class="nhuoc">Nhược:</span> phải gỡ nhãn cũ + nạp nhãn mới đúng thứ tự; sai một bước là app không tự chạy khi bật máy, và <b>khó nhận ra</b> vì nó chỉ lộ lúc khởi động lại máy.</span></label>
+
+  <h2>Câu 5 — Làm khi nào</h2>
+  <label class="opt"><input type="radio" name="q5" value="A" checked><b>Ⓐ Làm ngay, anh ngồi cạnh xem</b><br>
+    <span class="q"><span class="uu">Ưu:</span> có chuyện là lùi được ngay.<br><span class="nhuoc">Nhược:</span> anh phải rảnh tay lúc đó.</span></label>
+  <label class="opt"><input type="radio" name="q5" value="B"><b>Ⓑ Chuẩn bị xong, chờ anh hẹn giờ</b><br>
+    <span class="q"><span class="uu">Ưu:</span> anh chủ động thời điểm.<br><span class="nhuoc">Nhược:</span> tài liệu để lâu dễ lệch với mã.</span></label>
+
+  <h2>Câu 6 — Mức độ đổi tên bên trong mã</h2>
+  <label class="opt"><input type="radio" name="q6" value="A" checked><b>Ⓐ Đổi cả tên kỹ thuật lẫn tên hiển thị</b><br>
+    <span class="q"><span class="uu">Ưu:</span> sạch một lần, không phải quay lại.<br><span class="nhuoc">Nhược:</span> đụng 12 tệp, cần nghiệm thu kỹ hơn.</span></label>
+  <label class="opt"><input type="radio" name="q6" value="B"><b>Ⓑ Chỉ đổi thư mục + tài liệu, giữ chuỗi trong mã</b><br>
+    <span class="q"><span class="uu">Ưu:</span> ít rủi ro nhất.<br><span class="nhuoc">Nhược:</span> mã còn tên cũ rải rác — lần sau ai đọc cũng hỏi lại.</span></label>
+
+  <div class="card q"><b>Góc nhìn đội:</b> em nghiêng <b>1Ⓐ · 2Ⓐ · 3Ⓐ · 4Ⓐ · 5Ⓐ · 6Ⓐ</b>. Hai chỗ em cố ý chọn «giữ nguyên» (khoá bố cục và nhãn dịch vụ) vì chúng <b>không ai nhìn thấy</b> mà lại là hai chỗ gãy đau nhất — sạch ở đó không đổi lại được gì, chỉ thêm rủi ro.</div>
+
+  <div class="card"><b>Chốt:</b> tick sáu câu → bấm nút → dán khối vào chat cho em.<br>
+    <textarea id="note" placeholder="Ghi chú thêm (không bắt buộc)…"></textarea><br>
+    <button onclick="buildText()">📋 Tạo &amp; sao chép quyết định</button>
+    <textarea id="out"></textarea>
+  </div>
+
+  <h2>📋 Khối copy 1 — dán vào <span class="buoc">Ô 2</span> (PM app AIBOSS)</h2>
+  <div class="card q">Đây là câu khởi động ghế PM mới. Dán nguyên khối vào ô 2 rồi gửi.</div>
+  <div class="chep" id="o2">Bạn là claude-aiboss-app-pm.
+
+📂 ĐỌC NGAY, đúng thứ tự (⛔ đừng hỏi lại thứ tự):
+1. ~/Operations/agents/CLAUDE-AIBOSS-APP-PM-BOOT.md   ← hồ sơ khởi động của bạn
+2. ~/claude-aiboss-app-pm/CLAUDE.md                   ← linh hồn ghế bạn
+3. ~/Operations/agents/CLAUDE-PHONG-BAN-PM-BOOT.md    ← hồ sơ đầy đủ dự án
+4. ~/Projects/RULES-BUILD-WEB.md                      ← luật build web của nhà
+
+🎯 VIỆC ĐẦU TIÊN: Owner muốn đổi tên app phong-ban-ai → aiboss-app, gồm đổi tên thư mục
+trong ~/Projects/ và mọi thủ tục liên quan, làm SẠCH và AN TOÀN.
+
+🔴 BẠN KHÔNG PHẢI NGƯỜI LÀM. Bạn HIỂU rồi VIẾT BỘ LỆNH GIAO VIỆC (kiểu AI-READ của skill
+/pm-giao-viec) để claude-aiboss-app-exe ở ô 4 thi hành. Bạn: đọc · đo · viết tài liệu ·
+nghiệm thu. Bạn KHÔNG tự git mv, KHÔNG tự sửa launchd, KHÔNG tự đổi tên gì cả.
+
+🚦 THỨ TỰ BẮT BUỘC:
+B1 đọc đủ 4 tệp trên
+B2 CẮM MẮT CANH KÊNH ngay (xem mục ③ hồ sơ khởi động) — đừng để cuối
+B3 tự ĐO phạm vi đổi tên tại nguồn, đừng chép số của người khác
+B4 viết kế hoạch + bộ lệnh giao việc cho exe
+B5 TRÌNH claude-phong-ban-pm duyệt: ghi kênh + RUNG CHUÔNG
+B6 CHỜ nó trả OK. Chưa OK thì KHÔNG giao exe, KHÔNG làm gì thêm.
+
+⚠️ claude-phong-ban-pm (ô 3) là người soi bạn trong giai đoạn đầu. Nó chưa OK thì bạn dừng.
+⚠️ Quyết định của Owner cho sáu câu ở round-2 sẽ được dán cho bạn — chờ có rồi mới viết tài liệu.</div>
+
+  <h2>📋 Khối copy 2 — dán vào <span class="buoc">Ô 4</span> (Thợ code app AIBOSS)</h2>
+  <div class="card q">⚠️ Dán khối này <b>SAU</b> khi PM ô 2 đã viết xong tài liệu và em duyệt OK. Dán sớm thì nó chưa có gì để làm.</div>
+  <div class="chep" id="o4">Bạn là claude-aiboss-app-exe.
+
+📂 ĐỌC NGAY, đúng thứ tự:
+1. ~/claude-aiboss-app-exe/CLAUDE.md                  ← linh hồn ghế bạn (luật cứng + bẫy đã cắn)
+2. ~/Operations/agents/CLAUDE-PHONG-BAN-PM-BOOT.md    ← hồ sơ đầy đủ dự án
+3. ~/Projects/RULES-BUILD-WEB.md                      ← luật build web của nhà
+4. tài liệu giao việc mà claude-aiboss-app-pm vừa viết (nó sẽ chỉ đường dẫn cho bạn)
+
+🎯 VAI: bạn VIẾT MÃ. Nhận việc đã khoanh phạm vi từ claude-aiboss-app-pm (ô 2), thi hành,
+tự kiểm, báo lại bằng SỐ. Bạn KHÔNG tự mở round hỏi Owner — đó là việc của PM.
+
+🚦 TRƯỚC KHI VIẾT DÒNG NÀO:
+· cắm mắt canh kênh phối hợp (PM sẽ cho đường dẫn)
+· đọc kỹ tài liệu giao việc; thấy đề bài SAI hoặc THIẾU thì BÁC THẲNG trước khi viết
+· việc này là ĐỔI TÊN — gãy được. Bốn chỗ gãy ngay: launchd trỏ đường dẫn tuyệt đối ·
+  cấu hình đẩy chon-mau/.vercel · khoá lưu bố cục trình duyệt · ~/Projects/CLAUDE.md
+
+🔬 TỰ KIỂM TRƯỚC KHI BÁO:
+npx tsc --noEmit → ĐẾM dòng 'error TS' (đừng | head && echo sạch — nó in «sạch» dù có lỗi)
+next build phải thấy «Compiled successfully»
+mọi kết quả «0/sạch» phải kèm ĐỐI CHỨNG DƯƠNG trên mẫu chắc-chắn-CÓ
+
+⚠️ Ghi kênh KHÔNG đánh thức ai. Báo xong phải RUNG CHUÔNG cho PM.</div>
+
+</div></section>
+<footer><div class="wrap">Round 2 · phong-ban-ai nội bộ · dựng bởi claude-phong-ban-pm · 13:23 18/08/2026 London</div></footer>
+<script>
+function buildText(){
+  var v={};["q1","q2","q3","q4","q5","q6"].forEach(function(n){
+    var e=document.querySelector('input[name="'+n+'"]:checked');v[n]=e?e.value:"CHƯA TICK";});
+  var ten={q1:"thư mục",q2:"kho GitHub",q3:"khoá bố cục",q4:"nhãn dịch vụ",q5:"thời điểm",q6:"mức đổi trong mã"};
+  var note=document.getElementById('note').value.trim();
+  var now=new Date();
+  var hh=("0"+now.getHours()).slice(-2)+":"+("0"+now.getMinutes()).slice(-2)+" "+("0"+now.getDate()).slice(-2)+"-"+("0"+(now.getMonth()+1)).slice(-2);
+  var t="# ROUND 2 — doi ten app phong-ban-ai -> aiboss-app\n(gio chot: "+hh+")\n";
+  ["q1","q2","q3","q4","q5","q6"].forEach(function(n,i){t+="\nCau "+(i+1)+" ("+ten[n]+"): "+v[n];});
+  if(note)t+="\n\nGhi chu: "+note;
+  t+="\n\n⚠️ NHAC: (1) PM STAMP round-2 «✅ ĐÃ QUYẾT LÚC "+hh+"» + badge ✔ tai tung option da chon. (2) PM dua quyet dinh vao tai lieu giao viec, khong om viec.";
+  var o=document.getElementById('out');o.value=t;o.select();try{document.execCommand('copy')}catch(e){}
+}
+</script>
+</body></html>
