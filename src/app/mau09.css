@@ -499,7 +499,7 @@
 /* Hàng của "tôi" lật ngược chiều (row-reverse) ⇒ đẩy nhãn về mép phải cho thẳng bong bóng. */
 .toi .nhan-danh-thuc{margin-left:auto}
 
-/* 🧬 Khối fork — hiện khi phiên dán vào thuộc THƯ MỤC KHÁC (round-122, 15/08) */
+/* 🧬 Khối fork — hiện khi phiên dán vào thuộc THƯ MỤC KHÁC (round-122 (bos-funnel), 15/08) */
 .khoi-fork { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .khoi-fork .nut-chu { align-self: flex-start; }
 .ghi-chu-fork { font-size: 12px; line-height: 1.5; opacity: .72; }

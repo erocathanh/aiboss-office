@@ -5,7 +5,7 @@ import { docGocTich, kiemChuoi, khoCua, doTep } from './goc-tich';
 /**
  * 🔎 TRA CHUỖI ĐỜI CỦA GHẾ — dành riêng cho câu hỏi loại thứ BA.
  *
- * Ba loại câu hỏi (chốt round-122 sau 3 vòng phản biện):
+ * Ba loại câu hỏi (chốt round-122 (bos-funnel) sau 3 vòng phản biện):
  *   A. «chuyện đó THẾ NÀO / vì sao chọn A»  → tra bản ghi, thấy 1 chỗ là đủ
  *   B. «bây giờ RA SAO / tệp còn ⛔ không»   → ĐO MÁY, bản ghi ⛔ KHÔNG có thẩm quyền
  *   C. «tôi đã nói/giao/gửi… CHƯA»          → khẳng định VẮNG MẶT trên TOÀN CHUỖI ĐỜI
@@ -148,7 +148,7 @@ export interface KetQuaTra {
   so_tang: number;
   tang_hong: { ma: string; trang_thai: string }[];
   khop: MauKhop[];
-  /** Câu dặn sẽ chèn vào lời hỏi — chữ đã chốt round-122. */
+  /** Câu dặn sẽ chèn vào lời hỏi — chữ đã chốt round-122 (bos-funnel). */
   loi_dan: string;
 }
 

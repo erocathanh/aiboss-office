@@ -575,7 +575,7 @@ export default function UngDung({
       if (!lichSu.length) {
         // ⛔ KHÔNG im lặng mở phiên trắng — nói thẳng, để Owner còn biết mà tra lại.
         // 🧬 ⛔ Đừng dừng ở lời than: app BIẾT bệnh thì app phải đưa THUỐC.
-        //    Chìa ra nút Fork ngay tại đây (Owner chốt round-122 · 15/08).
+        //    Chìa ra nút Fork ngay tại đây (Owner chốt round-122 (bos-funnel) · 15/08).
         capNhat(i, {
           phienChoFork: ma,
           loiDan:
@@ -1391,7 +1391,7 @@ export default function UngDung({
                           </button>
                         </div>
                         {o.loiDan && <div className="dan-ket-qua">{o.loiDan}</div>}
-                        {/* 🧬 App BIẾT bệnh thì app đưa THUỐC — ⛔ đừng dừng ở lời than (Owner chốt round-122). */}
+                        {/* 🧬 App BIẾT bệnh thì app đưa THUỐC — ⛔ đừng dừng ở lời than (Owner chốt round-122 (bos-funnel)). */}
                         {o.phienChoFork && (
                           <div className="khoi-fork">
                             <button className="nut-chu manh" type="button" disabled={o.dangFork} onClick={() => forkVeGhe(i)}>

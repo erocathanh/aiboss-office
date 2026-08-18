@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
         }
 
         /**
-         * 🔎 CHẶN NGAY TẠI Ô GÕ (Owner chốt round-122 · Q2=A).
+         * 🔎 CHẶN NGAY TẠI Ô GÕ (Owner chốt round-122 (bos-funnel) · Q2=A).
          *
          * Câu loại «tôi đã nói/giao/gửi… CHƯA» ⇒ app TỰ TRA chuỗi đời của ghế rồi ĐÍNH
          * kết quả + ĐỘ PHỦ vào câu hỏi. Vì sao ⛔ không để ghế tự nhớ: fork chỉ giữ **8,4%**
