@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
   NumberOne, NumberTwo, NumberThree, NumberFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
   Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
+  CaretUp, CaretDown,
 } from '@phosphor-icons/react/dist/ssr';
 import { dungMarkdown } from '@/lib/dung-markdown';
 
@@ -127,6 +128,14 @@ interface OChat {
    * Trước đây bấm gửi lúc đang chạy là câu RƠI MẤT, ⛔ không báo gì.
    */
   hangCho: string[];
+  /**
+   * 🔽 THU KHUNG CHAT (Owner 18/08: «thêm nút thu khung chat ô 1 ÔNG TRÙM ở giao diện
+   * mobile, sau khi thu sẽ đổi thành icon bấm để mở ra»).
+   * ⛔ KHÔNG lưu localStorage: Owner vào app qua CẢ LAN lẫn Tailscale = HAI GỐC RIÊNG
+   *    ⇒ mỗi đường nhớ một kiểu, rối hơn tiện. Đây là trạng thái NHÌN, mất là mất, ⛔ không sao.
+   *    (Khác `KHOA_BO_CUC`/`KHOA_TIEU_DIEM` — hai cái đó là bố cục toàn app nên CÓ lưu.)
+   */
+  thuKhung: boolean;
 }
 
 const O_TRONG: OChat = {
@@ -136,7 +145,7 @@ const O_TRONG: OChat = {
   // ¶ MẶC ĐỊNH TẮT (đổi 17/08/2026 sau phản hồi thật của Owner).
   // Bật mặc định ⇒ mọi câu in THÔ ⇒ Owner thấy nguyên dấu ** và tưởng markdown hỏng.
   // Tính năng giữ nguyên, chỉ đổi mặc định: cần xem nhịp mẩu thì bấm ¶.
-  hienMau: false, hangCho: [], moHoSo: false, moMenu: false, matKetNoi: false,
+  hienMau: false, hangCho: [], moHoSo: false, moMenu: false, matKetNoi: false, thuKhung: false,
 };
 
 /**
@@ -1146,7 +1155,7 @@ export default function UngDung({
             {dsO.map((o, i) => (
               <div
                 key={i}
-                className={`o-chat${i === tieuDiem ? ' tieu-diem' : ''}${toanMan === i ? ' toan' : ''}`}
+                className={`o-chat${i === tieuDiem ? ' tieu-diem' : ''}${toanMan === i ? ' toan' : ''}${o.thuKhung ? ' thu-khung' : ''}`}
                 data-o={i}
                 onMouseDown={() => datTieuDiem(i)}
               >
@@ -1226,6 +1235,27 @@ export default function UngDung({
                           aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
                         />
                       </button>
+                      {/**
+                        * 🔽 NÚT THU KHUNG — CHỈ ô 1 (ÔNG TRÙM), CHỈ màn hẹp (CSS lo phần ẩn/hiện).
+                        * Owner: «sau khi thu sẽ đổi thành icon bấm để mở ra» ⇒ icon ĐỔI CHIỀU,
+                        * ⛔ không phải hai nút. Đang mở → mũi tên LÊN (bấm là thu lên);
+                        * đã thu → mũi tên XUỐNG (bấm là mở xuống).
+                        * ⚠️ Ô 1 ⛔ KHÔNG có nút đóng và ⛔ KHÔNG đổi được ghế — hai luật đó GIỮ NGUYÊN.
+                        *    Thu khung chỉ là chuyện NHÌN nên ⛔ không đụng vào chúng.
+                        */}
+                      {i === 0 && (
+                        <button
+                          className="nut-tron nut-thu" type="button"
+                          onClick={() => capNhat(i, { thuKhung: !o.thuKhung })}
+                          title={o.thuKhung ? 'Mở lại khung trò chuyện' : 'Thu khung trò chuyện, chỉ chừa thanh tên'}
+                          aria-label={o.thuKhung ? 'Mở lại khung trò chuyện' : 'Thu khung trò chuyện'}
+                          aria-expanded={!o.thuKhung}
+                        >
+                          {o.thuKhung
+                            ? <CaretDown size={18} weight={DAM_ICON} aria-hidden="true" />
+                            : <CaretUp size={18} weight={DAM_ICON} aria-hidden="true" />}
+                        </button>
+                      )}
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => datToanMan(toanMan === i ? null : i)}

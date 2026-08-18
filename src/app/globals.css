@@ -207,3 +207,57 @@
   font-family: inherit; font-size: 13px;
 }
 .bc-4 .nut-dung-soan { height: 30px; width: 30px; border-radius: 7px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   🔽 VIỆC ② — THU KHUNG CHAT Ô 1 (ÔNG TRÙM) trên màn hẹp
+   (18/08/2026 · claude-aiboss-app-exe)
+   Owner: «thêm nút thu khung chat ô 1 ÔNG TRÙM ở giao diện mobile,
+           sau khi thu sẽ đổi thành icon bấm để mở ra».
+
+   🔴 CHỖ THEN CHỐT — ẩn `.than` KHÔNG đủ, ô vẫn cao y nguyên.
+      Lưới có BA luật ép chiều cao, ⛔ không phải một:
+        (a) mau09:240  .luoi.bc-1{grid-template-rows:1fr}          ← ⛔ không dính minmax, nhưng 1fr ăn hết
+        (b) mau09:419  @media 1040 · .luoi.bc-2,.bc-4{grid-auto-rows:minmax(320px,1fr)}
+        (c) mau09:625  @media 1040 · .luoi.toan-man{grid-auto-rows:1fr}
+      Ô 1 hiện ở CẢ BA ⇒ phải nới CẢ BA, ⛔ đừng sửa (b) rồi báo xong.
+
+   ⚙️ Cách nới: dùng `:has()` — CHỈ đổi lưới KHI có ô đang thu.
+      ⇒ ⛔ không có ô nào thu thì mọi số đo y hệt trước (đúng cổng ②-e: màn rộng ⛔ không đổi).
+      `:has()` nhà đã dùng sẵn ở mau09:414 (`body:has(.cot-3.mo-khu)`) ⇒ ⛔ không phải thứ mới.
+
+   📌 Sàn 320px ⛔ không mất — nó CHUYỂN từ HÀNG lưới xuống CHÍNH Ô chưa thu,
+      để thu ô 1 xong thì ô còn lại vẫn đủ cao mà đọc.
+   ⚠️ Ẩn bằng `display:none` chứ ⛔ KHÔNG gỡ khỏi cây: giữ nguyên `.bang-tin` + tham chiếu
+      cuộn + lịch sử ⇒ mở lại là còn đúng chỗ cũ, ⛔ không phải nạp lại phiên.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Máy tính có chỗ ⇒ ⛔ không cần nút này. Owner chỉ xin cho điện thoại. */
+.nut-thu { display: none; }
+
+@media (max-width: 1040px) {
+  .nut-thu { display: flex; }
+
+  /* Thu CẢ dải nhắc phiên: đo được nó cao 66px và nằm NGOÀI `.than` (anh em, ⛔ không phải con)
+     ⇒ chỉ ẩn `.than` thì bố cục 1 ô còn thừa 66px, giảm 83,4% thay vì ~92%.
+     Dải này thuộc KHUNG CHAT chứ ⛔ không phải thanh tên ⇒ thu thì phải thu cùng. */
+  .o-chat.thu-khung .than,
+  .o-chat.thu-khung .nhac-phien { display: none; }
+
+  /* 🔴 HAI LỖI PHÉP ĐO BẮT ĐƯỢC ở bản đầu — ghi lại vì cả hai đều «đúng lý thuyết mà sai thật»:
+     · bố cục 1 ô: nới hàng thành `auto` mà ô vẫn 729px — GIẢM 0%. Vì lưới mặc định
+       `align-content:stretch` ⇒ MỘT hàng `auto` vẫn bị kéo căng hết khung.
+     · bố cục 4 ô: ô thu xuống 0px ⇒ `.o-chat{overflow:hidden}` XÉN LUÔN thanh tên
+       ⇒ Owner MẤT NÚT để mở lại. Thu mà mất đường quay lại là hỏng nặng hơn ⛔ không thu.
+     ⇒ Vá gốc: ô đã thu ⛔ KHÔNG được kéo giãn (`align-self:start`) và lưới ⛔ không kéo căng
+       hàng (`align-content:start`); chiều cao ô = đúng chiều cao thanh tên. */
+  .o-chat.thu-khung { min-height: 0; align-self: start; }
+
+  .luoi:has(.o-chat.thu-khung) {
+    grid-template-rows: auto;        /* nới (a) bc-1 */
+    grid-auto-rows: auto;            /* nới (b) bc-2/bc-4 và (c) toan-man */
+    align-content: start;            /* ⛔ không kéo căng hàng cho đầy khung */
+  }
+
+  /* sàn 320px xuống CHÍNH Ô ⇒ ô CHƯA thu vẫn đủ cao để đọc */
+  .luoi:has(.o-chat.thu-khung) .o-chat:not(.thu-khung) { min-height: 320px; }
+}
