@@ -576,7 +576,7 @@
    📱 Khung cuộn riêng: bảng rộng CUỘN TRONG NÓ, ⛔ không đẩy cả ô chat
    (bài học «mép trái biến mất» trên máy gập). */
 .cuon-bang{overflow-x:auto;margin:8px 0;-webkit-overflow-scrolling:touch}
-.bang-md{border-collapse:collapse;font-size:.94em;min-width:100%}
+.bang-md{border-collapse:collapse;font-size:.94em;width:100%;max-width:100%;table-layout:auto}
 .bang-md th,.bang-md td{
   border:1px solid var(--vien-2);padding:5px 9px;vertical-align:top;
   white-space:normal;overflow-wrap:anywhere;
@@ -777,3 +777,18 @@
    Cặp với nút ☰ mở danh bạ: có đường ĐI thì phải có đường VỀ. */
 .nut-ve-chat{display:none;flex:none;margin-left:10px}
 @media (max-width:1040px){ .nut-ve-chat{display:inline-flex} }
+
+
+/* ═══ 🛡 CHẶN TRÀN NHIỀU LỚP trong bong bóng (18/08/2026) ═══
+   Owner: «ô trả lời bị tràn bên phải che mất chữ».
+   🔴 Gốc: `.bang-md` đặt `min-width:100%` — cái đó CHO PHÉP bảng rộng HƠN khung,
+      chỉ chặn nhỏ hơn. Bảng nở ⇒ đẩy bong bóng ⇒ chữ bị đẩy khỏi mép phải.
+      `overflow-wrap:anywhere` chỉ cứu CHỮ, ⛔ không cứu được BẢNG.
+   ⇒ Đổi sang `width:100%` (ép bằng khung, ô tự xuống dòng) và chặn thêm ba lớp dưới,
+     vì một lớp hỏng là chữ biến mất mà ⛔ không ai báo. */
+.dong-tin{min-width:0}                    /* flex item ⛔ không co được nếu thiếu dòng này */
+.bong{max-width:100%}
+.bong .cuon-bang{max-width:100%}          /* khung cuộn của bảng ⛔ không được nở theo bảng */
+.bong pre{max-width:100%}                 /* khối mã cũng vậy */
+.bong table{max-width:100%}
+.bong img,.bong svg{max-width:100%;height:auto}
