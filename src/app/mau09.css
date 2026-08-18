@@ -751,3 +751,14 @@
 
 /* 👑 → icon vương miện của bộ (Owner 17/08). Căn theo dòng chữ để ⛔ không nhảy chân chữ. */
 .vuong-mien{vertical-align:-2px;margin-right:3px;color:var(--vang-sang);flex:none}
+
+
+/* 🔗 Liên kết trong câu trả lời (17/08/2026 · claude-phong-ban-pm).
+   📱 overflow-wrap: URL dài phải NGẮT ĐƯỢC, ⛔ không được đẩy rộng bong bóng —
+      đúng bài học «mép trái biến mất» trên máy gập. */
+.bong a.lien-md{
+  color:var(--vang-sang);text-decoration:underline;text-underline-offset:2px;
+  overflow-wrap:anywhere;text-decoration-thickness:1px;
+}
+.bong a.lien-md:hover{color:#ffd98a;text-decoration-thickness:2px}
+.bong a.lien-md:active{opacity:.8}

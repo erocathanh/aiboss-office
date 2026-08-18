@@ -71,6 +71,42 @@ function dungBang(s: string): string {
   return ra.join('\n');
 }
 
+/**
+ * 🔗 Bọc LIÊN KẾT thành thẻ bấm được (Owner 17/08/2026).
+ *
+ * ⚠️ LUẬT NHÀ §G (RULES-BUILD-WEB) — ⛔ ĐỪNG bỏ, nó sinh từ ca hỏng thật 11/8:
+ *    Link MỞ APP kiểu scheme (`zalo.me` · `zalo://` `fb://` `tg://` `whatsapp://` `zoomus://`)
+ *    ⛔ TUYỆT ĐỐI KHÔNG mở tab mới. Lý do đo được: trình duyệt mở tab rỗng rồi mới nhận
+ *    302 sang scheme app; tab rỗng ⛔ không đi được ⇒ nó ĐÓNG và ném người dùng về một
+ *    tab `_blank` khác — nhìn y hệt "bấm nhầm nút". Máy đá về, ⛔ không phải người bấm sai.
+ *    ⇒ Mấy link đó mở CÙNG TAB. Link http thường thì tab mới bình thường.
+ *    (Đo 11/8: wa.me · m.me · fb.me · t.me trả http thật ⇒ tab mới OK. ⛔ ĐỪNG suy theo họ.)
+ *
+ * 🔒 An toàn: CHỈ nhận http/https/mailto. `javascript:` `data:` bị bỏ qua — ghế có toàn
+ *    quyền chạy lệnh, câu trả lời của nó ⛔ không được biến thành đường chạy mã trong trang.
+ */
+const MO_APP = /^(?:https?:\/\/(?:www\.)?zalo\.me\/|zalo:|fb:|tg:|whatsapp:|zoomus:)/i;
+
+function theLien(url: string, chu: string): string {
+  // ⚠️ Chuỗi đã THOÁT HTML trước đó ⇒ `&` đang là `&amp;`, giữ nguyên là đúng cho thuộc tính.
+  const sach = url.trim();
+  if (!/^(https?:\/\/|mailto:)/i.test(sach)) return chu;   // ⛔ chặn javascript:/data:
+  const cungTab = MO_APP.test(sach);
+  const dat = cungTab ? '' : ' target="_blank" rel="noopener noreferrer"';
+  const nhac = cungTab ? ' title="Mở app — cùng tab theo luật §G"' : '';
+  return `<a href="${sach}"${dat}${nhac} class="lien-md">${chu}</a>`;
+}
+
+/**
+ * Áp một phép biến đổi CHỈ lên phần NGOÀI khối mã.
+ * ⚠️ Bắt buộc: URL nằm trong `<pre>`/`<code>` là MÃ để đọc, ⛔ không phải link để bấm.
+ */
+function ngoaiKhoiMa(s: string, bien: (x: string) => string): string {
+  return s.split(/(<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>)/)
+    .map((phan) => (phan.startsWith('<pre>') || phan.startsWith('<code>') ? phan : bien(phan)))
+    .join('');
+}
+
 export function dungMarkdown(tho: string): string {
   if (!tho) return '';
   let s = thoat(tho);
@@ -84,6 +120,17 @@ export function dungMarkdown(tho: string): string {
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>');
   // Tiêu đề ##…
   s = s.replace(/^#{1,4}\s+(.+)$/gm, '<b class="tieu-md">$1</b>');
+
+  // 🔗 Liên kết — SAU khối mã (⇒ URL trong mã ⛔ không thành link) và TRƯỚC bảng/danh sách
+  s = ngoaiKhoiMa(s, (t) => t
+    // [chữ](url) — kiểu markdown
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, (_m, chu, url) => theLien(url, chu))
+    // URL trần — ⛔ đừng nuốt dấu câu cuối câu (. , ; : ) ] » ") vào link
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)\]]+)/g, (_m, truoc, url) => {
+      const duoi = url.match(/[.,;:!?)\]»"']+$/);
+      const sach = duoi ? url.slice(0, -duoi[0].length) : url;
+      return truoc + theLien(sach, sach) + (duoi ? duoi[0] : '');
+    }));
 
   // 📊 Bảng — TRƯỚC danh sách và TRƯỚC bước đổi xuống dòng
   s = dungBang(s);
