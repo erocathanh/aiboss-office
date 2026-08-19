@@ -175,7 +175,32 @@ export function dsPhien(
 export interface TinLichSu {
   ai: 'toi' | 'ho';
   chu: string;
+  /** Chuỗi HIỂN THỊ "22:11". ⛔ Đừng dùng để tính toán — xem `luc`. */
   gio: string;
+  /**
+   * 🕐 MỐC THẬT (epoch ms) — thêm 19/08/2026 (việc ②A).
+   *
+   * Vì sao cần: `gio` là CHUỖI "22:11", ⛔ không phải mốc. Muốn biết bong bóng thuộc
+   * NGÀY nào thì so chuỗi ⛔ không ra — và ca 23:59 → 00:01 thì HỎNG chắc chắn.
+   *
+   * ⚠️ TUỲ CHỌN, và phải giữ tuỳ chọn: đo tệp phiên thật (1.364 dòng) có **157 dòng
+   *    ⛔ KHÔNG có `timestamp`** (11,5%). Ép kiểu bắt buộc là hoặc ném lỗi, hoặc phải
+   *    BỊA một mốc — bịa thì dữ liệu sai mà số đo vẫn đẹp.
+   * 📌 `gio` GIỮ NGUYÊN, ⛔ không bỏ: bong bóng cũ trong bộ nhớ ⛔ không vỡ, và giao diện
+   *    ⛔ chưa đổi một ly nào ở bước này.
+   */
+  luc?: number;
+}
+
+/**
+ * Mốc ISO → epoch ms. Trả `undefined` cho MỌI ca ⛔ không chắc chắn.
+ * ⛔ ĐỪNG trả `Date.now()` khi thiếu `ts` — đó là BỊA, và nó làm hỏng chính phép
+ * đối chứng dương của việc này («tin ⛔ không có luc phải > 0»).
+ */
+function mocMs(ts?: string): number | undefined {
+  if (!ts) return undefined;
+  const t = Date.parse(ts);
+  return Number.isNaN(t) ? undefined : t;
 }
 
 /** Đọc LỊCH SỬ THẬT của một phiên — ⛔ không phải hội thoại mẫu. */
@@ -203,9 +228,9 @@ export async function lichSuPhien(maNhanSu: string, maPhien: string): Promise<Ti
     if (!chu) continue;
 
     if (j.type === 'user' && j.userType === 'external') {
-      ra.push({ ai: 'toi', chu, gio: gioNgan(j.timestamp) });
+      ra.push({ ai: 'toi', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
     } else if (j.type === 'assistant') {
-      ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp) });
+      ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
     }
   }
   return ra;

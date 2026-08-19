@@ -36,6 +36,14 @@ interface TomTatPhien {
 interface Tin {
   ai: 'toi' | 'ho'; chu: string; gio: string; loi?: boolean;
   /**
+   * 🕐 MỐC THẬT (epoch ms) — việc ②A, 19/08/2026.
+   * `gio` là chuỗi HIỂN THỊ "22:11" ⇒ ⛔ không suy ra được NGÀY. Ca 23:59 → 00:01 hỏng chắc.
+   * ⚠️ TUỲ CHỌN: 11,5% dòng trong tệp phiên thật ⛔ KHÔNG có `timestamp`.
+   *    Bong bóng cũ đang nằm trong bộ nhớ cũng ⛔ không có ⇒ mọi chỗ ĐỌC phải chịu được `undefined`.
+   * 📌 Bước này CHỈ thêm dữ liệu — giao diện ⛔ KHÔNG đổi một ly (cổng ③ của việc ②A).
+   */
+  luc?: number;
+  /**
    * 📍 Vị trí KẾT THÚC của từng mẩu máy chủ bắn về (Owner 17/08/2026:
    * «bắn mẩu nhỏ mới lên cần thêm xuống dòng cho tôi để biết mẩu mới»).
    * Giữ RIÊNG, ⛔ không nhét ký tự lạ vào `chu` — để tắt chế độ này là chữ sạch ngay,
@@ -695,7 +703,7 @@ export default function UngDung({
       // ⛔ Câu do ghế khác đánh thức thì ⛔ KHÔNG được xoá bản nháp Owner đang gõ dở.
       ...(tuGo ? { soan: '' } : {}),
       chiPhi: null, token: null, dangChay: true, matKetNoi: false,   // gửi được ⇒ đèn về xanh
-      tin: [...cu.tin, { ai: 'toi', chu: cauHoi, gio: gioBayGio(), ...(tuAi ? { tu_ai: tuAi } : {}) }],
+      tin: [...cu.tin, { ai: 'toi', chu: cauHoi, gio: gioBayGio(), luc: Date.now(), ...(tuAi ? { tu_ai: tuAi } : {}) }],
     }));
 
     // ⚠️ Hàm cập nhật phải THUẦN — mọi thứ nó cần đều đọc từ `cu`, ⛔ không đọc cờ bên ngoài.
@@ -706,7 +714,7 @@ export default function UngDung({
         if (cuoi && cuoi.ai === 'ho' && cuoi.dang) {
           n[n.length - 1] = { ...cuoi, chu: cuoi.chu + c, ranh: [...mocMau] };
         } else {
-          n.push({ ai: 'ho', chu: c, gio: gioBayGio(), dang: true, ranh: [...mocMau] });
+          n.push({ ai: 'ho', chu: c, gio: gioBayGio(), luc: Date.now(), dang: true, ranh: [...mocMau] });
         }
         return { tin: n };
       });
@@ -787,7 +795,7 @@ export default function UngDung({
       if (khoCho.length > 0) { veChu(khoCho); khoCho = ''; }
     };
     const themLoi = (chu: string) => {
-      capNhat(i, (cu) => ({ tin: [...cu.tin, { ai: 'ho', chu, gio: gioBayGio(), loi: true }] }));
+      capNhat(i, (cu) => ({ tin: [...cu.tin, { ai: 'ho', chu, gio: gioBayGio(), luc: Date.now(), loi: true }] }));
     };
 
     huyLuong(i);
