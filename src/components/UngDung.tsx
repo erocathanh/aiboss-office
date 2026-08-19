@@ -220,6 +220,32 @@ export default function UngDung({
     Array.from({ length: SO_O }, (_, i) => (i === 0 ? { ...O_TRONG, ns: ongTrum } : { ...O_TRONG })),
   );
   const [boCuc, datBoCuc] = useState<1 | 2 | 4>(1);
+
+  /**
+   * 📱 MÁY CẢM ỨNG hay máy có BÀN PHÍM RỜI? (Owner 18/08: «cần biến nó thành xuống hàng
+   * vì có nút gửi rồi»).
+   *
+   * 🕳 GỐC ĐO ĐƯỢC: điều kiện cũ là `Enter && !e.shiftKey` ⇒ gửi. Điện thoại
+   *    ⛔ KHÔNG CÓ phím Shift khi gõ ⇒ `!e.shiftKey` LUÔN đúng ⇒ Enter LUÔN gửi,
+   *    và Owner ⛔ không có cách nào xuống dòng. Trên máy tính thì Shift+Enter vẫn xuống
+   *    dòng nên lỗi này ⛔ không lộ ra ở đó.
+   *
+   * ⚠️ ⛔ ĐỪNG tính bằng `navigator.userAgent` — nó nói MÁY GÌ, ⛔ không nói CÁCH NHẬP.
+   *    `pointer: coarse` hỏi đúng câu cần hỏi: ngón tay hay con trỏ.
+   * ⚠️ Khởi tạo `false` và chỉ đổi trong `useEffect` ⇒ lần dựng ĐẦU ở máy chủ và ở trình
+   *    duyệt GIỐNG NHAU, ⛔ không vỡ bước ráp lại (hydration). Đọc `matchMedia` ngay lúc
+   *    dựng là lỗi ráp-lại kinh điển.
+   * 🔁 Có nghe `change`: máy gập / máy có cả chuột lẫn cảm ứng đổi kiểu giữa chừng được.
+   */
+  const [camUng, datCamUng] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const doLai = () => datCamUng(mq.matches);
+    doLai();
+    mq.addEventListener('change', doLai);
+    return () => mq.removeEventListener('change', doLai);
+  }, []);
   const [tieuDiem, datTieuDiemThuan] = useState(0);
   const [nhacO1, datNhacO1] = useState('');
   /**
@@ -1567,7 +1593,12 @@ export default function UngDung({
                           onChange={(e) => capNhat(i, { soan: e.target.value })}
                           onInput={(e) => tuCao(e.currentTarget)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gui(i); }
+                            if (e.key !== 'Enter') return;
+                            // 📱 Máy cảm ứng: Enter là XUỐNG DÒNG. Gửi đã có nút Gửi ngay cạnh.
+                            if (camUng) return;
+                            // 💻 Máy có bàn phím rời: giữ nguyên nếp cũ — Enter gửi, Shift+Enter xuống dòng.
+                            if (e.shiftKey) return;
+                            e.preventDefault(); gui(i);
                           }}
                           /**
                            * 🔴 ⛔ ĐÃ BỎ `disabled={o.dangChay}` (17/08/2026).
@@ -1579,7 +1610,9 @@ export default function UngDung({
                           /* Ô hẹp thì lời nhắc dài sẽ xuống dòng rồi bị cắt cụt — rút gọn. */
                           placeholder={o.dangChay
                             ? 'Đang trả lời — cứ gõ, gửi là xếp hàng'
-                            : boCuc === 1 ? `Nhắn cho ${o.ns.nhan}… (Enter để gửi)` : `Nhắn cho ${o.ns.nhan}…`}
+                            : boCuc === 1 && !camUng
+                              ? `Nhắn cho ${o.ns.nhan}… (Enter để gửi)`
+                              : `Nhắn cho ${o.ns.nhan}…`}
                         />
                         {/**
                           * 🛑 NÚT DỪNG — Owner 18/08: «nút stop hiện ngay sau khi bấm nút gửi
