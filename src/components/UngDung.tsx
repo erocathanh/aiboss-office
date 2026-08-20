@@ -108,6 +108,40 @@ const BO_MARKETING: string[] = [
   'claude-cskh', 'claude-sales', 'claude-web-demo',
 ];
 
+/**
+ * 🎛 BỘ GHẾ DỰNG SẴN — «Vận hành» (Owner 20/08).
+ *
+ * 🔴 ĐỌC KỸ MỘT CHỮ: «ghế hiện tại» ở đây là **ẢNH CHỤP**, ⛔ KHÔNG phải «động».
+ *    Mục «Ghế hiện tại» vốn đã ĐỘNG (bộ Owner đang xếp, được cất lại khi đổi sang bộ khác).
+ *    Nếu bộ này cũng lấy động thì Owner có **hai nút làm y hệt một việc**.
+ *    ⇒ Chụp bộ ghế lúc 10:49 20/08 rồi ĐÓNG CỨNG, giống hệt cách `BO_MARKETING` làm.
+ *
+ * ⚠️ Ô 5-6 (`claude-zalo-bot` · `claude-chat-channels`) ⛔ KHÔNG có hồ sơ `soul` và
+ *    ⛔ không có `~/<ghế>/CLAUDE.md` ⇒ chạy được nhưng ⛔ KHÔNG có linh hồn riêng.
+ *    📌 Đó là TRẠNG THÁI THẬT Owner xin chụp ⇒ ⛔ ĐỪNG «sửa cho đẹp» bằng cách thay ghế khác.
+ *    Vì sao vẫn nạp được: `POST /api/o` chỉ đòi `timNhanSu()` (có trong `nhan-su.json` là qua),
+ *    còn `spawn` cần THƯ MỤC làm chỗ đứng — cả sáu đều có. Và ô 5-6 ĐANG chạy thật.
+ */
+const BO_VAN_HANH: string[] = [
+  'claude-eroca-boss', 'claude-aiboss-app-pm', 'claude-phong-ban-pm',
+  'claude-aiboss-app-exe', 'claude-zalo-bot', 'claude-chat-channels',
+];
+
+/**
+ * 🔴 Bộ đang xếp có PHẢI một bộ dựng sẵn ⛔ không?
+ *
+ * 🕳 LỖI PHÉP ĐO BẮT ĐƯỢC (20/08, khi thêm bộ «Vận hành»): `napBoGhe` cất bộ cũ MỖI LẦN
+ *    Owner bấm một bộ dựng sẵn ⇒ bấm hai bộ liên tiếp là **bộ RIÊNG của Owner bị ghi đè
+ *    bởi bộ dựng sẵn trước đó**, và «Ghế hiện tại» trả về bộ dựng sẵn — ⛔ KHÔNG phải đội
+ *    Owner đang ngồi. Đo thật: Vận hành → Marketing → Vận hành → «Ghế hiện tại»
+ *    ⇒ ra bộ MARKETING. Đội thật của Owner mất, ⛔ không có đường về.
+ *
+ * ⇒ CHỈ cất khi bộ đang xếp **⛔ KHÔNG phải** bộ dựng sẵn. Nhờ vậy «Ghế hiện tại» luôn
+ *   là đội THẬT của Owner, bấm qua lại bao nhiêu bộ cũng ⛔ mất.
+ */
+const LA_BO_DUNG_SAN = (ten: (string | null)[]): boolean =>
+  [BO_MARKETING, BO_VAN_HANH].some((bo) => bo.every((x, i) => ten[i] === x));
+
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
 // Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
 const ICON_SO_O = [NumberOne, NumberTwo, NumberThree, NumberFour, NumberFive, NumberSix];
@@ -648,8 +682,12 @@ export default function UngDung({
     if (luuBoCu) {
       const cu: CapGhe[] = dsORef.current.slice(0, SO_O)
         .map((o) => ({ ten: o.ns?.ten ?? null, phien: o.phienHienTai ?? null }));
-      datBoGheCu(cu);
-      try { localStorage.setItem(KHOA_BO_GHE_CU, JSON.stringify(cu)); } catch { /* ⛔ không lưu được thì thôi */ }
+      // 🔴 ⛔ ĐỪNG cất đè khi bộ đang xếp CHÍNH LÀ một bộ dựng sẵn — xem `LA_BO_DUNG_SAN`.
+      //    Cất đè = Owner bấm hai bộ liên tiếp là mất đội thật, ⛔ không có đường về.
+      if (!LA_BO_DUNG_SAN(cu.map((m) => m.ten))) {
+        datBoGheCu(cu);
+        try { localStorage.setItem(KHOA_BO_GHE_CU, JSON.stringify(cu)); } catch { /* ⛔ không lưu được thì thôi */ }
+      }
     }
 
     doiBoCuc(6);
@@ -1369,6 +1407,18 @@ export default function UngDung({
                   >
                     <Crown size={15} weight={DAM_ICON} aria-hidden="true" />
                     Phòng Marketing — 6 ô
+                  </button>
+                  {/* 🎛 «Vận hành» — ẢNH CHỤP bộ ghế 10:49 20/08, ⛔ KHÔNG lấy động
+                      (lấy động thì trùng y hệt mục «Ghế hiện tại» ở trên).
+                      ♻️ Dùng ĐÚNG `napBoGhe` của bộ Marketing — cùng bốn chốt, cùng đường ghi sổ.
+                      ⛔ Đẻ đường song song thì lần sau sửa một chỗ, chỗ kia âm thầm lệch. */}
+                  <button
+                    className="muc-menu" type="button" role="menuitem"
+                    title={BO_VAN_HANH.join(' · ')}
+                    onClick={() => { void napBoGhe(BO_VAN_HANH.map((t) => ({ ten: t, phien: null })), true); }}
+                  >
+                    <List size={15} weight={DAM_ICON} aria-hidden="true" />
+                    Vận hành — 6 ô
                   </button>
                 </div>
               )}
