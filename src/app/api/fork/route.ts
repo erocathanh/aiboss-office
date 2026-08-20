@@ -4,9 +4,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { CAU_HINH } from '@/lib/cau-hinh';
 import { timNhanSu } from '@/lib/nhan-su';
-import { thuMucAgent } from '@/lib/doc-phien';
+import { thuMucAgent, mocTepPhien } from '@/lib/doc-phien';
 import { themMatXich, khoCua, doTep } from '@/lib/goc-tich';
-import { datO } from '@/lib/kho-phien';
+import { datO, ghiMocKetThuc } from '@/lib/kho-phien';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -111,6 +111,32 @@ export async function POST(req: NextRequest) {
 
   // ⑤ ô này trỏ sang phiên MỚI
   datO(maO, maNhanSu, maMoi);
+
+  /**
+   * 🔑 KHAI «app này VỪA SỞ HỮU và VỪA GHI tệp phiên mới» ⇒ mở CỬA THA THỨ BA
+   *    (`doc-phien.ts` → `dangChay`, vế `if (mocKetThucCuaTa !== null) return false`).
+   *
+   * 🕳 ⛔ KHÔNG có hai dòng này thì Owner bị chặn OAN 5 PHÚT sau MỖI lần fork
+   *    (ca thật 20/08, dính 2/2 lần). Đường đi: `datO` đổi sang mã phiên MỚI ⇒
+   *    `kho-phien.ts:62` cố ý xoá mốc (đúng cho ca ĐỔI GHẾ) ⇒ ô có mã mới mà mốc NULL
+   *    ⇒ cửa 3 đóng; tệp fork vừa chép nên mtime MỚI ⇒ cửa 2 cũng đóng ⇒ CHẶN.
+   * 📌 FORK là đường DUY NHẤT sinh ra tệp VỪA CÓ NỘI DUNG VỪA MỚI. Ba đường kia đều thoát:
+   *    phiên mới (⛔ chưa có tệp) · đổi ghế (tệp cũ) · đóng ô (⛔ không có phiên).
+   *    ⇒ Vá ĐÚNG chỗ này, ⛔ ĐỪNG sửa `datO`/`kho-phien`/ngưỡng 5 phút cho «tổng quát».
+   *
+   * ⚠️ `mocTepPhien`, ⛔ TUYỆT ĐỐI KHÔNG `Date.now()`: `moc_ket_thuc` theo định nghĩa là
+   *    MỐC SỬA TỆP, ⛔ không phải mốc đồng hồ (`chat/route.ts:231` cũng dùng hàm này).
+   *    Trộn hai loại số vào một ô thì hôm nay ⛔ ai so nên ⛔ lộ — ngày nào có người
+   *    thêm phép so, nó SAI ÂM THẦM.
+   *
+   * 🕳 KHE HỞ bản vá này MỞ RA — ghi ra để người sau biết chỗ mà nghi, ⛔ giấu:
+   *    mở cửa 3 ⇒ ô vừa fork MẤT lớp che của cửa 2 trong 5 phút đầu, chỉ còn cửa 1 (`ps`).
+   *    `ps` hụt khi: terminal vừa `exec` chưa hiện trong bảng (vài trăm ms — hẹp) HOẶC
+   *    `claude` đang chạy rồi TỰ ĐỔI mã phiên bên trong nên dòng lệnh vẫn mang mã CŨ (rộng hơn).
+   *    Diện: CHỈ ô vừa fork, CHỈ 5 phút đầu. Chấp nhận được — đổi lấy việc Owner dùng được ngay.
+   */
+  const mocMoi = mocTepPhien(maNhanSu, maMoi);
+  if (mocMoi !== null) ghiMocKetThuc(maO, mocMoi);
 
   return Response.json({
     ma_moi: maMoi,

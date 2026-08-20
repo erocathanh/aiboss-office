@@ -319,6 +319,16 @@ export function dangChay(
    * Owner bị chặn bằng câu "đang chạy ở terminal khác", mà terminal đó ⛔ KHÔNG hề
    * tồn tại. Owner đứng trước máy quay, ghế câm.
    *
+   * 🔴 LẦN THỨ HAI — 20/08, ca FORK. Cùng bộ canh này, cùng kiểu «chặn oan», khác đường vào:
+   *    fork chép tệp gốc sang mã mới ⇒ tệp VỪA CÓ NỘI DUNG VỪA CÓ mtime MỚI TINH,
+   *    mà `datO` đổi mã phiên nên `moc_ket_thuc` bị xoá về null (`kho-phien.ts:62` —
+   *    cố ý, và ĐÚNG cho ca đổi ghế). ⇒ cửa 2 chặn vì mtime mới, cửa 3 chặn vì mốc null.
+   *    Owner fork xong ⛔ gõ được câu nào trong 5 phút. Nguyên văn: «⛔ không vá tôi ⛔ resume được».
+   *    ⇒ Đã vá tại `api/fork/route.ts` (khai mốc ngay sau `datO`), ⛔ KHÔNG nới ngưỡng ở đây.
+   * 📌 Hai lần rồi. Lần thứ ba, ai đọc tới đây thì nhớ: bộ canh này chỉ có BẰNG CHỨNG
+   *    GIÁN TIẾP (mtime + sổ). Thêm đường nào sinh ra tệp «vừa mới vừa có nội dung»
+   *    là lại chặn oan — hãy hỏi «đường mới này có khai mốc ⛔ không?» TRƯỚC KHI ship.
+   *
    * 📌 Vì sao chậm: ta lấy mốc ngay khi vòng đọc kết thúc, nhưng `claude` nhận
    *    SIGTERM ⛔ không chết ngay — nó còn xả nốt bản ghi (kể cả dòng
    *    «[Request interrupted by user]»). Lấy mốc lúc đó = **đo trước khi việc xong**.
