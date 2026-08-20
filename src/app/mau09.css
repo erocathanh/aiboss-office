@@ -792,3 +792,28 @@
 .bong pre{max-width:100%}                 /* khối mã cũng vậy */
 .bong table{max-width:100%}
 .bong img,.bong svg{max-width:100%;height:auto}
+
+/* ═══════════════════════ BỐ CỤC 6 Ô (Owner 20/08) ═══════════════════════
+   Owner: «giao diện 6 ô thì sẽ ẩn 2 cột menu bên trái đi để có thêm 2 ô».
+   🔴 BẪY ⛔ KHÔNG NẰM TRONG ĐỀ BÀI: `.luoi.bc-4` xưa nay ⛔ KHÔNG có luật ẩn ô thừa —
+      vì SO_O=4 nên ⛔ chẳng có ô thứ 5 để mà ẩn. Nâng SO_O lên 6 thì bố cục 4 ô
+      sẽ HIỆN CẢ 6. Phải thêm luật ẩn cho bc-4, ⛔ đừng chỉ thêm bc-6. */
+.luoi.bc-4 .o-chat:nth-child(n+5){display:none}
+.luoi.bc-6{grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr}
+
+/* Giấu hai cột trái CHỈ ở bố cục 6 — lấy chỗ cho 2 ô thêm vào. */
+.khung.bc-6{grid-template-columns:1fr}
+.khung.bc-6 .cot-1,.khung.bc-6 .cot-2{display:none}
+
+/* 🔴 GIẤU CỘT = MẤT LỐI VÀO DANH BẠ. Nút ☰ xưa nay chỉ hiện ở màn hẹp
+   (`.nut-danh-ba{display:none}` + bật lại trong media). Ở bố cục 6 phải bật nó
+   trên MỌI bề rộng, ⛔ nếu không Owner ⛔ không còn đường đổi người trong ô. */
+.khung.bc-6 .nut-danh-ba{display:inline-flex}
+
+/* Màn hẹp: 3 cột × 2 hàng quá chật ⇒ đổi thành 2 cột × 3 hàng. */
+@media (max-width:1100px){
+  .luoi.bc-6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
+}
+@media (max-width:560px){
+  .luoi.bc-6{grid-template-columns:1fr;grid-template-rows:repeat(6,1fr)}
+}

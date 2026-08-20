@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
  * Dùng bản `ssr` cho hợp Next. Độ đậm thống nhất `bold` — ⛔ đừng trộn nhiều độ đậm.
  */
 import {
-  NumberOne, NumberTwo, NumberThree, NumberFour, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
+  NumberOne, NumberTwo, NumberThree, NumberFour, NumberFive, NumberSix, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
   Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
   CaretUp, CaretDown, ArrowsClockwise,
 } from '@phosphor-icons/react/dist/ssr';
@@ -82,7 +82,7 @@ interface Tin {
  *   PHẢI cắt luồng ngay (`huyLuong`) — ⛔ đừng để luồng rác tích lại.
  * ==========================================================================*/
 
-const SO_O = 4;
+const SO_O = 6;   // 4 → 6 (Owner 20/08: bố cục 6 ô, giấu 2 cột trái)
 const maOCua = (i: number) => `o-${i + 1}`;
 /**
  * 🔔 Nhịp thăm dò cổng đánh thức. 5 giây = giữa khoảng Owner chốt (4–6s).
@@ -91,10 +91,25 @@ const maOCua = (i: number) => `o-${i + 1}`;
 const NHIP_THAM_DO_MS = 5_000;
 const KHOA_BO_CUC = 'phong-ban-ai.bo-cuc';
 const KHOA_TIEU_DIEM = 'phong-ban-ai.tieu-diem';
+const KHOA_BO_GHE_CU = 'phong-ban-ai.bo-ghe-cu';
+
+/**
+ * 🎛 BỘ GHẾ DỰNG SẴN — «Phòng Marketing» (Owner 20/08, cho lớp 19h30).
+ * Sáu ghế này là SÁU GHẾ DUY NHẤT có hồ sơ `soul` mà ⛔ không phải ghế nội bộ
+ * (`claude-phong-ban-pm` · `claude-aiboss-app-pm` · `claude-aiboss-app-exe`).
+ * ⇒ nạp vào ô là CHẠY THẬT được, ⛔ không phải ô trống.
+ * ⚠️ ⛔ ĐỪNG lấy từ `demo-man-hinh.ts` — tệp đó ⛔ KHÔNG chứa mã ghế nào, chỉ có nhãn nút.
+ * 👑 Ô 1 để `claude-eroca-boss` cho ĐÚNG SỔ, nhưng `datNguoi` vốn đã chặn đổi ô 1
+ *    ⇒ dòng này là để ĐỌC HIỂU, ⛔ không phải để ghi.
+ */
+const BO_MARKETING: string[] = [
+  'claude-eroca-boss', 'claude-marketing', 'claude-ketoan',
+  'claude-cskh', 'claude-sales', 'claude-web-demo',
+];
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
 // Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
-const ICON_SO_O = [NumberOne, NumberTwo, NumberThree, NumberFour];
+const ICON_SO_O = [NumberOne, NumberTwo, NumberThree, NumberFour, NumberFive, NumberSix];
 const DAM_ICON = 'bold' as const;   // ⛔ MỘT độ đậm cho cả dự án
 
 const MAU_PHONG = ['#c89425', '#5b8def', '#3fb27f', '#e0724a', '#9b6bd6', '#d94f70', '#4bb3c4'];
@@ -227,7 +242,7 @@ export default function UngDung({
   const [dsO, datDsO] = useState<OChat[]>(() =>
     Array.from({ length: SO_O }, (_, i) => (i === 0 ? { ...O_TRONG, ns: ongTrum } : { ...O_TRONG })),
   );
-  const [boCuc, datBoCuc] = useState<1 | 2 | 4>(1);
+  const [boCuc, datBoCuc] = useState<1 | 2 | 4 | 6>(1);
 
   /**
    * 📱 MÁY CẢM ỨNG hay máy có BÀN PHÍM RỜI? (Owner 18/08: «cần biến nó thành xuống hàng
@@ -245,6 +260,30 @@ export default function UngDung({
    *    dựng là lỗi ráp-lại kinh điển.
    * 🔁 Có nghe `change`: máy gập / máy có cả chuột lẫn cảm ứng đổi kiểu giữa chừng được.
    */
+  /* 🎛 Menu «Giao diện» — bộ ghế dựng sẵn (Owner 20/08) */
+  const [moMenuGD, datMoMenuGD] = useState(false);
+  /**
+   * 🔴 LƯU CẶP (ghế, phiên) — ⛔ KHÔNG chỉ lưu mã ghế.
+   * `claude-aiboss-app-pm` lần theo `/api/o` và bắt đúng chỗ tôi làm hụt:
+   *   POST { ma_o, ma_nhan_su: 'ghế MỚI', ma_phien: null }
+   *   → o/route.ts:56 chốt chống xoá CHỈ nổ khi CÙNG ghế ⇒ ca ĐỔI GHẾ nó ⛔ KHÔNG che
+   *   → kho-phien.ts đặt ma_phien = null ⇒ LIÊN KẾT PHIÊN CŨ BỊ XOÁ
+   * ⇒ lưu mỗi tên ghế thì «quay về» trả đúng TÊN mà ô RỖNG LỊCH SỬ — đúng vết đau 18/08.
+   */
+  type CapGhe = { ten: string | null; phien: string | null };
+  const [boGheCu, datBoGheCu] = useState<CapGhe[] | null>(null);
+  const [nhacGD, datNhacGD] = useState('');
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem(KHOA_BO_GHE_CU);
+      if (s) {
+        const j = JSON.parse(s) as unknown;
+        // ⛔ Bản lưu đời cũ là mảng CHUỖI — bỏ qua, ⛔ đừng khôi phục nửa vời rồi mất lịch sử.
+        if (Array.isArray(j) && j.every((x) => x && typeof x === 'object')) datBoGheCu(j as CapGhe[]);
+      }
+    } catch { /* hỏng thì coi như chưa lưu, ⛔ đừng để vỡ cả trang */ }
+  }, []);
+
   const [camUng, datCamUng] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -421,9 +460,9 @@ export default function UngDung({
     // Bố cục + tiêu điểm chỉ là chuyện giao diện ⇒ để ở localStorage.
     try {
       const bc = Number(localStorage.getItem(KHOA_BO_CUC));
-      if (bc === 1 || bc === 2 || bc === 4) datBoCuc(bc);
+      if (bc === 1 || bc === 2 || bc === 4 || bc === 6) datBoCuc(bc);
       const td = Number(localStorage.getItem(KHOA_TIEU_DIEM));
-      if (Number.isInteger(td) && td >= 0 && td < SO_O && td < (bc === 2 || bc === 4 ? bc : 1)) {
+      if (Number.isInteger(td) && td >= 0 && td < SO_O && td < (bc === 2 || bc === 4 || bc === 6 ? bc : 1)) {
         datTieuDiemThuan(td);
       }
     } catch { /* chế độ riêng tư → dùng mặc định */ }
@@ -479,7 +518,7 @@ export default function UngDung({
   }, [nhanSu, ongTrum, capNhat, napDsPhien, napLichSu, ghiO]);
 
   /* ---------- Đổi bố cục ---------- */
-  function doiBoCuc(bc: 1 | 2 | 4) {
+  function doiBoCuc(bc: 1 | 2 | 4 | 6) {
     datBoCuc(bc);
     try { localStorage.setItem(KHOA_BO_CUC, String(bc)); } catch { /* bỏ qua */ }
     if (tieuDiem >= bc) datTieuDiem(0);
@@ -490,10 +529,10 @@ export default function UngDung({
   useEffect(() => {
     function bam(e: KeyboardEvent) {
       const t = document.activeElement;
-      // ⛔ Đang gõ trong ô nhập thì số 1–4 là CHỮ, không phải phím tắt.
+      // ⛔ Đang gõ trong ô nhập thì số 1–6 là CHỮ, không phải phím tắt.
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key >= '1' && e.key <= '4') {
+      if (e.key >= '1' && e.key <= '6') {
         const i = Number(e.key) - 1;
         if (i < boCuc) { e.preventDefault(); datTieuDiem(i); }
       }
@@ -555,6 +594,83 @@ export default function UngDung({
     capNhat(i, { ...O_TRONG });
     await ghiO(i, null, null);
   }
+
+  /* ---------- 🎛 NẠP MỘT BỘ GHẾ vào 6 ô (menu «Giao diện») ----------
+   *
+   * Owner 20/08: một menu chọn giao diện — «ghế hiện tại» và «phòng marketing
+   * load sẵn các ghế vào các ô». Dùng cho lớp: cần cảnh 6 ô có ghế để quay.
+   *
+   * ♻️ DÙNG LẠI `datNguoi` + `dongO`, ⛔ KHÔNG viết đường ghi sổ mới.
+   *    Lý do quan trọng: `datNguoi` đã xử đúng phần khó nhất — nó **NỐI LẠI PHIÊN
+   *    GẦN NHẤT** của ghế mới rồi nạp lịch sử. ⇒ đổi ghế ⛔ KHÔNG mất lịch sử chat.
+   *    (Bẫy ④: tôi ĐỌC `ghiO`/`xoa_lien_ket` trước khi gõ. `ghiO(..., true)` chỉ được
+   *    gọi khi ghế mới ⛔ CHƯA có phiên nào nối được — đó là ý định THẬT, ⛔ không phải xoá mù.)
+   *
+   * 🪤 NĂM BẪY — bốn của PM, cái thứ NĂM tôi tự đo ra:
+   *   ① ⛔ Đè mất bộ Owner đang xếp ⇒ LƯU bộ cũ TRƯỚC khi nạp (cả localStorage để
+   *      tải lại trang vẫn quay về được).
+   *   ② Ô ĐANG CHẠY ⇒ BỎ QUA + NÓI RA, ⛔ đừng im lặng bỏ qua (đè là giết việc đang chảy).
+   *   ③ Nạp ghế = GHI SỔ Ô ⇒ sau khi nạp phải đọc lại sổ, so CẶP ô→ghế (⛔ không dùng md5).
+   *   ④ Phiên cũ ⇒ xem đoạn ♻️ trên.
+   *   ⑤ 🆕 `datNguoi` có chốt `trung`: ghế đã mở ở ô KHÁC thì nó chỉ CHUYỂN TIÊU ĐIỂM,
+   *      ⛔ KHÔNG nạp. Bộ Marketing có ghế trùng với bộ đang xếp nhưng KHÁC CHỖ
+   *      (vd `ketoan` đang ở ô 6, đích là ô 3) ⇒ chốt đó sẽ làm nạp HỤT MÀ ⛔ KHÔNG BÁO.
+   *      ⇒ phải DỌN mấy ô giữ ghế-đích-sai-chỗ TRƯỚC, rồi mới nạp.
+   */
+  const napBoGhe = useCallback(async (muc: CapGhe[], luuBoCu: boolean) => {
+    datMoMenuGD(false);
+    const ten = muc.map((m) => m.ten);
+
+    // ① B1 — CẤT bộ hiện tại (CẶP ghế+phiên) TRƯỚC KHI đụng vào bất cứ ô nào
+    if (luuBoCu) {
+      const cu: CapGhe[] = dsORef.current.slice(0, SO_O)
+        .map((o) => ({ ten: o.ns?.ten ?? null, phien: o.phienHienTai ?? null }));
+      datBoGheCu(cu);
+      try { localStorage.setItem(KHOA_BO_GHE_CU, JSON.stringify(cu)); } catch { /* ⛔ không lưu được thì thôi */ }
+    }
+
+    doiBoCuc(6);
+    await new Promise((r) => setTimeout(r, 80));   // để React vẽ xong 6 ô rồi mới nạp
+
+    const dangChay = new Set(
+      dsORef.current.map((o, k) => (o.dangChay ? k : -1)).filter((k) => k >= 0),
+    );
+
+    // ⑤ dọn ô đang giữ ghế thuộc bộ ĐÍCH nhưng SAI CHỖ — gỡ chốt `trung`
+    for (let k = 1; k < SO_O; k++) {
+      const dang = dsORef.current[k]?.ns?.ten;
+      if (!dang || dangChay.has(k)) continue;
+      if (dang !== ten[k] && ten.includes(dang)) await dongO(k);
+    }
+
+    const boQua: number[] = [];
+    for (let i = 1; i < SO_O; i++) {
+      if (dangChay.has(i)) { boQua.push(i + 1); continue; }   // ② ⛔ không đè ô đang chạy
+      const dich = ten[i] ?? null;
+      const dang = dsORef.current[i]?.ns?.ten ?? null;
+      if (dang === dich) continue;                            // đã đúng chỗ ⇒ ⛔ đừng đụng
+      if (!dich) { await dongO(i); continue; }
+      const n = nhanSu.find((x) => x.ten === dich);
+      if (!n) { boQua.push(i + 1); continue; }                // ghế ⛔ không có trong danh bạ
+      await datNguoi(i, n);
+
+      /* 🔴 NỐI ĐÚNG PHIÊN ĐÃ LƯU. `datNguoi` nối phiên GẦN NHẤT của ghế — đúng cho bộ
+         dựng sẵn, nhưng SAI cho «quay về»: ghế có nhiều phiên thì gần-nhất ⛔ chưa chắc
+         là phiên ô đó đang mở. ⇒ khôi phục phải chỉ ĐÍCH DANH.
+         An toàn: `/api/o` chỉ nhận phiên CÒN THẬT trong kho của ĐÚNG ghế đó (o/route.ts:37)
+         ⇒ phiên đã bị xoá thì máy chủ chặn, ⛔ không ghi bậy. */
+      const phienLuu = muc[i]?.phien ?? null;
+      if (phienLuu && dsORef.current[i]?.phienHienTai !== phienLuu) {
+        capNhat(i, { phienHienTai: phienLuu, chiPhi: null, token: null });
+        await ghiO(i, dich, phienLuu);
+        await napLichSu(i, dich, phienLuu);
+      }
+    }
+
+    datNhacGD(boQua.length
+      ? `Ô ${boQua.join(', ')} đang chạy — ⛔ chưa đổi. Xong việc rồi bấm lại.`
+      : '');
+  }, [nhanSu, datNguoi, doiBoCuc, capNhat, ghiO, napLichSu]);
 
   /* ---------- Bấm chọn một phiên trong danh sách của một ô ---------- */
   async function chonPhien(i: number, p: TomTatPhien) {
@@ -1048,7 +1164,7 @@ export default function UngDung({
         )}
       </header>
 
-      <div className="khung">
+      <div className={`khung bc-${boCuc}`}>
         {/* ===== Cột 1 — cây phòng ban ===== */}
         <aside className="cot cot-1">
           <div className="de-cot">Cơ cấu tổ chức</div>
@@ -1177,6 +1293,45 @@ export default function UngDung({
               </span>
             )}
             <div className="nhom-bo-cuc">
+              {/**
+                * 🎛 MENU «GIAO DIỆN» — bộ ghế dựng sẵn (Owner 20/08, cho lớp).
+                * Đặt trong `.nhom-bo-cuc` vì khối đó đã có `position:relative` (mau09:221)
+                * ⇒ menu xổ bám đúng chỗ, ⛔ không phải thêm vỏ bọc mới.
+                * ⛔ Mục «Ghế hiện tại» CHỈ hiện khi ĐÃ có bộ lưu — hiện một nút ⛔ không làm gì
+                *   thì tệ hơn ⛔ không có nút (đúng bài học nút ☰ chết sáng nay).
+                */}
+              <button
+                className={`nut-bc nut-gd${moMenuGD ? ' chon' : ''}`} type="button"
+                onClick={() => datMoMenuGD((v) => !v)}
+                title="Chọn bộ ghế dựng sẵn cho 6 ô"
+                aria-label="Menu giao diện" aria-expanded={moMenuGD}
+              >
+                Giao diện <CaretDown size={12} weight={DAM_ICON} aria-hidden="true" />
+              </button>
+              {moMenuGD && (
+                <div className="menu-xo menu-gd" role="menu">
+                  <button
+                    className="muc-menu" type="button" role="menuitem"
+                    disabled={!boGheCu}
+                    title={boGheCu
+                      ? boGheCu.map((m) => m.ten).filter(Boolean).join(' · ')
+                      : 'Chưa lưu bộ nào — bấm «Phòng Marketing» thì bộ đang xếp sẽ được cất lại'}
+                    onClick={() => { void napBoGhe(boGheCu ?? [], false); }}
+                  >
+                    <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
+                    {boGheCu ? 'Ghế hiện tại (bộ đã lưu)' : 'Chưa có bộ nào để quay về'}
+                  </button>
+                  <button
+                    className="muc-menu" type="button" role="menuitem"
+                    title={BO_MARKETING.join(' · ')}
+                    onClick={() => { void napBoGhe(BO_MARKETING.map((t) => ({ ten: t, phien: null })), true); }}
+                  >
+                    <Crown size={15} weight={DAM_ICON} aria-hidden="true" />
+                    Phòng Marketing — 6 ô
+                  </button>
+                </div>
+              )}
+              {nhacGD && <span className="nhan-mau" title={nhacGD}>{nhacGD}</span>}
               <button
                 className={`nut-bc${boCuc === 1 ? ' chon' : ''}`} type="button" data-bc="1"
                 onClick={() => doiBoCuc(1)}
@@ -1207,7 +1362,21 @@ export default function UngDung({
                   <line x1="9" y1=".8" x2="9" y2="13.2" />
                 </svg>
               </button>
-              <div className="goi-y-phim">Phím <b>1</b> · <b>2</b> · <b>3</b> · <b>4</b> — nhảy tiêu điểm sang ô tương ứng</div>
+              {/* 🆕 Bố cục 6 ô (Owner 20/08). Ở 6 ô thì GIẤU hai cột trái để lấy chỗ —
+                  xem `.khung.bc-6` trong mau09.css. Đường vào danh bạ giữ bằng nút ☰. */}
+              <button
+                className={`nut-bc${boCuc === 6 ? ' chon' : ''}`} type="button" data-bc="6"
+                onClick={() => doiBoCuc(6)}
+                title="6 ô — ba cột, hai hàng (ẩn hai cột trái để lấy chỗ)" aria-label="Bố cục 6 ô"
+              >
+                <svg viewBox="0 0 18 14" aria-hidden="true">
+                  <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
+                  <line x1="6.27" y1=".8" x2="6.27" y2="13.2" />
+                  <line x1="11.73" y1=".8" x2="11.73" y2="13.2" />
+                  <line x1=".8" y1="7" x2="17.2" y2="7" />
+                </svg>
+              </button>
+              <div className="goi-y-phim">Phím <b>1</b>…<b>6</b> — nhảy tiêu điểm sang ô tương ứng</div>
             </div>
           </div>
 

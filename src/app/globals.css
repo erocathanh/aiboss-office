@@ -267,3 +267,11 @@
    và ⛔ không có cách nào biết vì sao. Nhãn đã nói lý do — kiểu này để MẮT thấy trước khi chạm. */
 .muc-menu[disabled] { opacity: 0.42; cursor: default; }
 .muc-menu[disabled]:hover { background: none; color: inherit; }
+
+/* 🎛 Menu «Giao diện» — bộ ghế dựng sẵn (20/08/2026, việc gấp cho lớp).
+   Dùng lại `.menu-xo` + `.muc-menu` sẵn có ⇒ ⛔ không đẻ bộ kiểu thứ hai cho cùng một thứ. */
+.nut-gd {
+  width: auto; padding: 0 10px; gap: 5px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.menu-gd { min-width: 226px; }
