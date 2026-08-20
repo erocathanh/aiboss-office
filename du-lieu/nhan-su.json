@@ -47,9 +47,9 @@
     {
       "ten": "claude-eroca-boss",
       "phong": "dieu-hanh",
-      "vai": "Ông trùm",
-      "viet_tat": "ÔT",
-      "nhan": "ÔNG TRÙM",
+      "vai": "Tổng giám đốc",
+      "viet_tat": "TGĐ",
+      "nhan": "TỔNG GIÁM ĐỐC",
       "ghim": true,
       "soul": "/Users/erocathanh/idea/inbox/aiboss-business-os-org/demo-soul/soul-eroca-boss.md"
     },

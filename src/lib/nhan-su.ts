@@ -54,7 +54,7 @@ const thoTheoTen = new Map(THO.map((n) => [n.ten, n]));
 
 const DS: NhanSu[] = coNhan.map((n) => ({
   ten: n.ten,
-  // ⭐ Nhãn viết tay trong dữ liệu THẮNG nhãn máy sinh — «ÔNG TRÙM» phải hiện đúng chữ đó,
+  // ⭐ Nhãn viết tay trong dữ liệu THẮNG nhãn máy sinh — «TỔNG GIÁM ĐỐC» phải hiện đúng chữ đó,
   //    ⛔ không để bộ sinh nhãn dịch slug thành thứ khác.
   nhan: thoTheoTen.get(n.ten)?.nhan ?? n.nhan,
   ghim: thoTheoTen.get(n.ten)?.ghim === true,

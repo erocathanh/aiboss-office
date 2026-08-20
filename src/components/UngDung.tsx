@@ -187,7 +187,7 @@ interface OChat {
    */
   hangCho: string[];
   /**
-   * 🔽 THU KHUNG CHAT (Owner 18/08: «thêm nút thu khung chat ô 1 ÔNG TRÙM ở giao diện
+   * 🔽 THU KHUNG CHAT (Owner 18/08: «thêm nút thu khung chat ô 1 TỔNG GIÁM ĐỐC ở giao diện
    * mobile, sau khi thu sẽ đổi thành icon bấm để mở ra»).
    * ⛔ KHÔNG lưu localStorage: Owner vào app qua CẢ LAN lẫn Tailscale = HAI GỐC RIÊNG
    *    ⇒ mỗi đường nhớ một kiểu, rối hơn tiện. Đây là trạng thái NHÌN, mất là mất, ⛔ không sao.
@@ -267,7 +267,7 @@ export default function UngDung({
   nhanSu: NhanSu[];
   tong: { nhan_su: number; phong_ban: number; truong_phong: number };
 }) {
-  /* 👑 Ghế ghim (ÔNG TRÙM) — LUẬT CỨNG: ô 1 là nó, ở CẢ 3 chế độ. */
+  /* 👑 Ghế ghim (TỔNG GIÁM ĐỐC) — LUẬT CỨNG: ô 1 là nó, ở CẢ 3 chế độ. */
   const ongTrum = useMemo(() => nhanSu.find((n) => n.ghim) ?? null, [nhanSu]);
 
   const [phongMo, datPhongMo] = useState<string | null>(null);
@@ -394,7 +394,7 @@ export default function UngDung({
   const dsHien = useMemo(() => {
     const k = boDau(tuKhoa.trim());
     const loc = nhanSu.filter((n) => {
-      // 👑 Ghế ghim (ÔNG TRÙM) LỌT QUA MỌI BỘ LỌC PHÒNG BAN — nó là ghế trùm toàn quyền,
+      // 👑 Ghế ghim (TỔNG GIÁM ĐỐC) LỌT QUA MỌI BỘ LỌC PHÒNG BAN — nó là ghế trùm toàn quyền,
       //    ⛔ không thuộc riêng phòng nào. Vẫn chịu bộ lọc tìm kiếm để gõ tên là ra.
       if (n.ghim) return !k || n.tim.includes(k);
       if (phongChon && n.phong !== phongChon) return false;
@@ -552,7 +552,7 @@ export default function UngDung({
       const daDung = new Set<string>();
       for (let i = 0; i < SO_O; i++) {
         const ghi = so[maOCua(i)];
-        // 👑 Ô 1 LUÔN là ÔNG TRÙM — sổ ghi ai cũng KHÔNG đổi được điều đó.
+        // 👑 Ô 1 LUÔN là TỔNG GIÁM ĐỐC — sổ ghi ai cũng KHÔNG đổi được điều đó.
         const ten = i === 0 ? (ongTrum?.ten ?? null) : (ghi?.ma_nhan_su ?? null);
         if (!ten) continue;
         const ns = nhanSu.find((x) => x.ten === ten);
@@ -567,7 +567,7 @@ export default function UngDung({
           capNhat(i, { phienHienTai: ghi.ma_phien });
           void napLichSu(i, ten, ghi.ma_phien);
         } else if (!khopNguoi) {
-          // Ô 1 vừa bị ép về ÔNG TRÙM mà sổ đang ghi người khác → ghi lại cho khớp.
+          // Ô 1 vừa bị ép về TỔNG GIÁM ĐỐC mà sổ đang ghi người khác → ghi lại cho khớp.
           void ghiO(i, ten, null);
         }
       }
@@ -630,12 +630,12 @@ export default function UngDung({
   function chonNhanSu(n: NhanSu) {
     datAnKhu(false);
     if (tieuDiem === 0) {
-      // 👑 Ô 1 là ÔNG TRÙM. Có ô trống khác đang hiện thì dùng ô đó, không thì nói thẳng.
+      // 👑 Ô 1 là TỔNG GIÁM ĐỐC. Có ô trống khác đang hiện thì dùng ô đó, không thì nói thẳng.
       const trong = dsO.findIndex((o, k) => k > 0 && k < boCuc && !o.ns);
       if (trong === -1) {
         datNhacO1(boCuc === 1
-          ? 'Ô 1 là ÔNG TRÙM — bấm nút 2 ô / 4 ô để có chỗ cho agent khác'
-          : 'Ô 1 là ÔNG TRÙM — bấm vào ô 2/3/4 rồi chọn lại');
+          ? 'Ô 1 là TỔNG GIÁM ĐỐC — bấm nút 2 ô / 4 ô để có chỗ cho agent khác'
+          : 'Ô 1 là TỔNG GIÁM ĐỐC — bấm vào ô 2/3/4 rồi chọn lại');
         return;
       }
       void datNguoi(trong, n);
@@ -1556,7 +1556,7 @@ export default function UngDung({
                         />
                       </button>
                       {/**
-                        * 🔽 NÚT THU KHUNG — CHỈ ô 1 (ÔNG TRÙM), CHỈ màn hẹp (CSS lo phần ẩn/hiện).
+                        * 🔽 NÚT THU KHUNG — CHỈ ô 1 (TỔNG GIÁM ĐỐC), CHỈ màn hẹp (CSS lo phần ẩn/hiện).
                         * Owner: «sau khi thu sẽ đổi thành icon bấm để mở ra» ⇒ icon ĐỔI CHIỀU,
                         * ⛔ không phải hai nút. Đang mở → mũi tên LÊN (bấm là thu lên);
                         * đã thu → mũi tên XUỐNG (bấm là mở xuống).
@@ -1594,7 +1594,7 @@ export default function UngDung({
                         * gom nút đóng ô và mấy nút vừa đưa vào hồ sơ thành menu bên phải»).
                         * 📌 Nguyên tắc xếp: thanh giữ thứ bấm THƯỜNG XUYÊN, menu chứa thứ THỈNH THOẢNG.
                         * 👑 Ô 1 vẫn CÓ menu (còn cần ranh giới mẩu · danh sách phiên) — chỉ ⛔ không có
-                        *    mục «Đóng ô», vì ÔNG TRÙM luôn ngồi đó.
+                        *    mục «Đóng ô», vì TỔNG GIÁM ĐỐC luôn ngồi đó.
                         */}
                       <div className="boc-menu">
                         <button

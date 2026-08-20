@@ -16,7 +16,7 @@ export default function Trang() {
     viet_tat: n.viet_tat,
     tim: n.tim,
     // 👑 PHẢI mang sang giao diện — thiếu trường này thì UI ⛔ không biết ghế nào được ghim,
-    //    và ÔNG TRÙM rơi tuột xuống giữa danh sách (đo thật: vị trí 126/212).
+    //    và TỔNG GIÁM ĐỐC rơi tuột xuống giữa danh sách (đo thật: vị trí 126/212).
     //    ⛔ Đừng đưa `soul` ra đây — đường dẫn tệp là chuyện phía máy chủ.
     ghim: n.ghim ?? false,
   }));

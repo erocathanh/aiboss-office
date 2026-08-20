@@ -64,7 +64,7 @@ export const CAU_HINH = {
   /**
    * Trần tiền cho MỖI lượt. **0 = KHÔNG GIỚI HẠN** (Owner chốt 14/08/2026).
    *
-   * 🔴 Vì sao bỏ: trần 0,5 USD CẮT NGANG ghế ÔNG TRÙM giữa lúc nó đang rà tình hình —
+   * 🔴 Vì sao bỏ: trần 0,5 USD CẮT NGANG ghế TỔNG GIÁM ĐỐC giữa lúc nó đang rà tình hình —
    *    đo thật: một lượt «nắm tình hình» ăn 1.176.716 token, lượt sau 210.342 token
    *    rồi báo «Reached maximum budget ($0.5)». Việc chưa xong mà đã bị chặt.
    *
@@ -88,7 +88,7 @@ export const CAU_HINH = {
    *    đồng hồ còn được đặt lại (`chay-agent.ts` → `datLaiDongHo`), chạy bao lâu cũng được.
    *
    * 🔴 Vì sao đổi (14/08): bản cũ hẹn CỨNG 120 giây kể từ lúc sinh tiến trình. Đo tại
-   *    bản ghi ghế ÔNG TRÙM — hai lượt khác hẳn đề tài cùng chết ở **117 giây**, trong đó
+   *    bản ghi ghế TỔNG GIÁM ĐỐC — hai lượt khác hẳn đề tài cùng chết ở **117 giây**, trong đó
    *    có đúng câu MỞ MÀN của kịch bản quay. Ghế nặng (opus + nỗ lực cao nhất + nạp trọn
    *    luật nhà) đọc vài phút là bình thường; chính kịch bản ghi *«mỗi ô 30 giây–3 phút»*.
    *    ⇒ Trần cứng biến việc-chạy-đúng thành lỗi, mà lời báo lỗi lại đổ cho câu hỏi của

@@ -6,7 +6,7 @@ import { khoPhienCua } from './doc-phien';
  * 🔬 MÁY ĐO cho lỗi «app tự xoá liên kết phiên» (17/08/2026, claude-phong-ban-pm).
  *
  * VÌ SAO CÓ TỆP NÀY: ngày 17/08 Owner mở app trên điện thoại thì liên kết phiên
- * của ÔNG TRÙM biến mất, còn tệp `.jsonl` thì NGUYÊN VẸN. Nối tay lại là xong,
+ * của TỔNG GIÁM ĐỐC biến mất, còn tệp `.jsonl` thì NGUYÊN VẸN. Nối tay lại là xong,
  * nhưng ⛔ KHÔNG ai biết gốc ⇒ nó sẽ tái diễn.
  *
  * Bài học đứng sau: **thứ không tái hiện được thì ⛔ không chẩn đoán được.**
@@ -97,7 +97,7 @@ export function ghiVetMatLienKet(maO: string, maNhanSu: string, maPhien: string,
  * 🔬 VỆT cho ca THỨ HAI: có ai gọi `/api/o` xin ghi mã phiên RỖNG lên một ô
  * ĐANG CÓ mã phiên, mà ⛔ KHÔNG khai ý định xoá.
  *
- * Ca thật 17/08: Owner mở app trên điện thoại ⇒ liên kết phiên ÔNG TRÙM biến mất,
+ * Ca thật 17/08: Owner mở app trên điện thoại ⇒ liên kết phiên TỔNG GIÁM ĐỐC biến mất,
  * tệp `.jsonl` thì nguyên vẹn. Đường đi ⛔ KHÔNG qua `coPhien`:
  *   `fetch('/api/o')` thất bại → `catch` coi như SỔ TRẮNG → ô 1 (ghế ghim) thấy
  *   "sổ ghi người khác" → ghi lại với mã phiên rỗng ⇒ xoá liên kết ĐÚNG.

@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
           cauHoi: cauGui,
           maPhienCu,
           thuMuc: thuMucAgent(maNhanSu),
-          // 👑 Ghế có LINH HỒN RIÊNG (ÔNG TRÙM) thì ⛔ KHÔNG nhét qua lời dặn hệ thống nữa —
+          // 👑 Ghế có LINH HỒN RIÊNG (TỔNG GIÁM ĐỐC) thì ⛔ KHÔNG nhét qua lời dặn hệ thống nữa —
           //    linh hồn được chép sẵn thành `CLAUDE.md` trong THƯ MỤC GHẾ, và Claude Code
           //    TỰ NẠP theo chỗ đứng (đúng cơ chế cascade — xem chon-mau/luat-nap.html).
           //    Cách này hơn ở chỗ: sửa linh hồn = sửa 1 tệp, ⛔ không phải đẩy lại app;
