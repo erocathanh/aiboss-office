@@ -92,6 +92,7 @@ const NHIP_THAM_DO_MS = 5_000;
 const KHOA_BO_CUC = 'phong-ban-ai.bo-cuc';
 const KHOA_TIEU_DIEM = 'phong-ban-ai.tieu-diem';
 const KHOA_BO_GHE_CU = 'phong-ban-ai.bo-ghe-cu';
+const KHOA_AN_COT = 'phong-ban-ai.an-cot';
 
 /**
  * 🎛 BỘ GHẾ DỰNG SẴN — «Phòng Marketing» (Owner 20/08, cho lớp 19h30).
@@ -302,6 +303,28 @@ export default function UngDung({
    * Màn rộng ⛔ không dùng tới cờ này (CSS chỉ đọc `mo-khu` dưới 1040px).
    */
   const [anKhu, datAnKhu] = useState(false);
+
+  /**
+   * 📕 ẨN/HIỆN HAI CỘT TRÁI (Owner chốt 20/08, hướng Ⓑ: nút bấm được ở MỌI bố cục).
+   *
+   * 🔴 ⛔ TUYỆT ĐỐI ⛔ KHÔNG tái dùng `anKhu`. `anKhu` sinh cho MÀN HẸP và nó **TỰ ĐẶT LẠI false**
+   *    ngay trong `datNguoi` (dòng ~548) và `chonNhanSu` (~574) — tức là Owner ẩn cột xong,
+   *    **chọn một người là cột TỰ HIỆN LẠI** mà ⛔ không hiểu vì sao. Phải là trạng thái RIÊNG.
+   *
+   * `null` = CHƯA chọn tay ⇒ theo bố cục (6 ô thì ẩn, còn lại hiện) — giữ đúng nếp `claude-phong-ban-pm`
+   * đã dựng cho bc-6. Owner bấm một lần thì ý ĐỊNH của Owner thắng, ở MỌI bố cục.
+   */
+  const [anCot, datAnCot] = useState<boolean | null>(null);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(KHOA_AN_COT);
+      if (v === '1' || v === '0') datAnCot(v === '1');
+    } catch { /* ⛔ không đọc được thì cứ theo bố cục */ }
+  }, []);
+  const datAnCotLuu = useCallback((v: boolean) => {
+    datAnCot(v);
+    try { localStorage.setItem(KHOA_AN_COT, v ? '1' : '0'); } catch { /* thôi */ }
+  }, []);
 
   /**
    * Bản sao MỚI NHẤT của trạng thái 4 ô, đọc được từ trong hàm bất đồng bộ.
@@ -1164,7 +1187,7 @@ export default function UngDung({
         )}
       </header>
 
-      <div className={`khung bc-${boCuc}`}>
+      <div className={`khung bc-${boCuc}${(anCot === null ? boCuc === 6 : anCot) ? ' an-cot' : ' hien-cot'}`}>
         {/* ===== Cột 1 — cây phòng ban ===== */}
         <aside className="cot cot-1">
           <div className="de-cot">Cơ cấu tổ chức</div>
@@ -1279,7 +1302,7 @@ export default function UngDung({
               */}
             <button
               className="nut-tron nut-danh-ba" type="button"
-              onClick={() => datAnKhu(true)}
+              onClick={() => { datAnKhu(true); datAnCotLuu(false); }}
               title="Mở danh bạ — tìm phòng ban, đổi ghế"
               aria-label="Mở danh bạ"
             >
@@ -1293,6 +1316,24 @@ export default function UngDung({
               </span>
             )}
             <div className="nhom-bo-cuc">
+              {/**
+                * 📕 NÚT ẨN/HIỆN HAI CỘT TRÁI (Owner chốt 20/08 — hướng Ⓑ).
+                * Nhãn NÓI RÕ việc sẽ xảy ra khi bấm, ⛔ không phải nói trạng thái hiện tại —
+                * nút mà đọc xong còn phải đoán thì Owner bấm thử mới biết.
+                * ⚠️ Ẩn cột = mất lối vào danh bạ ⇒ luật bật nút ☰ phải áp cho CẢ trạng thái này,
+                *    ⛔ không chỉ bc-6. «Ẩn thứ gì thì chừa đường quay lại TRONG CÙNG lượt sửa.»
+                */}
+              <button
+                className={`nut-bc nut-cot${(anCot === null ? boCuc === 6 : anCot) ? '' : ' chon'}`}
+                type="button"
+                onClick={() => datAnCotLuu(!(anCot === null ? boCuc === 6 : anCot))}
+                title={(anCot === null ? boCuc === 6 : anCot)
+                  ? 'Hiện lại hai cột danh bạ + phòng ban'
+                  : 'Ẩn hai cột trái để khung trò chuyện rộng thêm 584px'}
+                aria-pressed={(anCot === null ? boCuc === 6 : anCot)}
+              >
+                {(anCot === null ? boCuc === 6 : anCot) ? 'Hiện 2 cột' : 'Ẩn 2 cột'}
+              </button>
               {/**
                 * 🎛 MENU «GIAO DIỆN» — bộ ghế dựng sẵn (Owner 20/08, cho lớp).
                 * Đặt trong `.nhom-bo-cuc` vì khối đó đã có `position:relative` (mau09:221)

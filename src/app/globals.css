@@ -275,3 +275,18 @@
   font-size: 12px; font-weight: 600; white-space: nowrap;
 }
 .menu-gd { min-width: 226px; }
+
+/* ═══ 📕 ẨN/HIỆN HAI CỘT TRÁI (Owner chốt 20/08 · hướng Ⓑ) ═══
+   Chỉ áp MÀN RỘNG: dưới 1041px hai cột vốn xếp dọc và đã có nút ☰ + `.cot-3.mo-khu` lo
+   ⇒ ⛔ đừng đụng vào nếp màn hẹp đang chạy đúng.
+   `.hien-cot` đặt SAU `.khung.bc-6 .cot-1{display:none}` (mau09:806) và cùng độ cụ thể
+   ⇒ thắng nhờ THỨ TỰ ⇒ ở 6 ô Owner vẫn gọi được hai cột ra. */
+@media (min-width: 1041px) {
+  .khung.an-cot { grid-template-columns: 1fr; }
+  .khung.an-cot .cot-1, .khung.an-cot .cot-2 { display: none; }
+  .khung.an-cot .nut-danh-ba { display: inline-flex; }   /* ⬅ đường quay lại, ⛔ không được thiếu */
+  .khung.hien-cot { grid-template-columns: 264px 320px 1fr; }
+  .khung.hien-cot .cot-1, .khung.hien-cot .cot-2 { display: block; }
+}
+.nut-cot { display: none; width: auto; padding: 0 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+@media (min-width: 1041px) { .nut-cot { display: inline-flex; } }
