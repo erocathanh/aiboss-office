@@ -1812,6 +1812,24 @@ export default function UngDung({
                           onInput={(e) => tuCao(e.currentTarget)}
                           onKeyDown={(e) => {
                             if (e.key !== 'Enter') return;
+                            /**
+                             * 🇻🇳 BỘ GÕ TIẾNG VIỆT đang soạn dở ⇒ Enter là để CHỐT ÂM,
+                             * ⛔ KHÔNG phải để gửi. (Owner 20/08: dính MỖI câu lệnh.)
+                             *
+                             * Đường đi của lỗi khi ⛔ không chặn:
+                             *   âm cuối còn TRONG bộ gõ, ⛔ chưa vào state → Enter chốt âm
+                             *   → keydown mang isComposing=true → gui(i) đọc `o.soan` THIẾU âm cuối
+                             *   → GỬI CÂU CỤT → bộ gõ chốt xong, onChange đặt soan = âm còn sót
+                             *   → ô đang chạy ⇒ âm đó rơi vào HÀNG CHỜ ⇒ bị gửi LẦN HAI.
+                             *
+                             * ⚠️ PHẢI CÓ CẢ HAI VẾ: `isComposing` là chuẩn; `keyCode === 229`
+                             *    là đường lùi cho bộ gõ/trình duyệt cũ ⛔ không đặt isComposing.
+                             *    Thiếu một vế là còn máy dính.
+                             * 📌 Trả về TRƯỚC `preventDefault` — vì chặn mặc định lúc đang soạn
+                             *    còn cản luôn việc chốt âm ở một số trình duyệt.
+                             */
+                            if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing
+                              || e.keyCode === 229) return;
                             // 📱 Máy cảm ứng: Enter là XUỐNG DÒNG. Gửi đã có nút Gửi ngay cạnh.
                             if (camUng) return;
                             // 💻 Máy có bàn phím rời: giữ nguyên nếp cũ — Enter gửi, Shift+Enter xuống dòng.
