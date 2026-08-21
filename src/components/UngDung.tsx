@@ -12,6 +12,7 @@ import {
   CaretUp, CaretDown, ArrowsClockwise,
 } from '@phosphor-icons/react/dist/ssr';
 import { dungMarkdown } from '@/lib/dung-markdown';
+import { SO_O } from '@/lib/so-o';
 
 /* Bố cục + tên lớp CSS bê nguyên bản mẫu 09 Owner đã duyệt. ⛔ Không thiết kế lại. */
 
@@ -82,7 +83,8 @@ interface Tin {
  *   PHẢI cắt luồng ngay (`huyLuong`) — ⛔ đừng để luồng rác tích lại.
  * ==========================================================================*/
 
-const SO_O = 6;   // 4 → 6 (Owner 20/08: bố cục 6 ô, giấu 2 cột trái)
+// 🔢 SỐ Ô: nhập từ NGUỒN DUY NHẤT `src/lib/so-o.ts` — ⛔ tự khai lại ở đây nữa.
+//    (21/08: khai hai nơi ⇒ máy chủ mù ⇒ sổ đẻ mục ngoài tầm ⇒ TIN MẤT IM LẶNG.)
 const maOCua = (i: number) => `o-${i + 1}`;
 /**
  * 🔔 Nhịp thăm dò cổng đánh thức. 5 giây = giữa khoảng Owner chốt (4–6s).

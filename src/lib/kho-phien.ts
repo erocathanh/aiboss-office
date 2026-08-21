@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { SO_O, oTrongTam } from './so-o';
 
 /**
  * SỔ GHI "Ô NÀO ĐANG MỞ PHIÊN NÀO" — ghi XUỐNG ĐĨA.
@@ -56,6 +57,20 @@ export function layTatCa(): So {
 }
 
 export function datO(maO: string, maNhanSu: string | null, maPhien: string | null): void {
+  /**
+   * 🚧 CHẶN Ô NGOÀI TẦM — sổ ⛔ BAO GIỜ được đẻ lại mục mà app ⛔ vẽ nổi.
+   *
+   * 🐛 Ca thật 21/08: sổ giữ `o-9` suốt 6,4 ngày. Cổng đánh thức đọc SỔ nên trả **200**,
+   *    còn trình duyệt chỉ dựng 6 ô nên ⛔ BAO GIỜ nhặt ⇒ mẩu chết sau 180 giây ⇒
+   *    **tin mất im lặng**, mà mắt canh lại tưởng đã giao (nhận 200 ⇒ ghi «đã đọc»).
+   * ⇒ Chặn TẠI ĐÂY, ⛔ ở 4 nơi gọi: chặn ở nguồn thì thêm nơi gọi mới cũng tự an toàn.
+   * ⛔ ⛔ ném lỗi và ⛔ trả 409 — ô ngoài tầm là chuyện SỔ BẨN, ⛔ phải người dùng làm sai.
+   *    Ném lỗi ở đây là làm chết một lượt chat thật vì một mục rác. Bỏ qua + ghi log là đủ.
+   */
+  if (!oTrongTam(maO)) {
+    console.warn(`[kho-phien] ⛔ BỎ QUA ghi sổ cho ô NGOÀI TẦM «${maO}» (app chỉ có ${SO_O} ô).`);
+    return;
+  }
   const s = doc();
   const cu = s[maO];
   // Đổi sang phiên KHÁC thì mốc kết thúc cũ hết giá trị.
