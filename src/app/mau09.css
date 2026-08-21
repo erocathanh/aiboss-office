@@ -810,10 +810,38 @@
    trên MỌI bề rộng, ⛔ nếu không Owner ⛔ không còn đường đổi người trong ô. */
 .khung.bc-6 .nut-danh-ba{display:inline-flex}
 
-/* Màn hẹp: 3 cột × 2 hàng quá chật ⇒ đổi thành 2 cột × 3 hàng. */
+/* Màn hẹp: 3 cột × 2 hàng quá chật ⇒ đổi thành 2 cột × 3 hàng, rồi 1 cột × 6 hàng.
+   ─────────────────────────────────────────────────────────────────────────────
+   🐛 CA THẬT 21/08 — Owner: «giao diện 6 ô trên mobile các ô bị nhỏ dồn lại và
+      chồng lên nhau». GỐC: hai khối dưới đây dùng `repeat(N,1fr)` ⇒ N hàng CHIA ĐỀU
+      chiều cao khung. Màn ~700px chia 6 ⇒ ~115px/ô, trong khi RIÊNG ô soạn đã ≈88px
+      (`.soan textarea:focus{min-height:calc(3*1.45em+18px)}`, chữ 16px chống zoom)
+      ⇒ thanh tên + thân + ô soạn ⛔ KHÔNG đủ chỗ ⇒ nội dung bị XÉN.
+   📌 «Đúng lý thuyết mà sai thật»: `1fr` = `minmax(auto,1fr)` nên hàng ĐÁNG LẼ ⛔ co
+      được dưới min-content. Nhưng `.o-chat` có `overflow:hidden` ⇒ sàn tự động RƠI VỀ 0
+      ⇒ hàng co thoải mái và nội dung bị cắt. **⛔ ĐỪNG tin `1fr` tự bảo vệ nội dung.**
+   ✅ Bê đúng khuôn bc-2/bc-4 (mau09:419) — luật đó chạy đúng từ 17/08:
+        grid-template-rows:none        ⇒ XOÁ danh sách hàng cứng (⛔ thiếu là repeat() còn đè)
+        grid-auto-rows:minmax(320px,1fr) ⇒ SÀN 320px mỗi ô, ⛔ không bóp nữa
+        overflow-y:auto                ⇒ lưới TỰ CUỘN thay vì nhồi cho vừa khung
+   🔴 VÌ SAO SỬA TẠI CHỖ, ⛔ KHÔNG thêm khối mới ở @media 1040 (dòng ~418):
+      hai khối này nằm CUỐI tệp ⇒ chúng ĐÈ mọi luật bc-6 viết phía trên. Thêm ở trên
+      là vá xong mà ⛔ đổi gì, rồi tưởng chẩn sai gốc.
+   ⛔ ⛔ KHÔNG đụng `.luoi.bc-6` ở dòng ~802 (3 cột × 2 hàng) — đó là màn RỘNG, đang đúng.
+   ───────────────────────────────────────────────────────────────────────────── */
 @media (max-width:1100px){
-  .luoi.bc-6{grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,1fr)}
+  .luoi.bc-6{
+    grid-template-columns:1fr 1fr;
+    grid-template-rows:none;
+    grid-auto-rows:minmax(320px,1fr);
+    overflow-y:auto;
+  }
 }
 @media (max-width:560px){
-  .luoi.bc-6{grid-template-columns:1fr;grid-template-rows:repeat(6,1fr)}
+  .luoi.bc-6{
+    grid-template-columns:1fr;
+    grid-template-rows:none;
+    grid-auto-rows:minmax(320px,1fr);
+    overflow-y:auto;
+  }
 }
