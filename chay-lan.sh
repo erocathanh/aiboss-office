@@ -55,6 +55,30 @@ else
 fi
 echo "🟢 node dùng cho máy chủ + các ghế: $(node -v 2>/dev/null) · pnpm: $(pnpm -v 2>/dev/null || echo 'không thấy')"
 
+# ── TRẦN LƯỢT CHẠY ĐỒNG THỜI (20/08/2026 · Owner bị chặn ở ô thứ 4) ──────────────
+# Owner mở 6 ô nhưng máy chủ chỉ cho 3 lượt cùng lúc ⇒ gửi tới ô thứ 4 là hiện
+#   «Máy chủ đang chạy 3 lượt cùng lúc (trần 3)»  (chan-muc-dung.ts:25)
+# Nâng 3 → 6, ĐÚNG BẰNG SỐ Ô.
+# 🔴 ⛔ TUYỆT ĐỐI ĐỪNG GỠ TRẦN (đặt 0 / vô hạn). Mỗi lượt là MỘT TIẾN TRÌNH `claude`
+#    chạy thật — vòng lặp đánh thức mà ⛔ không có phanh thì ĐỐT TIỀN THẬT tới khi
+#    Owner phát hiện. Trần là cái phanh, ⛔ không phải chỗ vướng.
+# 📌 Trần THỨ HAI nâng ngay bên dưới — hai cái phải đi cùng nhau, xem chú thích ở đó.
+export TRAN_DONG_THOI=6
+
+# Trần THỨ HAI: số lượt mỗi phút cho MỖI KHÁCH (theo IP — chan-muc-dung.ts:34).
+# Owner ngồi MỘT máy ⇒ cả 6 ô CHUNG một suất. Mặc định 6/phút ⇒ gửi đủ 6 ô là hết sạch
+# suất của phút đó, câu thứ 7 (kể cả gửi lại một ô) bị chặn «Quá 6 lượt mỗi phút».
+#
+# 6 → 20 (20/08 sáng) → 60 (20/08, Owner lệnh «nâng lên 60 hay 100 luôn đi em»).
+# 🔬 VÌ SAO 60 chứ ⛔ KHÔNG 100 — đo `chan-muc-dung.ts`:
+#   dòng 22  if (dangChay >= tranDongThoi) return   ← kiểm TRƯỚC và THOÁT SỚM ⇒ ⛔ KHÔNG ghi mốc
+#   dòng 34  if (moc.length >= soLuotMoiPhut) …     ← kiểm SAU
+#   ⇒ `soLuotMoiPhut` chỉ đếm lượt THẬT SỰ ĐƯỢC CHẠY, mà số đó đã bị chặn trên bởi 6 chỗ song song.
+#   ⇒ Trần VẬT LÝ: lượt ngắn nhất (~10 giây) cho tối đa ~36 lượt/phút; lượt ~30 giây chỉ ~12/phút.
+#   ⇒ 60 phủ hết ca nhanh nhất mà VẪN là trần thật. 100 vượt xa mức vật lý ⇒ ⛔ không còn là phanh.
+# ⛔ ĐỪNG bỏ hẳn, và ⛔ ĐỪNG đụng TRAN_DONG_THOI — cái đó mới là phanh TIỀN.
+export SO_LUOT_MOI_PHUT=60
+
 cd ~/Projects/phong-ban-ai
 # BẢN CHẠY THẬT (next start), ⛔ KHÔNG phải next dev.
 # Vì sao đổi 17/08 16:0x: ở chế độ dev, Next biên dịch lại từng route lúc chạm vào
