@@ -199,7 +199,20 @@ export interface KetQuaTra {
   loi_dan: string;
 }
 
+/**
+ * 🔌 CỜ TẮT — `TRA_CHUOI=0` thì tính năng nghỉ hẳn, ⛔ nối thêm gì vào câu Owner.
+ *
+ * · MẶC ĐỊNH **BẬT**: chỉ đúng chuỗi `'0'` mới tắt. Thiếu biến / rỗng / giá trị lạ ⇒ VẪN BẬT
+ *   (⛔ đổi nết đang chạy — người ⛔ biết cờ này tồn tại thì ⛔ thấy gì khác).
+ * · Đọc LÚC GỌI chứ ⛔ lúc nạp mô-đun: để thử được CẢ HAI CHIỀU mà ⛔ phải nạp lại mô-đun.
+ * · Đặt ở `chay-lan.sh` (cùng chỗ TRAN_DONG_THOI · SO_LUOT_MOI_PHUT).
+ */
+export function traChuoiDangBat(): boolean {
+  return process.env.TRA_CHUOI !== '0';
+}
+
 export function traChuoi(maNhanSu: string, maPhien: string | null, cau: string): KetQuaTra | null {
+  if (!traChuoiDangBat()) return null;
   if (!laLoaiC(cau)) return null;
   const tuKhoa = bocTuKhoa(cau);
   if (!tuKhoa.length) {

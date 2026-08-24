@@ -79,6 +79,19 @@ export TRAN_DONG_THOI=6
 # ⛔ ĐỪNG bỏ hẳn, và ⛔ ĐỪNG đụng TRAN_DONG_THOI — cái đó mới là phanh TIỀN.
 export SO_LUOT_MOI_PHUT=60
 
+# ── CỜ TẮT «TRA CHUỖI GỐC TÍCH» (24/08/2026 · Owner phát hiện app sửa chữ mình) ──────
+# Khi Owner hỏi kiểu «tôi đã dặn em việc này chưa?», app TỰ NỐI thêm một khối
+#   «🔎 APP ĐÃ TRA GIÚP …» vào CUỐI câu Owner rồi mới đưa cho ghế (chat/route.ts).
+# 📌 Ý đồ: bản fork chỉ giữ ~8,4% lịch sử ⇒ ghế «⛔ nhớ» là chuyện THƯỜNG, nết mặc định
+#    là đáp «dạ chưa ạ» — SAI MỘT CÁCH TỰ TIN, mà Owner ⛔ có cách kiểm.
+#    Nên đây là NỐI THÊM, ⛔ phải sửa chữ Owner. Nhưng Owner có quyền tắt.
+#
+# 1 (hoặc bỏ hẳn dòng này) = BẬT — nết hiện hành.
+# 0                        = TẮT hẳn, traChuoi() trả null ngay, ⛔ nối gì vào câu Owner.
+# ⚠️ Chỉ đúng chuỗi «0» mới tắt. Gõ «false»/«off»/«no» là VẪN BẬT — cố ý, để ⛔ ai
+#    tắt nhầm một tính năng chống-sai-tự-tin bằng một chữ gõ vội.
+export TRA_CHUOI=1
+
 cd ~/Projects/phong-ban-ai
 # BẢN CHẠY THẬT (next start), ⛔ KHÔNG phải next dev.
 # Vì sao đổi 17/08 16:0x: ở chế độ dev, Next biên dịch lại từng route lúc chạm vào
