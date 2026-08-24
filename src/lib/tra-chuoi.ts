@@ -54,8 +54,55 @@ const MAU_LOAI_C: RegExp[] = [
 
 
 
+/**
+ * Ba mẫu CẦN PHANH: chỉ số 4·5·6 ⇒ **mẫu 5 («nhớ…») · mẫu 6 («mấy/bao nhiêu lần») · mẫu 7 («lần cuối»)**.
+ *
+ * 🐛 Vì sao ba chứ ⛔ một: bản đầu chỉ phanh mẫu 5, `claude-aiboss-app-pm` chạy thật và bắt được
+ *    **ba sai dương còn sống**: «lần cuối tôi gặp nó là hôm qua» · «đây là lần cuối tôi nhắc nhé»
+ *    (mẫu 7) · «bao nhiêu lần cũng được» (mẫu 6). Bốn mẫu còn lại tự buộc «chưa»/«không» nên ⛔ cần.
+ * ⛔ ĐỪNG cắm số rời rạc ở chỗ khác — chèn mẫu mới vào giữa là lệch âm thầm.
+ */
+const CAN_CONG_HOI = new Set([4, 5, 6]);
+
+/**
+ * 🚧 CỔNG «CÂU HỎI» — ba mẫu trên khớp THÔI CHƯA ĐỦ, câu còn phải có dấu hiệu ĐANG HỎI.
+ *
+ * 🐛 Ca gốc (Owner 23/08): «**Nhớ nhắc** tụi nó ở bước cuối nhé» — Owner đang **GIAO VIỆC**,
+ *    mà app vẫn nối khối «🔎 APP ĐÃ TRA GIÚP» vào cuối câu rồi mới đưa ghế. Owner tự phát hiện:
+ *    *«app này can thiệp vào nội dung tôi gửi à?»*
+ *
+ * 🔴 SÁU CHỮ ĐÃ THỬ RỒI LOẠI — trông như dấu hỏi nhưng đầy trong câu KỂ tiếng Việt.
+ *    Mỗi chữ đều có CA THẬT chứng minh nó lọt, ⛔ phải suy đoán:
+ *      «rồi»           ⇒ lọt «mấy lần trước tôi bỏ qua RỒI thôi» · «tôi nhắc nó RỒI mà nó quên»
+ *      «bao nhiêu|mấy» ⇒ lọt «BAO NHIÊU lần cũng được»
+ *      «ai|đâu|nào»    ⇒ lọt «…giao việc cho AI agent NÀO ở ô NÀO nhé» — CÂU KỂ của Owner
+ *    Bỏ «bao nhiêu» ⛔ làm hụt mẫu 6: «anh nhắc nó bao nhiêu lần rồi?» vẫn qua nhờ dấu «?».
+ *
+ * 📐 ĐO TRÊN 594 CÂU THẬT của Owner (`~/Operations/scripts/.cau-that-owner-594.txt`),
+ *    ⛔ phải trên câu tự nghĩ — bộ ca tự nghĩ đo được LOGIC, ⛔ đo được THÓI QUEN NGÔN NGỮ:
+ *      chưa vá                    76 câu bị chèn
+ *      phanh mỗi mẫu 5            73
+ *      phanh 5·6·7 + bộ RỘNG      75   ← «ai|đâu|nào» MỞ LẠI đúng cái sai dương vừa chặn
+ *      phanh 5·6·7 + bộ HẸP       72   ← BẢN NÀY. 72 câu còn lại đi cửa mẫu 1-4, ĐÚNG chủ đích.
+ *    🕳 Lần bóc kho đầu tiên HỎNG: lọc bỏ câu >400 ký tự ⇒ ra 431 câu và mẫu 5·6·7 = 0.
+ *       Nhưng câu ĐÃ BỊ CHÈN thì DÀI RA ⇒ bộ lọc ăn đúng những câu đã nổ. Số 0 đó vô giá trị.
+ *
+ * ⚠️ `?` (mã 63) NẰM SẴN TRONG `NGAN` ⇒ `${T}chưa${P}` khớp được cả «…chưa?». ⛔ cần liệt kê riêng.
+ * ⚠️ PHẢI GIỮ NEO `${T}…${P}` — bỏ neo là «ai» khớp nhầm trong «h(ai)» · «ngo(ài)».
+ *    Và ⛔ ĐƯỢC thay bằng `\b`: `\b` dựa trên [A-Za-z0-9_] nên ⛔ hiểu chữ có dấu (bẫy ghi ở đầu tệp).
+ */
+const CO_DAU_HOI = new RegExp(
+  `[?]|${T}(chưa|khi nào|bao giờ|lúc nào|thế nào)${P}`,
+  'i',
+);
+
 export function laLoaiC(cau: string): boolean {
-  return MAU_LOAI_C.some((r) => r.test(cau));
+  return MAU_LOAI_C.some((r, i) => {
+    if (!r.test(cau)) return false;
+    // Ba mẫu 5·6·7 khớp thôi CHƯA đủ — câu phải kèm dấu hiệu hỏi (xem CO_DAU_HOI).
+    if (CAN_CONG_HOI.has(i) && !CO_DAU_HOI.test(cau)) return false;
+    return true;
+  });
 }
 
 /** Bóc từ khoá tra: bỏ từ nối, giữ từ có nghĩa. */
