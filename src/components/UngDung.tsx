@@ -91,6 +91,26 @@ const maOCua = (i: number) => `o-${i + 1}`;
  * Một lần gọi gộp CẢ 4 ô ⇒ 12 lượt gọi mỗi phút, ⛔ không phải 48.
  */
 const NHIP_THAM_DO_MS = 5_000;
+/**
+ * 🔴 BỐN KHOÁ DƯỚI ĐÂY: **CẤM ĐỔI TÊN** — kể cả khi đổi tên kho/dự án.
+ *
+ * Chúng là **khoá lưu TRONG TRÌNH DUYỆT của Owner**, ⛔ phải tên hiển thị, ⛔ phải tên thư mục.
+ * Chữ «phong-ban-ai» ở đây chỉ là **tiền tố định danh kho lưu**, ⛔ liên quan tên dự án.
+ *
+ * 🕳 Đổi chúng thì app VẪN CHẠY, ⛔ báo lỗi dòng nào — nhưng Owner mở lên sẽ thấy:
+ *      · bố cục về mặc định (mất kiểu chia ô đang dùng)
+ *      · mất ô đang chọn
+ *      · mất đường quay về bộ ghế cũ
+ *      · hai cột trái hiện lại dù đã ẩn
+ *    Tức là **mọi thứ Owner tự tay xếp bị xoá sạch, mà ⛔ ai báo.**
+ *
+ * 📌 Ghi 29/08/2026 khi cả nhà chuẩn bị đổi tên kho sang `aiboss-app-chat`.
+ *    `claude-aiboss-app-pm` cảnh báo có HAI khoá · `claude-phong-ban-pm` đếm ra BỐN ·
+ *    `claude-aiboss-app-exe` đo lại: **ĐÚNG 4**, đều nằm ở đây, ⛔ chỗ nào khác trong mã
+ *    (đối chứng dương: thước vẫn thấy 12 chỗ gọi localStorage ⇒ ⛔ mù).
+ * ⇒ Ai đổi tên kho: **bỏ qua bốn dòng này.** Muốn đổi thật thì phải viết mã CHUYỂN
+ *    dữ liệu cũ sang khoá mới trước, ⛔ đổi trần.
+ */
 const KHOA_BO_CUC = 'phong-ban-ai.bo-cuc';
 const KHOA_TIEU_DIEM = 'phong-ban-ai.tieu-diem';
 const KHOA_BO_GHE_CU = 'phong-ban-ai.bo-ghe-cu';
