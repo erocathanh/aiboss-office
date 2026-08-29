@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Round 3 — Luật chuông &amp; kênh: đưa lên CLAUDE.md toàn cục?</title>
+<style>
+ :root{--navy:#0a1929;--navy2:#102a43;--gold:#c89425;--gold2:#f1c768;--kem:#faf7f0;--mo:#93a5b8}
+ *{box-sizing:border-box}
+ body{margin:0;background:linear-gradient(160deg,var(--navy),var(--navy2));color:var(--kem);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.75}
+ .b{max-width:920px;margin:0 auto;padding:42px 24px 90px}
+ .nhan{display:inline-block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);
+       border:1px solid rgba(200,148,37,.4);padding:5px 12px;border-radius:99px}
+ h1{font-size:clamp(24px,4vw,34px);margin:16px 0 6px;letter-spacing:-.02em}
+ .gio{color:var(--mo);font-size:13.5px;margin:0 0 26px}
+ .cau{background:rgba(255,255,255,.05);border:1px solid rgba(250,247,240,.12);border-radius:14px;
+      padding:22px;margin:26px 0}
+ .cau h2{margin:0 0 6px;font-size:19px}
+ .cau .vs{color:var(--mo);font-size:14px;margin:0 0 16px}
+ .opt{display:block;background:rgba(255,255,255,.04);border:1px solid rgba(250,247,240,.14);
+      border-radius:11px;padding:15px 17px;margin:10px 0;cursor:pointer;transition:.15s}
+ .opt:hover{border-color:var(--gold)}
+ .opt.chon{border-color:var(--gold2);background:rgba(200,148,37,.13)}
+ .opt input{margin-right:9px}
+ .opt b{font-size:15.5px}
+ .opt .ma{font-family:ui-monospace,monospace;color:var(--gold2);font-size:13px;margin-left:8px}
+ .opt .kq{display:block;color:var(--mo);font-size:13.5px;margin-top:6px}
+ .opt .uu{display:block;font-size:13px;margin-top:5px}
+ .de{display:inline-block;font-size:11px;color:var(--navy);background:var(--gold2);
+     border-radius:4px;padding:1px 7px;margin-left:7px;font-weight:700}
+ .ghi{background:rgba(255,255,255,.04);border-left:3px solid var(--gold);padding:13px 16px;
+      border-radius:0 9px 9px 0;margin:16px 0;font-size:14px}
+ pre{background:rgba(0,0,0,.34);border:1px solid rgba(250,247,240,.1);border-radius:10px;
+     padding:13px 15px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+ code{background:rgba(255,255,255,.08);padding:1.5px 6px;border-radius:4px;color:var(--gold2);font-size:.9em}
+ pre code{background:none;padding:0;color:var(--kem)}
+ textarea{width:100%;min-height:110px;background:rgba(0,0,0,.35);color:var(--kem);
+          border:1px solid rgba(250,247,240,.16);border-radius:10px;padding:13px;
+          font-family:ui-monospace,monospace;font-size:13px;margin-top:12px}
+ button{background:var(--gold);color:var(--navy);border:0;border-radius:9px;padding:12px 22px;
+        font-size:15px;font-weight:700;cursor:pointer;margin-top:12px}
+ button:hover{background:var(--gold2)}
+</style>
+</head>
+<body><div class="b">
+ <span class="nhan">Round 3 · nội bộ · claude-phong-ban-pm</span>
+ <h1>Luật chuông &amp; kênh — đưa lên CLAUDE.md toàn cục?</h1>
+ <p class="gio" id="gio">Gửi lúc: —</p>
+
+ <div class="ghi" style="border-left-color:#f1c768;background:rgba(200,148,37,.10)">
+ 🚧 <b>Owner dặn 20/08 — đã ghi vào chính khối sẽ đưa lên:</b>
+ <br>· Đây là <b>giải pháp TẠM</b>, ⛔ phải luật vĩnh viễn.
+ <br>· App <code>aiboss-app-chat</code> <b>đổi mỗi ngày</b> ⇒ mọi <b>số đo có hạn dùng</b> — phải kiểm + đối chiếu thực tế trước khi dựa vào.
+ <br>· <b>Ai ⛔ ngồi trong ghế của app thì BỎ QUA</b> (phiên terminal · agent nền · cron · Hermes).
+ <br>⇒ Vì thêm 3 dòng điều kiện này, khối global từ <b>8 → 12 dòng</b> ⇒ sau khi áp là <b>35/35</b> — 🔴 <b>CHẠM ĐÚNG TRẦN</b>, ⛔ còn chỗ cho luật sau.
+ Đây là lý do câu ① nay đáng cân nhắc bản rút gọn hơn.
+ </div>
+
+ <div class="ghi">
+ <b>Vì sao hỏi:</b> anh bảo bổ sung luật rung chuông + chống miss tin vào <code>~/.claude/CLAUDE.md</code>.
+ Nhưng chính file đó có hai luật cứng chặn em làm bừa:
+ <br>· <i>«agent ĐỀ XUẤT, Owner duyệt diff — agent KHÔNG tự sửa file global»</i>
+ <br>· <i>«file này ≤ ~35 dòng nội dung; vượt = sai thiết kế, KHÔNG nới trần»</i>
+ <br><br>
+ <b>Em đo:</b> hiện <b>23 dòng</b> nội dung ⇒ còn <b>12 dòng</b>. Khối em soạn <b>8 dòng</b> ⇒ sau khi áp là <b>31/35</b>.
+ <br><b>Nguồn chi tiết đã dựng sẵn:</b> <code>~/Operations/LUAT-CHUONG-VA-KENH.md</code> (62 dòng — số đo, cách dựng mắt canh, hai bẫy đo).
+ </div>
+
+ <div class="cau" data-ma="A">
+  <h2>① Đưa lên toàn cục ở mức nào?</h2>
+  <p class="vs">Em soi theo đúng «chính sách tinh lọc §3» của chính file đó — thăng cấp cần đủ CẢ 3: cross-context · tần suất cao · <b>ổn định (hết tiến hoá)</b>.
+  Phần <b>nguyên lý</b> đủ cả 3. Phần <b>số đo</b> (180 giây · 6 lượt/phút · 6 ô) thì <b>trượt tiêu chí ổn định</b> — mắt canh vừa vá hôm nay.</p>
+
+  <label class="opt"><input type="radio" name="A" value="A1-nguyen-van-8-dong"><b>A1 · Áp nguyên văn 8 dòng em soạn</b>
+   <span class="kq">Nguyên lý + pointer về tệp chuẩn. Số đo KHÔNG lên global.</span>
+   <span class="uu">👍 mọi ghế đọc được ngay cả khi ngồi ngoài <code>~/</code> · 👍 giữ đúng luật «global chỉ 1 pointer» · 👎 <b>ăn TRỌN 12 dòng còn lại ⇒ global đầy 35/35</b>, luật sau ⛔ còn chỗ</span>
+   <span class="kq"><i>Góc nhìn đội:</i> em nghiêng về cái này — nó đúng luật chống-trùng, và cái hay bị quên nhất («đừng nói tôi đang theo dõi kênh») là nguyên lý chứ không phải con số.</span></label>
+
+  <label class="opt"><input type="radio" name="A" value="A2-rut-con-3-dong"><b>A2 · Rút còn 3 dòng — chỉ điều dễ quên nhất</b>
+   <span class="kq">Giữ: ghế sống từng lượt ⇒ đừng nói «đang theo dõi kênh» · xong việc ghi 1 dòng lên kênh NGAY · rung chuông chỉ khi mang việc tiến về phía trước. Còn lại đẩy hết về tệp chuẩn.</span>
+   <span class="uu">👍 chừa 9 dòng cho luật sau · 👎 mất phần «200 ⛔ nói đã tới» và phần khai sổ mắt canh — hai chỗ vừa cắn thật hôm nay</span>
+   <span class="kq"><i>Góc nhìn đội:</i> chọn cái này nếu anh thấy global nên là chỗ để <b>rất ít chữ</b> mà thôi.</span></label>
+
+  <label class="opt"><input type="radio" name="A" value="A3-khong-len-global"><b>A3 · Không lên global — để hết ở <code>~/CLAUDE.md</code></b>
+   <span class="kq">Vì mọi ghế trong app đều có cwd nằm dưới <code>~/</code>, nên <code>~/CLAUDE.md</code> đã tự nạp rồi.</span>
+   <span class="uu">👍 global sạch, đúng tinh thần «thăng cấp là sự kiện HIẾM» · 👎 ghế nào chạy ở cwd ngoài <code>~/</code> sẽ ⛔ thấy luật này</span>
+   <span class="kq"><i>Góc nhìn đội:</i> đây là lựa chọn <b>đúng sách vở nhất</b> — em nêu để anh cân, dù anh đã bảo đưa lên global.</span></label>
+
+  <label class="opt"><input type="radio" name="A" value="A4-sua-chu-truoc"><b>A4 · Em muốn sửa chữ trước rồi mới áp</b>
+   <span class="kq">Anh gõ chữ anh muốn vào ô cuối trang, em áp đúng chữ đó.</span>
+   <span class="uu">👍 chữ trong global là chữ của anh · 👎 thêm một vòng qua lại</span></label>
+ </div>
+
+ <div class="cau" data-ma="B">
+  <h2>② Bốn CLAUDE.md ghế đang chép trùng nhau — dọn không?</h2>
+  <p class="vs">Chi tiết chuông/kênh hiện <b>chép trong 4 tệp</b>: <code>phong-ban-pm</code> · <code>aiboss-app-pm</code> · <code>aiboss-app-exe</code> · <code>eroca-boss</code>.
+  Sửa một nơi thì ba nơi kia nói khác — đúng thứ §3 gọi là <b>drift</b>. Hôm nay đã có ca thật: số đo mắt canh trong 4 tệp đó nay đã <b>sai</b> vì bản vá v2.</p>
+
+  <label class="opt"><input type="radio" name="B" value="B1-don-ca-4"><b>B1 · Dọn cả 4 — thay bằng 1 dòng trỏ về tệp chuẩn</b>
+   <span class="kq">Gọn khoảng 120 dòng. Mỗi ghế còn 1 dòng: «luật chuông &amp; kênh → <code>~/Operations/LUAT-CHUONG-VA-KENH.md</code>».</span>
+   <span class="uu">👍 một sự thật một chỗ ở, hết drift · 👎 ghế phải mở thêm 1 tệp mới thấy chi tiết (tốn 1 lượt đọc)</span>
+   <span class="kq"><i>Góc nhìn đội:</i> ⚠️ em <b>không tự làm được</b> — đó là CLAUDE.md của ghế khác, và anh vừa dặn em đang ở <b>vai reviewer</b>. Nếu anh gật, em đưa việc cho PM của từng ghế chứ không nhắn thẳng exec.</span></label>
+
+  <label class="opt"><input type="radio" name="B" value="B2-chi-2-ghe-app"><b>B2 · Chỉ dọn 2 ghế app, để 2 ghế còn lại nguyên</b>
+   <span class="kq">Dọn <code>aiboss-app-pm</code> + <code>aiboss-app-exe</code> — hai ghế đụng mã app nhiều nhất.</span>
+   <span class="uu">👍 đụng ít, dễ lùi · 👎 vẫn còn 2 bản chép ⇒ drift chưa hết</span></label>
+
+  <label class="opt"><input type="radio" name="B" value="B3-khong-don"><b>B3 · Không dọn — chỉ SỬA số đo đã sai trong 4 tệp</b>
+   <span class="kq">Giữ nguyên cách chép, chỉ vá con số mắt canh cho khớp v2.</span>
+   <span class="uu">👍 ghế đọc CLAUDE.md là thấy đủ, ⛔ mở thêm tệp · 👎 lần vá sau lại phải sửa 4 nơi — bệnh cũ quay lại</span></label>
+ </div>
+
+ <textarea id="them" placeholder="Anh muốn sửa chữ trong khối global, hoặc dặn thêm gì thì gõ đây…"></textarea>
+ <button onclick="tao()">Tạo &amp; copy câu trả lời</button>
+ <textarea id="ra" style="display:none"></textarea>
+
+<script>
+document.getElementById('gio').textContent =
+  'Gửi lúc: ' + new Date().toLocaleString('vi-VN',{dateStyle:'full',timeStyle:'short'});
+document.querySelectorAll('.opt').forEach(function(o){
+  o.addEventListener('click', function(){
+    o.parentElement.querySelectorAll('.opt').forEach(function(x){ x.classList.remove('chon'); });
+    o.classList.add('chon');
+  });
+});
+function tao(){
+  function g(n){
+    var el = document.querySelector('input[name="' + n + '"]:checked');
+    return el ? el.value : '(chưa chọn)';
+  }
+  var them = document.getElementById('them').value.trim();
+  var d = new Date().toLocaleString('vi-VN');
+  var t = [
+    'ROUND 3 — luat chuong & kenh len CLAUDE.md toan cuc · Owner quyet luc ' + d,
+    'A. Muc do dua len global: ' + g('A'),
+    'B. Don 4 CLAUDE.md ghe:   ' + g('B'),
+    them ? 'C. Owner dan them:        ' + them : '',
+    '',
+    'Sau khi nhan, lam DONG THOI 2 viec:',
+    '1) STAMP trang round-3: banner to «DA QUYET LUC <gio>» dau trang + badge «DA CHON» tai tung option Owner tick + them dau tick vao <title>.',
+    '2) GIAO viec theo tung quyet dinh — viec cua ghe khac thi giao PM cua ghe do, PM khong om viec.'
+  ].filter(Boolean).join('\n');
+  var ra = document.getElementById('ra');
+  ra.style.display = 'block'; ra.value = t; ra.select();
+  navigator.clipboard.writeText(t).then(
+    function(){ document.querySelector('button').textContent = '✅ Đã copy — dán vào chat cho em'; },
+    function(){ document.querySelector('button').textContent = 'Copy tay giúp em (đã bôi sẵn)'; }
+  );
+}
+</script>
+</div></body>
+</html>
