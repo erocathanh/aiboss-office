@@ -574,12 +574,23 @@ export default function UngDung({
       ten: string,
       maPhien: string,
       truocByte?: number,
-    ): Promise<{ tin: Tin[]; conNua: boolean; viTri: number; catDai: boolean }> => {
+      conHieuLuc?: () => boolean,
+    ): Promise<{ tin: Tin[]; conNua: boolean; viTri: number; catDai: boolean } | null> => {
       const q =
         `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}` +
         (truocByte === undefined ? '' : `&truoc_byte=${truocByte}`);
       const r = await fetch(q);
       if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
+      /**
+       * 🐛 Hermes vòng 6: bản nhịp A đầu của tôi parse JSON + locTin **TRƯỚC** chốt lỗi-thời.
+       *    Bản CHA bỏ phản hồi lỗi-thời TRƯỚC khi parse ⇒ phản hồi lỗi-thời có JSON hỏng
+       *    trước thì **im lặng bị bỏ**, sau thì **SINH THÔNG BÁO LỖI NHÌN THẤY**.
+       *    Đó là ĐỔI HÀNH VI — đúng thứ nhịp A cấm.
+       * ✅ Chốt vào TRONG cửa, chạy ngay sau fetch. Trả `null` (⛔ ném lỗi) để người gọi
+       *    `return` im lặng Y NHƯ bản cha — ném lỗi là rơi vào catch, và catch của resume
+       *    có sinh chẩn đoán nhìn thấy được.
+       */
+      if (conHieuLuc && !conHieuLuc()) return null;
       const j = await r.json();
       return {
         tin: locTin(j.lich_su), // locTin BÁC khi hình dạng sai — ⛔ lọc
@@ -597,8 +608,8 @@ export default function UngDung({
     const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
-      const kq = await docLichSu(ten, maPhien); // 🚪 qua CỬA ĐỌC
-      if (!conMoiNhat(i, ma)) return; // có lần gọi MỚI HƠN ⇒ kết quả này đã lỗi thời
+      const kq = await docLichSu(ten, maPhien, undefined, () => conMoiNhat(i, ma));
+      if (!kq) return; // lỗi thời ⇒ bỏ im lặng
       /**
        * 🐛 ĐÂY LÀ CHỖ XOÁ LỊCH SỬ ĐANG SỐNG TRÊN MÁY OWNER — có từ `d359bb6` 17/08.
        *    Ba lỗi trong một hàm: ⛔ kiểm `r.ok` · `isArray(…) : []` biến thân lỗi thành RỖNG ·
@@ -629,7 +640,7 @@ export default function UngDung({
       // Chỉ lần gọi MỚI NHẤT được hạ cờ — ⛔ thì vòng xoay tắt trong khi lần kia còn bay.
       if (conMoiNhat(i, ma)) capNhat(i, { dangNap: false });
     }
-  }, [capNhat, locTin, xinMaMoi, conMoiNhat]);
+  }, [capNhat, docLichSu, xinMaMoi, conMoiNhat]);
 
   /**
    * ⬆️ KÉO THÊM PHẦN CŨ HƠN — đi bằng CON TRỎ, mỗi lần một trang.
@@ -644,7 +655,10 @@ export default function UngDung({
     const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
-      const kq = await docLichSu(ten, maPhien, viTri); // 🚪 qua CỬA ĐỌC
+      // 🔴 CHỐT NÀY BẢN CHA CÓ (:618) mà nhịp A đầu của tôi ĐÁNH RƠI — Hermes vòng 6 bắt.
+      //    Rơi chốt = yêu cầu cũ về sau VẪN ghi được đè lên kết quả mới.
+      const kq = await docLichSu(ten, maPhien, viTri, () => conMoiNhat(i, ma));
+      if (!kq) return; // lỗi thời ⇒ bỏ im lặng, Y NHƯ bản cha
       const sach = kq.tin;
       /**
        * 🐛 Hermes chỉ ra race CÒN SÓT (có TỪ TRƯỚC, ⛔ do lượt này): chốt «đang chảy» chỉ
@@ -673,7 +687,7 @@ export default function UngDung({
     } finally {
       if (conMoiNhat(i, ma)) capNhat(i, { dangNap: false });
     }
-  }, [capNhat, locTin, xinMaMoi, conMoiNhat]);
+  }, [capNhat, docLichSu, xinMaMoi, conMoiNhat]);
 
   /**
    * 🔄 NẠP LẠI đoạn chat của MỘT ô — "F5 riêng cho ô này" (Owner 18/08).
@@ -1028,8 +1042,8 @@ export default function UngDung({
       // 🐛 Hermes vòng 4: đường fork ⛔ kiểm `r2.ok` ⇒ HTTP 400 có thân JSON hợp lệ vẫn
       //    parse ngon ⇒ lichSu = [] ⇒ ghi `tin: []` ⇒ XOÁ TRẮNG. Cùng mẫu 3 đường kia.
       const maFork = xinMaMoi(i);
-      const kq2 = await docLichSu(o.ns.ten, String(j.ma_moi)); // 🚪 qua CỬA ĐỌC
-      if (!conMoiNhat(i, maFork)) return;
+      const kq2 = await docLichSu(o.ns.ten, String(j.ma_moi), undefined, () => conMoiNhat(i, maFork));
+      if (!kq2) return; // lỗi thời ⇒ bỏ im lặng, TRƯỚC khi parse — Y NHƯ bản cha
       const lichSu = kq2.tin;
       capNhat(i, {
         dangFork: false, phienChoFork: null, chuoiDan: '',
@@ -1063,8 +1077,8 @@ export default function UngDung({
        *    và Owner đi tìm sai chỗ. Sai kiểu này tệ hơn báo lỗi trần.
        */
       const maResume = xinMaMoi(i);
-      const kq = await docLichSu(o.ns.ten, ma); // 🚪 qua CỬA ĐỌC
-      if (!conMoiNhat(i, maResume)) return;
+      const kq = await docLichSu(o.ns.ten, ma, undefined, () => conMoiNhat(i, maResume));
+      if (!kq) return; // lỗi thời ⇒ bỏ im lặng, TRƯỚC khi parse — Y NHƯ bản cha
       const lichSu = kq.tin;
       if (!lichSu.length) {
         // ⛔ KHÔNG im lặng mở phiên trắng — nói thẳng, để Owner còn biết mà tra lại.
