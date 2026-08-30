@@ -643,7 +643,8 @@ export default function UngDung({
         tin: [...sach, ...o1.tin],
         conNua: !!j.con_nua,
         viTri: Number(j.vi_tri) || 0,
-        catDongDai: !!j.cat_dong_qua_dai,
+        // 🔴 CỘNG DỒN, ⛔ ghi đè: trang trước đọc hụt thì cảnh báo phải Ở LẠI.
+        catDongDai: o1.catDongDai || !!j.cat_dong_qua_dai,
       });
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
