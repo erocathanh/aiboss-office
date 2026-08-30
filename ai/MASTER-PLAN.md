@@ -141,7 +141,7 @@ bảng markdown → danh sách dọc màn hẹp   → 5 luật CSS trong mau09.c
 convertMarkdownTables mất nội dung      → hàm đó KHÔNG còn trong src (0 tệp) ⇒ bẫy hết hiệu lực
 ```
 
-### P0-4 · 🚨 BẪY NHÓM TIẾN TRÌNH — cảnh báo này CHƯA AI GHI VÀO MÃ
+### P0-6 · 🚨 BẪY NHÓM TIẾN TRÌNH — cảnh báo này CHƯA AI GHI VÀO MÃ
 
 **Đo 18/08:** ba ghế **chung một nhóm tiến trình với MÁY CHỦ** (`pgid=70498`).
 **Đo lại 30/08 — VẪN ĐÚNG:**
@@ -163,7 +163,7 @@ Sửa theo lối đó = **bắn SIGTERM vào cả nhóm = giết MÁY CHỦ và 
 ```
 📌 Bước ① rẻ nhất và ngăn được tai nạn nặng nhất. Làm trước.
 
-### P0-5 · F5 LÚC GHẾ ĐANG NHẢ CHỮ — giao diện NÓI DỐI, và nó lấy mất cái phanh
+### P0-7 · F5 LÚC GHẾ ĐANG NHẢ CHỮ — giao diện NÓI DỐI, và nó lấy mất cái phanh
 
 **Đo lại 30/08 — VẪN ĐÚNG:**
 ```
@@ -183,7 +183,7 @@ Ba tầng bệnh, **tầng ③ nặng nhất**:
 ```
 ① thêm GET /api/dung chỉ-đọc (hoặc cờ trong /api/phien): ô nào ĐANG CHẠY + pid + bắt đầu lúc nào
    ⇒ khôi phục đặt dangChay ĐÚNG SỰ THẬT ⇒ NÚT DỪNG HIỆN LẠI.  RẺ · LÙI ĐƯỢC · LÀM TRƯỚC
-   📌 Trùng với P0-4 bước ③ — làm một lần, được cả hai việc.
+   📌 Trùng với P0-6 bước ③ — làm một lần, được cả hai việc.
 ② nối lại luồng sau F5 — việc THẬT SỰ KHÓ, openclaw KHÔNG có mẫu để bê (nó là cổng nối + TUI,
    KHÔNG phải app web ⇒ KHÔNG có nút F5 nào để hỏng; nó nối lại KẾT NỐI, KHÔNG phát lại LUỒNG)
 ③ trong lúc chưa có ②: ô đang chạy sau F5 phải NÓI RA. KHÔNG để giao diện im lặng nói dối.
@@ -217,7 +217,7 @@ Câu «WatchPaths hay StartInterval» tụt xuống hàng chi tiết cài đặt
 ⚠️ **KHÔNG bê con số 30 giây của openclaw.** Của họ hợp với nhịp tim máy; của ta là người-gửi ⇒ 30s
 có thể QUÁ CHẬM. Bê số của người khác vào bài toán khác là lỗi v1 suýt lặp lần hai.
 
-### P1-5 · SQLite cho trạng thái liên-ghế (v1 gọi BE-S1..S4) — CHƯA làm dòng nào
+### P1-6 · SQLite cho trạng thái liên-ghế (v1 gọi BE-S1..S4) — CHƯA làm dòng nào
 ```
 đo 30/08: sqlite trong src = 0 tệp  ⇒ cả làn BE của v1 chưa khởi động
 ```
