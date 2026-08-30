@@ -1544,8 +1544,12 @@ export default function UngDung({
   guiRef.current = gui;
   const dangThamDo = useRef(false);
 
-  useEffect(() => {
-    const hen = setInterval(async () => {
+  /**
+   * 📡 MỘT NHỊP THĂM DÒ — tách khỏi đồng hồ để ô VỪA RẢNH gọi được NGAY,
+   *    ⛔ phải ngồi đợi hết nhịp 5 giây (việc ③ của P0-2a).
+   * ⚠️ Chỉ đọc qua `ref` nên phụ thuộc rỗng là ĐÚNG — ⛔ phải cẩu thả.
+   */
+  const thamDoMotNhip = useCallback(async () => {
       // ⛔ Nhịp trước chưa về thì bỏ nhịp này — ⛔ đừng chồng yêu cầu lên nhau.
       if (dangThamDo.current) return;
 
@@ -1557,19 +1561,33 @@ export default function UngDung({
        */
       if (typeof document !== 'undefined' && document.hidden) return;
 
-      // Chỉ hỏi hộ ô ĐANG CÓ GHẾ và ⛔ KHÔNG đang chạy (ô bận thì đánh thức cũng vô ích).
-      const dsHoi = dsORef.current
-        .map((o, i) => ({ o, i }))
-        .filter(({ o }) => o.ns && !o.dangChay && !o.dangNap)
-        .map(({ i }) => maOCua(i));
-      if (dsHoi.length === 0) return;
+      /**
+       * 🗣 KHAI CẢ HAI DANH SÁCH (P0-2a, 30/08/2026).
+       *
+       * 🕳 Chú thích cũ ở đây ghi «ô bận thì đánh thức cũng vô ích» — **DẠY SAI**.
+       *    Đánh thức ô bận ⛔ hề vô ích: nó chỉ cần ĐỢI. Câu đó khiến cả đội tưởng
+       *    mẩu rơi là chuyện đương nhiên, trong khi thật ra mẩu HẾT HẠN ÂM THẦM sau
+       *    3 phút — người gửi thấy `200` tưởng đã tới, người nhận ⛔ BAO GIỜ thấy.
+       *
+       * 📌 Ô CÓ ghế thì phải nằm ĐÚNG MỘT trong hai danh sách:
+       *      ds_o   = sẵn sàng NHẬN ngay
+       *      ds_ban = có ghế nhưng đang chạy / đang nạp ⇒ máy chủ GIỮ mẩu, ⛔ để hết hạn
+       *    Ô ⛔ CÓ ghế thì ⛔ vào danh sách nào — «trống» KHÁC «bận». Xếp nhầm ô trống
+       *    vào `ds_ban` là giữ một mẩu suốt 30 phút cho một chỗ ⛔ ai ngồi.
+       */
+      const coGhe = dsORef.current.map((o, i) => ({ o, i })).filter(({ o }) => o.ns);
+      const dsHoi = coGhe.filter(({ o }) => !o.dangChay && !o.dangNap).map(({ i }) => maOCua(i));
+      const dsBan = coGhe.filter(({ o }) => o.dangChay || o.dangNap).map(({ i }) => maOCua(i));
+      // ⛔ Về sớm khi ⛔ có ô rảnh — vẫn phải báo `ds_ban` để máy chủ GIỮ mẩu.
+      //    Về sớm ở đây đúng là chỗ mẩu chết trong khi ta tưởng đã lo xong.
+      if (dsHoi.length === 0 && dsBan.length === 0) return;
 
       dangThamDo.current = true;
       try {
         const r = await fetch('/api/danh-thuc/nhan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ds_o: dsHoi }),
+          body: JSON.stringify({ ds_o: dsHoi, ds_ban: dsBan }),
         });
         if (!r.ok) return;
         const j = await r.json();
@@ -1588,9 +1606,32 @@ export default function UngDung({
       } finally {
         dangThamDo.current = false;
       }
-    }, NHIP_THAM_DO_MS);
-    return () => clearInterval(hen);
   }, []);
+
+  useEffect(() => {
+    const hen = setInterval(() => { void thamDoMotNhip(); }, NHIP_THAM_DO_MS);
+    return () => clearInterval(hen);
+  }, [thamDoMotNhip]);
+
+  /**
+   * ⚡ Ô vừa BẬN → RẢNH ⇒ thăm dò NGAY, ⛔ ngồi đợi hết nhịp 5 giây (việc ③ của P0-2a).
+   *
+   * 🔤 «Vết bận» là một chuỗi 0/1 theo ô. Dùng chuỗi thay vì mảng để React so được bằng
+   *    `===` — mảng thì lần vẽ nào cũng là vật mới ⇒ hiệu ứng chạy mọi lần vẽ.
+   * ⏱ Hoãn 200ms rồi mới hỏi, CÓ LÝ DO: ngay sau khi hạ cờ bận, ô có thể GỬI TIẾP câu
+   *    đang xếp hàng của chính nó (:1456). Hỏi ngay là chen vào giữa hai việc đó.
+   *    200ms đủ để việc xếp hàng giành lại cờ bận, mà vẫn xa dưới mức 2 giây đề bài đòi.
+   */
+  const vetBan = dsO.map((o) => (o.ns && (o.dangChay || o.dangNap) ? '1' : '0')).join('');
+  const vetBanTruoc = useRef(vetBan);
+  useEffect(() => {
+    const truoc = vetBanTruoc.current;
+    vetBanTruoc.current = vetBan;
+    const vuaRanh = [...vetBan].some((c, i) => truoc[i] === '1' && c === '0');
+    if (!vuaRanh) return;
+    const t = setTimeout(() => { void thamDoMotNhip(); }, 200);
+    return () => clearTimeout(t);
+  }, [vetBan, thamDoMotNhip]);
 
   /** Nhãn dễ đọc của ghế đã đánh thức — ⛔ đừng hiện tên kỹ thuật trơ trọi. */
   const nhanCua = useCallback(

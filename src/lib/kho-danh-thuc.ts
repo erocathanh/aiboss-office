@@ -26,6 +26,18 @@ const TEP = path.join(THU_MUC, 'danh-thuc.json');
 /** Yêu cầu quá hạn này mà chưa ai xử → BỎ. ⛔ Đừng đánh thức bằng câu đã cũ. */
 export const HAN_YEU_CAU_MS = 3 * 60_000;
 
+/**
+ * ⏳ TRẦN CỨNG khi mẩu đang được GIỮ vì ô bận (P0-2a, 30/08/2026).
+ *
+ * 🐛 Bệnh cũ: ô bận quá 3 phút thì mẩu hết hạn ÂM THẦM. Người gửi thấy `200` tưởng đã tới;
+ *    người nhận ⛔ BAO GIỜ thấy. Đúng con bệnh «rơi im lặng» trong sổ bẫy.
+ * ✅ Nay ô bận thì đồng hồ 3 phút được DỜI theo mỗi nhịp thăm dò báo bận.
+ * ⚠️ Nhưng ⛔ được giữ vô hạn: ô bận vĩnh viễn thì mẩu sống mãi, mà **giữ mãi cũng là
+ *    một kiểu im lặng** — chỉ khác chỗ nó im ở phía bên kia. Quá trần này thì BỎ,
+ *    và mẩu rơi khỏi sổ với `da_xu = false` nên `baoMauChet` tự kêu + tự ghi sổ đếm.
+ */
+export const TRAN_GIU_MS = 30 * 60_000;
+
 /** Trần đánh thức cho CẢ MÁY CHỦ (mỗi phút) — phanh chống vòng lặp A↔B đốt tiền thật. */
 export const TRAN_MOI_PHUT = 6;
 
@@ -43,6 +55,12 @@ export interface YeuCauDanhThuc {
   luc: number;
   da_xu: boolean;
   xu_luc: number | null;
+  /**
+   * ⏳ Lần gần nhất ô đích được BÁO LÀ ĐANG BẬN. Có mặt = mẩu đang được giữ chờ ô rảnh.
+   * Đồng hồ 3 phút tính từ mốc này thay vì từ `luc` — nhưng vẫn chịu trần `TRAN_GIU_MS`
+   * tính từ `luc` GỐC, ⛔ phải từ mốc đã dời (⛔ thì nó tự gia hạn vô tận).
+   */
+  giu_toi?: number;
 }
 
 interface So {
@@ -98,7 +116,9 @@ function ghi(s: So): void {
 
 function donDep(s: So, bayGio: number): So {
   const giu = s.hang_doi
-    .filter((y) => bayGio - y.luc < GIU_LICH_SU_MS)
+    // ⏳ Mẩu đang được GIỮ vì ô bận phải sống quá mốc 10 phút — ⛔ thì trần 30 phút
+    //    ⛔ bao giờ tới nơi, và mẩu vẫn chết âm thầm y như cũ, chỉ muộn hơn.
+    .filter((y) => conDung(y, bayGio) || bayGio - y.luc < GIU_LICH_SU_MS)
     .slice(-TRAN_DONG_SO);
 
   // ⚰️ Mẩu RƠI KHỎI sổ mà `da_xu` vẫn false = chết ⛔ tới đích ⇒ KÊU + GHI SỔ ĐẾM.
@@ -113,9 +133,43 @@ function donDep(s: So, bayGio: number): So {
   return { hang_doi: giu, moc_goi: s.moc_goi.filter((t) => bayGio - t < 60_000) };
 }
 
-/** Yêu cầu này còn dùng được không (chưa xử + chưa quá 3 phút). */
+/**
+ * Yêu cầu này còn dùng được ⛔ — chưa xử, chưa quá hạn.
+ *
+ * 📌 HAI đồng hồ, ⛔ phải một:
+ *    · đồng hồ 3 phút  — tính từ `giu_toi` nếu ô đang bận, ⛔ thì từ `luc`
+ *    · TRẦN 30 phút    — LUÔN tính từ `luc` GỐC, ⛔ bao giờ dời
+ *   Thiếu vế hai thì một ô bận liên tục sẽ gia hạn mẩu tới vô tận.
+ */
 export function conDung(y: YeuCauDanhThuc, bayGio = Date.now()): boolean {
-  return !y.da_xu && bayGio - y.luc < HAN_YEU_CAU_MS;
+  if (y.da_xu) return false;
+  if (bayGio - y.luc >= TRAN_GIU_MS) return false;
+  const mocDem = Math.max(y.luc, y.giu_toi ?? 0);
+  return bayGio - mocDem < HAN_YEU_CAU_MS;
+}
+
+/**
+ * 🤚 GIỮ mẩu cho những ô ĐANG BẬN — gọi ở đầu mỗi nhịp thăm dò.
+ *
+ * ⚠️ Máy chủ ⛔ TỰ BIẾT ô nào bận: `dangChay` là trạng thái của TRÌNH DUYỆT.
+ *    Nên trình duyệt phải khai ra, và đây là chỗ nhận lời khai đó.
+ * 📌 Chỉ dời đồng hồ cho mẩu CHƯA xử và CHƯA quá trần — ⛔ hồi sinh mẩu đã chết.
+ * Trả về số mẩu thực sự được giữ, để bên gọi ⛔ phải đoán.
+ */
+export function giuChoOBan(dsBan: string[], bayGio = Date.now()): number {
+  if (dsBan.length === 0) return 0;
+  const ban = new Set(dsBan);
+  const s = donDep(doc(), bayGio);
+  let dem = 0;
+  for (const y of s.hang_doi) {
+    if (y.da_xu) continue;
+    if (!ban.has(y.ma_o)) continue;
+    if (bayGio - y.luc >= TRAN_GIU_MS) continue;   // quá trần ⇒ để nó chết đúng hẹn
+    y.giu_toi = bayGio;
+    dem += 1;
+  }
+  ghi(s);
+  return dem;
 }
 
 export type KetQuaXin =
