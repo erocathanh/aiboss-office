@@ -231,9 +231,21 @@ function mocMs(ts?: string): number | undefined {
  * 📌 Nút thắt **⛔ phải thời gian máy chủ** (0,68 giây vẫn nhanh) mà là **SỐ TIN trình duyệt
  *    phải dựng**. Nên trần đặt theo BYTE ĐỌC VÀO, ⛔ theo số dòng — đo thật: một dòng của
  *    ghế `web-demo` nặng tới ~9,9 KB, cắt 200 dòng vẫn ra ~2 MB.
- * ⚠️ 1,5 MB và 2 MB cùng cho 299 tin trên tệp đó ⇒ 1,5 là chỗ vừa đủ, thêm nữa ⛔ được gì.
+ * 📊 CHỌN MỨC BẰNG BẢNG ĐO, ⛔ bằng cảm giác — chạy trên đúng 6 ô Owner đang mở:
+ * ```
+ *   trần        tin (cả 6 ô)   byte gửi   thời gian     tin/ô ÍT NHẤT
+ *   ⛔ trần        ~10.900       8,60 MB       —          (nết cũ, gây lắc)
+ *   1,5 MB            685        0,54 MB     45 ms        50   ← quá mỏng
+ *   3   MB          1.225        1,15 MB     72 ms        79   ← CHỌN CÁI NÀY
+ *   5   MB          2.080        1,69 MB    124 ms       162
+ * ```
+ * ⇒ Lấy **3 MB**: vẫn nhẹ hơn nết cũ **9 lần về số tin** và **7,5 lần về byte**, mà mỗi ô còn
+ *   ~79-283 tin — đủ để đọc lại mạch việc. 1,5 MB rẻ hơn nhưng ô mỏng nhất chỉ còn **50 tin**,
+ *   mỏng quá thì Owner phải bấm «xem thêm» ngay, tức là ⛔ giải quyết được gì.
+ * 📌 Đề bài ghi «~1,5 MB HOẶC ~200 tin». Đo ra: mức cho ~200 tin/ô là **3 MB**, ⛔ phải 1,5 MB.
+ *   Hai con số trong đề bài ⛔ trỏ cùng một chỗ — tôi lấy theo SỐ TIN vì đó mới là thứ gây lắc.
  */
-export const TRAN_BYTE_MAC_DINH = 1.5 * 1024 * 1024;
+export const TRAN_BYTE_MAC_DINH = 3 * 1024 * 1024;
 
 export type KetQuaLichSu = {
   tin: TinLichSu[];
