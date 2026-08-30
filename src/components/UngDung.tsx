@@ -827,8 +827,19 @@ export default function UngDung({
      * ⇒ ⛔ đọc được thì DỪNG, giữ nguyên mọi thứ, để Owner thử lại.
      */
     if (ds === null) {
+      /**
+       * 🐛 LỜI NHẮN CŨ NÓI DỐI — và chính tôi viết ra nó (Hermes vòng 5 bắt).
+       *    Tôi ghi «⛔ đổi gì cả», nhưng ngay phía TRÊN (huyLuong + O_TRONG + datTieuDiem)
+       *    ô đã bị **xoá trắng và đổi sang ghế mới rồi**. Owner nhìn màn hình thấy ĐÃ ĐỔI
+       *    mà app bảo chưa — tệ hơn im lặng, vì nó dạy Owner ⛔ tin lời app.
+       * ⚠️ Sửa ĐÚNG phải là **đọc danh sách TRƯỚC, đổi ô SAU** — nhưng đó là đảo thứ tự,
+       *    thuộc nhịp B mà `claude-aiboss-app-pm` CHƯA gật. Lượt này chỉ cho lời nhắn
+       *    NÓI THẬT, ⛔ đụng hành vi. Ghi rõ ở đây để nhịp B ⛔ quên chỗ này.
+       */
       capNhat(i, {
-        loiDan: '⚠️ ⛔ đọc được danh sách phiên (mạng hoặc máy chủ). ⛔ đổi gì cả — thử lại giúp em.',
+        loiDan:
+          '⚠️ Đã chuyển ô sang ghế này, nhưng ⛔ đọc được danh sách phiên (mạng hoặc máy chủ). ' +
+          'Lịch sử CHƯA nạp — bấm «Nạp lại» khi mạng ổn, hoặc chọn phiên bằng tay.',
       });
       return;
     }
