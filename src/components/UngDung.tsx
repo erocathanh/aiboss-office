@@ -1859,6 +1859,27 @@ export default function UngDung({
                             : <CaretUp size={18} weight={DAM_ICON} aria-hidden="true" />}
                         </button>
                       )}
+                      {/**
+                        * ⏱ NÚT NẠP LỊCH SỬ CŨ HƠN — đứng trên THANH ĐẦU Ô, ⛔ trong luồng chat.
+                        *
+                        * 🐛 Hai thiết kế trước đều hỏng, và hỏng ở GỐC chứ ⛔ ở chi tiết:
+                        *    nút trong luồng + ghim  ⇒ dải ĐÈ LÊN CHỮ (Owner chụp ảnh 14:46)
+                        *    nút trong luồng + ⛔ ghim ⇒ đẩy chữ xuống rồi TRÔI MẤT khi cuộn
+                        * ✅ Lên thanh thì ⛔ phải chọn giữa hai cái dở: thanh vốn cố định, ⛔ chồng chữ,
+                        *    ⛔ ăn chỗ khung chat, và luôn nhìn thấy dù cuộn tới đâu. (Owner đề xuất.)
+                        * ⚠️ ⛔ dùng CaretUp — trùng nút thu khung ngay bên cạnh, người nhìn sẽ lẫn.
+                        */}
+                      {o.conNua && o.phienHienTai && o.ns && (
+                        <button
+                          className="nut-tron nut-lich-su" type="button"
+                          disabled={o.dangNap || o.dangChay}
+                          onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.viTri)}
+                          title={o.dangNap ? 'Đang nạp phần cũ hơn…' : 'Nạp thêm phần trò chuyện cũ hơn'}
+                          aria-label="Nạp thêm phần cũ hơn"
+                        >
+                          <ClockCounterClockwise size={18} weight={DAM_ICON} aria-hidden="true" />
+                        </button>
+                      )}
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => datToanMan(toanMan === i ? null : i)}
@@ -2077,18 +2098,6 @@ export default function UngDung({
                           <div className="moc-ngay canh-hut">
                             ⚠️ Có một đoạn quá lớn nên app đọc hụt — phần trên đây khuyết một khúc.
                             Bản gốc vẫn còn nguyên trong tệp phiên.
-                          </div>
-                        )}
-                        {o.conNua && o.phienHienTai && o.ns && (
-                          <div className="moc-ngay neo-tren">
-                            <button
-                              type="button"
-                              className="nut-keo-them"
-                              disabled={o.dangNap || o.dangChay}
-                              onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.viTri)}
-                            >
-                              ⬆️ Xem thêm phần cũ hơn
-                            </button>
                           </div>
                         )}
                         {o.tin.map((t, k) => (

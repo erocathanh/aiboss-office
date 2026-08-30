@@ -291,57 +291,8 @@
 .nut-cot { display: none; width: auto; padding: 0 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 @media (min-width: 1041px) { .nut-cot { display: inline-flex; } }
 
-/* ⬆️ Nút kéo thêm lịch sử cũ — chỉ hiện khi máy chủ báo còn phần chưa nạp. */
-.nut-keo-them{
-  font:inherit; font-size:13px; padding:6px 14px; cursor:pointer;
-  border:1px solid var(--vien,#3a3f4b); border-radius:999px;
-  background:transparent; color:inherit; opacity:.85;
-}
-.nut-keo-them:hover:not(:disabled){ opacity:1; }
-.nut-keo-them:disabled{ opacity:.4; cursor:default; }
-
 /* ⚠️ Báo Owner khi app đọc hụt một khúc — im lặng khuyết tệ hơn báo lỗi. */
 .moc-ngay.canh-hut{
   color:#e8b339; font-size:12.5px; line-height:1.5;
   padding:6px 12px; max-width:52ch; text-align:center; opacity:.95;
 }
-
-/**
- * 📌 GHIM NÚT «Xem thêm» VÀO ĐỈNH KHUNG CUỘN.
- *
- * 🐛 Ca thật 30/08: nút vẽ ở ĐỈNH danh sách (UngDung.tsx:2082) còn tin vẽ SAU (:2094),
- *    mà :473 và :480 tự cuộn XUỐNG ĐÁY mỗi lần có tin mới ⇒ nút cách chỗ Owner đang
- *    nhìn **167-382 tin**. Trên iPhone màn ngắn thì coi như KHÔNG CÓ NÚT.
- * 📌 Nút này sinh ra để CỨU LỊCH SỬ CHAT — thứ Owner mất rồi đòi lại.
- *    Vẽ ra mà với ⛔ tới thì bằng chưa làm.
- *
- * ⚠️ Nền PHẢI ĐẶC, ⛔ để trong suốt — tin cuộn qua sẽ lộ ra sau nút, đọc thành chữ chồng chữ.
- *    Màu lấy từ TIỀN LỆ CÓ SẴN trong nhà: `.hop-tim` (mau09:121) cũng ghim đỉnh và dùng
- *    `var(--navy-0)`. ⛔ bịa mã màu mới.
- * ⚠️ ⛔ dùng `:has()` để nhắm — thêm hẳn tên lớp `neo-tren`, chắc chắn hơn (đề bài dặn).
- */
-.bang-tin .neo-tren{
-  position:sticky; top:0; z-index:3;
-  background:var(--navy-0);
-  border-bottom:1px solid var(--vien);
-  margin:-16px -16px 0;   /* trải hết bề ngang, bù padding 16px của .bang-tin */
-  padding:8px 16px;
-
-  /**
-   * 🐛 HAI DÒNG NÀY LÀ THỨ TÔI THIẾU LẦN TRƯỚC — Owner mở iPhone thấy nút ĐÈ LÊN CHỮ.
-   *    Tôi nghiệm thu bằng «lớp CSS có mặt» ⇒ ĐẠT, mà mắt Owner nhìn ra hỏng ngay.
-   *    `claude-phong-ban-pm` đo trong TRÌNH DUYỆT THẬT và loại đúng nghi can tôi sẽ nghi:
-   *      laConTrucTiep=true · background CÓ áp · margin CÓ áp  ⇒ bộ chọn ⛔ sai
-   *    Thủ phạm là hai thuộc tính KẾ THỪA từ `.moc-ngay` mà `.neo-tren` ⛔ huỷ:
-   */
-  align-self:stretch;   /* HUỶ align-self:center (mau09:290). `.bang-tin` là flex-column
-                           ⇒ `center` làm phần tử CO vừa chữ rồi nằm giữa, margin âm
-                           ⛔ kéo giãn được ⇒ dải rộng 53%, chữ tin bên dưới lòi hai bên. */
-  border-radius:0;      /* HUỶ bo tròn 99px (mau09:291) — giữ nguyên thì vẫn là viên thuốc. */
-}
-
-/**
- * 👆 VÙNG CHẠM ≥44px — chuẩn iOS. Nút cũ cao ~30px (chữ 13px + đệm 6px),
- *    ngón tay trên iPhone bấm hụt. Nâng ĐỆM DỌC, ⛔ hạ cỡ chữ xuống dưới 13px (đề bài cấm).
- */
-.bang-tin .neo-tren .nut-keo-them{ padding:13px 18px; }
