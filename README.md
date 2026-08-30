@@ -8,7 +8,7 @@ Vòng này chạy **một ô, một agent thật**. Chia 2–4 ô để vòng sa
 ## Chạy
 
 ```bash
-cd /Users/erocathanh/Development/phong-ban-ai-app
+cd /Users/erocathanh/Projects/aiboss-app-chat
 pnpm install
 pnpm dev            # http://localhost:4319
 ```
