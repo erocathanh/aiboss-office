@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { baoMauChet } from './bao-mau-chet';
 
 /**
  * SỔ "YÊU CẦU ĐÁNH THỨC" — ghi XUỐNG ĐĨA, cùng chỗ với sổ ô↔phiên.
@@ -52,6 +53,20 @@ interface So {
 
 const SO_TRONG: So = { hang_doi: [], moc_goi: [] };
 
+/**
+ * Sổ THĂM DÒ — chỉ trong bộ nhớ tiến trình, ⛔ ghi đĩa (⛔ thêm người ghi).
+ * Dùng để tách cửa ② («có tab, riêng ô này ⛔ được hỏi») khỏi cửa ① («⛔ ai thăm dò»).
+ * Mất khi khởi động lại ⇒ cửa sẽ lùi về `thieu-cua`, ⛔ bịa ra cửa sai.
+ */
+let thamDoCuoiToanCuc = 0;
+const thamDoTheoO = new Map<string, number>();
+
+/** Trình duyệt vừa hỏi ô này. Gọi ở ĐẦU mỗi lần nhận việc. */
+export function ghiNhanThamDo(maO: string, bayGio = Date.now()): void {
+  thamDoCuoiToanCuc = bayGio;
+  thamDoTheoO.set(maO, bayGio);
+}
+
 function doc(): So {
   try {
     const j = JSON.parse(fs.readFileSync(TEP, 'utf8')) as Partial<So>;
@@ -67,18 +82,35 @@ function doc(): So {
 function ghi(s: So): void {
   fs.mkdirSync(THU_MUC, { recursive: true });
   // Ghi tệp tạm rồi đổi tên → ⛔ không để lại JSON dở dang nếu tắt máy giữa chừng.
-  const tam = `${TEP}.tam`;
-  fs.writeFileSync(tam, JSON.stringify(s, null, 2), 'utf8');
-  fs.renameSync(tam, TEP);
+  // 🔴 Tên tệp tạm phải RIÊNG cho từng tiến trình + từng lần ghi.
+  // Ca thật 29/08: hai máy chủ cùng sống (một cái mồ côi sau `bootout`) ⇒ cả hai dùng
+  // chung đúng một tên `<tệp>.tam` ⇒ bên này ghi dở thì bên kia `rename` mất, và sổ
+  // nhận nguyên một tệp JSON của người khác — hỏng IM LẶNG, ⛔ báo lỗi.
+  const tam = `${TEP}.${process.pid}.${Date.now()}.tam`;
+  try {
+    fs.writeFileSync(tam, JSON.stringify(s, null, 2), 'utf8');
+    fs.renameSync(tam, TEP);
+  } catch (loi) {
+    try { fs.unlinkSync(tam); } catch { /* tệp chưa kịp sinh ra */ }
+    throw loi;
+  }
 }
 
 function donDep(s: So, bayGio: number): So {
-  return {
-    hang_doi: s.hang_doi
-      .filter((y) => bayGio - y.luc < GIU_LICH_SU_MS)
-      .slice(-TRAN_DONG_SO),
-    moc_goi: s.moc_goi.filter((t) => bayGio - t < 60_000),
-  };
+  const giu = s.hang_doi
+    .filter((y) => bayGio - y.luc < GIU_LICH_SU_MS)
+    .slice(-TRAN_DONG_SO);
+
+  // ⚰️ Mẩu RƠI KHỎI sổ mà `da_xu` vẫn false = chết ⛔ tới đích ⇒ KÊU + GHI SỔ ĐẾM.
+  // Kêu ở ĐÂY vì đây đúng là chỗ mẩu biến mất ⇒ mỗi mẩu chỉ đi qua đúng MỘT lần.
+  // (`baoMauChet` còn nhớ mã mẩu, nên `xemSo` đọc-mà-⛔-ghi cũng ⛔ làm kêu lặp.)
+  for (const y of s.hang_doi) {
+    if (!y.da_xu && !giu.includes(y)) {
+      baoMauChet(y, { toanCuc: thamDoCuoiToanCuc, cuaO: thamDoTheoO.get(y.ma_o) ?? 0 }, bayGio);
+    }
+  }
+
+  return { hang_doi: giu, moc_goi: s.moc_goi.filter((t) => bayGio - t < 60_000) };
 }
 
 /** Yêu cầu này còn dùng được không (chưa xử + chưa quá 3 phút). */
@@ -156,6 +188,8 @@ export function xepHang(ts: {
  */
 export function nhanYeuCau(maO: string): YeuCauDanhThuc | null {
   const bayGio = Date.now();
+  // Ghi nhận TRƯỚC khi dọn: chính lượt thăm dò đang diễn ra này phải được tính.
+  ghiNhanThamDo(maO, bayGio);
   const s = donDep(doc(), bayGio);
   const y = s.hang_doi.find((x) => x.ma_o === maO && conDung(x, bayGio));
   if (!y) {

@@ -26,10 +26,15 @@ export async function POST(req: NextRequest) {
     ? than.ds_o.filter((x): x is string => typeof x === 'string' && /^o-\d+$/.test(x)).slice(0, 8)
     : [];
 
-  const nhan: Record<string, { ma: string; tu_ai: string; cau_hoi: string; luc: number }> = {};
+  const nhan: Record<
+    string,
+    { ma: string; ma_nhan_su: string; tu_ai: string; cau_hoi: string; luc: number }
+  > = {};
   for (const maO of dsO) {
     const y = nhanYeuCau(maO);
-    if (y) nhan[maO] = { ma: y.ma, tu_ai: y.tu_ai, cau_hoi: y.cau_hoi, luc: y.luc };
+    // ⭐ Trả kèm `ma_nhan_su`: mẩu nhắm vào GHẾ, ⛔ vào ô. Ô có thể đã đổi ghế kể từ
+    //   lúc xếp hàng ⇒ ⛔ có trường này thì bên nhận ⛔ cách nào biết mình có đúng người.
+    if (y) nhan[maO] = { ma: y.ma, ma_nhan_su: y.ma_nhan_su, tu_ai: y.tu_ai, cau_hoi: y.cau_hoi, luc: y.luc };
   }
 
   return Response.json({ nhan });

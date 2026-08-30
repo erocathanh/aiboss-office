@@ -43,9 +43,19 @@ function doc(): So {
 function ghi(s: So): void {
   fs.mkdirSync(THU_MUC, { recursive: true });
   // Ghi tệp tạm rồi đổi tên → ⛔ không để lại tệp JSON dở dang nếu tắt máy giữa chừng.
-  const tam = `${TEP}.tam`;
-  fs.writeFileSync(tam, JSON.stringify(s, null, 2), 'utf8');
-  fs.renameSync(tam, TEP);
+  // 🔴 Tên tệp tạm phải RIÊNG cho từng tiến trình + từng lần ghi.
+  // Ca thật 29/08: hai máy chủ cùng sống (một cái mồ côi sau `bootout`) ⇒ cả hai dùng
+  // chung đúng một tên `<tệp>.tam` ⇒ bên này đang ghi dở thì bên kia `rename` mất,
+  // và sổ nhận nguyên một tệp JSON của người khác — hỏng IM LẶNG, ⛔ báo lỗi.
+  const tam = `${TEP}.${process.pid}.${Date.now()}.tam`;
+  try {
+    fs.writeFileSync(tam, JSON.stringify(s, null, 2), 'utf8');
+    fs.renameSync(tam, TEP);
+  } catch (loi) {
+    // ⛔ để lại tệp tạm nằm rác trong .trang-thai nếu ghi/đổi tên hỏng giữa chừng.
+    try { fs.unlinkSync(tam); } catch { /* tệp chưa kịp sinh ra — bỏ qua */ }
+    throw loi;
+  }
 }
 
 export function layO(maO: string): TrangThaiO | null {
