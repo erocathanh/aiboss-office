@@ -17,6 +17,16 @@ export interface NhanSu {
   ghim?: boolean;
   /** Đường dẫn tệp linh hồn — nạp làm lời dặn hệ thống cho phiên của ghế này. */
   soul?: string;
+  /**
+   * 📁 CHỖ ĐỨNG riêng của ghế (tuỳ chọn). ⛔ có thì ghế đứng ở
+   * `<thuMucLamViec>/<tên ghế>` như thường lệ.
+   *
+   * 🎯 Sinh ra 30/08 cho bộ «Quản Lý Trường»: 5 phiên Owner muốn nối vào nằm ở kho
+   *    `-Users-erocathanh` (thư mục NHÀ). Mà kho phiên được suy TỪ chỗ đứng
+   *    (`khoPhienCua` → `thuMucAgent`) ⇒ ⛔ đặt được chỗ đứng thì `--resume` tìm
+   *    trong `-Users-erocathanh-claude-hieu-truong` và ⛔ BAO GIỜ thấy — ghế mở ra TRỐNG.
+   */
+  thu_muc?: string;
   phong: string;
   ten_phong: string;
   vai: string;
@@ -46,6 +56,8 @@ type NhanSuTho = {
   ghim?: boolean;
   /** Đường dẫn tệp linh hồn — nạp làm lời dặn hệ thống cho phiên của ghế này. */
   soul?: string;
+  /** Chỗ đứng riêng — xem chú thích ở `NhanSu.thu_muc`. */
+  thu_muc?: string;
 };
 
 const THO = (duLieu as { nhan_su: NhanSuTho[] }).nhan_su;
@@ -59,6 +71,7 @@ const DS: NhanSu[] = coNhan.map((n) => ({
   nhan: thoTheoTen.get(n.ten)?.nhan ?? n.nhan,
   ghim: thoTheoTen.get(n.ten)?.ghim === true,
   soul: thoTheoTen.get(n.ten)?.soul,
+  thu_muc: thoTheoTen.get(n.ten)?.thu_muc,
   phong: n.phong,
   ten_phong: tenPhongTheoMa.get(n.phong) ?? n.phong,
   vai: n.vai,

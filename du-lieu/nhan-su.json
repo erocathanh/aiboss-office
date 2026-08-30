@@ -22,7 +22,7 @@
       "ma": "dao-tao",
       "icon": "🎓",
       "ten": "Đào tạo & Cohort",
-      "so_nhan_su": 23
+      "so_nhan_su": 28
     },
     {
       "ma": "ban-hang",
@@ -1382,7 +1382,47 @@
       "viet_tat": "AE",
       "nhan": "Thợ code app AIBOSS",
       "soul": "/Users/erocathanh/claude-aiboss-app-exe/CLAUDE.md"
+    },
+    {
+      "ten": "claude-hieu-truong",
+      "phong": "dao-tao",
+      "vai": "Hiệu Trưởng",
+      "viet_tat": "HT",
+      "nhan": "HIỆU TRƯỞNG",
+      "thu_muc": "/Users/erocathanh"
+    },
+    {
+      "ten": "claude-phong-dao-tao",
+      "phong": "dao-tao",
+      "vai": "Phòng Đào Tạo",
+      "viet_tat": "PĐT",
+      "nhan": "PHÒNG ĐÀO TẠO",
+      "thu_muc": "/Users/erocathanh"
+    },
+    {
+      "ten": "claude-phong-cong-nghe",
+      "phong": "dao-tao",
+      "vai": "Phòng Công Nghệ",
+      "viet_tat": "PCN",
+      "nhan": "PHÒNG CÔNG NGHỆ",
+      "thu_muc": "/Users/erocathanh"
+    },
+    {
+      "ten": "claude-phong-tai-chinh",
+      "phong": "dao-tao",
+      "vai": "Phòng Tài Chính",
+      "viet_tat": "PTC",
+      "nhan": "PHÒNG TÀI CHÍNH",
+      "thu_muc": "/Users/erocathanh"
+    },
+    {
+      "ten": "claude-phong-hanh-chinh",
+      "phong": "dao-tao",
+      "vai": "Phòng Hành Chính",
+      "viet_tat": "PHC",
+      "nhan": "PHÒNG HÀNH CHÍNH",
+      "thu_muc": "/Users/erocathanh"
     }
   ],
-  "tong": 220
+  "tong": 225
 }

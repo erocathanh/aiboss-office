@@ -150,6 +150,31 @@ const BO_VAN_HANH: string[] = [
 ];
 
 /**
+ * 🎛 BỘ GHẾ DỰNG SẴN — «Quản Lý Trường» (Owner 30/08).
+ *
+ * 🔴 KHÁC HẲN hai bộ trên ở MỘT điểm sống còn: bộ này MANG THEO MÃ PHIÊN.
+ *    Hai bộ kia nạp ghế rồi để `phien: null` ⇒ `datNguoi` tự nối phiên GẦN NHẤT của ghế.
+ *    Ở đây Owner chỉ đích danh 5 CUỘC NÓI CHUYỆN đã có ⇒ phải ghim mã, ⛔ để máy đoán.
+ *    ♻️ Dùng đúng đường mà nút «quay về» vẫn đi (`muc[i].phien`), ⛔ đẻ đường song song.
+ *
+ * 📁 Vì sao 5 ghế này chạy được: chúng khai `thu_muc: "/Users/erocathanh"` trong
+ *    `du-lieu/nhan-su.json`. Kho phiên suy TỪ chỗ đứng, nên đứng ở thư mục NHÀ thì
+ *    kho là `-Users-erocathanh` — đúng chỗ 5 phiên này nằm. Bỏ `thu_muc` đi là ghế
+ *    đứng ở `~/claude-hieu-truong`, kho khác, và cả 5 ô mở ra TRỐNG TRƠN.
+ *
+ * 🛡 An toàn: `/api/o` chỉ nhận phiên CÓ THẬT trong kho của ĐÚNG ghế đó (o/route.ts:37)
+ *    ⇒ mã phiên bị xoá thì máy chủ chặn, ⛔ ghi bậy vào sổ ô.
+ */
+const BO_QUAN_LY_TRUONG: { ten: string; phien: string | null }[] = [
+  { ten: 'claude-eroca-boss',      phien: null },
+  { ten: 'claude-hieu-truong',     phien: 'e888d879-dcfe-4dd5-87e1-3df4cc7bfe6b' },
+  { ten: 'claude-phong-dao-tao',   phien: '5956cd23-1533-4565-a7fc-0050769887dc' },
+  { ten: 'claude-phong-cong-nghe', phien: '7911258a-2109-4d48-8a53-5286836daef6' },
+  { ten: 'claude-phong-tai-chinh', phien: '823ce356-1bb7-4174-991f-8ccee76582fd' },
+  { ten: 'claude-phong-hanh-chinh',phien: '1f08afd0-73d8-45e9-86b5-0a06417bf7e1' },
+];
+
+/**
  * 🔴 Bộ đang xếp có PHẢI một bộ dựng sẵn ⛔ không?
  *
  * 🕳 LỖI PHÉP ĐO BẮT ĐƯỢC (20/08, khi thêm bộ «Vận hành»): `napBoGhe` cất bộ cũ MỖI LẦN
@@ -162,7 +187,10 @@ const BO_VAN_HANH: string[] = [
  *   là đội THẬT của Owner, bấm qua lại bao nhiêu bộ cũng ⛔ mất.
  */
 const LA_BO_DUNG_SAN = (ten: (string | null)[]): boolean =>
-  [BO_MARKETING, BO_VAN_HANH].some((bo) => bo.every((x, i) => ten[i] === x));
+  // ⚠️ THÊM BỘ MỚI thì PHẢI thêm vào đây. Quên = lỗi 20/08 quay lại: Owner bấm hai bộ
+  //    liên tiếp là đội THẬT của mình bị ghi đè, ⛔ có đường về.
+  [BO_MARKETING, BO_VAN_HANH, BO_QUAN_LY_TRUONG.map((m) => m.ten)]
+    .some((bo) => bo.every((x, i) => ten[i] === x));
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
 // Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
@@ -1441,6 +1469,16 @@ export default function UngDung({
                   >
                     <List size={15} weight={DAM_ICON} aria-hidden="true" />
                     Vận hành — 6 ô
+                  </button>
+                  {/* 🎛 «Quản Lý Trường» — Owner 30/08. Bộ DUY NHẤT ghim sẵn mã phiên
+                      ⇒ truyền THẲNG `BO_QUAN_LY_TRUONG`, ⛔ map `phien: null` như hai bộ trên. */}
+                  <button
+                    className="muc-menu" type="button" role="menuitem"
+                    title={BO_QUAN_LY_TRUONG.map((m) => m.ten).join(' · ')}
+                    onClick={() => { void napBoGhe(BO_QUAN_LY_TRUONG, true); }}
+                  >
+                    <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
+                    Quản Lý Trường — 6 ô
                   </button>
                 </div>
               )}

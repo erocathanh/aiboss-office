@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline';
 import { CAU_HINH } from './cau-hinh';
+import { timNhanSu } from './nhan-su';
 
 /**
  * ĐỌC KHO PHIÊN THẬT của Claude Code trên máy.
@@ -29,6 +30,20 @@ export function thuMucAgent(maNhanSu: string): string {
   // Chỉ nhận ký tự an toàn — ⛔ chặn đường leo thư mục (../).
   const sach = maNhanSu.replace(/[^a-zA-Z0-9._-]/g, '');
   if (!sach || sach !== maNhanSu) throw new Error('Mã nhân sự không hợp lệ.');
+
+  /**
+   * 📁 Ghế khai `thu_muc` thì ĐỨNG ĐÚNG CHỖ ĐÓ, ⛔ đẻ thư mục con theo tên ghế.
+   * Vì kho phiên suy TỪ chỗ đứng, đây là cách DUY NHẤT nối một ghế vào phiên
+   * đã có sẵn ở thư mục khác (bộ «Quản Lý Trường», 30/08).
+   * ⛔ nhận đường tương đối / có `..` — chỉ đường TUYỆT ĐỐI đã chuẩn hoá.
+   */
+  const rieng = timNhanSu(sach)?.thu_muc;
+  if (rieng) {
+    const chuan = path.normalize(rieng);
+    if (path.isAbsolute(chuan) && !chuan.split(path.sep).includes('..')) return chuan;
+    throw new Error('thu_muc của ghế phải là đường TUYỆT ĐỐI và ⛔ chứa "..".');
+  }
+
   return path.join(CAU_HINH.thuMucLamViec, sach);
 }
 
