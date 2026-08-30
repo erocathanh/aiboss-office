@@ -284,8 +284,9 @@ export async function lichSuPhien(
 
   const tong = fs.statSync(p).size;
   /** Mép PHẢI của cửa sổ. ⛔ truyền gì ⇒ lấy cuối tệp (mở phiên = xem phần mới nhất). */
+  /** ⚠️ FAIL 4: `0` là GIÁ TRỊ HỢP LỆ («đã ở đầu tệp»), ⛔ phải «⛔ truyền». */
   const met =
-    Number.isFinite(truocByte) && (truocByte as number) > 0
+    Number.isFinite(truocByte) && (truocByte as number) >= 0
       ? Math.min(truocByte as number, tong)
       : tong;
 
@@ -352,9 +353,29 @@ function docCuaSo(p: string, bd: number, met: number): { chu: string; batDau: nu
     if (n === 1 && truoc[0] === 0x0a) return { chu: s, batDau: bd }; // chỗ cắt đã sạch
 
     const xd = s.indexOf('\n');
-    if (xd === -1) return { chu: '', batDau: met }; // cả khúc là một dòng cắt dở
+    /**
+     * 🐛 FAIL 3 (Hermes lần 3): trả `batDau: met` là **KẸT VĨNH VIỄN** — con trỏ ⛔ tiến,
+     *    bấm tiếp đọc lại ĐÚNG cửa sổ đó mãi mãi.
+     * ✅ Con trỏ phải **TIẾN QUA** khúc ⛔ đọc nổi: trả `bd` (mép TRÁI cửa sổ).
+     *    Mất khúc đó thì đành, nhưng phần CŨ HƠN vẫn tới được — và client được BÁO
+     *    bằng cờ `cat_dong_qua_dai` để nói thật với Owner, ⛔ im lặng.
+     * 📌 Cái phải chết là **KẸT IM LẶNG**, ⛔ phải nhánh nới.
+     *    Nhánh nới ĐANG GÁNH VIỆC THẬT: quét ĐỦ 9.130 tệp ⇒ dòng dài nhất **5,99 MB**,
+     *    2 dòng vượt trần cứng 4 MB (2db8f6a5 dòng 771-772), và 5 ghế khai
+     *    thu_muc='/Users/erocathanh' đọc đúng kho đó. Xoá nhánh = mất hẳn 2 tin.
+     *    ⚠️ Lần trước tôi định xoá nó vì quét 400/9.130 tệp = 4% rồi kết luận cho CẢ kho.
+     */
+    if (xd === -1) return { chu: '', batDau: bd };
     const giu = s.slice(xd + 1);
     // ⚠️ ĐẾM BYTE, ⛔ đếm ký tự — chữ Việt mỗi chữ nhiều byte, lệch là con trỏ trỏ sai chỗ.
+    /**
+     * 🐛 CHỖ THẬT SỰ GÂY KẸT — tôi tìm ra khi vá dòng Hermes chỉ mà nó VẪN kẹt.
+     *    Hermes chỉ nhánh `xd === -1`. Nhưng cửa sổ cuối tệp **CÓ** một dấu xuống dòng:
+     *    chính dấu kết tệp. ⇒ `xd !== -1`, rơi vào ĐÂY, `giu` rỗng, `batDau = met - 0 = met`
+     *    ⇒ con trỏ ⛔ tiến ⇒ KẸT. **Vá đúng dòng được chỉ mà ⛔ kiểm dòng nào ĐANG CHẠY.**
+     * ✅ `giu` rỗng nghĩa là cửa sổ ⛔ chứa nổi một dòng trọn vẹn ⇒ con trỏ phải TIẾN QUA.
+     */
+    if (!giu) return { chu: '', batDau: bd };
     return { chu: giu, batDau: met - Buffer.byteLength(giu, 'utf8') };
   } finally {
     fs.closeSync(fd);

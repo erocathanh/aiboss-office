@@ -210,6 +210,8 @@ interface OChat {
   noiTiep: boolean;
   /** Còn phần lịch sử CŨ HƠN chưa nạp ⛔ — máy chủ trả về, dùng để hiện nút «xem thêm». */
   conNua: boolean;
+  /** Máy chủ báo có khúc ⛔ đọc nổi (dòng dài hơn trần) — phải nói thật với Owner. */
+  catDongDai: boolean;
   /** CON TRỎ: trang đang hiện bắt đầu ở byte nào. Xin trang cũ hơn thì gửi lại số này. */
   viTri: number;
   dsPhien: TomTatPhien[];
@@ -252,7 +254,7 @@ interface OChat {
 
 const O_TRONG: OChat = {
   ns: null, tin: [], soan: '', dangChay: false, dangNap: false,
-  chiPhi: null, token: null, noiTiep: false, conNua: false, viTri: 0, dsPhien: [],
+  chiPhi: null, token: null, noiTiep: false, conNua: false, catDongDai: false, viTri: 0, dsPhien: [],
   phienHienTai: null, moChonPhien: false, moDan: false, chuoiDan: '', loiDan: '', phienChoFork: null, dangFork: false,
   // ¶ MẶC ĐỊNH TẮT (đổi 17/08/2026 sau phản hồi thật của Owner).
   // Bật mặc định ⇒ mọi câu in THÔ ⇒ Owner thấy nguyên dấu ** và tưởng markdown hỏng.
@@ -491,22 +493,76 @@ export default function UngDung({
     } catch { capNhat(i, { dsPhien: [] }); return []; }
   }, [capNhat]);
 
+  /**
+   * 🧹 LỌC DANH SÁCH TIN — **MỘT chốt, dùng ở MỌI đường**.
+   *
+   * 🐛 Hai lượt liền tôi khai «đã kiểm hình dạng dữ liệu» trong khi chốt chỉ nằm ở MỘT đường.
+   *    Hermes bắt cả hai lần. Nay tách hàm ra để **⛔ thể khai rộng hơn cái mình làm** —
+   *    ai muốn biết có mấy đường được che thì đếm chỗ gọi `locTin`, ⛔ phải tin lời tôi.
+   * ⚠️ Kiểm TỪNG PHẦN TỬ, ⛔ chỉ kiểm cái hộp: thân `{lich_su:[null]}` là mảng HỢP LỆ,
+   *    lọt qua `Array.isArray` rồi VỠ lúc vẽ.
+   */
+  /**
+   * 🎫 MÃ YÊU CẦU THEO Ô — chữa FAIL 7 (Hermes lần 3).
+   *
+   * 🐛 Bệnh: nhiều lần gọi dùng CHUNG một biến `dangNap`. Lần nào về TRƯỚC cũng hạ cờ,
+   *    dù lần kia còn đang bay ⇒ vòng xoay tắt sớm, và phản hồi tới sau vẫn được nhận.
+   * ✅ Mỗi lần gọi lấy một mã. Chỉ mã MỚI NHẤT được quyền ghi kết quả và hạ cờ.
+   *    ⛔ dùng AbortController vì ta ⛔ CẦN huỷ mạng — ta chỉ cần **bỏ qua kết quả cũ**,
+   *    và một con số so sánh thì rẻ hơn, ⛔ đẻ thêm đường lỗi mới.
+   */
+  const maYeuCau = useRef<number[]>([]);
+  const xinMaMoi = useCallback((i: number) => {
+    maYeuCau.current[i] = (maYeuCau.current[i] ?? 0) + 1;
+    return maYeuCau.current[i];
+  }, []);
+  const conMoiNhat = useCallback((i: number, ma: number) => maYeuCau.current[i] === ma, []);
+
+  const locTin = useCallback((th: unknown): Tin[] => {
+    if (!Array.isArray(th)) return [];
+    return th.filter(
+      (t): t is Tin =>
+        !!t && typeof t === 'object' &&
+        typeof (t as Tin).chu === 'string' &&
+        ((t as Tin).ai === 'toi' || (t as Tin).ai === 'ho'),
+    );
+  }, []);
+
   /* ---------- Nạp LỊCH SỬ THẬT của một phiên vào một ô ---------- */
   const napLichSu = useCallback(async (i: number, ten: string, maPhien: string) => {
+    const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
       const r = await fetch(
         `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}`,
       );
+      if (!conMoiNhat(i, ma)) return; // có lần gọi MỚI HƠN ⇒ kết quả này đã lỗi thời
+      /**
+       * 🐛 ĐÂY LÀ CHỖ XOÁ LỊCH SỬ ĐANG SỐNG TRÊN MÁY OWNER — có từ `d359bb6` 17/08.
+       *    Ba lỗi trong một hàm: ⛔ kiểm `r.ok` · `isArray(…) : []` biến thân lỗi thành RỖNG ·
+       *    `catch { tin: [] }` xoá sạch khi rớt mạng. **5 đường vào** gọi hàm này
+       *    (mở ô · Nạp lại · đổi phiên · fork · resume) — nặng hơn hẳn `keoThem` (1 đường).
+       * 📌 Tôi đã vá đúng mẫu này ở `keoThem` rồi yên tâm — nhưng `keoThem` là mã CHƯA
+       *    BAO GIỜ CHẠY. Cái cắn Owner nằm ở đây, và tôi đứng ngay cạnh mà ⛔ nhìn sang.
+       */
+      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
       const j = await r.json();
+      const sach = locTin(j.lich_su);
+      if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
       capNhat(i, {
-        tin: Array.isArray(j.lich_su) ? j.lich_su : [],
+        tin: sach,
         noiTiep: true,
         conNua: !!j.con_nua,
         viTri: Number(j.vi_tri) || 0,
+        catDongDai: !!j.cat_dong_qua_dai,
       });
-    } catch { capNhat(i, { tin: [] }); } finally { capNhat(i, { dangNap: false }); }
-  }, [capNhat]);
+    } catch {
+      /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
+    } finally {
+      // Chỉ lần gọi MỚI NHẤT được hạ cờ — ⛔ thì vòng xoay tắt trong khi lần kia còn bay.
+      if (conMoiNhat(i, ma)) capNhat(i, { dangNap: false });
+    }
+  }, [capNhat, locTin, xinMaMoi, conMoiNhat]);
 
   /**
    * ⬆️ KÉO THÊM PHẦN CŨ HƠN — đi bằng CON TRỎ, mỗi lần một trang.
@@ -518,31 +574,36 @@ export default function UngDung({
   const keoThem = useCallback(async (i: number, ten: string, maPhien: string, viTri: number) => {
     const o0 = dsORef.current[i];
     if (!o0 || o0.dangChay || o0.dangNap || viTri <= 0) return;
+    const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
       const r = await fetch(
         `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}&truoc_byte=${viTri}`,
       );
+      if (!conMoiNhat(i, ma)) return;
       if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
       const j = await r.json();
       /**
        * 🐛 Hermes bác claim «kiểm hình dạng dữ liệu» của tôi: bản trước chỉ hỏi CÁI HỘP
        * có phải mảng ⛔ — thân `{lich_su:[null]}` lọt qua rồi VỠ lúc vẽ. Nay kiểm TỪNG phần tử.
        */
-      const cu: unknown = j.lich_su;
-      if (!Array.isArray(cu)) throw new Error('máy chủ ⛔ trả về danh sách tin');
-      const sach = cu.filter(
-        (t): t is Tin =>
-          !!t && typeof t === 'object' && typeof (t as Tin).chu === 'string' &&
-          ((t as Tin).ai === 'toi' || (t as Tin).ai === 'ho'),
-      );
+      if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
+      const sach = locTin(j.lich_su); // ⚠️ dùng CHUNG chốt locTin
       /**
        * 🐛 Hermes chỉ ra race CÒN SÓT (có TỪ TRƯỚC, ⛔ do lượt này): chốt «đang chảy» chỉ
        * kiểm TRƯỚC khi gọi. Bấm xong rồi gửi câu mới thì phản hồi cũ về sau sẽ ĐÈ.
        * ⇒ Kiểm LẠI lúc phản hồi về: đổi phiên, hoặc đã bắt đầu chảy chữ ⇒ VỨT phản hồi này.
        */
       const o1 = dsORef.current[i];
-      if (!o1 || o1.phienHienTai !== maPhien || o1.dangChay) return;
+      /**
+       * 🐛 FAIL 1 (Hermes lần 3): chốt cũ kiểm «cùng phiên + chưa chảy chữ» nhưng **⛔ kiểm
+       *    CON TRỎ**. Ca thủng: kéo trang cũ ở con trỏ S → giữa chừng «Nạp lại» chạy, đặt
+       *    con trỏ mới S′ > S → phản hồi cũ VẪN được nối vào ⇒ **THỦNG khoảng [S, S′)**.
+       *    Lỗi là **MẤT ĐOẠN**, ⛔ phải tin trùng — nên ⛔ ai thấy, chỉ là lịch sử khuyết.
+       * ✅ Con trỏ đổi = nền dưới chân đã đổi ⇒ phản hồi này VÔ GIÁ TRỊ, vứt.
+       *    ⛔ cố ghép lại: ghép sai còn tệ hơn ⛔ ghép, vì trông như đủ.
+       */
+      if (!o1 || o1.phienHienTai !== maPhien || o1.dangChay || o1.viTri !== viTri) return;
       capNhat(i, {
         tin: [...sach, ...o1.tin],
         conNua: !!j.con_nua,
@@ -551,9 +612,9 @@ export default function UngDung({
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
     } finally {
-      capNhat(i, { dangNap: false });
+      if (conMoiNhat(i, ma)) capNhat(i, { dangNap: false });
     }
-  }, [capNhat]);
+  }, [capNhat, locTin, xinMaMoi, conMoiNhat]);
 
   /**
    * 🔄 NẠP LẠI đoạn chat của MỘT ô — "F5 riêng cho ô này" (Owner 18/08).
@@ -577,7 +638,9 @@ export default function UngDung({
    */
   const napLaiChat = useCallback(async (i: number) => {
     const o = dsORef.current[i];
-    if (!o?.ns || !o.phienHienTai || o.dangChay) return;   // chốt ②: nút khoá rồi vẫn chặn lần nữa
+    // ⚠️ FAIL 7: thêm `dangNap` — bấm «Nạp lại» lúc còn lần gọi đang bay thì đẻ hai lần gọi
+    //    chồng nhau, lần về trước hạ cờ của lần kia.
+    if (!o?.ns || !o.phienHienTai || o.dangChay || o.dangNap) return;
     await napLichSu(i, o.ns.ten, o.phienHienTai);
   }, [napLichSu]);
 
@@ -885,7 +948,7 @@ export default function UngDung({
         `/api/phien?ma_nhan_su=${encodeURIComponent(o.ns.ten)}&ma_phien=${encodeURIComponent(String(j.ma_moi))}`,
       );
       const j2 = await r2.json();
-      const lichSu = Array.isArray(j2.lich_su) ? j2.lich_su : [];
+      const lichSu = locTin(j2.lich_su); // ⚠️ dùng CHUNG chốt locTin
       capNhat(i, {
         dangFork: false, phienChoFork: null, chuoiDan: '',
         phienHienTai: String(j.ma_moi), tin: lichSu, noiTiep: true, chiPhi: null, token: null,
@@ -915,7 +978,7 @@ export default function UngDung({
         `/api/phien?ma_nhan_su=${encodeURIComponent(o.ns.ten)}&ma_phien=${encodeURIComponent(ma)}`,
       );
       const j = await r.json();
-      const lichSu = Array.isArray(j.lich_su) ? j.lich_su : [];
+      const lichSu = locTin(j.lich_su); // ⚠️ dùng CHUNG chốt locTin
       if (!lichSu.length) {
         // ⛔ KHÔNG im lặng mở phiên trắng — nói thẳng, để Owner còn biết mà tra lại.
         // 🧬 ⛔ Đừng dừng ở lời than: app BIẾT bệnh thì app phải đưa THUỐC.

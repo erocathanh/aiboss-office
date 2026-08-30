@@ -29,8 +29,15 @@ export async function GET(req: NextRequest) {
        * 🛡 Trần RAM nằm ở `TRAN_CUNG` trong doc-phien.ts và **⛔ tham số nào nới được nó** —
        *    người gọi ⛔ còn cách nào bảo máy chủ đọc trọn tệp 375 MB nữa.
        */
-      const troTho = Number(q.get('truoc_byte'));
-      const tro = Number.isFinite(troTho) && troTho > 0 ? troTho : undefined;
+      /**
+       * 🐛 FAIL 4 (Hermes lần 3): bản trước gộp «⛔ truyền» với «truyền số 0» làm một
+       *    ⇒ client xin `truoc_byte=0` (nghĩa là «tôi đã ở ĐẦU tệp») thì máy chủ hiểu thành
+       *    «⛔ truyền gì» rồi trả lại **CUỐI tệp**. Nhảy từ đầu về cuối, ⛔ ai báo.
+       * ✅ Phân biệt bằng CÓ MẶT THAM SỐ, ⛔ bằng giá trị.
+       */
+      const troTho = q.get('truoc_byte');
+      const troSo = troTho === null ? NaN : Number(troTho);
+      const tro = Number.isFinite(troSo) && troSo >= 0 ? troSo : undefined;
       const kq = await lichSuPhien(maNhanSu, maPhien, tro);
       return Response.json({
         lich_su: kq.tin,
