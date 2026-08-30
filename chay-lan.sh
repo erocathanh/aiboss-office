@@ -5,7 +5,7 @@
 # Bind 0.0.0.0 nghĩa là MỌI thiết bị trong wifi gọi được /api/fork — mà route đó chạy lệnh
 # thật trên máy. Nên script này BẮT BUỘC nạp mật khẩu trước khi mở cổng; thiếu là dừng luôn.
 #
-# Dùng:  ~/Projects/phong-ban-ai/chay-lan.sh
+# Dùng:  ~/Projects/aiboss-app-chat/chay-lan.sh
 # Tắt :  pkill -f 'next.*4319'
 
 set -e
@@ -92,11 +92,11 @@ export SO_LUOT_MOI_PHUT=60
 #    tắt nhầm một tính năng chống-sai-tự-tin bằng một chữ gõ vội.
 export TRA_CHUOI=1
 
-cd ~/Projects/phong-ban-ai
+cd ~/Projects/aiboss-app-chat
 # BẢN CHẠY THẬT (next start), ⛔ KHÔNG phải next dev.
 # Vì sao đổi 17/08 16:0x: ở chế độ dev, Next biên dịch lại từng route lúc chạm vào
 # (log: "Compiled /api/chat in 164ms") và bật lớp phủ báo lỗi đè lên màn hình —
 # Owner mở bằng iPhone thấy khung đỏ "hydration mismatch" tưởng app hỏng, trong khi
 # đó chỉ là cảnh báo của chế độ dựng-thử. Bản thật: không lớp phủ, không biên dịch lại, nhanh hơn.
-# Sửa mã xong PHẢI dựng lại: cd ~/Projects/phong-ban-ai && npx next build
+# Sửa mã xong PHẢI dựng lại: cd ~/Projects/aiboss-app-chat && npx next build
 exec npx next start -H 0.0.0.0 -p 4319
