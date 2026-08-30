@@ -555,14 +555,49 @@ export default function UngDung({
     return th as Tin[];
   }, []);
 
+  /**
+   * 🚪 CỬA ĐỌC LỊCH SỬ — **MỘT chỗ duy nhất** gọi `/api/phien` để lấy lịch sử.
+   *
+   * 🐛 Vì sao phải có: 5 vòng soi, điểm ⛔ hội tụ (3/7 → 5/7 → 2/7 → 1/7 → 2/7).
+   *    Mỗi vòng vá đúng chỗ được chỉ rồi lộ chỗ KẾ BÊN — vì chốt nằm RẢI RÁC ở 4 nơi,
+   *    và tôi phải NHỚ mới khai đúng. Tôi khai rộng hơn việc làm **4 lần**, cả bốn đều
+   *    vì lý do đó.
+   * ✅ Có một cửa thì **số đường ĐẾM ĐƯỢC**, ⛔ cần ai nhớ. Đây là luật «khai chốt kèm
+   *    SỐ ĐƯỜNG» của tôi, nhưng ép vào MÃ thay vì vào LỜI KHAI.
+   *
+   * ⚠️ NHỊP A: hàm này **⛔ đổi hành vi một dòng nào** — nó gom đúng thứ 4 đường đang làm.
+   *    Mọi phép đo cũ phải ra Y SỐ CŨ. Lệch một số = đã đổi hành vi = nhịp A hỏng.
+   *    Việc kiểm mã yêu cầu vẫn để NGƯỜI GỌI lo: đó là trạng thái của Ô, ⛔ phải của cửa.
+   */
+  const docLichSu = useCallback(
+    async (
+      ten: string,
+      maPhien: string,
+      truocByte?: number,
+    ): Promise<{ tin: Tin[]; conNua: boolean; viTri: number; catDai: boolean }> => {
+      const q =
+        `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}` +
+        (truocByte === undefined ? '' : `&truoc_byte=${truocByte}`);
+      const r = await fetch(q);
+      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
+      const j = await r.json();
+      return {
+        tin: locTin(j.lich_su), // locTin BÁC khi hình dạng sai — ⛔ lọc
+        conNua: !!j.con_nua,
+        viTri: Number(j.vi_tri) || 0,
+        catDai: !!j.cat_dong_qua_dai,
+      };
+    },
+    [locTin],
+  );
+
+
   /* ---------- Nạp LỊCH SỬ THẬT của một phiên vào một ô ---------- */
   const napLichSu = useCallback(async (i: number, ten: string, maPhien: string) => {
     const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
-      const r = await fetch(
-        `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}`,
-      );
+      const kq = await docLichSu(ten, maPhien); // 🚪 qua CỬA ĐỌC
       if (!conMoiNhat(i, ma)) return; // có lần gọi MỚI HƠN ⇒ kết quả này đã lỗi thời
       /**
        * 🐛 ĐÂY LÀ CHỖ XOÁ LỊCH SỬ ĐANG SỐNG TRÊN MÁY OWNER — có từ `d359bb6` 17/08.
@@ -572,10 +607,7 @@ export default function UngDung({
        * 📌 Tôi đã vá đúng mẫu này ở `keoThem` rồi yên tâm — nhưng `keoThem` là mã CHƯA
        *    BAO GIỜ CHẠY. Cái cắn Owner nằm ở đây, và tôi đứng ngay cạnh mà ⛔ nhìn sang.
        */
-      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
-      const j = await r.json();
-      const sach = locTin(j.lich_su);
-      if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
+
       /**
        * 🐛 Hermes vòng 4: bốn đường gọi đều đặt `phienHienTai` **TRƯỚC** khi đọc.
        *    Đọc lỗi ⇒ lịch sử phiên CŨ nằm dưới mã phiên MỚI — app hiện một thứ **⛔ có thật**.
@@ -585,11 +617,11 @@ export default function UngDung({
        */
       capNhat(i, {
         phienHienTai: maPhien,
-        tin: sach,
+        tin: kq.tin,
         noiTiep: true,
-        conNua: !!j.con_nua,
-        viTri: Number(j.vi_tri) || 0,
-        catDongDai: !!j.cat_dong_qua_dai,
+        conNua: kq.conNua,
+        viTri: kq.viTri,
+        catDongDai: kq.catDai,
       });
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
@@ -612,18 +644,8 @@ export default function UngDung({
     const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
-      const r = await fetch(
-        `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}&truoc_byte=${viTri}`,
-      );
-      if (!conMoiNhat(i, ma)) return;
-      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
-      const j = await r.json();
-      /**
-       * 🐛 Hermes bác claim «kiểm hình dạng dữ liệu» của tôi: bản trước chỉ hỏi CÁI HỘP
-       * có phải mảng ⛔ — thân `{lich_su:[null]}` lọt qua rồi VỠ lúc vẽ. Nay kiểm TỪNG phần tử.
-       */
-      if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
-      const sach = locTin(j.lich_su); // ⚠️ dùng CHUNG chốt locTin
+      const kq = await docLichSu(ten, maPhien, viTri); // 🚪 qua CỬA ĐỌC
+      const sach = kq.tin;
       /**
        * 🐛 Hermes chỉ ra race CÒN SÓT (có TỪ TRƯỚC, ⛔ do lượt này): chốt «đang chảy» chỉ
        * kiểm TRƯỚC khi gọi. Bấm xong rồi gửi câu mới thì phản hồi cũ về sau sẽ ĐÈ.
@@ -641,10 +663,10 @@ export default function UngDung({
       if (!o1 || o1.phienHienTai !== maPhien || o1.dangChay || o1.viTri !== viTri) return;
       capNhat(i, {
         tin: [...sach, ...o1.tin],
-        conNua: !!j.con_nua,
-        viTri: Number(j.vi_tri) || 0,
+        conNua: kq.conNua,
+        viTri: kq.viTri,
         // 🔴 CỘNG DỒN, ⛔ ghi đè: trang trước đọc hụt thì cảnh báo phải Ở LẠI.
-        catDongDai: o1.catDongDai || !!j.cat_dong_qua_dai,
+        catDongDai: o1.catDongDai || kq.catDai,
       });
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
@@ -1006,18 +1028,14 @@ export default function UngDung({
       // 🐛 Hermes vòng 4: đường fork ⛔ kiểm `r2.ok` ⇒ HTTP 400 có thân JSON hợp lệ vẫn
       //    parse ngon ⇒ lichSu = [] ⇒ ghi `tin: []` ⇒ XOÁ TRẮNG. Cùng mẫu 3 đường kia.
       const maFork = xinMaMoi(i);
-      const r2 = await fetch(
-        `/api/phien?ma_nhan_su=${encodeURIComponent(o.ns.ten)}&ma_phien=${encodeURIComponent(String(j.ma_moi))}`,
-      );
-      if (!r2.ok) throw new Error(`máy chủ trả ${r2.status}`);
+      const kq2 = await docLichSu(o.ns.ten, String(j.ma_moi)); // 🚪 qua CỬA ĐỌC
       if (!conMoiNhat(i, maFork)) return;
-      const j2 = await r2.json();
-      const lichSu = locTin(j2.lich_su); // ⚠️ dùng CHUNG chốt locTin — nay BÁC, ⛔ lọc
+      const lichSu = kq2.tin;
       capNhat(i, {
         dangFork: false, phienChoFork: null, chuoiDan: '',
         phienHienTai: String(j.ma_moi), tin: lichSu, noiTiep: true, chiPhi: null, token: null,
-        conNua: !!j2.con_nua, viTri: Number(j2.vi_tri) || 0,
-        catDongDai: !!j2.cat_dong_qua_dai,
+        conNua: kq2.conNua, viTri: kq2.viTri,
+        catDongDai: kq2.catDai,
         loiDan:
           `✅ Fork xong — mã MỚI ${String(j.ma_moi).slice(0, 8)}… · đọc được ${lichSu.length} lượt · chuỗi ${tang} tầng. ` +
           `Bản gốc ${dc?.nguyen_ven ? 'NGUYÊN VẸN' : '⚠️ ĐÃ ĐỔI — báo ngay'} ` +
@@ -1045,13 +1063,9 @@ export default function UngDung({
        *    và Owner đi tìm sai chỗ. Sai kiểu này tệ hơn báo lỗi trần.
        */
       const maResume = xinMaMoi(i);
-      const r = await fetch(
-        `/api/phien?ma_nhan_su=${encodeURIComponent(o.ns.ten)}&ma_phien=${encodeURIComponent(ma)}`,
-      );
-      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
+      const kq = await docLichSu(o.ns.ten, ma); // 🚪 qua CỬA ĐỌC
       if (!conMoiNhat(i, maResume)) return;
-      const j = await r.json();
-      const lichSu = locTin(j.lich_su); // ⚠️ dùng CHUNG chốt locTin — nay BÁC, ⛔ lọc
+      const lichSu = kq.tin;
       if (!lichSu.length) {
         // ⛔ KHÔNG im lặng mở phiên trắng — nói thẳng, để Owner còn biết mà tra lại.
         // 🧬 ⛔ Đừng dừng ở lời than: app BIẾT bệnh thì app phải đưa THUỐC.
@@ -1067,8 +1081,8 @@ export default function UngDung({
       huyLuong(i);
       capNhat(i, {
         phienHienTai: ma, tin: lichSu, noiTiep: true, chiPhi: null, token: null,
-        conNua: !!j.con_nua, viTri: Number(j.vi_tri) || 0,
-        catDongDai: !!j.cat_dong_qua_dai,
+        conNua: kq.conNua, viTri: kq.viTri,
+        catDongDai: kq.catDai,
         loiDan: `✅ Đã nối phiên ${ma.slice(0, 8)}… — đọc được ${lichSu.length} lượt.`, chuoiDan: '',
       });
       await ghiO(i, o.ns.ten, ma);
