@@ -219,18 +219,58 @@ function mocMs(ts?: string): number | undefined {
 }
 
 /** Đọc LỊCH SỬ THẬT của một phiên — ⛔ không phải hội thoại mẫu. */
-export async function lichSuPhien(maNhanSu: string, maPhien: string): Promise<TinLichSu[]> {
+/**
+ * 🚦 TRẦN BYTE MẶC ĐỊNH khi mở một phiên — **đo mà chọn, ⛔ đoán.**
+ *
+ * 🐛 Ca thật 30/08: bộ ghế «Quản Lý Trường» khai `thu_muc` là THƯ MỤC NHÀ ⇒ kho phiên của
+ *    chúng là kho chung, trong đó có tệp **375 MB**. Cách cũ đọc TRỌN tệp:
+ * ```
+ *   đọc trọn 375 MB   0,68 giây  →  29.041 TIN đẩy về trình duyệt   ← chỗ Owner thấy «lắc»
+ *   đọc đuôi 1,5 MB   0,01 giây  →     299 tin                       nhanh gấp 134 lần
+ * ```
+ * 📌 Nút thắt **⛔ phải thời gian máy chủ** (0,68 giây vẫn nhanh) mà là **SỐ TIN trình duyệt
+ *    phải dựng**. Nên trần đặt theo BYTE ĐỌC VÀO, ⛔ theo số dòng — đo thật: một dòng của
+ *    ghế `web-demo` nặng tới ~9,9 KB, cắt 200 dòng vẫn ra ~2 MB.
+ * ⚠️ 1,5 MB và 2 MB cùng cho 299 tin trên tệp đó ⇒ 1,5 là chỗ vừa đủ, thêm nữa ⛔ được gì.
+ */
+export const TRAN_BYTE_MAC_DINH = 1.5 * 1024 * 1024;
+
+export type KetQuaLichSu = {
+  tin: TinLichSu[];
+  /** Còn phần cũ hơn chưa nạp ⛔ — để trình duyệt biết có nên hiện nút «xem thêm». */
+  con_nua: boolean;
+  /** Đã đọc bao nhiêu byte / tổng tệp bao nhiêu — để lần kéo sau xin nhiều hơn. */
+  da_doc: number;
+  tong_byte: number;
+};
+
+export async function lichSuPhien(
+  maNhanSu: string,
+  maPhien: string,
+  tranByte: number = TRAN_BYTE_MAC_DINH,
+): Promise<KetQuaLichSu> {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) throw new Error('Mã phiên không hợp lệ.');
   const p = path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`);
-  if (!fs.existsSync(p)) return [];
+  if (!fs.existsSync(p)) return { tin: [], con_nua: false, da_doc: 0, tong_byte: 0 };
+
+  const tong = fs.statSync(p).size;
+  const tran = Number.isFinite(tranByte) && tranByte > 0 ? tranByte : TRAN_BYTE_MAC_DINH;
+  const conNua = tong > tran;
 
   const ra: TinLichSu[] = [];
-  const doc = readline.createInterface({
-    input: fs.createReadStream(p, { encoding: 'utf8' }),
-    crlfDelay: Infinity,
-  });
+  /**
+   * Tệp NHỎ hơn trần ⇒ đọc dòng như cũ (rẻ, và giữ nguyên nết đã chạy 3 tuần).
+   * Tệp LỚN hơn ⇒ dùng `docDuoi` — bộ đọc ĐUÔI đã có sẵn trong tệp này, nó tự bỏ
+   * dòng đầu bị cắt dở. ⛔ viết bộ đọc thứ hai.
+   */
+  const nguon = conNua
+    ? (async function* () { for (const d of docDuoi(p, tran).split('\n')) yield d; })()
+    : readline.createInterface({
+        input: fs.createReadStream(p, { encoding: 'utf8' }),
+        crlfDelay: Infinity,
+      });
 
-  for await (const d of doc) {
+  for await (const d of nguon) {
     const s = d.trim();
     if (!s.startsWith('{')) continue;
     let j: DongPhien;
@@ -248,7 +288,7 @@ export async function lichSuPhien(maNhanSu: string, maPhien: string): Promise<Ti
       ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
     }
   }
-  return ra;
+  return { tin: ra, con_nua: conNua, da_doc: Math.min(tran, tong), tong_byte: tong };
 }
 
 function gioNgan(ts?: string): string {

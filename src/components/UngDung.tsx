@@ -208,6 +208,10 @@ interface OChat {
   chiPhi: number | null;
   token: number | null;
   noiTiep: boolean;
+  /** Còn phần lịch sử CŨ HƠN chưa nạp ⛔ — máy chủ trả về, dùng để hiện nút «xem thêm». */
+  conNua: boolean;
+  /** Trần byte đã xin lần gần nhất. Kéo thêm = nhân đôi số này rồi gọi lại. */
+  tranByte: number;
   dsPhien: TomTatPhien[];
   phienHienTai: string | null;
   moChonPhien: boolean;
@@ -248,7 +252,7 @@ interface OChat {
 
 const O_TRONG: OChat = {
   ns: null, tin: [], soan: '', dangChay: false, dangNap: false,
-  chiPhi: null, token: null, noiTiep: false, dsPhien: [],
+  chiPhi: null, token: null, noiTiep: false, conNua: false, tranByte: 0, dsPhien: [],
   phienHienTai: null, moChonPhien: false, moDan: false, chuoiDan: '', loiDan: '', phienChoFork: null, dangFork: false,
   // ¶ MẶC ĐỊNH TẮT (đổi 17/08/2026 sau phản hồi thật của Owner).
   // Bật mặc định ⇒ mọi câu in THÔ ⇒ Owner thấy nguyên dấu ** và tưởng markdown hỏng.
@@ -495,8 +499,40 @@ export default function UngDung({
         `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}`,
       );
       const j = await r.json();
-      capNhat(i, { tin: Array.isArray(j.lich_su) ? j.lich_su : [], noiTiep: true });
+      capNhat(i, {
+        tin: Array.isArray(j.lich_su) ? j.lich_su : [],
+        noiTiep: true,
+        conNua: !!j.con_nua,
+        tranByte: Number(j.da_doc) || 0,
+      });
     } catch { capNhat(i, { tin: [] }); } finally { capNhat(i, { dangNap: false }); }
+  }, [capNhat]);
+
+  /**
+   * ⬆️ KÉO THÊM LỊCH SỬ CŨ HƠN — nhân đôi trần byte rồi xin lại.
+   *
+   * ⛔ nạp thêm bằng cách nối mảng: máy chủ trả về phần ĐUÔI tính từ CUỐI ngược lên,
+   * nên xin trần LỚN HƠN là đã bao trọn phần cũ — nối thêm sẽ ĐẺ TIN TRÙNG.
+   * ⇒ Thay TRỌN danh sách bằng bản mới, ⛔ nối.
+   */
+  const keoThem = useCallback(async (i: number, ten: string, maPhien: string, tranCu: number) => {
+    const tranMoi = Math.max(tranCu * 2, 3 * 1024 * 1024);
+    capNhat(i, { dangNap: true });
+    try {
+      const r = await fetch(
+        `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}&tran_byte=${tranMoi}`,
+      );
+      const j = await r.json();
+      capNhat(i, {
+        tin: Array.isArray(j.lich_su) ? j.lich_su : [],
+        conNua: !!j.con_nua,
+        tranByte: Number(j.da_doc) || tranMoi,
+      });
+    } catch {
+      /* giữ nguyên tin đang có — kéo hụt thì thà ⛔ đổi gì còn hơn xoá mất lịch sử */
+    } finally {
+      capNhat(i, { dangNap: false });
+    }
   }, [capNhat]);
 
   /**
@@ -833,6 +869,7 @@ export default function UngDung({
       capNhat(i, {
         dangFork: false, phienChoFork: null, chuoiDan: '',
         phienHienTai: String(j.ma_moi), tin: lichSu, noiTiep: true, chiPhi: null, token: null,
+        conNua: !!j2.con_nua, tranByte: Number(j2.da_doc) || 0,
         loiDan:
           `✅ Fork xong — mã MỚI ${String(j.ma_moi).slice(0, 8)}… · đọc được ${lichSu.length} lượt · chuỗi ${tang} tầng. ` +
           `Bản gốc ${dc?.nguyen_ven ? 'NGUYÊN VẸN' : '⚠️ ĐÃ ĐỔI — báo ngay'} ` +
@@ -874,6 +911,7 @@ export default function UngDung({
       huyLuong(i);
       capNhat(i, {
         phienHienTai: ma, tin: lichSu, noiTiep: true, chiPhi: null, token: null,
+        conNua: !!j.con_nua, tranByte: Number(j.da_doc) || 0,
         loiDan: `✅ Đã nối phiên ${ma.slice(0, 8)}… — đọc được ${lichSu.length} lượt.`, chuoiDan: '',
       });
       await ghiO(i, o.ns.ten, ma);
@@ -1842,6 +1880,18 @@ export default function UngDung({
                             <div className="to">✨</div>
                             <b>{o.phienHienTai ? 'Phiên trống' : 'Phiên mới'}</b>
                             <span>Gõ câu hỏi bên dưới để bắt đầu.</span>
+                          </div>
+                        )}
+                        {o.conNua && o.phienHienTai && o.ns && (
+                          <div className="moc-ngay">
+                            <button
+                              type="button"
+                              className="nut-keo-them"
+                              disabled={o.dangNap}
+                              onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.tranByte)}
+                            >
+                              ⬆️ Xem thêm phần cũ hơn
+                            </button>
                           </div>
                         )}
                         {o.tin.map((t, k) => (

@@ -22,7 +22,24 @@ export async function GET(req: NextRequest) {
 
   try {
     if (maPhien) {
-      return Response.json({ lich_su: await lichSuPhien(maNhanSu, maPhien) });
+      /**
+       * 🚦 Mặc định chỉ nạp PHẦN CUỐI (~1,5 MB). Muốn kéo thêm về trước thì gọi lại
+       * với `tran_byte` lớn hơn — trình duyệt đọc `con_nua` để biết còn gì mà kéo ⛔.
+       * ⚠️ Trần trên 64 MB: chặn người gõ tay một số khổng lồ làm máy chủ ngốn hết bộ nhớ.
+       *    (kho chung có tệp 375 MB — đọc trọn là đẩy 29.041 tin về trình duyệt.)
+       */
+      const tranTho = Number(q.get('tran_byte'));
+      const tran =
+        Number.isFinite(tranTho) && tranTho > 0
+          ? Math.min(tranTho, 64 * 1024 * 1024)
+          : undefined;
+      const kq = await lichSuPhien(maNhanSu, maPhien, tran);
+      return Response.json({
+        lich_su: kq.tin,
+        con_nua: kq.con_nua,
+        da_doc: kq.da_doc,
+        tong_byte: kq.tong_byte,
+      });
     }
     // Ô nào đang giữ phiên nào → để không tự gắn cờ "đang chạy nơi khác" lên chính nó.
     const maO = /^o-\d+$/.test(q.get('ma_o') ?? '') ? q.get('ma_o')! : 'o-1';
