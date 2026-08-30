@@ -483,14 +483,32 @@ export default function UngDung({
   }, [boCuc]);
 
   /* ---------- Nạp danh sách phiên thật của một ô ---------- */
-  const napDsPhien = useCallback(async (i: number, ten: string): Promise<TomTatPhien[]> => {
+  /**
+   * 🔴 THỨ NẶNG NHẤT CẢ BUỔI (Hermes vòng 4) — hàm này từng biến LỖI ĐỌC thành PHÉP XOÁ THẬT.
+   *
+   * Bản cũ: mọi lỗi ⇒ `dsPhien: []` rồi TRẢ VỀ `[]`. Người gọi ở đường ĐỔI GHẾ dùng chính
+   * mảng rỗng đó kết luận «ghế này ⛔ có phiên nào» rồi gọi `ghiO(…, null, true)`
+   * ⇒ **RỚT MẠNG lúc liệt kê phiên = XOÁ LIÊN KẾT PHIÊN trên máy chủ.**
+   *
+   * ⚠️ Khác hẳn mọi lỗi khác hôm nay: mấy cái kia xoá thứ đang HIỂN THỊ (tải lại là về);
+   *    cái này **GHI MỘT PHÉP XOÁ XUỐNG SỔ** — ⛔ lấy lại được.
+   * 📌 Cùng lớp bệnh với lỗi sống 13 ngày: **⛔ đọc được ⇒ coi là RỖNG ⇒ ghi xoá thật.**
+   *
+   * ✅ Chữa: trả `null` khi ⛔ đọc được, `[]` khi máy chủ THẬT SỰ nói rỗng. Hai thứ đó
+   *    ⛔ được phép trông giống nhau nữa — người gọi buộc phải phân biệt.
+   */
+  const napDsPhien = useCallback(async (i: number, ten: string): Promise<TomTatPhien[] | null> => {
     try {
       const r = await fetch(`/api/phien?ma_o=${maOCua(i)}&ma_nhan_su=${encodeURIComponent(ten)}`);
+      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
       const j = await r.json();
-      const ds: TomTatPhien[] = Array.isArray(j.phien) ? j.phien : [];
-      capNhat(i, { dsPhien: ds });
-      return ds;
-    } catch { capNhat(i, { dsPhien: [] }); return []; }
+      if (!Array.isArray(j.phien)) throw new Error('máy chủ ⛔ trả về danh sách phiên');
+      capNhat(i, { dsPhien: j.phien as TomTatPhien[] });
+      return j.phien as TomTatPhien[];
+    } catch {
+      // GIỮ NGUYÊN dsPhien đang có. ⛔ đặt [] — [] nghĩa là «⛔ có phiên», mà ta ⛔ biết điều đó.
+      return null;
+    }
   }, [capNhat]);
 
   /**
@@ -519,13 +537,22 @@ export default function UngDung({
   const conMoiNhat = useCallback((i: number, ma: number) => maYeuCau.current[i] === ma, []);
 
   const locTin = useCallback((th: unknown): Tin[] => {
-    if (!Array.isArray(th)) return [];
-    return th.filter(
-      (t): t is Tin =>
-        !!t && typeof t === 'object' &&
+    /**
+     * 🐛 Hermes vòng 4: bản trước **LỌC** — thân `{lich_su:[null]}` bị lọc thành `[]`
+     *    rồi VẪN được gán ⇒ **vẫn XOÁ TRẮNG lịch sử**, chỉ là xoá một cách lịch sự hơn.
+     * ✅ Phải **BÁC**: thấy một phần tử hỏng ⇒ coi CẢ phản hồi là hỏng ⇒ ném lỗi
+     *    ⇒ khối `catch` giữ nguyên tin đang có.
+     * 📌 Lọc là «tôi tự sửa dữ liệu của anh»; bác là «dữ liệu anh sai, tôi ⛔ dùng».
+     *    Với lịch sử hội thoại, tự sửa **⛔ bao giờ** đúng.
+     */
+    if (!Array.isArray(th)) throw new Error('máy chủ ⛔ trả về danh sách tin');
+    for (const t of th) {
+      const ok = !!t && typeof t === 'object' &&
         typeof (t as Tin).chu === 'string' &&
-        ((t as Tin).ai === 'toi' || (t as Tin).ai === 'ho'),
-    );
+        ((t as Tin).ai === 'toi' || (t as Tin).ai === 'ho');
+      if (!ok) throw new Error('danh sách tin có phần tử hỏng — BÁC cả phản hồi');
+    }
+    return th as Tin[];
   }, []);
 
   /* ---------- Nạp LỊCH SỬ THẬT của một phiên vào một ô ---------- */
@@ -549,7 +576,15 @@ export default function UngDung({
       const j = await r.json();
       const sach = locTin(j.lich_su);
       if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
+      /**
+       * 🐛 Hermes vòng 4: bốn đường gọi đều đặt `phienHienTai` **TRƯỚC** khi đọc.
+       *    Đọc lỗi ⇒ lịch sử phiên CŨ nằm dưới mã phiên MỚI — app hiện một thứ **⛔ có thật**.
+       * ✅ Chữa tại GỐC: `phienHienTai` và `tin` phải đi CÙNG MỘT NHỊP. Nay chính hàm đọc
+       *    đặt cả hai, và chỉ khi ĐỌC ĐƯỢC. Bốn nơi gọi ⛔ đặt trước nữa.
+       * 📌 Hai giá trị phải-luôn-khớp thì ⛔ được để hai chỗ khác nhau đặt.
+       */
       capNhat(i, {
+        phienHienTai: maPhien,
         tin: sach,
         noiTiep: true,
         conNua: !!j.con_nua,
@@ -734,7 +769,7 @@ export default function UngDung({
 
         const khopNguoi = ghi?.ma_nhan_su === ten;
         if (khopNguoi && ghi?.ma_phien) {
-          capNhat(i, { phienHienTai: ghi.ma_phien });
+          // ⚠️ ⛔ đặt phienHienTai ở đây — napLichSu tự đặt CÙNG NHỊP với tin
           void napLichSu(i, ten, ghi.ma_phien);
         } else if (!khopNguoi) {
           // Ô 1 vừa bị ép về TỔNG GIÁM ĐỐC mà sổ đang ghi người khác → ghi lại cho khớp.
@@ -785,10 +820,21 @@ export default function UngDung({
     datTieuDiem(i);
 
     const ds = await napDsPhien(i, n.ten);
+    /**
+     * 🔴 `null` = ⛔ ĐỌC ĐƯỢC, **⛔ phải «⛔ có phiên»**. Hai thứ đó khác nhau một trời:
+     *    đoán nhầm hướng này là ghi một phép XOÁ THẬT xuống sổ ô.
+     * ⇒ ⛔ đọc được thì DỪNG, giữ nguyên mọi thứ, để Owner thử lại.
+     */
+    if (ds === null) {
+      capNhat(i, {
+        loiDan: '⚠️ ⛔ đọc được danh sách phiên (mạng hoặc máy chủ). ⛔ đổi gì cả — thử lại giúp em.',
+      });
+      return;
+    }
     // Mặc định NỐI LẠI phiên gần nhất còn nối được — ⛔ không mặc định đẻ phiên mới.
     const ganNhat = ds.find((p) => !p.dang_chay);
     if (ganNhat) {
-      capNhat(i, { phienHienTai: ganNhat.ma });
+      // ⚠️ ⛔ đặt phienHienTai ở đây — napLichSu tự đặt CÙNG NHỊP với tin
       await ghiO(i, n.ten, ganNhat.ma);
       await napLichSu(i, n.ten, ganNhat.ma);
       return;
@@ -892,7 +938,7 @@ export default function UngDung({
          ⇒ phiên đã bị xoá thì máy chủ chặn, ⛔ không ghi bậy. */
       const phienLuu = muc[i]?.phien ?? null;
       if (phienLuu && dsORef.current[i]?.phienHienTai !== phienLuu) {
-        capNhat(i, { phienHienTai: phienLuu, chiPhi: null, token: null });
+        capNhat(i, { chiPhi: null, token: null }); // ⚠️ ⛔ đặt phienHienTai — hàm đọc lo
         await ghiO(i, dich, phienLuu);
         await napLichSu(i, dich, phienLuu);
       }
@@ -908,7 +954,7 @@ export default function UngDung({
     const ns = dsO[i]?.ns;
     if (!ns || p.dang_chay) return; // ⛔ không nối vào phiên đang chạy nơi khác
     huyLuong(i);
-    capNhat(i, { moChonPhien: false, phienHienTai: p.ma, chiPhi: null, token: null });
+    capNhat(i, { moChonPhien: false, chiPhi: null, token: null }); // ⚠️ ⛔ đặt phienHienTai — napLichSu lo
     await ghiO(i, ns.ten, p.ma);
     await napLichSu(i, ns.ten, p.ma);
   }
@@ -945,15 +991,21 @@ export default function UngDung({
       }
       const dc = j.doi_chung as { nguyen_ven: boolean; so_dong_truoc: number; byte_truoc: number };
       const tang = (j.goc_tich as { chuoi: unknown[] })?.chuoi?.length ?? 0;
+      // 🐛 Hermes vòng 4: đường fork ⛔ kiểm `r2.ok` ⇒ HTTP 400 có thân JSON hợp lệ vẫn
+      //    parse ngon ⇒ lichSu = [] ⇒ ghi `tin: []` ⇒ XOÁ TRẮNG. Cùng mẫu 3 đường kia.
+      const maFork = xinMaMoi(i);
       const r2 = await fetch(
         `/api/phien?ma_nhan_su=${encodeURIComponent(o.ns.ten)}&ma_phien=${encodeURIComponent(String(j.ma_moi))}`,
       );
+      if (!r2.ok) throw new Error(`máy chủ trả ${r2.status}`);
+      if (!conMoiNhat(i, maFork)) return;
       const j2 = await r2.json();
-      const lichSu = locTin(j2.lich_su); // ⚠️ dùng CHUNG chốt locTin
+      const lichSu = locTin(j2.lich_su); // ⚠️ dùng CHUNG chốt locTin — nay BÁC, ⛔ lọc
       capNhat(i, {
         dangFork: false, phienChoFork: null, chuoiDan: '',
         phienHienTai: String(j.ma_moi), tin: lichSu, noiTiep: true, chiPhi: null, token: null,
         conNua: !!j2.con_nua, viTri: Number(j2.vi_tri) || 0,
+        catDongDai: !!j2.cat_dong_qua_dai,
         loiDan:
           `✅ Fork xong — mã MỚI ${String(j.ma_moi).slice(0, 8)}… · đọc được ${lichSu.length} lượt · chuỗi ${tang} tầng. ` +
           `Bản gốc ${dc?.nguyen_ven ? 'NGUYÊN VẸN' : '⚠️ ĐÃ ĐỔI — báo ngay'} ` +
@@ -975,11 +1027,19 @@ export default function UngDung({
     }
     capNhat(i, { loiDan: 'Đang kiểm bản ghi phiên…' });
     try {
+      /**
+       * 🐛 Hermes vòng 4: đường resume ⛔ kiểm `r.ok` ⇒ lỗi MÁY CHỦ bị biến thành
+       *    **chẩn đoán SAI** «phiên nằm ở thư mục khác» — app nói dối về nguyên nhân,
+       *    và Owner đi tìm sai chỗ. Sai kiểu này tệ hơn báo lỗi trần.
+       */
+      const maResume = xinMaMoi(i);
       const r = await fetch(
         `/api/phien?ma_nhan_su=${encodeURIComponent(o.ns.ten)}&ma_phien=${encodeURIComponent(ma)}`,
       );
+      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
+      if (!conMoiNhat(i, maResume)) return;
       const j = await r.json();
-      const lichSu = locTin(j.lich_su); // ⚠️ dùng CHUNG chốt locTin
+      const lichSu = locTin(j.lich_su); // ⚠️ dùng CHUNG chốt locTin — nay BÁC, ⛔ lọc
       if (!lichSu.length) {
         // ⛔ KHÔNG im lặng mở phiên trắng — nói thẳng, để Owner còn biết mà tra lại.
         // 🧬 ⛔ Đừng dừng ở lời than: app BIẾT bệnh thì app phải đưa THUỐC.
@@ -996,6 +1056,7 @@ export default function UngDung({
       capNhat(i, {
         phienHienTai: ma, tin: lichSu, noiTiep: true, chiPhi: null, token: null,
         conNua: !!j.con_nua, viTri: Number(j.vi_tri) || 0,
+        catDongDai: !!j.cat_dong_qua_dai,
         loiDan: `✅ Đã nối phiên ${ma.slice(0, 8)}… — đọc được ${lichSu.length} lượt.`, chuoiDan: '',
       });
       await ghiO(i, o.ns.ten, ma);
