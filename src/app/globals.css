@@ -326,6 +326,18 @@
   border-bottom:1px solid var(--vien);
   margin:-16px -16px 0;   /* trải hết bề ngang, bù padding 16px của .bang-tin */
   padding:8px 16px;
+
+  /**
+   * 🐛 HAI DÒNG NÀY LÀ THỨ TÔI THIẾU LẦN TRƯỚC — Owner mở iPhone thấy nút ĐÈ LÊN CHỮ.
+   *    Tôi nghiệm thu bằng «lớp CSS có mặt» ⇒ ĐẠT, mà mắt Owner nhìn ra hỏng ngay.
+   *    `claude-phong-ban-pm` đo trong TRÌNH DUYỆT THẬT và loại đúng nghi can tôi sẽ nghi:
+   *      laConTrucTiep=true · background CÓ áp · margin CÓ áp  ⇒ bộ chọn ⛔ sai
+   *    Thủ phạm là hai thuộc tính KẾ THỪA từ `.moc-ngay` mà `.neo-tren` ⛔ huỷ:
+   */
+  align-self:stretch;   /* HUỶ align-self:center (mau09:290). `.bang-tin` là flex-column
+                           ⇒ `center` làm phần tử CO vừa chữ rồi nằm giữa, margin âm
+                           ⛔ kéo giãn được ⇒ dải rộng 53%, chữ tin bên dưới lòi hai bên. */
+  border-radius:0;      /* HUỶ bo tròn 99px (mau09:291) — giữ nguyên thì vẫn là viên thuốc. */
 }
 
 /**
