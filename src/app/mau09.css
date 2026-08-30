@@ -848,3 +848,36 @@
     overflow-y:auto;
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   👆 VÙNG NGÓN TAY CHẠM — CHỈ trên màn cảm ứng. Trên desktop KHÔNG đổi một pixel.
+   ───────────────────────────────────────────────────────────────────────────
+   🧭 Owner hỏi 30/08: «nâng cả hàng 44px trên iPhone, desktop không ảnh hưởng nhỉ?»
+      Đo thật bằng trình duyệt ở khổ 390px mới thấy: nâng NÚT lên 44px KHÔNG đắt ở
+      chiều cao (chỉ +8px, vì thứ quyết định chiều cao là ẢNH 36px chứ KHÔNG phải nút)
+      — nó đắt ở TÊN GHẾ. flex KHÔNG cho tràn ngang, nó BÓP CHỮ:
+          nút 30→44  ⇒  tên ghế 107px → 59px, mất 45% bề rộng.
+      Nên KHÔNG phóng to cái nút. Chỉ nới VÙNG CHẠM bằng một lớp phủ vô hình:
+          vùng chạm 44×44  ·  cao thanh KHÔNG đổi  ·  tên ghế chỉ mất 16px.
+
+   ⚠️ HAI VÙNG CHẠM CẠNH NHAU SẼ ĐÈ LÊN NHAU nếu chỉ dán lớp phủ mà KHÔNG nới khe.
+      Đè nhau thì bấm nút này có thể ăn sang nút kia — tệ hơn cả nút bé.
+      Số đo: khe nay 10px ⇒ tâm cách tâm 40 ⇒ phủ 44 là ĐÈ 4px.
+      Nới thêm 2px mỗi bên ⇒ tâm cách tâm 44 ⇒ đè ĐÚNG 0.
+
+   📌 Bố cục 4 ô dùng 40×40 chứ KHÔNG phải 44×44 — thanh ở đó chỉ cao 45px,
+      phủ 44 là chạm mép, còn 40 thì nằm gọn. Thà nhỏ hơn chuẩn 4px mà KHÔNG tràn.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (pointer:coarse){
+  .nut-tron{position:relative;margin-left:2px;margin-right:2px}
+  .bc-4 .nut-tron{margin-left:3px;margin-right:3px}
+
+  /* lớp phủ VÔ HÌNH — to bằng ngón tay mà KHÔNG chiếm chỗ trong bố cục */
+  .nut-tron::after{
+    content:"";position:absolute;
+    top:50%;left:50%;transform:translate(-50%,-50%);
+    width:44px;height:44px;
+  }
+  .bc-4 .nut-tron::after{width:40px;height:40px}
+}
