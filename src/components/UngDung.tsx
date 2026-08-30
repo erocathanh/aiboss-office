@@ -795,6 +795,14 @@ export default function UngDung({
       });
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
+      /**
+       * 🧹 TIÊU NEO KHI HỎNG (ghế soi nêu 30/08). Neo đặt ở trên; nếu `capNhat` ném lỗi thì
+       *    `tin` ⛔ đổi ⇒ dấu vết cuộn ⛔ đổi ⇒ hiệu ứng cuộn ⛔ chạy tới nhánh tiêu neo
+       *    ⇒ neo NẰM LẠI và CƯỚP lần cuộn sau (tin mới về mà bị kéo lên giữa hội thoại).
+       *    Hỏng im lặng: ⛔ báo lỗi, ⛔ ai thấy, chỉ Owner thấy khung nhảy bậy.
+       * 📌 Xoá cái ⛔ có là vô hại — `delete` trên khoá ⛔ tồn tại ⛔ ném lỗi.
+       */
+      delete neoKeo.current[i];
     } finally {
       if (conMoiNhat(i, ma)) capNhat(i, { dangNap: false });
     }
