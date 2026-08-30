@@ -516,20 +516,47 @@ export default function UngDung({
    * ⇒ Thay TRỌN danh sách bằng bản mới, ⛔ nối.
    */
   const keoThem = useCallback(async (i: number, ten: string, maPhien: string, tranCu: number) => {
-    const tranMoi = Math.max(tranCu * 2, 3 * 1024 * 1024);
+    /**
+     * 🐛 FAIL 5 (Hermes 30/08): nút chỉ khoá theo `dangNap`. Bấm lúc ô ĐANG CHẢY CHỮ
+     * là thay TRỌN mảng tin ⇒ xoá luôn câu vừa gửi và phần đang chảy.
+     * Đường «nạp lại» (napLaiChat) ĐÃ có chốt `o.dangChay`; keoThem thì ⛔ — nay thêm.
+     * ⚠️ Chốt ở CẢ HAI nơi: nút bị `disabled` rồi vẫn chặn lần nữa ở đây, vì
+     *    `disabled` chỉ là lớp giao diện — gọi thẳng hàm thì nó ⛔ đỡ được.
+     */
+    if (dsORef.current[i]?.dangChay) return;
+    /**
+     * 🐛 FAIL 6 (Hermes 30/08): bản trước cứng hoá «3 MB» ở ĐÂY *và* ở doc-phien.ts
+     * ⇒ sửa một nơi là hai nơi lệch nhau âm thầm.
+     * ✅ Nay chỉ dùng `tranCu` — con số đó do MÁY CHỦ gửi về (`da_doc`) ở lần nạp đầu.
+     *    Máy chủ là NGUỒN DUY NHẤT của trần. Chưa có số (=0) thì xin gấp đôi mức nhỏ
+     *    nhất an toàn, rồi từ lần sau cứ theo số máy chủ trả.
+     */
+    const tranMoi = tranCu > 0 ? tranCu * 2 : 6 * 1024 * 1024;
     capNhat(i, { dangNap: true });
     try {
       const r = await fetch(
         `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}&tran_byte=${tranMoi}`,
       );
+      /**
+       * 🐛 BLOCKER ② (Hermes 30/08) — ĐÂY LÀ CHỖ XOÁ SẠCH LỊCH SỬ TRƯỚC MẮT OWNER.
+       * Máy chủ trả LỖI 400 kèm thân JSON `{ loi: … }`. `r.json()` parse thành công
+       * ⇒ khối `catch` «giữ nguyên tin» ⛔ HỀ CHẠY ⇒ `j.lich_su` ⛔ phải mảng
+       * ⇒ gán `tin: []` ⇒ **toàn bộ hội thoại đang hiện biến mất**.
+       * ⇒ Phải chặn ở `r.ok`, VÀ kiểm hình dạng dữ liệu — ⛔ tin mã 200 là đủ.
+       */
+      if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
       const j = await r.json();
+      if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
       capNhat(i, {
-        tin: Array.isArray(j.lich_su) ? j.lich_su : [],
+        tin: j.lich_su,
         conNua: !!j.con_nua,
         tranByte: Number(j.da_doc) || tranMoi,
       });
     } catch {
-      /* giữ nguyên tin đang có — kéo hụt thì thà ⛔ đổi gì còn hơn xoá mất lịch sử */
+      /**
+       * GIỮ NGUYÊN tin đang có. Kéo hụt thì thà ⛔ đổi gì còn hơn xoá mất lịch sử.
+       * ⛔ đặt `tin: []` ở đây — đó chính là lỗi vừa vá ở trên.
+       */
     } finally {
       capNhat(i, { dangNap: false });
     }
@@ -1887,7 +1914,7 @@ export default function UngDung({
                             <button
                               type="button"
                               className="nut-keo-them"
-                              disabled={o.dangNap}
+                              disabled={o.dangNap || o.dangChay}
                               onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.tranByte)}
                             >
                               ⬆️ Xem thêm phần cũ hơn

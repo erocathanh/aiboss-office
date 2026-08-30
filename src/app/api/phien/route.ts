@@ -28,11 +28,18 @@ export async function GET(req: NextRequest) {
        * ⚠️ Trần trên 64 MB: chặn người gõ tay một số khổng lồ làm máy chủ ngốn hết bộ nhớ.
        *    (kho chung có tệp 375 MB — đọc trọn là đẩy 29.041 tin về trình duyệt.)
        */
+      /**
+       * 🐛 BLOCKER ① (Hermes 30/08): bản trước kẹp cứng 64 MB. Với tệp 375 MB thì
+       *    `con_nua` LUÔN true, mà mọi lần bấm «xem thêm» đều trả ĐÚNG CÙNG khúc đuôi
+       *    ⇒ nút bấm mãi ⛔ đi tiếp được. Trần cố định + vòng nhân đôi = **kẹt vĩnh viễn**.
+       * ✅ Chữa: ⛔ kẹp bằng SỐ CỐ ĐỊNH nữa. Chặn duy nhất là KÍCH THƯỚC TỆP —
+       *    xin quá tệp thì đọc trọn tệp, `con_nua` thành false, vòng lặp KẾT THÚC.
+       * 🛡 Bộ nhớ vẫn được bảo vệ, nhưng bằng thứ khác: mỗi bước nới là MỘT CÚ BẤM TAY
+       *    của người dùng, ⛔ phải vòng tự chạy. Muốn đọc trọn tệp 375 MB thì phải bấm
+       *    ~7 lần và tự thấy nó chậm dần — đó là phanh THẬT, ⛔ phải một con số bịa.
+       */
       const tranTho = Number(q.get('tran_byte'));
-      const tran =
-        Number.isFinite(tranTho) && tranTho > 0
-          ? Math.min(tranTho, 64 * 1024 * 1024)
-          : undefined;
+      const tran = Number.isFinite(tranTho) && tranTho > 0 ? tranTho : undefined;
       const kq = await lichSuPhien(maNhanSu, maPhien, tran);
       return Response.json({
         lich_su: kq.tin,

@@ -98,7 +98,26 @@ function docDuoi(p: string, soByte = 256 * 1024): string {
     const dem = Buffer.alloc(cd - bd);
     fs.readSync(fd, dem, 0, dem.length, bd);
     const s = dem.toString('utf8');
-    return bd > 0 ? s.slice(s.indexOf('\n') + 1) : s; // bỏ dòng đầu bị cắt dở
+    if (bd <= 0) return s; // đọc từ đầu tệp ⇒ ⛔ có dòng nào bị cắt dở
+
+    /**
+     * 🐛 BA CA `s.indexOf('\n') + 1` LÀM SAI, Hermes bắt 30/08:
+     *  ① đuôi ⛔ CÓ xuống dòng nào  ⇒ indexOf = -1 ⇒ +1 = 0 ⇒ slice(0) giữ NGUYÊN
+     *     dòng cắt dở ⇒ JSON.parse ném lỗi ⇒ bị `catch { continue }` NUỐT IM LẶNG.
+     *  ② điểm cắt rơi ĐÚNG đầu một dòng nguyên vẹn ⇒ cắt đi là BỎ OAN cả dòng đó.
+     *  ③ ⇒ phải hỏi byte NGAY TRƯỚC điểm cắt: là `\n` thì chỗ cắt đã sạch, giữ nguyên.
+     */
+    let batDauSach = false;
+    {
+      const truoc = Buffer.alloc(1);
+      const n = fs.readSync(fd, truoc, 0, 1, bd - 1);
+      batDauSach = n === 1 && truoc[0] === 0x0a; // 0x0a = '\n'
+    }
+    if (batDauSach) return s;
+
+    const xd = s.indexOf('\n');
+    // ⛔ có xuống dòng nào ⇒ CẢ khúc này là một dòng bị cắt dở ⇒ ⛔ dùng được gì.
+    return xd === -1 ? '' : s.slice(xd + 1);
   } finally {
     fs.closeSync(fd);
   }
@@ -275,8 +294,25 @@ export async function lichSuPhien(
    * Tệp LỚN hơn ⇒ dùng `docDuoi` — bộ đọc ĐUÔI đã có sẵn trong tệp này, nó tự bỏ
    * dòng đầu bị cắt dở. ⛔ viết bộ đọc thứ hai.
    */
-  const nguon = conNua
-    ? (async function* () { for (const d of docDuoi(p, tran).split('\n')) yield d; })()
+  /**
+   * 🐛 FAIL 7 (Hermes 30/08): MỘT DÒNG có thể DÀI HƠN CẢ TRẦN — lúc đó khúc đuôi ⛔ chứa
+   * dòng nguyên vẹn nào, hàm trả mảng RỖNG, và giao diện gọi đó là «Phiên trống».
+   * ⇒ Đó là **diễn giải sai dữ liệu thật** — phiên CÓ nội dung, chỉ là ta cắt hụt.
+   * ⇒ Nới gấp đôi tối đa 5 lần; hết nới mà vẫn rỗng thì đọc TRỌN tệp. Thà chậm còn hơn nói dối.
+   */
+  let tranThuc = tran;
+  let tho = conNua ? docDuoi(p, tranThuc) : '';
+  if (conNua) {
+    for (let lan = 0; lan < 5 && !tho.includes('\n') && tranThuc < tong; lan++) {
+      tranThuc = Math.min(tranThuc * 2, tong);
+      tho = docDuoi(p, tranThuc);
+    }
+    if (!tho.includes('\n')) { tranThuc = tong; tho = fs.readFileSync(p, 'utf8'); }
+  }
+  const conNuaThuc = tranThuc < tong;
+
+  const nguon = conNuaThuc || conNua
+    ? (async function* () { for (const d of tho.split('\n')) yield d; })()
     : readline.createInterface({
         input: fs.createReadStream(p, { encoding: 'utf8' }),
         crlfDelay: Infinity,
@@ -300,7 +336,7 @@ export async function lichSuPhien(
       ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
     }
   }
-  return { tin: ra, con_nua: conNua, da_doc: Math.min(tran, tong), tong_byte: tong };
+  return { tin: ra, con_nua: conNuaThuc, da_doc: Math.min(tranThuc, tong), tong_byte: tong };
 }
 
 function gioNgan(ts?: string): string {
