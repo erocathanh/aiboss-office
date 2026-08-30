@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from 'react';
 /**
  * 🎨 Bộ icon: `@phosphor-icons/react` — bộ ƯU TIÊN SỐ 1 trong skill `taste` (§3.C),
  * và `lucide-react` thì skill KHUYÊN TRÁNH. MỘT họ icon cho cả dự án, ⛔ không trộn.
@@ -34,7 +34,44 @@ interface TomTatPhien {
   ma: string; moc: number; moc_doc: string;
   tin_cuoi: string; so_luot: number; dang_chay: boolean;
 }
+/**
+ * 🔑 MÃ RIÊNG của một bong bóng — dùng làm `key` cho React.
+ *
+ * 🐛 VÌ SAO PHẢI CÓ (FAIL ② Hermes, 30/08): trước đây `key={k}` lấy CHỈ SỐ trong mảng.
+ *    Nạp phần cũ hơn là NỐI VÀO ĐẦU ⇒ chỉ số của MỌI tin cũ đều đổi ⇒ React coi mọi dòng
+ *    là dòng mới ⇒ dựng lại hàng trăm bong bóng + vẽ lại markdown. Đúng cái GIẬT mà
+ *    phân trang sinh ra để chữa — vá một đầu, mở lại ở đầu kia.
+ *
+ * 🔬 VÌ SAO ⛔ DÙNG `luc` (mốc mili-giây) — ĐO THẬT 30/08, 6 ghế · 11.620 tin:
+ *      luc trơn  KHÔNG độc nhất   (nặng nhất 4.111/4.184)
+ *      luc + ai  VẪN KHÔNG độc nhất — 4/6 ghế có trùng, nặng nhất 3.810/3.863
+ *    Hai tin trong CÙNG một mili-giây là chuyện có thật, ⛔ phải giả thuyết.
+ *    ⇒ Khoá phải do MÌNH cấp, ⛔ suy từ nội dung. Đếm tăng dần là đủ: React chỉ cần
+ *      ĐỘC NHẤT và ỔN ĐỊNH, ⛔ cần có thứ tự hay ý nghĩa.
+ *
+ * ⚠️ Nối vào đầu GIỮ NGUYÊN vật cũ (`[...moi, ...cu]`) ⇒ tin cũ giữ nguyên mã ⇒ ⛔ dựng lại.
+ *    Lúc chảy chữ cũng an toàn vì chỗ cập nhật dùng `{ ...cuoi }` — mã đi theo.
+ */
+/**
+ * ⚙️ Chạy TRƯỚC khi trình duyệt VẼ, nhưng ⛔ nổ cảnh báo lúc dựng phía máy chủ.
+ * Trang này là thành phần máy khách nhưng Next VẪN dựng thử trên máy chủ, mà ở đó ⛔ có DOM
+ * ⇒ chọn theo môi trường. Đặt ở tầng TỆP để thứ tự hook ⛔ bao giờ đổi giữa hai lần vẽ.
+ * 📌 Cần «trước khi vẽ» vì việc neo chỗ đọc mà chạy SAU khi vẽ thì mắt Owner kịp thấy
+ *    khung nhảy xuống đáy rồi mới bật ngược lên — vá xong vẫn còn giật.
+ */
+const dungTruocKhiVe = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+/** Lệch dưới ngần này pixel thì coi như ĐANG Ở ĐÁY — chưa tới một dòng chữ.
+ *  Để ở tầng TỆP: nó là hằng số, ⛔ phải thứ đổi theo mỗi lần vẽ, nên ⛔ được nằm trong
+ *  danh sách phụ thuộc của hook nào cả. */
+const LECH_COI_LA_DAY = 8;
+
+let demMaTin = 0;
+const datMa = () => `t${++demMaTin}`;
+
 interface Tin {
+  /** 🔑 Mã riêng do máy khách cấp — xem `datMa()`. ⛔ Đừng thay bằng chỉ số hay `luc`. */
+  ma: string;
   ai: 'toi' | 'ho'; chu: string; gio: string; loi?: boolean;
   /**
    * 🕐 MỐC THẬT (epoch ms) — việc ②A, 19/08/2026.
@@ -194,6 +231,13 @@ const LA_BO_DUNG_SAN = (ten: (string | null)[]): boolean =>
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
 // Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
+/**
+ * ⚠️ MẢNG NÀY PHẢI DÀI ĐÚNG BẰNG `SO_O` (lib/so-o.ts). Nay khớp: 6 icon / 6 ô.
+ * 🔗 Cùng họ với lỗi đã sửa ở `huyRefs`/`dauVetCuon` — mảng gõ tay theo số ô thì trôi lúc nào
+ *    KHÔNG ai hay. Khác một điều: chỗ này hỏng chỉ ra ICON SAI (có nhánh `?? NumberOne` đỡ),
+ *    nên tôi CỐ Ý KHÔNG dựng chốt nổ ở đây — chốt nổ giết cả app để đổi lấy một cái icon
+ *    là đánh đổi tồi. Nâng `SO_O` thì nhớ thêm icon tại đây.
+ */
 const ICON_SO_O = [NumberOne, NumberTwo, NumberThree, NumberFour, NumberFive, NumberSix];
 const DAM_ICON = 'bold' as const;   // ⛔ MỘT độ đậm cho cả dự án
 
@@ -426,8 +470,31 @@ export default function UngDung({
   dsORef.current = dsO;
 
   const bangTinRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const huyRefs = useRef<Array<AbortController | null>>([null, null, null, null]);
-  const dauVetCuon = useRef<string[]>(['', '', '', '']);
+  /**
+   * 🐛 KHAI CỨNG 4 PHẦN TỬ CHO 6 Ô (bắt được 30/08 · claude-aiboss-app-pm).
+   *    `SO_O` là 6 (lib/so-o.ts:21) nhưng hai mảng này gõ tay 4 ⇒ ô 5·6 KHÔNG có chỗ.
+   *    Hệ quả NẶNG NHẤT ở `huyRefs`: `huyRefs.current[4]?.abort()` là **lệnh RỖNG** cho tới
+   *    khi có phép gán đầu tiên ⇒ đổi ghế · đóng ô · mở phiên khác ở ô 5·6 có thể
+   *    **KHÔNG cắt được luồng đang chảy**. Lỗi im lặng: KHÔNG ai thấy, chỉ tốn tiền chạy tiếp.
+   *    `dauVetCuon` nhẹ hơn vì JS tự nới mảng — nhưng khai 4 cho 6 vẫn là SAI TỪ LÚC VIẾT.
+   * ✅ Sinh theo `SO_O`, ⛔ gõ tay con số. Đổi số ô sau này thì hai dòng này tự đúng theo.
+   */
+  const huyRefs = useRef<Array<AbortController | null>>(Array.from({ length: SO_O }, () => null));
+  const dauVetCuon = useRef<string[]>(Array.from({ length: SO_O }, () => ''));
+  /**
+   * 📌 CHỖ ĐANG ĐỌC, ghi lại NGAY TRƯỚC khi nối phần cũ vào đầu (FAIL ① Hermes 30/08).
+   * Ô nào có mục ở đây nghĩa là «lần đổi độ dài sắp tới là do NỐI VÀO ĐẦU, ⛔ phải tin mới».
+   */
+  const neoKeo = useRef<Record<number, { top: number; cao: number }>>({});
+  /**
+   * 📌 «Ô NÀY CÓ ĐANG Ở ĐÁY KHÔNG» — ghi lại NGAY TRƯỚC khi phóng to / thu lại.
+   * 🐛 Vì sao cần (PM đo 30/08 trên WEBKIT): phóng to một ô thì NĂM ô kia bị ẩn
+   *    (`clientHeight` = 0). Thu lại, chúng hiện ra với chiều cao MỚI nhưng giữ nguyên
+   *    `scrollTop` CŨ ⇒ trỏ vào giữa hội thoại. Đo thật 6 ô: ô5 cách đáy 8.325px
+   *    ≈ 30 màn hình. Chromium tự bám mép đáy nên CHE MẤT lỗi; WebKit ⛔ bám ⇒ lộ.
+   * ⚠️ Mặc định `true` (coi như đang ở đáy) vì lúc mở ô lần đầu app luôn đưa xuống đáy.
+   */
+  const oODay = useRef<boolean[]>(Array.from({ length: SO_O }, () => true));
   const daKhoiPhuc = useRef(false);
 
   const capNhat = useCallback((i: number, vá: Partial<OChat> | ((o: OChat) => Partial<OChat>)) => {
@@ -462,15 +529,35 @@ export default function UngDung({
     return loc.sort((a, b) => Number(b.ghim ?? false) - Number(a.ghim ?? false));
   }, [nhanSu, phongChon, tuKhoa]);
 
-  /* ---------- Cuộn xuống đáy — CHỈ ô nào vừa có chữ mới ---------- */
-  useEffect(() => {
+  /* ---------- Cuộn xuống đáy — CHỈ ô nào vừa có chữ mới ----------
+   *
+   * 🐛 FAIL ① (Hermes 30/08): độ dài mảng đổi vì HAI nguyên nhân trái ngược nhau,
+   *    mà dấu vết ở đây ⛔ phân biệt được:
+   *      · tin MỚI về            ⇒ ĐÚNG là phải xuống đáy
+   *      · nối phần CŨ vào đầu   ⇒ SAI hoàn toàn: Owner bấm để ĐỌC PHẦN CŨ mà bị ném
+   *                                 xuống tin mới nhất ⇒ tính năng thành VÔ DỤNG.
+   * ✅ Nên `keoThem` để lại một cái NEO trước khi nối; thấy neo thì giữ chỗ đọc, ⛔ xuống đáy.
+   *    ⛔ Gỡ hẳn lệnh xuống đáy — tin mới về thì vẫn phải xuống.
+   */
+  dungTruocKhiVe(() => {
     dsO.forEach((o, i) => {
       const cuoi = o.tin[o.tin.length - 1];
       const dau = `${o.tin.length}:${cuoi ? cuoi.chu.length : 0}`;
       if (dau === dauVetCuon.current[i]) return;
       dauVetCuon.current[i] = dau;
       const b = bangTinRefs.current[i];
-      if (b) b.scrollTop = b.scrollHeight;
+      if (!b) return;
+      const neo = neoKeo.current[i];
+      if (neo) {
+        // 🔑 Tiêu neo TRƯỚC khi dùng — lỡ dòng dưới ném lỗi thì neo cũ ⛔ nằm lại
+        //    để cướp nhầm lần cuộn sau.
+        delete neoKeo.current[i];
+        // Phần cũ đẩy nội dung xuống đúng bằng (cao_sau − cao_truoc) ⇒ cộng bù thì
+        // mắt người đọc đứng NGUYÊN chỗ cũ.
+        b.scrollTop = neo.top + (b.scrollHeight - neo.cao);
+        return;
+      }
+      b.scrollTop = b.scrollHeight;
     });
   }, [dsO]);
 
@@ -481,6 +568,20 @@ export default function UngDung({
     });
     return () => cancelAnimationFrame(t);
   }, [boCuc]);
+
+  /**
+   * 📷 GHI NHỚ ô nào đang ở đáy — gọi NGAY TRƯỚC khi bấm phóng to / thu lại.
+   * ⚠️ Ô đang ẨN (`clientHeight` = 0) thì GIỮ NGUYÊN giá trị cũ, ⛔ ghi đè:
+   *    lúc thu lại chỉ còn MỘT ô nhìn thấy được, năm ô kia phải giữ trạng thái đã ghi
+   *    từ lúc phóng to. Ghi đè ở đây là xoá mất đúng thứ mình cần.
+   */
+  const ghiNhoDay = useCallback(() => {
+    bangTinRefs.current.forEach((b, i) => {
+      if (!b || b.clientHeight === 0) return;
+      oODay.current[i] = b.scrollHeight - b.scrollTop - b.clientHeight <= LECH_COI_LA_DAY;
+    });
+  }, []);
+
 
   /* ---------- Nạp danh sách phiên thật của một ô ---------- */
   /**
@@ -552,7 +653,8 @@ export default function UngDung({
         ((t as Tin).ai === 'toi' || (t as Tin).ai === 'ho');
       if (!ok) throw new Error('danh sách tin có phần tử hỏng — BÁC cả phản hồi');
     }
-    return th as Tin[];
+    // 🔑 Đóng dấu mã NGAY TẠI CỬA VÀO — mọi tin trong bộ nhớ đều phải có mã.
+    return (th as Tin[]).map((t) => ({ ...t, ma: datMa() }));
   }, []);
 
   /**
@@ -675,6 +777,15 @@ export default function UngDung({
        *    ⛔ cố ghép lại: ghép sai còn tệ hơn ⛔ ghép, vì trông như đủ.
        */
       if (!o1 || o1.phienHienTai !== maPhien || o1.dangChay || o1.viTri !== viTri) return;
+      /**
+       * 📌 ĐO NGAY TRƯỚC KHI NỐI — sau khi nối thì `scrollHeight` đã là số MỚI, ⛔ còn gì để trừ.
+       * ⚠️ Chỉ đặt neo khi THẬT SỰ có tin nối vào: `sach` rỗng thì độ dài ⛔ đổi ⇒ hiệu ứng
+       *    cuộn ⛔ chạy tới nhánh tiêu neo ⇒ neo sẽ nằm lại và cướp nhầm lần cuộn sau.
+       */
+      const bang = bangTinRefs.current[i];
+      if (bang && sach.length > 0) {
+        neoKeo.current[i] = { top: bang.scrollTop, cao: bang.scrollHeight };
+      }
       capNhat(i, {
         tin: [...sach, ...o1.tin],
         conNua: kq.conNua,
@@ -1111,8 +1222,19 @@ export default function UngDung({
     const ns = dsO[i]?.ns;
     if (!ns) return;
     huyLuong(i);
+    /**
+     * 🐛 FAIL ③ (Hermes 30/08): bản cũ xoá `tin` mà GIỮ NGUYÊN con trỏ phân trang.
+     *    Ca thủng: phiên cũ còn trang trước (`conNua`=true, `viTri`>0) → Owner mở phiên MỚI →
+     *    sau lượt đầu mã phiên mới hiện ra nhưng CON TRỎ VẪN THUỘC PHIÊN CŨ
+     *    ⇒ nút «nạp phần cũ» mọc lên ở phiên trắng, bấm vào là ĐỌC NHẦM PHIÊN.
+     *    Cảnh báo `catDongDai` của phiên cũ cũng mọc sang theo.
+     * 🔎 Đã quét MỌI chỗ đặt `tin: []` trong tệp: chỉ chỗ này thủng, ⛔ có lỗ thứ hai.
+     *    Họ trạng thái phân trang đúng ba trường — khai ở `OChat`, mặc định ở `O_TRONG`.
+     */
+    delete neoKeo.current[i];   // neo chỗ đọc của phiên CŨ ⛔ được sống sang phiên mới
     capNhat(i, {
       moChonPhien: false, phienHienTai: null, tin: [], noiTiep: false, chiPhi: null, token: null,
+      conNua: false, viTri: 0, catDongDai: false,
     });
     await ghiO(i, ns.ten, null, true); // ý định THẬT: Owner bấm mở PHIÊN MỚI
   }
@@ -1153,7 +1275,7 @@ export default function UngDung({
       // ⛔ Câu do ghế khác đánh thức thì ⛔ KHÔNG được xoá bản nháp Owner đang gõ dở.
       ...(tuGo ? { soan: '' } : {}),
       chiPhi: null, token: null, dangChay: true, matKetNoi: false,   // gửi được ⇒ đèn về xanh
-      tin: [...cu.tin, { ai: 'toi', chu: cauHoi, gio: gioBayGio(), luc: Date.now(), ...(tuAi ? { tu_ai: tuAi } : {}) }],
+      tin: [...cu.tin, { ma: datMa(), ai: 'toi', chu: cauHoi, gio: gioBayGio(), luc: Date.now(), ...(tuAi ? { tu_ai: tuAi } : {}) }],
     }));
 
     // ⚠️ Hàm cập nhật phải THUẦN — mọi thứ nó cần đều đọc từ `cu`, ⛔ không đọc cờ bên ngoài.
@@ -1164,7 +1286,7 @@ export default function UngDung({
         if (cuoi && cuoi.ai === 'ho' && cuoi.dang) {
           n[n.length - 1] = { ...cuoi, chu: cuoi.chu + c, ranh: [...mocMau] };
         } else {
-          n.push({ ai: 'ho', chu: c, gio: gioBayGio(), luc: Date.now(), dang: true, ranh: [...mocMau] });
+          n.push({ ma: datMa(), ai: 'ho', chu: c, gio: gioBayGio(), luc: Date.now(), dang: true, ranh: [...mocMau] });
         }
         return { tin: n };
       });
@@ -1245,7 +1367,7 @@ export default function UngDung({
       if (khoCho.length > 0) { veChu(khoCho); khoCho = ''; }
     };
     const themLoi = (chu: string) => {
-      capNhat(i, (cu) => ({ tin: [...cu.tin, { ai: 'ho', chu, gio: gioBayGio(), luc: Date.now(), loi: true }] }));
+      capNhat(i, (cu) => ({ tin: [...cu.tin, { ma: datMa(), ai: 'ho', chu, gio: gioBayGio(), luc: Date.now(), loi: true }] }));
     };
 
     huyLuong(i);
@@ -1382,6 +1504,26 @@ export default function UngDung({
    * phiên từng ô giữ nguyên vì ⛔ không ô nào bị tháo khỏi cây giao diện.
    */
   const [toanMan, datToanMan] = useState<number | null>(null);
+
+  /**
+   * 🔭 PHÓNG TO / THU LẠI đổi chiều cao MỌI ô ⇒ phải neo lại — nhưng CHỈ ô nào TRƯỚC ĐÓ
+   *    đang ở đáy. Ném một ô đang đọc giữa chừng xuống đáy là mở lại đúng loại lỗi
+   *    vừa vá ở nút «nạp phần cũ».
+   * 🔁 Đặt lại HAI NHỊP (ngay lập tức + một khung hình sau): trên WebKit, đọc kích thước
+   *    ngay sau khi đổi lớp CSS có thể còn ra số CŨ. Gán hai lần là vô hại vì cùng một đích.
+   * 📌 Duyệt TOÀN BỘ ô, ⛔ chỉ ô vừa thu — lỗi đo được nằm ở NĂM ô kia.
+   */
+  dungTruocKhiVe(() => {
+    const datLai = () => {
+      bangTinRefs.current.forEach((b, i) => {
+        if (!b || b.clientHeight === 0) return;
+        if (oODay.current[i]) b.scrollTop = b.scrollHeight;
+      });
+    };
+    datLai();
+    const t = requestAnimationFrame(datLai);
+    return () => cancelAnimationFrame(t);
+  }, [toanMan]);
 
   const oGoRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
   const tuCao = (el: HTMLTextAreaElement | null) => {
@@ -1875,6 +2017,10 @@ export default function UngDung({
                         */}
                       {o.conNua && o.phienHienTai && o.ns && (
                         <button
+                          /* 📌 `nut-lich-su` CỐ Ý ⛔ CÓ LUẬT CSS RIÊNG — hình dáng đã do
+                             `nut-tron` lo trọn (kể cả lúc bị khoá: `.nut-tron[disabled]`).
+                             Giữ tên vì nó là CÁI MÓC để phép đo trình duyệt tìm đúng nút này
+                             ở cổng nghiệm thu. ⛔ Đi tìm luật cho nó — ⛔ có luật là ĐÚNG Ý. */
                           className="nut-tron nut-lich-su" type="button"
                           disabled={o.dangNap || o.dangChay}
                           onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.viTri)}
@@ -1886,7 +2032,7 @@ export default function UngDung({
                       )}
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
-                        onClick={() => datToanMan(toanMan === i ? null : i)}
+                        onClick={() => { ghiNhoDay(); datToanMan(toanMan === i ? null : i); }}
                         title={toanMan === i ? 'Thu về lưới' : 'Xem ô này TRỌN khung'}
                         aria-label="Xem trọn khung"
                         aria-pressed={toanMan === i}
@@ -2104,8 +2250,8 @@ export default function UngDung({
                             Bản gốc vẫn còn nguyên trong tệp phiên.
                           </div>
                         )}
-                        {o.tin.map((t, k) => (
-                          <div key={k} className={`dong-tin ${t.ai}`}>
+                        {o.tin.map((t) => (
+                          <div key={t.ma} className={`dong-tin ${t.ai}`}>
                             <div className="anh-nho">{t.ai === 'toi' ? 'ET' : o.ns!.viet_tat}</div>
                             <div>
                               {/* 🔔 Câu này máy tự gửi, ⛔ KHÔNG phải Owner gõ — phải nói rõ ai gọi. */}

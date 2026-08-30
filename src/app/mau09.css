@@ -715,7 +715,11 @@
 }
 
 
-/* 🚦 ĐÈN TRẠNG THÁI PHIÊN trên nút số ô (17/08/2026 · claude-phong-ban-pm).
+/* 🚦 ĐÈN TRẠNG THÁI PHIÊN — nay nằm ở GÓC TRÊN PHẢI của ẢNH ĐẠI DIỆN (thứ trái cùng trên
+   thanh đầu ô). Dời sang đây 30/08/2026 theo lệnh Owner; TRƯỚC ĐÓ nó gắn ở nút số ô.
+   ⚠️ Nó neo vào `.anh-o`, mà `.anh-o` phải giữ `position:relative` (xem chú thích tại đó).
+      Gỡ dòng neo ấy thì đèn văng sang tổ tiên khác — SAI CHỖ mà ⛔ báo lỗi dòng nào.
+   (bản đầu 17/08/2026 · claude-phong-ban-pm).
    Owner: «icon đang active màu xanh / mất kết nối màu xám để biết có đang kết nối phiên».
    📌 Mỗi màu neo vào một SỰ THẬT ĐO ĐƯỢC, ⛔ không có màu nào là trang trí:
       cam nháy = luồng vừa đứt · xanh nháy = đang chảy chữ · xanh = có phiên · xám = chưa nối. */
