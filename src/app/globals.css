@@ -305,3 +305,31 @@
   color:#e8b339; font-size:12.5px; line-height:1.5;
   padding:6px 12px; max-width:52ch; text-align:center; opacity:.95;
 }
+
+/**
+ * 📌 GHIM NÚT «Xem thêm» VÀO ĐỈNH KHUNG CUỘN.
+ *
+ * 🐛 Ca thật 30/08: nút vẽ ở ĐỈNH danh sách (UngDung.tsx:2082) còn tin vẽ SAU (:2094),
+ *    mà :473 và :480 tự cuộn XUỐNG ĐÁY mỗi lần có tin mới ⇒ nút cách chỗ Owner đang
+ *    nhìn **167-382 tin**. Trên iPhone màn ngắn thì coi như KHÔNG CÓ NÚT.
+ * 📌 Nút này sinh ra để CỨU LỊCH SỬ CHAT — thứ Owner mất rồi đòi lại.
+ *    Vẽ ra mà với ⛔ tới thì bằng chưa làm.
+ *
+ * ⚠️ Nền PHẢI ĐẶC, ⛔ để trong suốt — tin cuộn qua sẽ lộ ra sau nút, đọc thành chữ chồng chữ.
+ *    Màu lấy từ TIỀN LỆ CÓ SẴN trong nhà: `.hop-tim` (mau09:121) cũng ghim đỉnh và dùng
+ *    `var(--navy-0)`. ⛔ bịa mã màu mới.
+ * ⚠️ ⛔ dùng `:has()` để nhắm — thêm hẳn tên lớp `neo-tren`, chắc chắn hơn (đề bài dặn).
+ */
+.bang-tin .neo-tren{
+  position:sticky; top:0; z-index:3;
+  background:var(--navy-0);
+  border-bottom:1px solid var(--vien);
+  margin:-16px -16px 0;   /* trải hết bề ngang, bù padding 16px của .bang-tin */
+  padding:8px 16px;
+}
+
+/**
+ * 👆 VÙNG CHẠM ≥44px — chuẩn iOS. Nút cũ cao ~30px (chữ 13px + đệm 6px),
+ *    ngón tay trên iPhone bấm hụt. Nâng ĐỆM DỌC, ⛔ hạ cỡ chữ xuống dưới 13px (đề bài cấm).
+ */
+.bang-tin .neo-tren .nut-keo-them{ padding:13px 18px; }

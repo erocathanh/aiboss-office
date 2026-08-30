@@ -2080,7 +2080,7 @@ export default function UngDung({
                           </div>
                         )}
                         {o.conNua && o.phienHienTai && o.ns && (
-                          <div className="moc-ngay">
+                          <div className="moc-ngay neo-tren">
                             <button
                               type="button"
                               className="nut-keo-them"
