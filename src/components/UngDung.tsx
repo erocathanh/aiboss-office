@@ -210,8 +210,8 @@ interface OChat {
   noiTiep: boolean;
   /** Còn phần lịch sử CŨ HƠN chưa nạp ⛔ — máy chủ trả về, dùng để hiện nút «xem thêm». */
   conNua: boolean;
-  /** Trần byte đã xin lần gần nhất. Kéo thêm = nhân đôi số này rồi gọi lại. */
-  tranByte: number;
+  /** CON TRỎ: trang đang hiện bắt đầu ở byte nào. Xin trang cũ hơn thì gửi lại số này. */
+  viTri: number;
   dsPhien: TomTatPhien[];
   phienHienTai: string | null;
   moChonPhien: boolean;
@@ -252,7 +252,7 @@ interface OChat {
 
 const O_TRONG: OChat = {
   ns: null, tin: [], soan: '', dangChay: false, dangNap: false,
-  chiPhi: null, token: null, noiTiep: false, conNua: false, tranByte: 0, dsPhien: [],
+  chiPhi: null, token: null, noiTiep: false, conNua: false, viTri: 0, dsPhien: [],
   phienHienTai: null, moChonPhien: false, moDan: false, chuoiDan: '', loiDan: '', phienChoFork: null, dangFork: false,
   // ¶ MẶC ĐỊNH TẮT (đổi 17/08/2026 sau phản hồi thật của Owner).
   // Bật mặc định ⇒ mọi câu in THÔ ⇒ Owner thấy nguyên dấu ** và tưởng markdown hỏng.
@@ -503,60 +503,53 @@ export default function UngDung({
         tin: Array.isArray(j.lich_su) ? j.lich_su : [],
         noiTiep: true,
         conNua: !!j.con_nua,
-        tranByte: Number(j.da_doc) || 0,
+        viTri: Number(j.vi_tri) || 0,
       });
     } catch { capNhat(i, { tin: [] }); } finally { capNhat(i, { dangNap: false }); }
   }, [capNhat]);
 
   /**
-   * ⬆️ KÉO THÊM LỊCH SỬ CŨ HƠN — nhân đôi trần byte rồi xin lại.
+   * ⬆️ KÉO THÊM PHẦN CŨ HƠN — đi bằng CON TRỎ, mỗi lần một trang.
    *
-   * ⛔ nạp thêm bằng cách nối mảng: máy chủ trả về phần ĐUÔI tính từ CUỐI ngược lên,
-   * nên xin trần LỚN HƠN là đã bao trọn phần cũ — nối thêm sẽ ĐẺ TIN TRÙNG.
-   * ⇒ Thay TRỌN danh sách bằng bản mới, ⛔ nối.
+   * 🔄 ĐỔI SO VỚI BẢN TRƯỚC: bản trước NỚI cửa sổ rồi THAY TRỌN mảng. Nay các trang
+   *    **⛔ đè lên nhau** (trang cũ nằm hẳn TRƯỚC con trỏ) ⇒ phải **NỐI VÀO ĐẦU**,
+   *    và nối thế **⛔ đẻ tin trùng**. Chú thích cũ dặn «thay trọn, ⛔ nối» — nay SAI, đã bỏ.
    */
-  const keoThem = useCallback(async (i: number, ten: string, maPhien: string, tranCu: number) => {
-    /**
-     * 🐛 FAIL 5 (Hermes 30/08): nút chỉ khoá theo `dangNap`. Bấm lúc ô ĐANG CHẢY CHỮ
-     * là thay TRỌN mảng tin ⇒ xoá luôn câu vừa gửi và phần đang chảy.
-     * Đường «nạp lại» (napLaiChat) ĐÃ có chốt `o.dangChay`; keoThem thì ⛔ — nay thêm.
-     * ⚠️ Chốt ở CẢ HAI nơi: nút bị `disabled` rồi vẫn chặn lần nữa ở đây, vì
-     *    `disabled` chỉ là lớp giao diện — gọi thẳng hàm thì nó ⛔ đỡ được.
-     */
-    if (dsORef.current[i]?.dangChay) return;
-    /**
-     * 🐛 FAIL 6 (Hermes 30/08): bản trước cứng hoá «3 MB» ở ĐÂY *và* ở doc-phien.ts
-     * ⇒ sửa một nơi là hai nơi lệch nhau âm thầm.
-     * ✅ Nay chỉ dùng `tranCu` — con số đó do MÁY CHỦ gửi về (`da_doc`) ở lần nạp đầu.
-     *    Máy chủ là NGUỒN DUY NHẤT của trần. Chưa có số (=0) thì xin gấp đôi mức nhỏ
-     *    nhất an toàn, rồi từ lần sau cứ theo số máy chủ trả.
-     */
-    const tranMoi = tranCu > 0 ? tranCu * 2 : 6 * 1024 * 1024;
+  const keoThem = useCallback(async (i: number, ten: string, maPhien: string, viTri: number) => {
+    const o0 = dsORef.current[i];
+    if (!o0 || o0.dangChay || o0.dangNap || viTri <= 0) return;
     capNhat(i, { dangNap: true });
     try {
       const r = await fetch(
-        `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}&tran_byte=${tranMoi}`,
+        `/api/phien?ma_nhan_su=${encodeURIComponent(ten)}&ma_phien=${encodeURIComponent(maPhien)}&truoc_byte=${viTri}`,
       );
-      /**
-       * 🐛 BLOCKER ② (Hermes 30/08) — ĐÂY LÀ CHỖ XOÁ SẠCH LỊCH SỬ TRƯỚC MẮT OWNER.
-       * Máy chủ trả LỖI 400 kèm thân JSON `{ loi: … }`. `r.json()` parse thành công
-       * ⇒ khối `catch` «giữ nguyên tin» ⛔ HỀ CHẠY ⇒ `j.lich_su` ⛔ phải mảng
-       * ⇒ gán `tin: []` ⇒ **toàn bộ hội thoại đang hiện biến mất**.
-       * ⇒ Phải chặn ở `r.ok`, VÀ kiểm hình dạng dữ liệu — ⛔ tin mã 200 là đủ.
-       */
       if (!r.ok) throw new Error(`máy chủ trả ${r.status}`);
       const j = await r.json();
-      if (!Array.isArray(j.lich_su)) throw new Error('máy chủ ⛔ trả về danh sách tin');
+      /**
+       * 🐛 Hermes bác claim «kiểm hình dạng dữ liệu» của tôi: bản trước chỉ hỏi CÁI HỘP
+       * có phải mảng ⛔ — thân `{lich_su:[null]}` lọt qua rồi VỠ lúc vẽ. Nay kiểm TỪNG phần tử.
+       */
+      const cu: unknown = j.lich_su;
+      if (!Array.isArray(cu)) throw new Error('máy chủ ⛔ trả về danh sách tin');
+      const sach = cu.filter(
+        (t): t is Tin =>
+          !!t && typeof t === 'object' && typeof (t as Tin).chu === 'string' &&
+          ((t as Tin).ai === 'toi' || (t as Tin).ai === 'ho'),
+      );
+      /**
+       * 🐛 Hermes chỉ ra race CÒN SÓT (có TỪ TRƯỚC, ⛔ do lượt này): chốt «đang chảy» chỉ
+       * kiểm TRƯỚC khi gọi. Bấm xong rồi gửi câu mới thì phản hồi cũ về sau sẽ ĐÈ.
+       * ⇒ Kiểm LẠI lúc phản hồi về: đổi phiên, hoặc đã bắt đầu chảy chữ ⇒ VỨT phản hồi này.
+       */
+      const o1 = dsORef.current[i];
+      if (!o1 || o1.phienHienTai !== maPhien || o1.dangChay) return;
       capNhat(i, {
-        tin: j.lich_su,
+        tin: [...sach, ...o1.tin],
         conNua: !!j.con_nua,
-        tranByte: Number(j.da_doc) || tranMoi,
+        viTri: Number(j.vi_tri) || 0,
       });
     } catch {
-      /**
-       * GIỮ NGUYÊN tin đang có. Kéo hụt thì thà ⛔ đổi gì còn hơn xoá mất lịch sử.
-       * ⛔ đặt `tin: []` ở đây — đó chính là lỗi vừa vá ở trên.
-       */
+      /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
     } finally {
       capNhat(i, { dangNap: false });
     }
@@ -896,7 +889,7 @@ export default function UngDung({
       capNhat(i, {
         dangFork: false, phienChoFork: null, chuoiDan: '',
         phienHienTai: String(j.ma_moi), tin: lichSu, noiTiep: true, chiPhi: null, token: null,
-        conNua: !!j2.con_nua, tranByte: Number(j2.da_doc) || 0,
+        conNua: !!j2.con_nua, viTri: Number(j2.vi_tri) || 0,
         loiDan:
           `✅ Fork xong — mã MỚI ${String(j.ma_moi).slice(0, 8)}… · đọc được ${lichSu.length} lượt · chuỗi ${tang} tầng. ` +
           `Bản gốc ${dc?.nguyen_ven ? 'NGUYÊN VẸN' : '⚠️ ĐÃ ĐỔI — báo ngay'} ` +
@@ -938,7 +931,7 @@ export default function UngDung({
       huyLuong(i);
       capNhat(i, {
         phienHienTai: ma, tin: lichSu, noiTiep: true, chiPhi: null, token: null,
-        conNua: !!j.con_nua, tranByte: Number(j.da_doc) || 0,
+        conNua: !!j.con_nua, viTri: Number(j.vi_tri) || 0,
         loiDan: `✅ Đã nối phiên ${ma.slice(0, 8)}… — đọc được ${lichSu.length} lượt.`, chuoiDan: '',
       });
       await ghiO(i, o.ns.ten, ma);
@@ -1915,7 +1908,7 @@ export default function UngDung({
                               type="button"
                               className="nut-keo-them"
                               disabled={o.dangNap || o.dangChay}
-                              onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.tranByte)}
+                              onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.viTri)}
                             >
                               ⬆️ Xem thêm phần cũ hơn
                             </button>

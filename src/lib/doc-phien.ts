@@ -239,104 +239,126 @@ function mocMs(ts?: string): number | undefined {
 
 /** Đọc LỊCH SỬ THẬT của một phiên — ⛔ không phải hội thoại mẫu. */
 /**
- * 🚦 TRẦN BYTE MẶC ĐỊNH khi mở một phiên — **đo mà chọn, ⛔ đoán.**
+ * 🚦 TRẦN CỨNG MỖI LẦN GỌI — ⛔ BAO GIỜ vượt, kể cả người gọi xin nhiều hơn.
  *
- * 🐛 Ca thật 30/08: bộ ghế «Quản Lý Trường» khai `thu_muc` là THƯ MỤC NHÀ ⇒ kho phiên của
- *    chúng là kho chung, trong đó có tệp **375 MB**. Cách cũ đọc TRỌN tệp:
- * ```
- *   đọc trọn 375 MB   0,68 giây  →  29.041 TIN đẩy về trình duyệt   ← chỗ Owner thấy «lắc»
- *   đọc đuôi 1,5 MB   0,01 giây  →     299 tin                       nhanh gấp 134 lần
- * ```
- * 📌 Nút thắt **⛔ phải thời gian máy chủ** (0,68 giây vẫn nhanh) mà là **SỐ TIN trình duyệt
- *    phải dựng**. Nên trần đặt theo BYTE ĐỌC VÀO, ⛔ theo số dòng — đo thật: một dòng của
- *    ghế `web-demo` nặng tới ~9,9 KB, cắt 200 dòng vẫn ra ~2 MB.
- * 📊 CHỌN MỨC BẰNG BẢNG ĐO, ⛔ bằng cảm giác — chạy trên đúng 6 ô Owner đang mở:
- * ```
- *   trần        tin (cả 6 ô)   byte gửi   thời gian     tin/ô ÍT NHẤT
- *   ⛔ trần        ~10.900       8,60 MB       —          (nết cũ, gây lắc)
- *   1,5 MB            685        0,54 MB     45 ms        50   ← quá mỏng
- *   3   MB          1.225        1,15 MB     72 ms        79   ← CHỌN CÁI NÀY
- *   5   MB          2.080        1,69 MB    124 ms       162
- * ```
- * ⇒ Lấy **3 MB**: vẫn nhẹ hơn nết cũ **9 lần về số tin** và **7,5 lần về byte**, mà mỗi ô còn
- *   ~79-283 tin — đủ để đọc lại mạch việc. 1,5 MB rẻ hơn nhưng ô mỏng nhất chỉ còn **50 tin**,
- *   mỏng quá thì Owner phải bấm «xem thêm» ngay, tức là ⛔ giải quyết được gì.
- * 📌 Đề bài ghi «~1,5 MB HOẶC ~200 tin». Đo ra: mức cho ~200 tin/ô là **3 MB**, ⛔ phải 1,5 MB.
- *   Hai con số trong đề bài ⛔ trỏ cùng một chỗ — tôi lấy theo SỐ TIN vì đó mới là thứ gây lắc.
+ * 🐛 BẢN TRƯỚC SAI TỪ GỐC (Hermes bác 30/08 lần 2): tôi bỏ trần rồi cho vòng TỰ NỚI
+ *    3→6→12→24→48→96 MB **ngay trong MỘT lần gọi**, xong `readFileSync` đọc TRỌN tệp.
+ *    Tôi biện hộ «mỗi bước nới là một cú bấm tay» — **SAI**, vòng đó tự chạy, ⛔ ai bấm.
+ *    ⇒ Một lần gọi có thể nuốt trọn tệp 375 MB vào bộ nhớ.
+ *
+ * ✅ CÁCH ĐÚNG: **trần CỨNG cho mỗi lần gọi + CON TRỎ để đi ngược về trước.**
+ *    Đi xa hơn ⇒ GỌI NHIỀU LẦN, mỗi lần vẫn chỉ đọc ≤ trần. ⛔ phải nới cửa sổ của một lần.
+ *    Khác biệt cốt lõi: trần cũ hạn chế **cửa sổ**; trần mới hạn chế **bộ nhớ mỗi lần gọi**.
  */
-export const TRAN_BYTE_MAC_DINH = 3 * 1024 * 1024;
+export const TRAN_CUNG = 4 * 1024 * 1024;
+
+/**
+ * 🪟 Trần NỚI — dùng DUY NHẤT khi cửa sổ ⛔ chứa nổi một DÒNG TRỌN VẸN nào.
+ * Ca thật: một dòng có thể dài hơn cả trần (đo được dòng 9,9 KB, cá biệt tới hàng trăm KB).
+ * Lúc đó trả rỗng là **nói dối** — giao diện sẽ gọi phiên CÓ nội dung là «Phiên trống».
+ * ⇒ Cho nới, nhưng **CÓ ĐÁY CỨNG**: tối đa 16 MB rồi thôi, và báo ra bằng `cat_dong_qua_dai`.
+ * ⇒ Bộ nhớ tệ nhất mỗi lần gọi: 16 MB, ⛔ phải 375 MB.
+ */
+export const TRAN_TOI_DA = 16 * 1024 * 1024;
 
 export type KetQuaLichSu = {
   tin: TinLichSu[];
-  /** Còn phần cũ hơn chưa nạp ⛔ — để trình duyệt biết có nên hiện nút «xem thêm». */
+  /** Còn phần cũ hơn ⛔ — tức con trỏ chưa về tới đầu tệp. */
   con_nua: boolean;
-  /** Đã đọc bao nhiêu byte / tổng tệp bao nhiêu — để lần kéo sau xin nhiều hơn. */
-  da_doc: number;
+  /** CON TRỎ: trang này bắt đầu ở byte nào. Lần sau xin trang cũ hơn thì gửi đúng số này. */
+  vi_tri: number;
   tong_byte: number;
+  /** Cửa sổ đụng phải một dòng dài hơn trần — đã nới tới đáy cứng mà vẫn hụt. */
+  cat_dong_qua_dai: boolean;
 };
 
 export async function lichSuPhien(
   maNhanSu: string,
   maPhien: string,
-  tranByte: number = TRAN_BYTE_MAC_DINH,
+  truocByte?: number,
 ): Promise<KetQuaLichSu> {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) throw new Error('Mã phiên không hợp lệ.');
   const p = path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`);
-  if (!fs.existsSync(p)) return { tin: [], con_nua: false, da_doc: 0, tong_byte: 0 };
+  if (!fs.existsSync(p))
+    return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
 
   const tong = fs.statSync(p).size;
-  const tran = Number.isFinite(tranByte) && tranByte > 0 ? tranByte : TRAN_BYTE_MAC_DINH;
-  const conNua = tong > tran;
+  /** Mép PHẢI của cửa sổ. ⛔ truyền gì ⇒ lấy cuối tệp (mở phiên = xem phần mới nhất). */
+  const met =
+    Number.isFinite(truocByte) && (truocByte as number) > 0
+      ? Math.min(truocByte as number, tong)
+      : tong;
 
-  const ra: TinLichSu[] = [];
-  /**
-   * Tệp NHỎ hơn trần ⇒ đọc dòng như cũ (rẻ, và giữ nguyên nết đã chạy 3 tuần).
-   * Tệp LỚN hơn ⇒ dùng `docDuoi` — bộ đọc ĐUÔI đã có sẵn trong tệp này, nó tự bỏ
-   * dòng đầu bị cắt dở. ⛔ viết bộ đọc thứ hai.
-   */
-  /**
-   * 🐛 FAIL 7 (Hermes 30/08): MỘT DÒNG có thể DÀI HƠN CẢ TRẦN — lúc đó khúc đuôi ⛔ chứa
-   * dòng nguyên vẹn nào, hàm trả mảng RỖNG, và giao diện gọi đó là «Phiên trống».
-   * ⇒ Đó là **diễn giải sai dữ liệu thật** — phiên CÓ nội dung, chỉ là ta cắt hụt.
-   * ⇒ Nới gấp đôi tối đa 5 lần; hết nới mà vẫn rỗng thì đọc TRỌN tệp. Thà chậm còn hơn nói dối.
-   */
-  let tranThuc = tran;
-  let tho = conNua ? docDuoi(p, tranThuc) : '';
-  if (conNua) {
-    for (let lan = 0; lan < 5 && !tho.includes('\n') && tranThuc < tong; lan++) {
-      tranThuc = Math.min(tranThuc * 2, tong);
-      tho = docDuoi(p, tranThuc);
-    }
-    if (!tho.includes('\n')) { tranThuc = tong; tho = fs.readFileSync(p, 'utf8'); }
+  let rong = Math.min(TRAN_CUNG, met);
+  let cua = met > 0 ? docCuaSo(p, met - rong, met) : { chu: '', batDau: 0 };
+  let catDai = false;
+
+  // Cửa sổ ⛔ có dòng trọn vẹn ⇒ nới, nhưng CHẶN Ở ĐÁY CỨNG.
+  while (!cua.chu.includes('\n') && rong < Math.min(TRAN_TOI_DA, met)) {
+    rong = Math.min(rong * 2, TRAN_TOI_DA, met);
+    cua = docCuaSo(p, met - rong, met);
   }
-  const conNuaThuc = tranThuc < tong;
+  if (met > 0 && !cua.chu.includes('\n')) catDai = true;
 
-  const nguon = conNuaThuc || conNua
-    ? (async function* () { for (const d of tho.split('\n')) yield d; })()
-    : readline.createInterface({
-        input: fs.createReadStream(p, { encoding: 'utf8' }),
-        crlfDelay: Infinity,
-      });
-
-  for await (const d of nguon) {
-    const s = d.trim();
-    if (!s.startsWith('{')) continue;
+  const tho = cua.chu;
+  /**
+   * 🐛 MẤT ĐÚNG MỘT TIN — tôi tự bắt được bằng cách đối chiếu bản CON TRỎ với bản ĐỌC TRỌN
+   *    (4.183 so với 4.184). Gốc: con trỏ trỏ vào **GIỮA MỘT DÒNG**.
+   *    Dòng vắt ngang mép trang thì **CẢ HAI trang cùng bỏ nó**:
+   *      trang mới bỏ vì đầu dòng bị cắt · trang cũ bỏ vì ĐUÔI dòng bị cắt (JSON.parse ném lỗi)
+   *    ⇒ tin đó rơi vào khe giữa hai trang, ⛔ ai báo.
+   * ✅ Chữa: con trỏ phải là **ĐẦU MỘT DÒNG**, ⛔ phải mép byte thô. `docCuaSo` trả về
+   *    `batDau` = chỗ phần GIỮ LẠI thật sự bắt đầu; lấy đúng số đó làm con trỏ thì trang
+   *    kế tiếp kết thúc ĐÚNG ở ranh dòng, ⛔ còn dòng nào bị cắt đuôi.
+   */
+  const viTri = met > 0 ? cua.batDau : 0;
+  const ra: TinLichSu[] = [];
+  for (const d of tho.split('\n')) {
+    const st = d.trim();
+    if (!st.startsWith('{')) continue;
     let j: DongPhien;
     try {
-      j = JSON.parse(s) as DongPhien;
+      j = JSON.parse(st) as DongPhien;
     } catch {
       continue;
     }
     const chu = bocChu(j.message?.content).trim();
     if (!chu) continue;
-
     if (j.type === 'user' && j.userType === 'external') {
       ra.push({ ai: 'toi', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
     } else if (j.type === 'assistant') {
       ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
     }
   }
-  return { tin: ra, con_nua: conNuaThuc, da_doc: Math.min(tranThuc, tong), tong_byte: tong };
+  return { tin: ra, con_nua: viTri > 0, vi_tri: viTri, tong_byte: tong, cat_dong_qua_dai: catDai };
+}
+
+/**
+ * Đọc khúc [bd, met) của tệp. `boDongDau` = chỗ bắt đầu có thể rơi giữa một dòng.
+ * ⚠️ Ba ca đã cắn (Hermes 30/08): ⛔ có `\n` ⇒ `indexOf` trả -1 ⇒ `+1` thành 0 ⇒ GIỮ NGUYÊN
+ *    dòng cắt dở · và nếu chỗ cắt rơi ĐÚNG đầu một dòng nguyên vẹn thì cắt là BỎ OAN.
+ *    ⇒ Hỏi byte NGAY TRƯỚC: là `\n` thì chỗ cắt đã sạch.
+ */
+function docCuaSo(p: string, bd: number, met: number): { chu: string; batDau: number } {
+  const fd = fs.openSync(p, 'r');
+  try {
+    const dem = Buffer.alloc(Math.max(0, met - bd));
+    if (dem.length) fs.readSync(fd, dem, 0, dem.length, bd);
+    const s = dem.toString('utf8');
+    if (bd <= 0) return { chu: s, batDau: 0 };
+
+    const truoc = Buffer.alloc(1);
+    const n = fs.readSync(fd, truoc, 0, 1, bd - 1);
+    if (n === 1 && truoc[0] === 0x0a) return { chu: s, batDau: bd }; // chỗ cắt đã sạch
+
+    const xd = s.indexOf('\n');
+    if (xd === -1) return { chu: '', batDau: met }; // cả khúc là một dòng cắt dở
+    const giu = s.slice(xd + 1);
+    // ⚠️ ĐẾM BYTE, ⛔ đếm ký tự — chữ Việt mỗi chữ nhiều byte, lệch là con trỏ trỏ sai chỗ.
+    return { chu: giu, batDau: met - Buffer.byteLength(giu, 'utf8') };
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function gioNgan(ts?: string): string {

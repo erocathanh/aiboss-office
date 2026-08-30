@@ -23,29 +23,21 @@ export async function GET(req: NextRequest) {
   try {
     if (maPhien) {
       /**
-       * 🚦 Mặc định chỉ nạp PHẦN CUỐI (~1,5 MB). Muốn kéo thêm về trước thì gọi lại
-       * với `tran_byte` lớn hơn — trình duyệt đọc `con_nua` để biết còn gì mà kéo ⛔.
-       * ⚠️ Trần trên 64 MB: chặn người gõ tay một số khổng lồ làm máy chủ ngốn hết bộ nhớ.
-       *    (kho chung có tệp 375 MB — đọc trọn là đẩy 29.041 tin về trình duyệt.)
+       * 📖 PHÂN TRANG BẰNG CON TRỎ — ⛔ phải bằng cách nới trần.
+       * `truoc_byte` = trang trước bắt đầu ở byte nào. Xin trang CŨ HƠN thì gửi lại số đó.
+       * ⛔ truyền gì ⇒ lấy phần MỚI NHẤT (mở phiên).
+       * 🛡 Trần RAM nằm ở `TRAN_CUNG` trong doc-phien.ts và **⛔ tham số nào nới được nó** —
+       *    người gọi ⛔ còn cách nào bảo máy chủ đọc trọn tệp 375 MB nữa.
        */
-      /**
-       * 🐛 BLOCKER ① (Hermes 30/08): bản trước kẹp cứng 64 MB. Với tệp 375 MB thì
-       *    `con_nua` LUÔN true, mà mọi lần bấm «xem thêm» đều trả ĐÚNG CÙNG khúc đuôi
-       *    ⇒ nút bấm mãi ⛔ đi tiếp được. Trần cố định + vòng nhân đôi = **kẹt vĩnh viễn**.
-       * ✅ Chữa: ⛔ kẹp bằng SỐ CỐ ĐỊNH nữa. Chặn duy nhất là KÍCH THƯỚC TỆP —
-       *    xin quá tệp thì đọc trọn tệp, `con_nua` thành false, vòng lặp KẾT THÚC.
-       * 🛡 Bộ nhớ vẫn được bảo vệ, nhưng bằng thứ khác: mỗi bước nới là MỘT CÚ BẤM TAY
-       *    của người dùng, ⛔ phải vòng tự chạy. Muốn đọc trọn tệp 375 MB thì phải bấm
-       *    ~7 lần và tự thấy nó chậm dần — đó là phanh THẬT, ⛔ phải một con số bịa.
-       */
-      const tranTho = Number(q.get('tran_byte'));
-      const tran = Number.isFinite(tranTho) && tranTho > 0 ? tranTho : undefined;
-      const kq = await lichSuPhien(maNhanSu, maPhien, tran);
+      const troTho = Number(q.get('truoc_byte'));
+      const tro = Number.isFinite(troTho) && troTho > 0 ? troTho : undefined;
+      const kq = await lichSuPhien(maNhanSu, maPhien, tro);
       return Response.json({
         lich_su: kq.tin,
         con_nua: kq.con_nua,
-        da_doc: kq.da_doc,
+        vi_tri: kq.vi_tri,
         tong_byte: kq.tong_byte,
+        cat_dong_qua_dai: kq.cat_dong_qua_dai,
       });
     }
     // Ô nào đang giữ phiên nào → để không tự gắn cờ "đang chạy nơi khác" lên chính nó.
