@@ -299,3 +299,9 @@
 }
 .nut-keo-them:hover:not(:disabled){ opacity:1; }
 .nut-keo-them:disabled{ opacity:.4; cursor:default; }
+
+/* ⚠️ Báo Owner khi app đọc hụt một khúc — im lặng khuyết tệ hơn báo lỗi. */
+.moc-ngay.canh-hut{
+  color:#e8b339; font-size:12.5px; line-height:1.5;
+  padding:6px 12px; max-width:52ch; text-align:center; opacity:.95;
+}

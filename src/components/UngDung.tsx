@@ -608,6 +608,7 @@ export default function UngDung({
         tin: [...sach, ...o1.tin],
         conNua: !!j.con_nua,
         viTri: Number(j.vi_tri) || 0,
+        catDongDai: !!j.cat_dong_qua_dai,
       });
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
@@ -1963,6 +1964,18 @@ export default function UngDung({
                             <div className="to">✨</div>
                             <b>{o.phienHienTai ? 'Phiên trống' : 'Phiên mới'}</b>
                             <span>Gõ câu hỏi bên dưới để bắt đầu.</span>
+                          </div>
+                        )}
+                        {/**
+                          * 🐛 Máy chủ ĐÃ báo `cat_dong_qua_dai` từ lâu, nhưng ⛔ ai vẽ nó ra
+                          * ⇒ Owner thấy lịch sử khuyết mà **⛔ được nói vì sao**.
+                          * 📌 App BIẾT mình đọc hụt thì app phải NÓI RA. Im lặng khuyết còn tệ
+                          *    hơn báo lỗi: Owner sẽ tưởng hội thoại đó ⛔ từng tồn tại.
+                          */}
+                        {o.catDongDai && (
+                          <div className="moc-ngay canh-hut">
+                            ⚠️ Có một đoạn quá lớn nên app đọc hụt — phần trên đây khuyết một khúc.
+                            Bản gốc vẫn còn nguyên trong tệp phiên.
                           </div>
                         )}
                         {o.conNua && o.phienHienTai && o.ns && (
