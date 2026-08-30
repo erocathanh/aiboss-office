@@ -1791,7 +1791,28 @@ export default function UngDung({
                 ) : (
                   <>
                     <div className="de-o">
-                      <div className="anh-o">{o.ns.viet_tat}</div>
+                      <div className="anh-o">
+                        {o.ns.viet_tat}
+                        {/**
+                        * 🚦 ĐÈN TRẠNG THÁI (Owner 17/08 · DỜI sang ẢNH ĐẠI DIỆN 30/08 theo Owner).
+                        * Nằm ở góc ảnh — thứ TRÁI CÙNG trên thanh, mắt bắt được ngay.
+                        * ⚠️ NEO của nó là `position:relative` trên `.anh-o` (mau09:256). Gỡ dòng neo đó
+                        *    thì đèn văng lên tổ tiên khác, ra SAI CHỖ mà ⛔ báo lỗi dòng nào.
+                        * Bốn mức, mỗi mức dựa vào một SỰ THẬT ĐO ĐƯỢC — ⛔ không đèn trang trí:
+                        *   cam nhấp nháy = luồng vừa ĐỨT (matKetNoi)
+                        *   xanh nhấp nháy = ĐANG chảy chữ (dangChay)
+                        *   xanh = có phiên, rảnh
+                        *   xám = CHƯA nối phiên nào
+                        */}
+                        <span
+                        className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
+                        title={o.matKetNoi ? 'Mất kết nối — luồng vừa đứt, gửi lại để nối'
+                        : o.dangChay ? 'Đang chạy — chữ đang về'
+                        : o.phienHienTai ? 'Đã nối phiên — sẵn sàng'
+                        : 'Chưa nối phiên nào'}
+                        aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
+                        />
+                      </div>
                       <div className="tt-o">
                         {/* ⭐ nhãn to · slug nhỏ mờ */}
                         <b title={o.ns.nhan}>
@@ -1820,23 +1841,6 @@ export default function UngDung({
                         {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
                           return <IconSo size={17} weight={DAM_ICON} aria-hidden="true" />; })()}
                         <Info size={15} weight={DAM_ICON} aria-hidden="true" className="dau-i" />
-                        {/**
-                          * 🚦 ĐÈN TRẠNG THÁI (Owner 17/08). Gắn vào chính nút số ô ⇒ ⛔ không tốn
-                          * thêm chỗ trên thanh vốn chỉ còn 3 thứ.
-                          * Bốn mức, mỗi mức dựa vào một SỰ THẬT ĐO ĐƯỢC — ⛔ không đèn trang trí:
-                          *   cam nhấp nháy = luồng vừa ĐỨT (matKetNoi)
-                          *   xanh nhấp nháy = ĐANG chảy chữ (dangChay)
-                          *   xanh = có phiên, rảnh
-                          *   xám = CHƯA nối phiên nào
-                          */}
-                        <span
-                          className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
-                          title={o.matKetNoi ? 'Mất kết nối — luồng vừa đứt, gửi lại để nối'
-                            : o.dangChay ? 'Đang chạy — chữ đang về'
-                            : o.phienHienTai ? 'Đã nối phiên — sẵn sàng'
-                            : 'Chưa nối phiên nào'}
-                          aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
-                        />
                       </button>
                       {/**
                         * 🔽 NÚT THU KHUNG — CHỈ ô 1 (TỔNG GIÁM ĐỐC), CHỈ màn hẹp (CSS lo phần ẩn/hiện).

@@ -254,6 +254,9 @@
     padding:9px 12px;border-bottom:1px solid var(--vien);background:rgba(10,25,41,.55);
   }
   .anh-o{
+    /* ⚠️ NEO cho đèn trạng thái (den-o) — thiếu dòng này thì đèn văng lên
+       neo của tổ tiên khác, ra SAI CHỖ mà ⛔ báo lỗi dòng nào. */
+    position:relative;
     width:36px;height:36px;flex:none;border-radius:10px;
     display:flex;align-items:center;justify-content:center;
     font-size:12px;font-weight:750;color:#0a1929;
