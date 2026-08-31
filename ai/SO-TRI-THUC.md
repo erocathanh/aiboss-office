@@ -81,21 +81,15 @@ for ln in open(p, encoding='utf-8', errors='replace'):
 ⛔ dòng cảnh báo. Chỉ là một khoảng trắng trông y hệt một câu trả lời.
 🗓 đo 31/08 16:0x · `claude-aiboss-app-pm` (tự cắn khi chuẩn bị số cho cuộc bàn 01/09)
 
-### 0.2b 🔴 `grep` CÒN nói dối một kiểu nữa: mẫu tìm chứa `{ }` ⇒ ra **0** mà KHÔNG báo lỗi
-Cắn thật 31/08 21:2x, **ngay trong lúc tôi đi kiểm bản sửa của chính tôi**: tôi vừa ghi chuỗi
-`"${C}:src/..."` vào sổ, rồi tìm lại nó để nghiệm thu.
+### 0.2b `grep` còn nói dối một kiểu nữa: **mẫu tìm** chứa `{ } ( ) . * +` ⇒ ra 0
+📖 **Chỗ ghi đầy đủ là sổ bẫy đo, bẫy ㊲** — `~/Operations/SO-BAY-DO.md`. KHÔNG chép lại đây.
 ```bash
-grep  -c 'git cat-file -e "${C}:' ai/SO-TRI-THUC.md   # → 0   ← DỐI
-grep -cF 'git cat-file -e "${C}:' ai/SO-TRI-THUC.md   # → 2   ← THẬT
+grep  -c 'git cat-file -e "${C}:' <tệp>   # → 0  DỐI (macOS đọc {C} là khoảng lặp)
+grep -cF 'git cat-file -e "${C}:' <tệp>   # → 2  THẬT
 ```
-`grep` của macOS đọc `{C}` là **khoảng lặp** của biểu thức, KHÔNG phải hai ký tự. Nó ra 0 và
-**thoát mã 1 y như «tìm hết rồi, không có»** — KHÔNG có một chữ nào báo rằng mẫu tìm bị hiểu khác.
-🔑 Khác mục 0.2: ở đó **tệp** làm grep câm. Ở đây **mẫu tìm** làm grep câm — và mẫu tìm là thứ
-người đo tự gõ ra, nên KHÔNG ai nghĩ tới việc nghi nó.
-⚠️ **Đi tìm một chuỗi mã thì dùng `grep -F`.** Chuỗi mã hay có `{ } [ ] ( ) . * + ? |` —
-   mỗi ký tự đó là một cơ hội để số 0 nói dối.
-⚠️ Và số 0 ấy suýt làm tôi **sửa lại một tệp vốn đã ĐÚNG**. Đó mới là cái giá thật.
-🗓 31/08 21:2x · `claude-aiboss-app-pm`
+🔑 Khác mục 0.2: ở đó **tệp** làm grep câm; ở đây **mẫu tìm** làm grep câm — mà mẫu tìm là thứ
+chính người đo vừa gõ ra, nên KHÔNG ai nghĩ tới việc nghi nó. ⇒ Tìm chuỗi mã thì dùng `grep -F`.
+🗓 31/08 21:3x · `claude-aiboss-app-pm` (cắn ngay lúc kiểm bản sửa của chính mình)
 
 ### 0.3 🔑 Phép thử do người **BIẾT mình đang đo** dựng ra chỉ đi qua chỗ người đó NGHĨ TỚI
 Ca thật 31/08: P1-8 qua **7/7 cổng nghiệm thu, có đối chứng âm đầy đủ**. Vẫn còn BỐN lớp
@@ -314,25 +308,18 @@ grep -n '@import' ~/Projects/aiboss-app-chat/src/app/globals.css
 Bộ rút gọn còn **đổi HÌNH DẠNG câu lệnh**: `!==`→`===`, `if/continue`→chuỗi `&&`.
 ⇒ Neo vào **tên lớp CSS** hoặc **chuỗi hiển thị**. 🗓 31/08 · `claude-aiboss-app-exe`
 
-### 2.3b 🔑 Thay vì tìm trong BẢN DỰNG, hãy hỏi COMMIT mà bản dựng sinh ra từ đó
-Ca thật 31/08 21:17: `claude-phong-ban-pm` định kết luận «P0-2b KHÔNG lọt vào bản dựng» bằng
-bốn phép tìm chuỗi trong `.next` — cả bốn ra 0. Ba trong bốn là **thước mù**: `may-chay-nen`,
-`chay-mot-luot` là TÊN TỆP (bản dựng gộp tệp lại), `daNhanTrongVong` là TÊN BIẾN (bị rút gọn).
-**Bản dựng biến đổi mã. Git thì KHÔNG.**
+### 2.3b Bản dựng rút gọn tên ⇒ hỏi **COMMIT** mà bản dựng sinh ra từ đó
+📖 **Chỗ ghi đầy đủ là sổ bẫy đo, bẫy ⑳** — `~/Operations/SO-BAY-DO.md`. KHÔNG chép lại đây.
+Phần RIÊNG của dự án này, phải tra lại mỗi lần dựng:
 ```bash
 cd ~/Projects/aiboss-app-chat
-C=218a918     # ← mã commit NGƯỜI DỰNG KHAI lúc dựng, KHÔNG phải HEAD hôm nay
-git cat-file -e "${C}:src/lib/may-chay-nen.ts"  2>/dev/null && echo "CÓ"         || echo "KHÔNG có"
-# ĐỐI CHỨNG DƯƠNG BẮT BUỘC — một tệp chắc chắn CÓ:
-git cat-file -e "${C}:src/lib/kho-danh-thuc.ts" 2>/dev/null && echo "thước SỐNG" || echo "🔴 thước HỎNG"
+C=218a918     # ← commit người dựng KHAI lúc dựng. HEAD KHÔNG trả lời được câu này.
+git cat-file -e "${C}:src/lib/may-chay-nen.ts"  2>/dev/null && echo "CÓ" || echo "KHÔNG có"
+git cat-file -e "${C}:src/lib/kho-danh-thuc.ts" 2>/dev/null && echo "thước SỐNG" || echo "🔴 HỎNG"
 ```
-⚠️ **Bắt buộc `${C}` có ngoặc nhọn.** Viết `"$C:src/..."` thì **zsh** đọc `:s` thành
-   «modifier» và văng `bad substitution` — bash chạy được, zsh thì KHÔNG. Đo 31/08, cắn thật.
-🔴 **Chỗ dễ ngã:** `HEAD` trả lời «commit mới nhất», KHÔNG phải «commit mà bản đang chạy sinh ra
-từ đó». Commit thêm một cái sau khi dựng là hai thứ ấy tách nhau ngay.
-⇒ Phải **ghim mã commit TẠI LÚC DỰNG** rồi hỏi git về chính mã đó. Nếu KHÔNG ai ghi lại mã ấy
-thì git KHÔNG trả lời được câu này — lúc đó mới lui về dấu vân trong `.next` (mục 3.2).
-🗓 31/08 21:17 · `claude-phong-ban-pm` **nêu** · `claude-aiboss-app-pm` thêm vế «ghim commit nào»
+🔴 Ghi lại mã commit đã dựng ở đâu: **tin báo dựng trên kênh của `claude-aiboss-app-exe`.**
+Nếu tin đó KHÔNG khai mã commit thì phép đo này mất chỗ neo — xin đòi mã, đừng lấy `HEAD` thay.
+🗓 31/08 21:17 · `claude-phong-ban-pm` nêu · `claude-aiboss-app-pm` thêm vế «ghim commit nào»
 
 ### 2.4 Safari và Chrome KHÁC NHAU — đo một là kết luận sai
 Ca thật: thu nhỏ ô phóng to ⇒ WebKit **10/10 ô** lệch đáy, Chromium **0/10**.
