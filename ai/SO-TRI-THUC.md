@@ -276,6 +276,37 @@ im ở tầng tệp** ⇒ thước-đoán-bằng-mtime sẽ coi chúng là rản
 Một phép đoán thì chỉ sai thêm ở mỗi câu mới.
 🗓 31/08 · `claude-aiboss-app-exe` dựng cửa · `claude-aiboss-app-pm` dùng lại cho bộ hẹn
 
+### 3.7 🔑 Muốn biết «bản mới đã lên chưa» thì **HỎI CỬA**, đừng bóc chú thích trang
+Cách hiển nhiên nhất — so `.next/BUILD_ID` với mã trong chú thích HTML — **SAI hai lần**.
+
+```bash
+# ✅ CÁCH ĐÚNG — hỏi chính app xem NÓ nghĩ nó là bản nào:
+curl -s -u "$U:$P" -X POST http://127.0.0.1:4319/api/danh-thuc/nhan \
+  -H 'Content-Type: application/json' -d '{"ds_o":[],"ds_ban":[],"ma_trinh_duyet":"do"}' \
+  | sed -n 's/.*"ban_dung":"\([^"]*\)".*/\1/p'
+cat ~/Projects/aiboss-app-chat/.next/BUILD_ID
+# KHỚP NGUYÊN VĂN thì mới là đã nạp. ĐỐI CHỨNG DƯƠNG: chuỗi rút ra phải dài >0 —
+# rỗng nghĩa là máy chủ đang chạy bản TRƯỚC P1-8 (bản đó chưa có trường này), KHÔNG phải «chưa nạp».
+```
+
+🕳 **HAI BẪY của cách bóc chú thích, tôi cắn cả hai trong mười phút (31/08 16:3x):**
+```
+① Next ĐỔI «-» thành «_» khi nhúng mã bản dựng vào trang:
+     đĩa   JLA2FZB444Ozc4tOCPd-H
+     trang JLA2FZB444Ozc4tOCPd_H     ← lệch đúng 1 ký tự, vị trí 19
+   🔴 Hai bản dựng TRƯỚC đó (EallAvplga6I5sc8PwYss · iksVzaJERrPeAtsZE1Fyq) KHÔNG có
+      gạch ngang nào ⇒ phép so vẫn đúng suốt. Nó chỉ hỏng ĐÚNG LẦN ĐẦU gặp mã có gạch ngang.
+   📌 Một phép đo đúng nhiều lần liền KHÔNG chứng minh nó đúng — có thể chỉ là chưa gặp ca xấu.
+
+② `sed -n 's/.*<!--\(.*\)-->.*/\1/p'` THAM LAM: trang nặng 171KB có nhiều chú thích,
+   `.*<!--` ăn tới cái CUỐI CÙNG ⇒ trả ra rác («/$»). Mã bản dựng nằm ở chú thích ĐẦU (byte 16).
+   Lúc đo tay tôi có `head -c 200` nên KHÔNG lộ; cắm vào script mà quên nó là lộ ngay.
+```
+🔴 **Hậu quả nếu ai cắm bản bóc-chú-thích vào một bộ kiểm tự động:** nó báo «CHƯA NẠP»
+**mãi mãi**. Và **một bộ báo động luôn kêu sai còn tệ hơn không có bộ báo động** —
+người ta học cách bỏ qua nó, rồi bỏ qua luôn lần nó kêu đúng.
+🗓 đo 31/08 16:3x · `claude-aiboss-app-pm` cắn · thước đúng do `claude-aiboss-app-exe` tìm ra
+
 ### 3.6 🔑 Tiến trình con **⛔ MỒ CÔI** khi nạp lại — chúng CÙNG NHÓM với máy chủ
 Ai đọc `chay-agent.ts` thấy `spawn` ⛔ có `detached` rất dễ kết luận «giết máy chủ ⇒ con mồ côi,
 chạy tiếp, tiêu tiền, nút Dừng ⛔ giết được». **SAI trên đường nạp lại THẬT.**
