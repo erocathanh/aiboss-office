@@ -558,6 +558,28 @@ Nó là `{phong_ban:[7], nhan_su:[225], tong:int}`. Tôi ĐOÁN hình dạng r�
 📌 **Ba lần ra ba con số khác nhau ⇒ lỗi ở PHÉP ĐỌC, đừng đổ cho dữ liệu.** Mở cấu trúc ra NHÌN
 trước khi viết vòng lặp: `print(type(d), list(d.keys()))` — hai giây, chặn được cả ba lần sai.
 
+🔴 **ĐÍNH CHÍNH 31/08 19:4x — tôi viết bảng trên như thể hai cách CẠNH TRANH nhau. SAI.**
+```
+chay-agent.ts:218   fs.mkdirSync(ts.thuMuc, { recursive: true })   ← chạy NGAY TRƯỚC MỖI lần spawn
+⇒ thư mục ghế TỰ SINH mỗi lượt. KHÔNG cần fork, KHÔNG cần tạo tay.
+```
+⇒ **Fork KHÔNG phải đường để có chỗ đứng riêng.** Fork chỉ CHÉP PHIÊN. Hai việc khác nhau hẳn:
+```
+chỗ đứng  : tự sinh, miễn phí, mọi ghế đều có
+phiên cũ  : muốn thấy thì HOẶC đặt `thu_muc` trỏ đúng kho, HOẶC fork (mất 93,5%)
+```
+📌 Cả đội bàn fork suốt một buổi chiều **như thể nó là đường tạo chỗ đứng**. Nó không phải.
+Phát hiện của `claude-aiboss-app-exe`, tôi đo lại tại `:218` — đúng.
+
+📏 **Và đây là lý do đúng 5 ghế đó hỏng, đo 31/08:**
+```
+5 ghế khai thu_muc = /Users/erocathanh (thư mục NHÀ)
+⇒ ~/claude-hieu-truong · ~/claude-phong-dao-tao · … : KHÔNG cái nào tồn tại
+   (đối chứng dương: ~/claude-aiboss-app-pm CÓ · đối chứng âm: thư mục bịa KHÔNG)
+⇒ chúng KHÔNG có thư mục riêng ⇒ KHÔNG có chỗ đặt một CLAUDE.md khai vai riêng
+⇒ cách «dặn ghế tự sửa CLAUDE.md của nó» áp được cho 220 ghế kia, KHÔNG áp được cho đúng 5 ghế này
+```
+
 🎯 **Vì sao cách B đúng cho bộ «Quản Lý Trường»** (chú thích thiết kế có sẵn `nhan-su.ts:22-28`):
 kho phiên được SUY TỪ chỗ đứng. Năm phiên Owner muốn nối nằm ở kho `-Users-erocathanh`.
 Không đặt chỗ đứng thì `--resume` đi tìm ở `-Users-erocathanh-claude-hieu-truong`
