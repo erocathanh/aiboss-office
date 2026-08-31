@@ -1946,23 +1946,39 @@ export default function UngDung({
            *    (đang chờ đề bài) sẽ vá. ⛔ tự dựng nửa vời ở đây.
            */
           if (o.ns.ten !== y.ma_nhan_su) continue;
-          void guiRef.current(i, y.cau_hoi, y.tu_ai);
+
           /**
-           * ✅ XÁC NHẬN — gọi NGAY SAU KHI `gui()` đã bắt đầu, ⛔ phải trước.
-           *    Xác nhận trước là khai «đã giao» trong khi việc còn chưa chạy.
-           * 🔒 Trước khi có cổng này, máy chủ đánh dấu «đã xử» ngay lúc TRAO ⇒ tab chết
-           *    giữa chừng là mẩu mất mà ⛔ ai biết. Nay ⛔ xác nhận ⇒ mẩu QUAY LẠI.
-           * ⚠️ CHỖ CÒN HỞ, tôi ⛔ giấu: nếu `gui()` đã chạy mà lời xác nhận này rớt mạng,
-           *    mẩu sẽ quay lại hàng đợi và được giao LẦN NỮA ⇒ ghế chạy hai lần.
-           *    Cửa sổ rất hẹp (xác nhận đi ngay, hạn giữ chỗ 30 giây) và đây là đánh đổi
-           *    có chủ ý: **thà chạy lại còn hơn mất câu**. Muốn triệt thì phải có khoá
-           *    chống trùng ở tầng `gui()` — việc khác, ⛔ nhét vào đợt này.
+           * 🔴 P0-2d (31/08) — ĐẢO THỨ TỰ: **XÁC NHẬN TRƯỚC · CHẠY SAU**.
+           *
+           * 🕳 Bản cũ chạy `gui()` TRƯỚC rồi mới xác nhận, kèm chú thích tự nhận là đánh đổi
+           *    «thà chạy lại còn hơn mất câu». Hermes chỉ ra vế đó nay SAI:
+           *    cửa xác nhận đã biết từ chối (khác `giu_boi`), nhưng **lời từ chối tới SAU
+           *    khi lượt đã chạy** ⇒ báo đúng mà vẫn thiệt tiền.
+           * 🔑 **Một cái cổng đặt SAU hành động thì nó ⛔ phải cổng, nó là một bản báo cáo.**
+           *
+           * ⚖️ ĐÁNH ĐỔI ĐỔI CHIỀU, tôi nói thẳng:
+           *      cũ : tab chết giữa chừng ⇒ mẩu QUAY LẠI ⇒ có thể chạy HAI LẦN (tốn tiền)
+           *      nay: tab chết ngay sau khi xác nhận ⇒ mẩu MẤT (một câu ⛔ ai trả lời)
+           *    Cửa sổ hỏng thu từ **30 giây** (hạn giữ chỗ) xuống còn khoảng cách giữa hai
+           *    lệnh liền nhau ⇒ nhỏ hơn hàng vạn lần. Đổi một rủi ro rộng lấy một rủi ro hẹp.
+           *
+           * ⏱ ĐO TRƯỚC KHI ĐẢO (31/08, 5 lần): cửa xác nhận trả lời **1-2 mili-giây**.
+           *    PM đặt ngưỡng «dưới 100ms thì cứ đảo» ⇒ dưới xa. Owner ⛔ cảm nhận được.
+           * ⚠️ Ai đổi cửa này thành việc nặng thì phải ĐO LẠI — con số trên là điều kiện
+           *    để đảo, ⛔ phải một hằng số của tự nhiên.
            */
-          void fetch('/api/danh-thuc/xac-nhan', {
+          const rXn = await fetch('/api/danh-thuc/xac-nhan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ma: y.ma, ma_trinh_duyet: maTrinhDuyet.current }),
-          }).catch(() => { /* rớt một nhịp — mẩu sẽ quay lại, ⛔ làm ồn */ });
+          }).catch(() => null);
+          // Cửa ⛔ trả lời ⇒ ĐỪNG chạy. Mẩu còn hạn giữ chỗ, nhịp sau nhận lại.
+          if (!rXn || !rXn.ok) continue;
+          const jXn = await rXn.json().catch(() => null);
+          // `xong: false` nghĩa là NGƯỜI KHÁC đã giao mẩu này ⇒ chạy nữa là chạy trùng.
+          if (!jXn?.xong) continue;
+
+          void guiRef.current(i, y.cau_hoi, y.tu_ai);
         }
       } catch {
         /**
