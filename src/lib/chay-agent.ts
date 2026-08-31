@@ -176,9 +176,40 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     ...(CONG_CU_CAM.length ? ['--disallowedTools', ...CONG_CU_CAM] : []),
   ];
 
+  /**
+   * 🪪 NỐI PHIÊN CŨ **VÀ** LỜI DẶN — hai việc ĐỘC LẬP, ⛔ phải hai lựa chọn loại trừ nhau.
+   *
+   * 🕳 CA THẬT 31/08/2026 (Owner bắt được, `claude-phong-ban-pm` truy ra gốc):
+   *    ghế mang nhãn `claude-phong-hanh-chinh` mà TỰ XƯNG `claude-tro-ly-dieu-hanh`.
+   *    Nó ⛔ nói dối — **nó chưa từng được báo.** Trước bản vá này, `else if` khiến
+   *    nhánh lời dặn ⛔ BAO GIỜ chạy khi có `maPhienCu`, mà 5 ghế «Quản Lý Trường»
+   *    đều chạy bằng `--resume`. Thứ duy nhất chúng có là trí nhớ cũ — và trong trí nhớ đó
+   *    chúng mang tên khác.
+   *
+   * 📏 SỐ ĐO 31/08 — vì sao đúng 5 ghế này dính:
+   *      225 ghế · 9 ghế CÓ `soul` · 5 ghế CÓ `thu_muc`
+   *      cả 5 ghế `thu_muc` đều **⛔ có `soul`** ⇒ `loiDan` là nguồn danh tính DUY NHẤT của chúng
+   *      (chúng đứng ở thư mục NHÀ, nên tệp CLAUDE.md nạp theo chỗ đứng là luật workspace,
+   *       ⛔ phải một bản khai vai)
+   *
+   * ✅ VÌ SAO GHÉP ĐƯỢC — đo thật, ⛔ suy từ `--help`:
+   *      `--help` ⛔ khai hai cờ này xung khắc, nhưng «⛔ cấm» chưa phải «chạy được».
+   *      Phép đo (`claude-aiboss-app-pm`, 31/08): mở phiên với lời dặn «tên bạn là ZORBAX»,
+   *      rồi `--resume <mã> --append-system-prompt «tên bạn là QUIXNAR»` + hỏi tên
+   *      ⇒ trả lời **QUIXNAR**. Hai cờ chạy cùng nhau VÀ lời dặn MỚI có tác dụng khi nối phiên.
+   *
+   * 🔒 GHẾ CÓ `soul` VẪN ⛔ BỊ NHÉT GÌ — `route.ts:199` đã cho `loiDan = undefined`,
+   *    nên chốt `if (ts.loiDan)` tự lo. Linh hồn của chúng nằm trong `CLAUDE.md` ở thư mục ghế
+   *    và Claude Code tự nạp theo chỗ đứng; nhét thêm một lời dặn là dựng ra HAI nguồn danh tính
+   *    cãi nhau. ⚠️ Đây là ca ĐỐI CHỨNG ÂM của bản vá: sửa xong, 9 ghế đó phải ⛔ đổi một ly.
+   *
+   * 📌 `else if` cũ ⛔ có một dòng chú thích nào, trong khi MỌI cờ quanh nó đều được giải thích
+   *    ⇒ bằng chứng nghiêng về SÓT, **chưa phải kết luận**. Ai sửa tiếp vẫn phải tự đọc.
+   */
   if (ts.maPhienCu) {
     doiSo.push('--resume', ts.maPhienCu);
-  } else if (ts.loiDan) {
+  }
+  if (ts.loiDan) {
     doiSo.push('--append-system-prompt', ts.loiDan);
   }
 
