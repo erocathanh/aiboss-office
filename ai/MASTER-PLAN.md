@@ -292,6 +292,120 @@ P1-7 nói về **mất cái đèn** (KHÔNG biết nó đang chạy). Vá nguồ
 đèn ghế đó phải NHÁY, KHÔNG cần gõ gì. Đối chứng: ghế rảnh thì đèn xanh ĐỨNG YÊN.
 ⚠️ Đo trên **WebKit** (Safari) chứ KHÔNG chỉ Chromium — đội này đã sai vì việc đó.
 
+## 4d. 📸 BẰNG CHỨNG ẢNH OWNER GỬI 30-31/08 — mỗi ảnh gắn với một kết luận
+
+> Ảnh là **mẫu duy nhất KHÔNG thay được bằng số**. Ba lần trong hai ngày, số của đội nói ĐẠT
+> mà mắt Owner nhìn ra hỏng ngay. Dẫn đủ đường dẫn để người sau mở lại được.
+
+```
+~/Zalo-files/2026-08-30/
+  2aOboQvAIhoTwMrki6OgpALnPHej50qTXWi9XVKa.jpg   nút «Xem thêm» ĐÈ LÊN CHỮ, che 2 dòng
+                                                 ⇒ đẻ ra: gỡ dải ghim, đưa nút lên thanh đầu ô
+  2aOboQvBST8YWdbiIXKy3ma32UkLoKA69coY4hEm.jpg   sau thu nhỏ — ô 2·3·4 ĐÚNG, ô 1 giữ chỗ đọc
+  2aOboQvBSaylONtLngYGifVQS7p3x1ys3WJRj6pc.jpg   (ảnh đôi) xác nhận 3 ô ở tin mới nhất
+  2aOboQvBY0FY1cwz9GRGIeO1HVX9WoMzhMA7g9GS.jpg   toàn màn hình ô 1, trước khi thu
+  2aOboQvBY6g6RphkAX1n8XK17uDBZYOCRJruOLcO.jpg   sau khi thu nhỏ ô 1
+  2aOboQvBYF5jxWFhCBVb3n1NCAJGIpJiz5LZ5H6W.jpg   🔑 ô3 cắt ngang chữ «Eroca Thanh», ô4 cắt giữa câu
+                                                 ⇒ đẻ ra: ô ĐANG NHẢ CHỮ thì đẩy lên, DỪNG thì bị che
+  2aOboQvBYMMiLQyugrpLfzWGPuxM7Bo520kDqDDs.jpg   ô3 nhả chữ thì đẩy lên, ô4 chưa nhả nên bị che
+
+~/Zalo-files/2026-08-31/
+  chup-man-hinh-chat-pm-aiboss-canh-bao-phien-trung.jpg
+        🔑 đèn XANH ĐỨNG YÊN trong khi ghế đang chạy · Owner phải GÕ TIN mới biết
+        · app trả «đang chạy ở terminal khác» — câu này NÓI SAI, lúc đó KHÔNG có terminal nào
+        ⇒ đẻ ra P1-7. Và vế ③ chứng minh app ĐÃ CÓ tín hiệu cần cho vế ①.
+  aiboss-phong-ban-ai-canh-bao-phien-dang-chay-noi-khac.jpg
+        🔴 SAU khi nạp bản mới: đèn + nút Dừng VẪN sai sau F5
+        ⇒ ĐO RA: đây KHÔNG phải thụt lùi — P1-7 CHƯA BAO GIỜ được vá (xem 4e)
+  chup-man-hinh-pm-phong-ban-ai-debug-mat-canh-restart.jpg
+        Owner nhắn tin xong mới phát hiện ô đang chạy — cùng bệnh
+  chat-tho-code-app-aiboss-debug-nap-ban-moi.jpg
+        🔑 exe bị CẮT GIỮA CÂU (tin kết bằng dấu «:») vì bộ hẹn nổ giữa lượt
+        ⇒ đẻ ra: bộ hẹn phải canh MỌI ghế, và quá trần thì BÁO chứ ĐỪNG nổ
+  chup-man-hinh-chat-debug-aiboss-app-mat-canh-restart.jpg
+        ✅ mặt TỐT: sau F5 thấy ô 4 đang chạy, và ghế tự được đánh thức KHÔNG cần Owner chat
+        ⚠️ nhưng xem 4e — đó là trùng hợp lúc đang chảy chữ, KHÔNG phải trạng thái được khôi phục
+  chup-man-hinh-chat-tgd-luat-gioi-han-vong-lap-aiboss.jpg
+  chup-man-hinh-pm-aiboss-hoi-quota-ngoai-le.jpg
+        Owner hỏi ngoại lệ hạn mức ⇒ ĐO RA phanh KHÔNG chạm việc gấp ⇒ khuyến nghị KHÔNG làm
+  chup-man-hinh-chat-pm-phong-ban-ai-mat-canh-kenh.jpg
+```
+
+## 4e. 🔴 P1-7 **CHƯA BAO GIỜ ĐƯỢC VÁ** — đính chính một hiểu nhầm của cả Owner lẫn PM
+
+Owner báo 31/08 trưa: *«lần trước đã fix nhưng lần gần nhất lại không còn được fix»*.
+**Đo tại mã — KHÔNG có bản vá nào, nên cũng KHÔNG có thụt lùi:**
+```
+/api/phien trả cờ đang-chạy          0
+GET /api/dung (tra sổ tiến trình)    0
+dangChay: false lúc khôi phục        vẫn 3 chỗ (UngDung.tsx:300 · 863 · 1453)
+commit từng vá P1-7                  KHÔNG có — chỉ có commit TÀI LIỆU 8282b21
+```
+🕳 **Vì sao cả hai tưởng đã vá:** lúc ~11:5x Owner F5 và thấy ô 4 hiện «đang chạy» ĐÚNG.
+Nhưng cờ đó do **luồng đang sống** bật lên, KHÔNG phải do khôi phục từ máy chủ.
+📌 **«Trông đúng lúc đang chảy chữ» KHÁC «khôi phục đúng sau khi tải lại».**
+PM báo Owner vế đầu như một chiến thắng mà KHÔNG tách hai vế — lỗi của PM.
+⇒ Bài học chung: **một quan sát đúng lúc sự việc đang diễn ra KHÔNG chứng minh trạng thái được lưu.**
+
+## 4f. Ba phát hiện 31/08 — `claude-phong-ban-pm` soi và soạn, PM kiểm rồi dán
+
+### P0-8 · 🔴 NHÃN «qua-han» ĐANG NÓI DỐI — báo hỏng ở chỗ KHÔNG hỏng
+```
+sổ danh-thuc.json : mẩu xếp 11:47:59 → tt=bo · ly_do=qua-han · THIẾU xu_luc
+bản ghi phiên ghế : ghế NHẬN câu đó lúc 11:48:05  ⇒ 6 giây, giao THÀNH CÔNG
+⇒ hai nguồn ĐỘC LẬP, và chúng nói ngược nhau
+```
+**Gốc:** lời xác nhận KHÔNG quay về ⇒ mẩu ở lại `dang_giu` ⇒ quá 30 giây `traVeMauHetHan`
+trả về `cho` ⇒ quá 180 giây `donDep` đóng dấu `qua-han`. **Việc GIAO KHÔNG hỏng; đường XÁC NHẬN hỏng.**
+🔴 Cột «vì sao bỏ» là thứ cả P0-2b dựng ra để có. Nó khai sai theo hướng NGUY NHẤT:
+**che chỗ hỏng thật, và bịa ra một chỗ hỏng KHÔNG có.** Hai người đã đi tìm nhầm hướng vì nó.
+
+### P0-9 · `da_xu` KHÔNG dùng làm khoá ĐẾM được nữa
+```
+boMau() đặt da_xu = true  ⇒ mẩu BỊ BỎ cũng mang da_xu = true
+⇒ ai đếm «đã giao» bằng khoá này sẽ đếm LUÔN mẩu chết ⇒ số nghiệm thu CAO HƠN sự thật
+ranh giới sạch: trước P0-2b  so_lan_thu=0 (3/3) · sau  so_lan_thu=1 (7/7, mà 7 mẩu đó KHÔNG có xu_luc)
+```
+**Thước đúng:** đếm `trang_thai === 'da_giao'`, hoặc đếm mẩu **CÓ `xu_luc`**.
+📌 Đây là ca **làm hỏng chính cái thước cả đội đang cầm để soi** — cùng họ với việc giẫm mốc bộ canh.
+
+### P0-10 · 🛟 HAI ĐƯỜNG GIAO TIN — và vế PHẢN VÍ DỤ phải chép cùng
+```
+đường A  gọi thẳng giữa hai ghế    vài giây     hỏng là MẤT LUÔN, KHÔNG ai gọi lại
+đường B  bộ canh đọc kênh          tới 90 giây  tự gọi lại nên KHÔNG mất
+```
+**Luật:** việc gì cũng **GHI KÊNH TRƯỚC rồi mới gọi.** Chỉ gọi mà KHÔNG ghi thì đường A hỏng
+là mất trắng, vì đường B KHÔNG có gì để đọc.
+
+🔴 **VẾ PHẢN VÍ DỤ, có thật, phải chép cùng — hai đường CHỈ bù nhau khi KHÔNG cùng tắc:**
+```
+12:03:30  bộ canh ghế PM gọi lần 12/12 ⇒ chạm trần
+12:05:00  PHANH CẠN — ghế PM ĐIẾC                      ← đường B tắc
+12:43:59  reviewer gửi ba mục · lời gọi thẳng CHẾT     ← đường A tắc
+13:03:33  phanh tự nhả
+13:09:34  bộ canh gọi lại, thấy 5 tin dồn
+⇒ CẢ HAI ĐƯỜNG CÙNG TẮC 58 PHÚT. Tin về hai cái lỗ bị chính hai cái lỗ đó nuốt.
+```
+
+### ✅ Câu Owner sẽ còn hỏi lại: bộ canh có mất tin khi máy chủ khởi lại KHÔNG — **KHÔNG**
+```
+ghế phong-ban-pm  11:42:05 → (khởi lại 11:43:46) → 11:48:05 → 11:54:45
+ghế app-exe       11:42:12 → (khởi lại)          → 11:44:00   chỉ 14 giây sau
+nhật ký bộ canh   3747 → 3939 → 4090 → 4175   liền số, KHÔNG hở dòng nào
+```
+Lý do: nó giữ mốc trên **ĐĨA**, KHÔNG nằm trong bộ nhớ máy chủ.
+
+### ⚖️ MỘT ĐIỂM PM BÁC LẠI reviewer — dòng cảnh báo phanh KHÔNG sai
+reviewer báo dòng «còn ~358 phút» là lỗi số cứng. **Đo lại: KHÔNG phải.**
+```
+mat-canh-ghe.sh:42  CON=$(( (CUA_SO - (GIO - LAN)) / 60 ))   ← hằng số SỐNG
+dòng «358 phút» in lúc 12:05 · PM sửa CUA_SO lúc 12:10
+⇒ lúc in, cửa sổ VẪN là 6 giờ ⇒ 358 phút ĐÚNG tại thời điểm đó
+⇒ 12:35 nó in «28 phút» theo hằng số MỚI ⇒ công thức chạy đúng
+```
+📌 Bài học chung: **một dòng nhật ký cũ ⛔ sai — nó đúng với cấu hình lúc nó được ghi.**
+Đọc log cũ bằng cấu hình MỚI là một dạng của bệnh «trộn hai bản» ta đã cắn ba lần hôm nay.
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
