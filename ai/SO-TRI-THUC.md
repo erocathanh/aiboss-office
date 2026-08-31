@@ -81,6 +81,22 @@ for ln in open(p, encoding='utf-8', errors='replace'):
 ⛔ dòng cảnh báo. Chỉ là một khoảng trắng trông y hệt một câu trả lời.
 🗓 đo 31/08 16:0x · `claude-aiboss-app-pm` (tự cắn khi chuẩn bị số cho cuộc bàn 01/09)
 
+### 0.2b 🔴 `grep` CÒN nói dối một kiểu nữa: mẫu tìm chứa `{ }` ⇒ ra **0** mà KHÔNG báo lỗi
+Cắn thật 31/08 21:2x, **ngay trong lúc tôi đi kiểm bản sửa của chính tôi**: tôi vừa ghi chuỗi
+`"${C}:src/..."` vào sổ, rồi tìm lại nó để nghiệm thu.
+```bash
+grep  -c 'git cat-file -e "${C}:' ai/SO-TRI-THUC.md   # → 0   ← DỐI
+grep -cF 'git cat-file -e "${C}:' ai/SO-TRI-THUC.md   # → 2   ← THẬT
+```
+`grep` của macOS đọc `{C}` là **khoảng lặp** của biểu thức, KHÔNG phải hai ký tự. Nó ra 0 và
+**thoát mã 1 y như «tìm hết rồi, không có»** — KHÔNG có một chữ nào báo rằng mẫu tìm bị hiểu khác.
+🔑 Khác mục 0.2: ở đó **tệp** làm grep câm. Ở đây **mẫu tìm** làm grep câm — và mẫu tìm là thứ
+người đo tự gõ ra, nên KHÔNG ai nghĩ tới việc nghi nó.
+⚠️ **Đi tìm một chuỗi mã thì dùng `grep -F`.** Chuỗi mã hay có `{ } [ ] ( ) . * + ? |` —
+   mỗi ký tự đó là một cơ hội để số 0 nói dối.
+⚠️ Và số 0 ấy suýt làm tôi **sửa lại một tệp vốn đã ĐÚNG**. Đó mới là cái giá thật.
+🗓 31/08 21:2x · `claude-aiboss-app-pm`
+
 ### 0.3 🔑 Phép thử do người **BIẾT mình đang đo** dựng ra chỉ đi qua chỗ người đó NGHĨ TỚI
 Ca thật 31/08: P1-8 qua **7/7 cổng nghiệm thu, có đối chứng âm đầy đủ**. Vẫn còn BỐN lớp
 chưa ai chạm tới, và cả bốn chỉ lộ ra khi Owner mở máy lên rồi chụp một tấm ảnh:
@@ -180,6 +196,31 @@ Danh sách càng đầy đủ trông càng đáng tin, thì càng ít ai nghĩ t
 🗓 31/08 · `hermes-aiboss-app-review` bắt (FAIL ⑥) · `claude-phong-ban-pm` gọi tên phép soi còn thiếu
    · `claude-aiboss-app-pm` là tác giả chỗ hổng
 
+### 0.6 🔑 Một LÝ DO đúng lúc viết sẽ ÂM THẦM SAI ĐI khi thứ nó dựa vào đổi — và KHÔNG có gì kêu lên
+
+Ca thật 31/08 (P0-2d). Chú thích cũ trong `UngDung.tsx` tự biện hộ:
+> *«thà chạy lại còn hơn mất câu»* ⇒ nên nó **chạy trước, xác nhận sau**.
+
+Vế đó ĐÚNG **khi cửa xác nhận chưa biết từ chối**. P0-2d dạy cửa ấy biết từ chối
+(`khac-trinh-duyet`) ⇒ vế đó **hết đúng**. Nhưng nó KHÔNG tự hết đúng: chú thích vẫn nằm
+nguyên chỗ cũ, vẫn đọc rất thuyết phục, và vẫn sẽ thuyết phục người tới sau.
+
+🔑 **Mã có phép thử báo khi nó sai. LÝ DO thì KHÔNG có gì báo cả.**
+Chốt hỏng thì đỏ đèn. Lý do hết hạn thì im lặng, và tiếp tục được trích dẫn.
+
+**Đo lại — dấu hiệu rẻ nhất là TUỔI: chú thích già hơn đoạn mã nó biện hộ thì đáng ngờ.**
+```bash
+cd ~/Projects/aiboss-app-chat
+F=src/components/UngDung.tsx
+git blame --date=short -- "$F" | grep -nE '(thà .*còn hơn|chấp nhận|đành |cố ý (KHÔNG|không))' | head
+# ĐỐI CHỨNG DƯƠNG BẮT BUỘC — chứng minh blame ĐỌC ĐƯỢC tệp, số 0 ở trên mới có nghĩa:
+git blame -- "$F" | grep -c '//'      # phải RA SỐ > 0
+```
+⚠️ Ra 0 mà đối chứng dương cũng 0 ⇒ **thước hỏng**, KHÔNG phải «sạch».
+⚠️ Tuổi chỉ là dấu hiệu. Phép soi THẬT là: **đọc lý do → gọi tên ĐIỀU KIỆN nó dựa vào → đi kiểm
+   điều kiện đó còn đúng KHÔNG.** Sửa xong một cửa thì phải đi tìm mọi lý do dựa vào cửa ấy.
+🗓 31/08 21:2x · `claude-aiboss-app-exe` **nêu** · `claude-aiboss-app-pm` ghi sổ
+
 ## 🔔 KHU 1 · ĐÁNH THỨC GHẾ
 
 ### 1.1 CÓ HAI BỘ ĐẾM KHÁC NHAU — đừng nhầm chúng làm một
@@ -272,6 +313,26 @@ grep -n '@import' ~/Projects/aiboss-app-chat/src/app/globals.css
 ### 2.3 Bản dựng RÚT GỌN TÊN — đừng grep tên biến/hàm để nghiệm thu
 Bộ rút gọn còn **đổi HÌNH DẠNG câu lệnh**: `!==`→`===`, `if/continue`→chuỗi `&&`.
 ⇒ Neo vào **tên lớp CSS** hoặc **chuỗi hiển thị**. 🗓 31/08 · `claude-aiboss-app-exe`
+
+### 2.3b 🔑 Thay vì tìm trong BẢN DỰNG, hãy hỏi COMMIT mà bản dựng sinh ra từ đó
+Ca thật 31/08 21:17: `claude-phong-ban-pm` định kết luận «P0-2b KHÔNG lọt vào bản dựng» bằng
+bốn phép tìm chuỗi trong `.next` — cả bốn ra 0. Ba trong bốn là **thước mù**: `may-chay-nen`,
+`chay-mot-luot` là TÊN TỆP (bản dựng gộp tệp lại), `daNhanTrongVong` là TÊN BIẾN (bị rút gọn).
+**Bản dựng biến đổi mã. Git thì KHÔNG.**
+```bash
+cd ~/Projects/aiboss-app-chat
+C=218a918     # ← mã commit NGƯỜI DỰNG KHAI lúc dựng, KHÔNG phải HEAD hôm nay
+git cat-file -e "${C}:src/lib/may-chay-nen.ts"  2>/dev/null && echo "CÓ"         || echo "KHÔNG có"
+# ĐỐI CHỨNG DƯƠNG BẮT BUỘC — một tệp chắc chắn CÓ:
+git cat-file -e "${C}:src/lib/kho-danh-thuc.ts" 2>/dev/null && echo "thước SỐNG" || echo "🔴 thước HỎNG"
+```
+⚠️ **Bắt buộc `${C}` có ngoặc nhọn.** Viết `"$C:src/..."` thì **zsh** đọc `:s` thành
+   «modifier» và văng `bad substitution` — bash chạy được, zsh thì KHÔNG. Đo 31/08, cắn thật.
+🔴 **Chỗ dễ ngã:** `HEAD` trả lời «commit mới nhất», KHÔNG phải «commit mà bản đang chạy sinh ra
+từ đó». Commit thêm một cái sau khi dựng là hai thứ ấy tách nhau ngay.
+⇒ Phải **ghim mã commit TẠI LÚC DỰNG** rồi hỏi git về chính mã đó. Nếu KHÔNG ai ghi lại mã ấy
+thì git KHÔNG trả lời được câu này — lúc đó mới lui về dấu vân trong `.next` (mục 3.2).
+🗓 31/08 21:17 · `claude-phong-ban-pm` **nêu** · `claude-aiboss-app-pm` thêm vế «ghim commit nào»
 
 ### 2.4 Safari và Chrome KHÁC NHAU — đo một là kết luận sai
 Ca thật: thu nhỏ ô phóng to ⇒ WebKit **10/10 ô** lệch đáy, Chromium **0/10**.
@@ -673,6 +734,33 @@ Nó KHÔNG sai — **nó chưa từng được báo.**
 ⚠️ `else if` đó **không có chú thích nào**, trong khi MỌI cờ quanh nó (`:160-176`) đều có chú thích
 giải thích lý do. Bằng chứng nghiêng về SÓT hơn là cố ý — nhưng đó là suy đoán, chưa phải kết luận.
 🗓 31/08 · `claude-phong-ban-pm` phát hiện tài liệu kể một nửa + tìm ra `else if` · `claude-aiboss-app-pm` đo lại
+
+### 3.11 🔴 Cái phanh của bộ hẹn NÓI «BÁO rồi THOÁT» mà có thể LÀM «NỔ» — một dòng xoá đè lên nó
+`~/Operations/scripts/hen-khoi-dong-lai-app.sh`, đọc theo dòng:
+```
+:71   quá trần THEO LỜI APP ⇒ in «🛑 BÁO rồi THOÁT» ; BAN=" $AI"
+:93   BAN=""                ← xoá VÔ ĐIỀU KIỆN, ngay sau đó
+:100  BAN nạp lại từ mtime
+:101  [ -z "$BAN" ] ⇒ «MỌI ghế im ⇒ RẢNH, nổ»
+```
+⇒ `BAN=" $AI"` ở `:71` là **gán chết** (đúng loại mục 0.1). Khi app nói BẬN mà mtime nói IM —
+ca này CÓ thật, mục 3.4: ghế chờ công cụ thì tệp im mà lượt vẫn chạy — script **in ra câu hoãn
+rồi khởi động lại luôn**, đúng thứ Owner cấm 31/08.
+```bash
+# chạy lại phép ĐẢO, KHÔNG đụng tệp thật:
+bash -c 'CHO=700; TRAN=600; AI="ghe-x "
+if [ "$CHO" -ge "$TRAN" ]; then echo "NÓI: 🛑 BÁO rồi THOÁT"; BAN=" $AI"; fi
+BAN=""
+[ -z "$BAN" ] && echo "LÀM: ⇒ RẢNH, NỔ"'
+# ĐỐI CHỨNG DƯƠNG: bỏ dòng BAN="" đi thì câu thứ hai BIẾN MẤT ⇒ phép đảo do ĐÚNG dòng đó gây ra
+```
+📌 **Chưa cắn ai** (đo 31/08 21:2x): 6 nhật ký, **1** lần chạm trần — 15:38, 604s — và lần ấy
+mtime CŨNG nói bận (18s · 1s · 14s) nên `BAN` được nạp lại và script thoát ĐÚNG.
+🔑 Nó sống sót nhờ **hai thước tình cờ đồng ý**, KHÔNG phải nhờ mã đúng. Chính ca «hai thước lệch
+nhau» mới là ca thiết kế hai thước sinh ra để lo — và đó đúng là ca nó hỏng.
+⚠️ **KHÔNG sửa tệp này trong lúc có tiến trình đang chạy nó**: `bash` đọc script theo VỊ TRÍ BYTE,
+sửa giữa chừng làm nó nhảy vào rác. Kiểm trước: `pgrep -f hen-khoi-dong-lai-app` phải RỖNG.
+🗓 31/08 21:2x · `claude-aiboss-app-pm`
 
 ## ⛔ KHU 4 · CẤM ĐỘNG
 ```
