@@ -71,7 +71,10 @@ const LECH_COI_LA_DAY = 8;
  *
  * 🔴 ⛔ CÓ `luc` ⇒ trả CHUỖI RỖNG. TUYỆT ĐỐI ⛔ suy ngày từ chỗ khác:
  *    ⛔ lấy hôm nay · ⛔ lấy mốc sửa tệp · ⛔ đoán từ tin liền kề.
- *    14% mẩu tin ⛔ có mốc — bịa một lần là Owner đọc SAI LỊCH SỬ mà ⛔ có cách nào biết.
+ *    Bịa một lần là Owner đọc SAI LỊCH SỬ mà ⛔ có cách nào biết.
+ *    ⚠️ ⛔ ghi «14% mẩu tin thiếu mốc» ở đây — ĐÓ LÀ SAI ĐƠN VỊ (xem chú thích `luc` bên dưới):
+ *       14% là của DÒNG trong tệp phiên; MẨU thành bong bóng thì 0/3.774 = 0%.
+ *       Nhánh này vẫn phải giữ, nhưng giữ vì **⛔ ai bảo đảm mãi mãi 0%**, ⛔ phải vì «14%».
  * ⚠️ ⛔ dựng từ `gio`: `gio` là chuỗi HIỂN THỊ «22:11», cộng ngày vào đó chính là bịa.
  */
 function mocDayDu(luc?: number): string {
@@ -1596,6 +1599,48 @@ export default function UngDung({
   const [chuaBietAiChay, datChuaBietAiChay] = useState(false);
 
   /**
+   * 🔖 «TRANG NÀY ĐANG CHẠY MÃ CŨ» (P1-8 · 31/08/2026 · đích do ô 1 nêu).
+   *
+   * 🎯 Owner nạp lại 30-40 lần/tuần ⇒ tab cũ phải TỰ LỘ RA, ⛔ nằm im chờ người phát hiện.
+   * 🔑 Tab **⛔ cần biết mã của chính nó**. Nó chỉ cần thấy con số phía máy chủ ĐỔI trong
+   *    lúc nó còn mở. Đó là thứ tab tự quan sát được, ⛔ cần ai cấp lúc dựng.
+   * ⚠️ Rỗng = «⛔ biết» ⇒ IM (xem hở ① ở route.ts). Hụt còn hơn báo nhầm.
+   */
+  const [maCu, datMaCu] = useState(false);
+  // `null` = CHƯA đo lần nào. ⛔ dùng chuỗi rỗng làm mốc «chưa đo»: rỗng là một GIÁ TRỊ
+  //   hợp lệ thật (`next dev`), gộp hai thứ đó là đẻ lại đúng chỗ hở thứ ba.
+  const banDungDauTien = useRef<string | null>(null);
+  const banRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * 📏 ĐO chiều cao băng rồi ghi vào biến CSS `--cao-bang` — ⛔ ĐOÁN bằng số cứng.
+   *
+   * 🕳 VÌ SAO PHẢI ĐO, ⛔ gõ đại «44px»: băng xuống dòng khác nhau theo bề ngang máy và
+   *    theo cỡ chữ hệ thống. Gõ số cứng là hoặc chừa thừa, hoặc chừa HỤT — mà chừa hụt
+   *    ở đây nghĩa là **ô gõ và nút Gửi bị cắt khỏi màn**, vì `body` ghim `100vh;overflow:hidden`.
+   * 🪤 Bẫy đã đo 31/08: trên màn hẹp `.cot-3.mo-khu` là `position:fixed;inset:0;z-index:60`
+   *    ⇒ băng nằm trong dòng chảy sẽ bị che SẠCH đúng trên máy Owner đang dùng.
+   *    ⇒ băng phải `fixed` + z-index TRÊN 60, và `--cao-bang` dùng để đẩy lớp phủ đó xuống.
+   * 📌 Mặc định `--cao-bang: 0px` ⇒ ⛔ có băng thì mọi phép `calc` thành phép trừ 0,
+   *    tức bố cục hiện tại ⛔ đổi một ly. Đây là chỗ đáng giá nhất của cách làm này.
+   */
+  dungTruocKhiVe(() => {
+    const goc = document.documentElement;
+    const el = banRef.current;
+    if (!maCu || !el) {
+      goc.style.setProperty('--cao-bang', '0px');
+      return;
+    }
+    const doLai = () => goc.style.setProperty('--cao-bang', `${el.offsetHeight}px`);
+    doLai();
+    // Xoay máy / đổi cỡ chữ ⇒ băng xuống dòng lại ⇒ phải đo lại, ⛔ giữ số cũ.
+    if (typeof ResizeObserver === 'undefined') return;
+    const rinh = new ResizeObserver(doLai);
+    rinh.observe(el);
+    return () => rinh.disconnect();
+  }, [maCu]);
+
+  /**
    * 🔭 PHÓNG TO / THU LẠI đổi chiều cao MỌI ô ⇒ phải neo lại — nhưng CHỈ ô nào TRƯỚC ĐÓ
    *    đang ở đáy. Ném một ô đang đọc giữa chừng xuống đáy là mở lại đúng loại lỗi
    *    vừa vá ở nút «nạp phần cũ».
@@ -1678,9 +1723,18 @@ export default function UngDung({
         ({ ma_o: maOCua(i), ma_nhan_su: o.ns!.ten });
       const dsHoi = coGhe.filter(({ o }) => !o.dangChay && !o.dangNap).map(khai);
       const dsBan = coGhe.filter(({ o }) => o.dangChay || o.dangNap).map(khai);
-      // ⛔ Về sớm khi ⛔ có ô rảnh — vẫn phải báo `ds_ban` để máy chủ GIỮ mẩu.
-      //    Về sớm ở đây đúng là chỗ mẩu chết trong khi ta tưởng đã lo xong.
-      if (dsHoi.length === 0 && dsBan.length === 0) return;
+      /**
+       * 🔴 CỬA THOÁT CŨ ĐÃ GỠ (P1-8 · 31/08/2026) — trước đây:
+       *      if (dsHoi.length === 0 && dsBan.length === 0) return;
+       *
+       * 🪤 Tab ⛔ có ghế nào ⇒ ⛔ gọi cửa ⇒ **⛔ BAO GIỜ biết mình cũ**. Mà tab mở suốt
+       *    ngày ⛔ có ghế đúng là tab dễ cũ nhất.
+       * 📌 Đây là họ lỗi cả đội cắn cả ngày 31/08: **một chốt chặn nằm SAU cửa thoát
+       *    thì nó ⛔ chặn được gì.** Phép so bản dựng phải chạy ⛔ phụ thuộc có ghế hay ⛔.
+       * 💰 Giá phải trả, đã cân: một yêu cầu rỗng mỗi 5 giây cho MỘT tab (⛔ phải mỗi ô —
+       *    cả 4 ô gộp chung một lời gọi). Cửa `/nhan` ⛔ có phanh nhịp (đã đo), thân rỗng
+       *    chạy qua vòng lặp ⛔ làm gì. Và `document.hidden` vẫn chặn ở trên: tab ẩn thì ngủ.
+       */
 
       dangThamDo.current = true;
       try {
@@ -1691,6 +1745,46 @@ export default function UngDung({
         });
         if (!r.ok) return;
         const j = await r.json();
+
+        /**
+         * 🔖 SO BẢN DỰNG — chạy TRƯỚC phần chia mẩu, để nó ⛔ dính số phận của phần đó.
+         * · lần trả lời ĐẦU TIÊN sau khi tải trang ⇒ NHỚ, ⛔ báo (tab mới ⛔ cũ).
+         * · sau đó khác giá trị đã nhớ ⇒ máy chủ đã đổi BẢN ⇒ báo.
+         * · GIỐNG ⇒ im. Máy chủ nạp lại mà CÙNG bản dựng thì mã tab vẫn đúng — ⛔ làm phiền.
+         *   👆 Chính vế này là thứ phân biệt «so BẢN DỰNG» với «so máy chủ có khởi lại ⛔»,
+         *      và là đối chứng ÂM của cổng nghiệm thu ①.
+         * 🔒 ⛔ hạ cờ xuống lại: bản đã cũ thì ⛔ tự mới lại được. Chỉ tải trang mới xoá.
+         */
+        /**
+         * 🔴 CHỖ HỞ THỨ BA — @phong-ban-pm bắt được lúc 16:09, và nó ĐANG BẬT lúc đó.
+         *
+         * 🕳 CA THẬT sẽ xảy ra ở CHÍNH lần nạp đưa P1-8 lên:
+         *    ① máy chủ đang chạy là bản CŨ ⇒ trả về ⛔ CÓ khoá `ban_dung`
+         *    ② tab Owner mở từ trước ⇒ mọi lời gọi tới giờ đều ⛔ thấy khoá ⇒ ô nhớ RỖNG
+         *    ③ nạp bản mới ⇒ tab nhận `ban_dung` LẦN ĐẦU ⇒ mã cũ coi là «lần đầu ⇒ nhớ, im»
+         *    ⇒ Tab Owner đang chạy mã CŨ mà ⛔ được báo. **Im lặng đúng lần nạp quan trọng nhất.**
+         * 📌 Gốc: vế «lần đầu thì nhớ» ngầm giả định lần đầu đó xảy ra NGAY SAU khi tải trang.
+         *    Ở lần nạp đầu tiên, «lần đầu» bị dời tới tận SAU khi nạp — lúc tab đã cũ rồi.
+         *    ⇒ Cơ chế chỉ chạy đúng TỪ LẦN THỨ HAI. Một cái báo động ⛔ kêu ở lần đầu thì
+         *      nó ⛔ phải báo động, nó là một lời hứa.
+         *
+         * ✅ CHỮA: phân biệt «CHƯA TỪNG có khoá» với «có khoá mà giá trị rỗng».
+         *    Gộp thành MỘT dấu vân để so — ⛔ giữ hai biến rồi phải nhớ ghép chúng đúng cách.
+         *      ⛔ có khoá        → '(khong-co-khoa)'   (máy chủ bản CŨ, trước P1-8)
+         *      có khoá, rỗng    → ''                   (`next dev` ⛔ sinh BUILD_ID)
+         *      có khoá, có giá  → chính mã bản dựng
+         * 🔑 Chuỗi mốc chứa dấu ngoặc nên nó ⛔ BAO GIỜ trùng một BUILD_ID thật (chữ và số).
+         * ✅ Đối chứng âm VẪN GIỮ: cùng bản dựng ⇒ dấu vân y hệt ⇒ IM. Nạp lại mà ⛔ dựng lại
+         *    thì Owner ⛔ bị làm phiền — đó là vế chứng minh ta so BẢN DỰNG, ⛔ phải so
+         *    «máy chủ có khởi lại ⛔».
+         */
+        const coKhoa = j != null && Object.prototype.hasOwnProperty.call(j, 'ban_dung');
+        const vanBan = !coKhoa
+          ? '(khong-co-khoa)'
+          : (typeof j.ban_dung === 'string' ? j.ban_dung : '');
+        if (banDungDauTien.current === null) banDungDauTien.current = vanBan;
+        else if (banDungDauTien.current !== vanBan) datMaCu(true);
+
         const nhan = (j?.nhan ?? {}) as Record<
           string,
           { ma: string; ma_nhan_su: string; tu_ai: string; cau_hoi: string }
@@ -1816,6 +1910,31 @@ export default function UngDung({
           </button>
         )}
       </header>
+
+      {/**
+        * 🔖 BĂNG «TRANG NÀY ĐANG CHẠY MÃ CŨ» (P1-8 · 31/08/2026)
+        *
+        * ⛔ NÓI QUÁ THỨ BIẾT CHẮC: ta CHƯA đo được cơ chế hỏng (giả thuyết 404 đã bị BÁC
+        *    bằng số — xem route.ts). Nên câu chữ chỉ khai đúng một điều kiểm được:
+        *    **mã trang này cũ hơn mã máy chủ.** ⛔ hứa «vì thế nên app im».
+        * ⛔ TỰ TẢI LẠI: Owner đang gõ dở một câu là mất trắng. Băng DÍNH, ⛔ tự tắt,
+        *    ⛔ chặn thao tác — để Owner chọn LÚC.
+        * ♿ `role="status"` để trình đọc màn hình đọc lên khi băng xuất hiện.
+        */}
+      {maCu && (
+        <div className="bang-ma-cu" ref={banRef} role="status">
+          <span>
+            Bản mới đã lên máy chủ. Trang này đang chạy mã <b>CŨ</b>.
+          </span>
+          <button
+            type="button"
+            className="nut-tai-lai"
+            onClick={() => window.location.reload()}
+          >
+            Tải lại
+          </button>
+        </div>
+      )}
 
       <div className={`khung bc-${boCuc}${(anCot === null ? boCuc === 6 : anCot) ? ' an-cot' : ' hien-cot'}`}>
         {/* ===== Cột 1 — cây phòng ban ===== */}

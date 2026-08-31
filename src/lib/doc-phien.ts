@@ -217,9 +217,14 @@ export interface TinLichSu {
    * Vì sao cần: `gio` là CHUỖI "22:11", ⛔ không phải mốc. Muốn biết bong bóng thuộc
    * NGÀY nào thì so chuỗi ⛔ không ra — và ca 23:59 → 00:01 thì HỎNG chắc chắn.
    *
-   * ⚠️ TUỲ CHỌN, và phải giữ tuỳ chọn: đo tệp phiên thật (1.364 dòng) có **157 dòng
-   *    ⛔ KHÔNG có `timestamp`** (11,5%). Ép kiểu bắt buộc là hoặc ném lỗi, hoặc phải
+   * ⚠️ TUỲ CHỌN, và phải giữ tuỳ chọn. Ép kiểu bắt buộc là hoặc ném lỗi, hoặc phải
    *    BỊA một mốc — bịa thì dữ liệu sai mà số đo vẫn đẹp.
+   *    📏 SỐ ĐO — chú ý ĐƠN VỊ, đây là chỗ cả đội đã đọc nhầm một lần (31/08):
+   *       DÒNG thiếu `timestamp`   1.081/7.630 = 14,2%   ← 11,5% đo 19/08 ĐÃ TRÔI
+   *       MẨU user/assistant thiếu     0/3.774 =  0,0%   ← thứ THỰC SỰ thành bong bóng
+   *       14% kia là dòng `attachment` · `last-prompt` · `queue-operation` · `mode`.
+   *    ⇒ Đọc «14%» thành «14% mẩu tin» là dựng một phép nghiệm thu ⛔ BAO GIỜ chạy được,
+   *      vì ca đó ⛔ tồn tại trong dữ liệu thật. Muốn thử nhánh này thì phải DỰNG ca ra.
    * 📌 `gio` GIỮ NGUYÊN, ⛔ không bỏ: bong bóng cũ trong bộ nhớ ⛔ không vỡ, và giao diện
    *    ⛔ chưa đổi một ly nào ở bước này.
    */

@@ -296,3 +296,72 @@
   color:#e8b339; font-size:12.5px; line-height:1.5;
   padding:6px 12px; max-width:52ch; text-align:center; opacity:.95;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🔖 P1-8 — BĂNG «TRANG NÀY ĐANG CHẠY MÃ CŨ» (31/08/2026)
+
+   🪤 HAI BẪY ĐÃ ĐO trước khi viết khối này, ⛔ đoán:
+   ① `body{height:100vh;overflow:hidden}` + `.khung{height:calc(100vh - var(--cao-de))}`
+      ⇒ nhét một dải vào DÒNG CHẢY là đẩy đáy ra ngoài màn — mà đáy là Ô GÕ và NÚT GỬI.
+   ② màn ≤1040px: `.cot-3.mo-khu{position:fixed;inset:0;z-index:60}` phủ TOÀN màn
+      ⇒ băng trong dòng chảy bị che SẠCH, đúng trên iPhone của Owner — tức là hỏng
+        ở đúng chỗ việc này sinh ra để chữa.
+   ⇒ Nên: băng `fixed`, z-index **70** (trên 60), và chừa chỗ bằng biến `--cao-bang`
+     do JS ĐO THẬT rồi ghi vào (⛔ số cứng — băng xuống dòng khác nhau theo máy).
+
+   ✅ `--cao-bang` mặc định `0px` ⇒ khi ⛔ có băng, mọi `calc` dưới đây là phép trừ 0
+      ⇒ bố cục hiện tại ⛔ đổi một ly. Đối chứng: xoá `.bang-ma-cu` khỏi màn thì
+      `.khung` phải cao đúng như cũ.
+   ⚠️ Khối này nằm ở globals.css nên nó ĐÈ mau09.css (globals @import mau09 ở dòng 2).
+      Vì thế `.khung` và `.cot-3.mo-khu` bên dưới PHẢI bọc đúng @media như mau09 —
+      viết trần là giẫm luôn cả nhánh màn hẹp (nơi `.khung{height:auto}`).
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root { --cao-bang: 0px; }
+
+.bang-ma-cu {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center;
+  flex-wrap: wrap; gap: 8px 14px;
+  padding: 8px 14px;
+  background: #3a2a08; color: var(--vang-sang);
+  border-bottom: 1px solid #6b4f11;
+  font-size: 13px; line-height: 1.45; text-align: center;
+}
+.bang-ma-cu b { color: #ffd873; }
+
+/* Nút ≥32px cao cho ngón tay; ⛔ để nó co lại khi băng xuống dòng. */
+.bang-ma-cu .nut-tai-lai {
+  flex: 0 0 auto;
+  min-height: 32px; padding: 0 14px;
+  border: 1px solid #b98a1c; border-radius: 8px;
+  background: var(--vang-sang); color: #241a02;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.bang-ma-cu .nut-tai-lai:hover { background: #ffd873; }
+.bang-ma-cu .nut-tai-lai:active { background: #d8ae4e; }
+
+/* Chừa chỗ cho băng. `border-box` (mau09:15) ⇒ padding nằm TRONG 100vh. */
+body { padding-top: var(--cao-bang); }
+
+/* Màn rộng: `.khung` ghim theo 100vh ⇒ phải trừ thêm chiều cao băng, ⛔ là cụt đáy. */
+@media (min-width: 1041px) {
+  .khung { height: calc(100vh - var(--cao-de) - var(--cao-bang)); }
+}
+
+/* Màn hẹp: `body{height:auto}` nên khung ⛔ cần sửa — nhưng LỚP PHỦ toàn màn thì cần,
+   ⛔ thì nó trùm lên băng và Owner ⛔ bao giờ thấy. */
+@media (max-width: 1040px) {
+  .cot-3.mo-khu {
+    top: var(--cao-bang);
+    /* 🔴 `bottom:auto` BẮT BUỘC: mau09 đặt `inset:0` ⇒ bottom:0. Có đủ top+height+bottom là
+       QUÁ RÀNG BUỘC — trình duyệt bỏ `bottom`, nên nó VẪN chạy đúng, nhưng chạy đúng nhờ
+       một luật gỡ-rối chứ ⛔ phải nhờ điều ta viết ra. Khai thẳng thì người sau ⛔ phải tra. */
+    bottom: auto;
+    /* ⚠️ GIỮ CẶP DỰ PHÒNG y như mau09:415 (`height:100vh;height:100dvh`).
+       Chỉ viết mỗi `dvh`: máy ⛔ hiểu `dvh` sẽ VỨT cả dòng calc ⇒ rơi về `height:100vh`
+       của mau09 ⇒ khung cao trọn màn trong khi `top` đã đẩy xuống ⇒ THÒI ĐÁY ra ngoài,
+       đúng chỗ có ô gõ. Hai dòng: máy cũ ăn dòng trên, máy mới ăn dòng dưới. */
+    height: calc(100vh - var(--cao-bang));
+    height: calc(100dvh - var(--cao-bang));
+  }
+}

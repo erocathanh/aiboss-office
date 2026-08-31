@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { nhanYeuCau, giuChoOBan } from '@/lib/kho-danh-thuc';
 
 export const runtime = 'nodejs';
@@ -19,6 +21,44 @@ export const runtime = 'nodejs';
 let keuThieuKhaiLuc = 0;
 const NHIP_KEU_MS = 60_000;
 export const dynamic = 'force-dynamic';
+
+/**
+ * 🔖 DẤU VÂN BẢN DỰNG (P1-8 · 31/08/2026) — để TAB CŨ TỰ LỘ RA LÀ NÓ CŨ.
+ *
+ * 🎯 Owner chốt 31/08: tuần này nạp lại 30-40 lần. Ở nhịp đó, «nhớ nhắc Owner tải lại
+ *    trang» ⛔ phải một lời dặn — nó là chỗ CHẮC CHẮN HỎNG. Quên một lần là Owner nhìn
+ *    app im mà ⛔ có dấu hiệu nào chỉ ra vì sao.
+ *
+ * 🧪 CƠ CHẾ HỎNG CỤ THỂ THÌ CHƯA AI ĐO ĐƯỢC — nói thẳng, ⛔ giấu:
+ *    `claude-aiboss-app-pm` đã dựng giả thuyết «tab cũ xin bó JS cũ ⇒ 404» rồi TỰ BÁC
+ *    bằng số: bó cũ `page-fdeb465ab3c8b19d.js` VẪN CÒN trên đĩa sau lần dựng mới
+ *    (đối chứng dương: bó của bản mới cũng có ⇒ lệnh `ls` ⛔ mù). Next GIỮ LẠI bó cũ.
+ * ⇒ Nên cửa này ⛔ đoán tab hỏng KIỂU GÌ. Nó chỉ khai đúng một sự thật kiểm được:
+ *    **mã máy chủ hiện là bản nào.** Đúng dù nguyên nhân là gì, và vẫn đúng khi
+ *    nguyên nhân đổi ở lần dựng sau.
+ *
+ * 📌 ⛔ NHÉT LÚC DỰNG, ⛔ biến môi trường, ⛔ đụng `next.config.mjs` — đúng tệp đã hạ cả
+ *    app ngày 18/08. Đọc thẳng tệp `.next/BUILD_ID` lúc chạy là đủ.
+ *    (đo 31/08: thư mục làm việc của máy chủ = thư mục dự án ⇒ đường dẫn này đọc được thật)
+ *
+ * ⏱ ĐỌC ĐÚNG MỘT LẦN lúc nạp mô-đun, ⛔ đọc đĩa mỗi lời gọi: vòng thăm dò gõ cửa này
+ *    12 lần/phút cho mỗi tab.
+ *
+ * ⚠️ HAI CHỖ CÒN HỞ, ghi ra để người sau ⛔ tưởng nó kín:
+ *    ① `next dev` ⛔ sinh `.next/BUILD_ID` ⇒ trả chuỗi RỖNG. Bên trình duyệt coi rỗng là
+ *       «⛔ biết» và IM. Chọn hụt-hơn-báo-nhầm có chủ ý: một băng báo sai còn tệ hơn ⛔ băng.
+ *    ② Mô-đun nạp LÚC CÓ LỜI GỌI ĐẦU, ⛔ phải lúc máy chủ khởi. Nếu máy chủ sống suốt
+ *       từ lúc khởi tới sau một lần dựng mà ⛔ MỘT tab nào gõ cửa này, con số bắt được sẽ
+ *       là bản MỚI trong khi mã đang phục vụ là bản CŨ ⇒ ⛔ bao giờ báo. Vô hại trên thực tế
+ *       vì ⛔ có tab nào gõ cửa nghĩa là ⛔ có ai cần được báo — nhưng nó CÓ THẬT.
+ */
+const BAN_DUNG: string = (() => {
+  try {
+    return readFileSync(join(process.cwd(), '.next', 'BUILD_ID'), 'utf8').trim().slice(0, 64);
+  } catch {
+    return '';
+  }
+})();
 
 /**
  * 🖐 TRÌNH DUYỆT NHẬN VIỆC — `POST /api/danh-thuc/nhan`
@@ -115,5 +155,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return Response.json({ nhan, da_giu: daGiu, lech_ghe: lechGhe, thieu_khai: thieuKhai });
+  // 🔖 `ban_dung`: chở thêm ĐÚNG MỘT trường trên cửa đã gọi sẵn — ⛔ cửa mới, ⛔ đồng hồ mới.
+  return Response.json({ nhan, da_giu: daGiu, lech_ghe: lechGhe, thieu_khai: thieuKhai, ban_dung: BAN_DUNG });
 }
