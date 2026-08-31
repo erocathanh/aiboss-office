@@ -2,6 +2,22 @@ import { NextRequest } from 'next/server';
 import { nhanYeuCau, giuChoOBan } from '@/lib/kho-danh-thuc';
 
 export const runtime = 'nodejs';
+
+/**
+ * 📢 KÊU KHI CÓ TAB CŨ ĐANG CÂM (ghế soi nêu 31/08).
+ *
+ * 🕳 CA: nạp bản mới lên máy chủ, nhưng tab iPhone của Owner VẪN chạy mã cũ cho tới khi
+ *    anh tải lại trang. Tab cũ gửi mảng CHUỖI ⇒ `ma_nhan_su = null` ⇒ ⛔ ô nào được giao.
+ *    Cổng vẫn trả 200, mẩu vẫn vào hàng — chỉ là ⛔ ai giao được.
+ *    ⇒ Owner thấy «app im» mà ⛔ có một dấu hiệu nào chỉ ra vì sao.
+ * 📌 Vá một lỗi hỏng-im-lặng mà đẻ ra lỗi hỏng-im-lặng khác thì coi như ⛔ vá.
+ *    Nên chỗ này phải KÊU RA nhật ký: `~/Operations/logs/phong-ban-lan.log`.
+ *    Tìm bằng: grep TAB-CU-DANG-CAM
+ * ⏱ Hãm một phút một lần — vòng thăm dò chạy 12 lần/phút, kêu mỗi lần là ngập nhật ký
+ *    và ⛔ ai đọc nữa. Nhật ký ngập cũng là một kiểu im lặng.
+ */
+let keuThieuKhaiLuc = 0;
+const NHIP_KEU_MS = 60_000;
 export const dynamic = 'force-dynamic';
 
 /**
@@ -83,5 +99,17 @@ export async function POST(req: NextRequest) {
    * Mấy con số này để bên nghiệm thu ĐẾM được, ⛔ phải suy từ việc «⛔ thấy lỗi».
    * `lech_ghe` > 0 nghĩa là CÓ mẩu đang nằm chờ đúng ghế — ⛔ phải «⛔ có việc gì».
    */
+  if (thieuKhai > 0) {
+    const bayGio = Date.now();
+    if (bayGio - keuThieuKhaiLuc > NHIP_KEU_MS) {
+      keuThieuKhaiLuc = bayGio;
+      console.warn(
+        `[TAB-CU-DANG-CAM] ${thieuKhai} ô gửi danh sách dạng CHUỖI (⛔ khai ghế đang ngồi) ` +
+        '⇒ máy chủ ⛔ dám giao mẩu nào cho chúng. Trang đang mở là BẢN CŨ — ' +
+        'Owner cần TẢI LẠI TRANG. Xem chú thích đầu tệp app/api/danh-thuc/nhan/route.ts.',
+      );
+    }
+  }
+
   return Response.json({ nhan, da_giu: daGiu, lech_ghe: lechGhe, thieu_khai: thieuKhai });
 }
