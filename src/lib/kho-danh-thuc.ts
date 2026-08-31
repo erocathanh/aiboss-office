@@ -147,6 +147,18 @@ export function ghiNhanThamDo(maO: string, bayGio = Date.now()): void {
   thamDoTheoO.set(maO, bayGio);
 }
 
+/**
+ * Trình duyệt thăm dò ô này lần cuối lúc nào (`undefined` = CHƯA lần nào kể từ khi máy chủ khởi).
+ *
+ * 🎯 Sinh ra cho bộ chạy nền (P0-2c): nó phải biết ô nào CÒN người lái để đứng ngoài.
+ * ⚠️ Sổ nằm TRONG BỘ NHỚ. Máy chủ khởi lại là rỗng ⇒ `undefined` nghĩa là
+ *    **«tôi KHÔNG BIẾT»**, KHÔNG phải «chắc chắn không ai mở app».
+ *    Người đọc phải tự chọn phía an toàn cho ca của mình — xem `may-chay-nen.ts`.
+ */
+export function thamDoCuoiCua(maO: string): number | undefined {
+  return thamDoTheoO.get(maO);
+}
+
 function doc(): So {
   try {
     const j = JSON.parse(fs.readFileSync(TEP, 'utf8')) as Partial<So>;

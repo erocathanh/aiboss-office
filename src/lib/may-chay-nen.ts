@@ -1,0 +1,151 @@
+/**
+ * 🤖 BỘ CHẠY NỀN — máy chủ TỰ rút mẩu khỏi hàng đợi và chạy lượt, KHÔNG cần trình duyệt.
+ *    (P0-2c · Owner ưu tiên hàng đầu 31/08: *«phụ thuộc trình duyệt quá khó chịu»*)
+ *
+ * 🎯 ĐỔI CHỦ, KHÔNG PHẢI BỎ HTTP. Trình duyệt hôm nay là ĐỘNG CƠ (đo 31/08 19:18):
+ *    `/api/chat` là đường DUY NHẤT spawn ghế, và nó được gọi từ ĐÚNG MỘT chỗ — `UngDung.tsx`.
+ *    Tệp này thêm một người lái THỨ HAI, chạy ngay trong tiến trình máy chủ.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 🔴 BA CHỐT CHỐNG CHẠY TRÙNG — mỗi chốt chặn một ca ĐÃ đo được, đừng gỡ chốt nào
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * ① CÙNG ĐƯỜNG GIAO MẨU với trình duyệt: gọi CHÍNH `nhanYeuCau()`.
+ *    Nó đặt `dang_giu` + `giu_boi` + `giu_han` ⇒ trình duyệt KHÔNG lấy được mẩu đó nữa.
+ *    ⚠️ Nếu tôi tự đọc sổ rồi tự chạy (không qua `nhanYeuCau`) thì hai bên cùng lấy
+ *      MỘT mẩu ⇒ ghế chạy HAI LẦN ⇒ Owner trả tiền hai lần. Đây là ca đắt nhất.
+ *
+ * ② GHẾ ĐANG CHẠY thì BỎ QUA: tra `dsViec()` — cùng chốt mà `/api/chat:103` đang dùng.
+ *
+ * ③ CÒN TRÌNH DUYỆT THÌ NHƯỜNG: nếu ô này vừa được thăm dò trong `IM_CAN_MS` thì
+ *    coi như CÓ người lái rồi, bộ nền đứng ngoài.
+ *    📌 Vì sao nhường chứ không tranh: trình duyệt CÓ chỗ đổ chữ ra màn hình ngay;
+ *      bộ nền thì không. Cùng làm được thì để người làm ĐẸP HƠN làm.
+ *    ⚠️ GIỚI HẠN PHẢI BIẾT: dấu vết thăm dò nằm TRONG BỘ NHỚ (`thamDoTheoO`).
+ *      Máy chủ khởi lại ⇒ sổ rỗng ⇒ bộ nền tưởng KHÔNG có trình duyệt nào.
+ *      Vô hại vì chốt ① vẫn chặn chạy trùng — nhưng ĐỪNG đọc «0 thăm dò» thành
+ *      «chắc chắn không ai mở app». Đó là loại rỗng «tôi KHÔNG CÒN BIẾT», đã ghi sổ 31/08.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 🔌 MẶC ĐỊNH **TẮT**. Bật bằng biến môi trường `CHAY_NEN=1`.
+ *    Cố ý: nối tệp này vào máy chủ mà nó tự chạy ngay thì người duyệt KHÔNG có cơ hội
+ *    nhìn nó chạy thử. Bật là một QUYẾT ĐỊNH nhìn thấy được, không phải hệ quả của việc nạp.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
+import { chayMotLuot } from '@/lib/chay-mot-luot';
+import { nhanYeuCau, xacNhanDaGiao, xemSo } from '@/lib/kho-danh-thuc';
+import { dsViec } from '@/lib/kho-tien-trinh';
+import { layO } from '@/lib/kho-phien';
+
+/** Mã người giữ mẩu, để phân biệt với trình duyệt trong sổ. */
+export const NGUOI_GIU_NEN = 'may-chu-nen';
+
+/** Ô im lâu hơn ngần này thì coi là KHÔNG có trình duyệt lái nó. */
+export const IM_CAN_MS = 45_000;
+
+/** Nhịp rà hàng đợi. Thưa thôi — đây KHÔNG phải đường chính, nó là đường DỰ PHÒNG. */
+export const NHIP_MS = 10_000;
+
+let dangChay = false;
+let donGio: ReturnType<typeof setInterval> | null = null;
+
+/** Số đo để nghiệm thu — KHÔNG suy từ «không thấy gì». */
+export const dem = { vong: 0, daChay: 0, boQuaDangChay: 0, boQuaCoTrinhDuyet: 0, loi: 0 };
+
+/**
+ * Rà MỘT vòng. Trả về số lượt đã khởi chạy trong vòng này.
+ * Tách riêng để nghiệm thu gọi thẳng được, KHÔNG phải chờ đồng hồ.
+ */
+export async function raMotVong(bayGio = Date.now()): Promise<number> {
+  dem.vong++;
+  const so = xemSo();
+  // Chỉ quan tâm mẩu ĐANG CHỜ. Mẩu 'dang_giu' là của người khác — kể cả của chính ta.
+  const cho = so.hang_doi.filter((y) => y.trang_thai === 'cho');
+  if (cho.length === 0) return 0;
+
+  const dangChayTheoGhe = new Set(dsViec().map((v) => v.ma_nhan_su));
+  let daChay = 0;
+
+  for (const y of cho) {
+    // ── chốt ②: ghế đang chạy ở đâu đó rồi
+    if (dangChayTheoGhe.has(y.ma_nhan_su)) {
+      dem.boQuaDangChay++;
+      continue;
+    }
+    // ── chốt ③: còn trình duyệt lái ô này thì nhường
+    //    (đọc qua `xemSo` KHÔNG có dấu thăm dò, nên hỏi thẳng kho)
+    const imBaoLau = bayGio - (layThamDo(y.ma_o) ?? 0);
+    if (imBaoLau < IM_CAN_MS) {
+      dem.boQuaCoTrinhDuyet++;
+      continue;
+    }
+    // ── chốt ①: lấy mẩu qua CHÍNH đường của trình duyệt ⇒ không thể lấy trùng
+    const ket = nhanYeuCau(y.ma_o, y.ma_nhan_su, NGUOI_GIU_NEN);
+    if (!ket.y) continue; // ai đó nhanh tay hơn — đúng thứ ta muốn
+    const xn = xacNhanDaGiao(ket.y.ma, NGUOI_GIU_NEN);
+    if (!xn.xong) continue;
+
+    const o = layO(y.ma_o);
+    const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
+
+    // KHÔNG `await` — một mẩu chạy chậm KHÔNG được chặn mẩu của ô khác.
+    void chayMotLuot(
+      { maO: y.ma_o, maNhanSu: y.ma_nhan_su, cauHoi: y.cau_hoi, maPhienCu },
+      () => {
+        /* KHÔNG có ai xem. Chữ tự nằm trong .jsonl của Claude Code — xem chú thích
+           `chay-mot-luot.ts`. Cố ý ĐỂ TRỐNG chứ không ghi thêm một bản sao thứ hai:
+           hai bản ghi cho cùng một lượt là hai thứ có thể lệch nhau. */
+      },
+    ).then(
+      (kq) => {
+        if (kq.loi) dem.loi++;
+      },
+      () => {
+        dem.loi++;
+      },
+    );
+    dem.daChay++;
+    daChay++;
+  }
+  return daChay;
+}
+
+/**
+ * Đọc mốc thăm dò của một ô.
+ *
+ * 🔴 MẶC ĐỊNH LÀ «CÓ TRÌNH DUYỆT», KHÔNG PHẢI «KHÔNG BIẾT ⇒ CỨ CHẠY».
+ *    Nếu chưa ai cắm nguồn dấu vết thì ta KHÔNG BIẾT có trình duyệt hay không —
+ *    và «không biết» phải nghiêng về phía KHÔNG chạy, chứ không phải phía chạy.
+ * 🕳 Bản đầu tôi để `() => undefined` ⇒ `bayGio - 0` = một số khổng lồ
+ *    ⇒ chốt ③ KHÔNG BAO GIỜ chặn được ai. Một chốt luôn cho qua thì nó không phải chốt.
+ *    Đúng họ với «rỗng đọc thành 0» đã ghi sổ 31/08, chỉ khác cái áo.
+ */
+let layThamDo: (maO: string) => number | undefined = () => Date.now();
+/** Cho phép nơi khác cắm nguồn dấu vết thăm dò (kho-danh-thuc giữ nó trong bộ nhớ). */
+export function datNguonThamDo(f: (maO: string) => number | undefined): void {
+  layThamDo = f;
+}
+
+/** Bật bộ chạy nền. Gọi nhiều lần cũng chỉ chạy MỘT bộ. */
+export function bat(): boolean {
+  if (dangChay) return false;
+  if (process.env.CHAY_NEN !== '1') return false; // ⇦ mặc định TẮT, xem đầu tệp
+  dangChay = true;
+  donGio = setInterval(() => {
+    void raMotVong().catch(() => {
+      dem.loi++;
+    });
+  }, NHIP_MS);
+  return true;
+}
+
+/** Tắt — cho nghiệm thu và cho lúc máy chủ đóng. */
+export function tat(): void {
+  if (donGio) clearInterval(donGio);
+  donGio = null;
+  dangChay = false;
+}
+
+/** Đang bật hay không — để cửa trạng thái khai thật, KHÔNG phải đoán. */
+export function dangBat(): boolean {
+  return dangChay;
+}
