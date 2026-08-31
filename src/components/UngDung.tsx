@@ -252,7 +252,30 @@ const BO_VAN_HANH: string[] = [
  * 🛡 Cả 5 ghế phải khai `thu_muc: /Users/erocathanh` trong `nhan-su.json` — kho phiên suy TỪ
  *    chỗ đứng, ⛔ khai thì `--resume` tìm ở kho khác và KHÔNG BAO GIỜ thấy.
  */
-const BO_QUAN_LY_CU: { ten: string; phien: string | null }[] = [
+type CapGheDungSan = { ten: string; phien: string | null; goiY?: string };
+
+/**
+ * 🏫 BỘ «QUẢN LÝ TRƯỜNG» — dựng lại 31/08 theo lệnh Owner. KHÁC «Quản Lý Cũ» ở CHỖ ĐỨNG:
+ * ```
+ * Quản Lý Cũ     thu_muc = /Users/erocathanh  ⇒ ĐỌC THẲNG phiên gốc ở kho nhà
+ * Quản Lý Trường thư mục RIÊNG `~/<tên ghế>`  ⇒ chỗ để FORK clone tệp .jsonl vào
+ * ```
+ * 🔑 Hai bộ KHÔNG thay thế nhau — chúng là HAI BƯỚC của một việc:
+ *    ① mở «Quản Lý Cũ» đọc phiên gốc   ② fork sang «Quản Lý Trường» thành phiên MỚI
+ *      mà vẫn mang theo lịch sử.
+ * ⚠️ Mã phiên ở đây đi vào `goiY` (mồi ô dán), KHÔNG vào `phien` — xem chú thích `CapGhe`.
+ *    Nhét vào `phien` là ô mở ra TRỐNG và KHÔNG có nút Fork.
+ */
+const BO_QUAN_LY_TRUONG: CapGheDungSan[] = [
+  { ten: 'claude-eroca-boss',       phien: null },
+  { ten: 'claude-hieu-truong',      phien: null, goiY: 'e888d879-dcfe-4dd5-87e1-3df4cc7bfe6b' },
+  { ten: 'claude-phong-dao-tao',    phien: null, goiY: '5956cd23-1533-4565-a7fc-0050769887dc' },
+  { ten: 'claude-phong-cong-nghe',  phien: null, goiY: '7911258a-2109-4d48-8a53-5286836daef6' },
+  { ten: 'claude-phong-tai-chinh',  phien: null, goiY: '823ce356-1bb7-4174-991f-8ccee76582fd' },
+  { ten: 'claude-phong-hanh-chinh', phien: null, goiY: '1f08afd0-73d8-45e9-86b5-0a06417bf7e1' },
+];
+
+const BO_QUAN_LY_CU: CapGheDungSan[] = [
   { ten: 'claude-eroca-boss',            phien: null },
   { ten: 'claude-bos-funnel-pm',         phien: 'e888d879-dcfe-4dd5-87e1-3df4cc7bfe6b' },
   { ten: 'claude-giao-trinh-eeat',       phien: '5956cd23-1533-4565-a7fc-0050769887dc' },
@@ -276,7 +299,7 @@ const BO_QUAN_LY_CU: { ten: string; phien: string | null }[] = [
 const LA_BO_DUNG_SAN = (ten: (string | null)[]): boolean =>
   // ⚠️ THÊM BỘ MỚI thì PHẢI thêm vào đây. Quên = lỗi 20/08 quay lại: Owner bấm hai bộ
   //    liên tiếp là đội THẬT của mình bị ghi đè, ⛔ có đường về.
-  [BO_MARKETING, BO_VAN_HANH, BO_QUAN_LY_CU.map((m) => m.ten)]
+  [BO_MARKETING, BO_VAN_HANH, BO_QUAN_LY_CU.map((m) => m.ten), BO_QUAN_LY_TRUONG.map((m) => m.ten)]
     .some((bo) => bo.every((x, i) => ten[i] === x));
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
@@ -465,7 +488,18 @@ export default function UngDung({
    *   → kho-phien.ts đặt ma_phien = null ⇒ LIÊN KẾT PHIÊN CŨ BỊ XOÁ
    * ⇒ lưu mỗi tên ghế thì «quay về» trả đúng TÊN mà ô RỖNG LỊCH SỬ — đúng vết đau 18/08.
    */
-  type CapGhe = { ten: string | null; phien: string | null };
+  /**
+   * @property goiY MÃ PHIÊN GỢI Ý — mồi sẵn vào ô dán, KHÔNG nối thẳng.
+   *
+   * 🕳 Vì sao KHÔNG dùng `phien`: `phien` đi thẳng qua `ghiO` + `napLichSu`, mà `/api/o`
+   *    CHỈ nhận phiên có thật trong kho của ĐÚNG ghế đó. Phiên «Quản Lý Cũ» nằm ở kho NHÀ
+   *    ⇒ ghế «Quản Lý Trường» (thư mục RIÊNG) bị chặn ⇒ ô mở ra TRỐNG, và KHÔNG có nút Fork
+   *    (nút đó chỉ hiện ở đường DÁN TAY).
+   * ✅ `goiY` mồi vào ô dán ⇒ Owner bấm «Nối phiên» ⇒ app thấy phiên ở thư mục khác
+   *    ⇒ chìa nút «Fork về ghế này» ⇒ tệp .jsonl được clone sang thư mục ghế mới.
+   *    Đúng luồng Owner mô tả 31/08.
+   */
+  type CapGhe = { ten: string | null; phien: string | null; goiY?: string };
   const [boGheCu, datBoGheCu] = useState<CapGhe[] | null>(null);
   const [nhacGD, datNhacGD] = useState('');
   useEffect(() => {
@@ -1215,6 +1249,12 @@ export default function UngDung({
          là phiên ô đó đang mở. ⇒ khôi phục phải chỉ ĐÍCH DANH.
          An toàn: `/api/o` chỉ nhận phiên CÒN THẬT trong kho của ĐÚNG ghế đó (o/route.ts:37)
          ⇒ phiên đã bị xoá thì máy chủ chặn, ⛔ không ghi bậy. */
+      /* 🏫 MỒI Ô DÁN — mở sẵn khối dán và điền mã phiên gợi ý.
+         KHÔNG nối thẳng: phiên đó nằm ở kho THƯ MỤC KHÁC, `/api/o` sẽ chặn.
+         Owner bấm «Nối phiên» ⇒ app chìa nút Fork ⇒ clone .jsonl sang thư mục ghế này. */
+      const goiY = muc[i]?.goiY;
+      if (goiY) capNhat(i, { moDan: true, chuoiDan: goiY, loiDan: '' });
+
       const phienLuu = muc[i]?.phien ?? null;
       if (phienLuu && dsORef.current[i]?.phienHienTai !== phienLuu) {
         capNhat(i, { chiPhi: null, token: null }); // ⚠️ ⛔ đặt phienHienTai — hàm đọc lo
@@ -2265,6 +2305,17 @@ export default function UngDung({
                   >
                     <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
                     Quản Lý Cũ — 6 ô
+                  </button>
+                  {/* 🏫 «Quản Lý Trường» — dựng lại 31/08. Bộ này KHÔNG ghim phiên:
+                      5 ghế đứng ở THƯ MỤC RIÊNG, mã phiên cũ chỉ được MỒI vào ô dán (`goiY`)
+                      để Owner bấm «Nối phiên» → app chìa nút Fork → clone .jsonl sang đây. */}
+                  <button
+                    className="muc-menu" type="button" role="menuitem"
+                    title={BO_QUAN_LY_TRUONG.map((m) => m.ten).join(' · ')}
+                    onClick={() => { void napBoGhe(BO_QUAN_LY_TRUONG, true); }}
+                  >
+                    <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
+                    Quản Lý Trường — 6 ô
                   </button>
                 </div>
               )}

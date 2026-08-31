@@ -47,6 +47,12 @@
       "icon": "🗄",
       "ten": "Quản Lý Cũ",
       "so_nhan_su": 5
+    },
+    {
+      "ma": "quan-ly-truong",
+      "icon": "🏫",
+      "ten": "Quản Lý Trường",
+      "so_nhan_su": 5
     }
   ],
   "nhan_su": [
@@ -1393,6 +1399,41 @@
       "viet_tat": "AE",
       "nhan": "Thợ code app AIBOSS",
       "soul": "/Users/erocathanh/claude-aiboss-app-exe/CLAUDE.md"
+    },
+    {
+      "ten": "claude-hieu-truong",
+      "phong": "quan-ly-truong",
+      "vai": "Hiệu Trưởng",
+      "viet_tat": "HT",
+      "nhan": "HIỆU TRƯỞNG"
+    },
+    {
+      "ten": "claude-phong-dao-tao",
+      "phong": "quan-ly-truong",
+      "vai": "Phòng Đào Tạo",
+      "viet_tat": "PĐT",
+      "nhan": "PHÒNG ĐÀO TẠO"
+    },
+    {
+      "ten": "claude-phong-cong-nghe",
+      "phong": "quan-ly-truong",
+      "vai": "Phòng Công Nghệ",
+      "viet_tat": "PCN",
+      "nhan": "PHÒNG CÔNG NGHỆ"
+    },
+    {
+      "ten": "claude-phong-tai-chinh",
+      "phong": "quan-ly-truong",
+      "vai": "Phòng Tài Chính",
+      "viet_tat": "PTC",
+      "nhan": "PHÒNG TÀI CHÍNH"
+    },
+    {
+      "ten": "claude-phong-hanh-chinh",
+      "phong": "quan-ly-truong",
+      "vai": "Phòng Hành Chính",
+      "viet_tat": "PHC",
+      "nhan": "PHÒNG HÀNH CHÍNH"
     }
   ],
   "tong": 225
