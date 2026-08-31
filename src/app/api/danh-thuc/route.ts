@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { layTatCa } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { CAU_HINH } from '@/lib/cau-hinh';
-import { xinLuot, xepHang, xemSo, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
+import { xinLuot, xepHang, xemSo, timTheoKhoa, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,6 +25,8 @@ interface Than {
   ma_nhan_su?: unknown;
   cau_hoi?: unknown;
   tu_ai?: unknown;
+  /** 🔑 Khoá chống trùng — TUỲ CHỌN. Cùng khoá ⇒ trả lại mẩu CŨ, ⛔ tạo mẩu mới. */
+  khoa?: unknown;
 }
 
 export async function GET() {
@@ -43,6 +45,32 @@ export async function POST(req: NextRequest) {
   const maNhanSu = typeof than.ma_nhan_su === 'string' ? than.ma_nhan_su.trim() : '';
   const cauHoi = typeof than.cau_hoi === 'string' ? than.cau_hoi.trim() : '';
   const tuAi = typeof than.tu_ai === 'string' ? than.tu_ai.trim() : '';
+  const khoa = typeof than.khoa === 'string' ? than.khoa.trim().slice(0, 80) : '';
+
+  /**
+   * 🔑 KHOÁ CHỐNG TRÙNG — kiểm TRƯỚC MỌI THỨ, kể cả trước khi xin suất.
+   *
+   * 🐛 Ca Hermes nêu: người gửi hết giờ chờ rồi gọi lại ⇒ **ghế chạy HAI LẦN,
+   *    Owner trả tiền hai lần**. Cùng khoá thì trả lại mẩu CŨ, ⛔ đẻ mẩu mới.
+   * ⚠️ Đặt ở ĐÂY, ⛔ đặt sau `xinLuot()`: gọi lại lần hai mà vẫn tiêu một suất của
+   *    trần 6 lượt/phút thì chính cái chống-trùng lại đi đốt hạn mức.
+   * 📌 Khoá là TUỲ CHỌN. ⛔ có khoá ⇒ xử như cũ — ⛔ ép người gọi cũ phải đổi.
+   */
+  if (khoa) {
+    const cu = timTheoKhoa(khoa);
+    if (cu) {
+      return Response.json({
+        xong: true,
+        trung_khoa: true,
+        ma_o: cu.ma_o,
+        ma_nhan_su: cu.ma_nhan_su,
+        ma_yeu_cau: cu.ma,
+        ghi_chu:
+          'Khoá này đã dùng rồi — trả lại ĐÚNG mẩu cũ, ⛔ tạo mẩu mới. ' +
+          'Ghế sẽ chỉ chạy MỘT lần cho khoá này.',
+      });
+    }
+  }
 
   if (!maNhanSu) return Response.json({ loi: 'Thiếu `ma_nhan_su` — muốn đánh thức ai?' }, { status: 400 });
   if (!cauHoi) return Response.json({ loi: 'Thiếu `cau_hoi` — đánh thức mà không nói gì thì phí một lượt.' }, { status: 400 });
@@ -104,7 +132,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const yeuCau = xepHang({ maO, maNhanSu, tuAi, cauHoi });
+  const yeuCau = xepHang({ maO, maNhanSu, tuAi, cauHoi, ...(khoa ? { khoa } : {}) });
 
   return Response.json({
     xong: true,

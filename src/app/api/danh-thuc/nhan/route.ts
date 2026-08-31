@@ -38,7 +38,7 @@ export const dynamic = 'force-dynamic';
  *    = 48 lượt gọi mỗi phút cho một việc thường xuyên rỗng. Gộp còn 12.
  */
 export async function POST(req: NextRequest) {
-  let than: { ds_o?: unknown; ds_ban?: unknown };
+  let than: { ds_o?: unknown; ds_ban?: unknown; ma_trinh_duyet?: unknown };
   try {
     than = await req.json();
   } catch {
@@ -71,6 +71,10 @@ export async function POST(req: NextRequest) {
           .slice(0, 8)
       : [];
 
+  // 🪪 Mã TAB — để biết mẩu đang được GIỮ CHỖ bởi ai. Tab khác ⛔ xác nhận hộ được.
+  const maTrinhDuyet =
+    typeof than.ma_trinh_duyet === 'string' ? than.ma_trinh_duyet.trim().slice(0, 64) : '';
+
   const dsO = locO(than.ds_o);
   const dsBan = locO(than.ds_ban);
 
@@ -86,7 +90,7 @@ export async function POST(req: NextRequest) {
   let lechGhe = 0;
   let thieuKhai = 0;
   for (const { ma_o: maO, ma_nhan_su: maNhanSu } of dsO) {
-    const kq = nhanYeuCau(maO, maNhanSu);
+    const kq = nhanYeuCau(maO, maNhanSu, maTrinhDuyet);
     lechGhe += kq.lechGhe;
     if (kq.thieuKhai) thieuKhai += 1;
     const y = kq.y;

@@ -1543,6 +1543,20 @@ export default function UngDung({
   const guiRef = useRef(gui);
   guiRef.current = gui;
   const dangThamDo = useRef(false);
+  /**
+   * 🪪 MÃ CỦA TAB NÀY — để máy chủ biết mẩu đang được GIỮ CHỖ bởi ai (P0-2b).
+   * ⚠️ Sinh MỘT LẦN cho mỗi lần mở trang, ⛔ lấy mã phiên chat: hai ô khác nhau vẫn
+   *    chung một tab, mà thứ giữ chỗ là TAB chứ ⛔ phải ô.
+   * 🔁 Tải lại trang ⇒ mã mới ⇒ mẩu tab cũ đang giữ sẽ hết hạn và QUAY LẠI hàng đợi.
+   *    Đó là ý đồ, ⛔ phải lỗi.
+   */
+  const maTrinhDuyet = useRef<string>('');
+  if (!maTrinhDuyet.current) {
+    maTrinhDuyet.current =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `td-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
 
   /**
    * 📡 MỘT NHỊP THĂM DÒ — tách khỏi đồng hồ để ô VỪA RẢNH gọi được NGAY,
@@ -1591,13 +1605,13 @@ export default function UngDung({
         const r = await fetch('/api/danh-thuc/nhan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ds_o: dsHoi, ds_ban: dsBan }),
+          body: JSON.stringify({ ds_o: dsHoi, ds_ban: dsBan, ma_trinh_duyet: maTrinhDuyet.current }),
         });
         if (!r.ok) return;
         const j = await r.json();
         const nhan = (j?.nhan ?? {}) as Record<
           string,
-          { ma_nhan_su: string; tu_ai: string; cau_hoi: string }
+          { ma: string; ma_nhan_su: string; tu_ai: string; cau_hoi: string }
         >;
 
         for (const [maO, y] of Object.entries(nhan)) {
@@ -1616,6 +1630,22 @@ export default function UngDung({
            */
           if (o.ns.ten !== y.ma_nhan_su) continue;
           void guiRef.current(i, y.cau_hoi, y.tu_ai);
+          /**
+           * ✅ XÁC NHẬN — gọi NGAY SAU KHI `gui()` đã bắt đầu, ⛔ phải trước.
+           *    Xác nhận trước là khai «đã giao» trong khi việc còn chưa chạy.
+           * 🔒 Trước khi có cổng này, máy chủ đánh dấu «đã xử» ngay lúc TRAO ⇒ tab chết
+           *    giữa chừng là mẩu mất mà ⛔ ai biết. Nay ⛔ xác nhận ⇒ mẩu QUAY LẠI.
+           * ⚠️ CHỖ CÒN HỞ, tôi ⛔ giấu: nếu `gui()` đã chạy mà lời xác nhận này rớt mạng,
+           *    mẩu sẽ quay lại hàng đợi và được giao LẦN NỮA ⇒ ghế chạy hai lần.
+           *    Cửa sổ rất hẹp (xác nhận đi ngay, hạn giữ chỗ 30 giây) và đây là đánh đổi
+           *    có chủ ý: **thà chạy lại còn hơn mất câu**. Muốn triệt thì phải có khoá
+           *    chống trùng ở tầng `gui()` — việc khác, ⛔ nhét vào đợt này.
+           */
+          void fetch('/api/danh-thuc/xac-nhan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ma: y.ma, ma_trinh_duyet: maTrinhDuyet.current }),
+          }).catch(() => { /* rớt một nhịp — mẩu sẽ quay lại, ⛔ làm ồn */ });
         }
       } catch {
         /* mất mạng một nhịp — nhịp sau thử lại, ⛔ đừng làm ồn */

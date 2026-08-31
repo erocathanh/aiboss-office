@@ -52,6 +52,47 @@ export const TRAN_MOI_PHUT = 6;
 const GIU_LICH_SU_MS = 10 * 60_000;
 const TRAN_DONG_SO = 60;
 
+/**
+ * 🏷 TRẠNG THÁI CÓ NHÃN — thay cho `da_xu: boolean` (P0-2b, 31/08/2026).
+ *
+ * 📐 HỌC HÌNH DẠNG openclaw `heartbeat-wake.ts:7-9`: kết quả của họ là HỢP CÓ NHÃN
+ *    `{status:"ran"|"skipped"|"failed", reason}` — ⛔ phải boolean.
+ * 🐛 VÌ SAO ĐỔI: `da_xu` là boolean nên nó ⛔ mang được LÝ DO. Mọi ca hỏng đều trông
+ *    GIỐNG HỆT NHAU: hết hạn, lệch ghế, tab chết giữa chừng — cùng ra `false` rồi biến mất.
+ *    Đó chính là gốc của «hỏng im lặng» mà đội này đuổi cả hai ngày.
+ */
+export type TrangThaiMau =
+  | 'cho'       /** chờ giao */
+  | 'dang_giu'  /** đã trao cho MỘT trình duyệt, đang chờ nó xác nhận */
+  | 'da_giao'   /** trình duyệt xác nhận đã bắt đầu gửi vào ô */
+  | 'bo';       /** bỏ — LUÔN kèm `ly_do`, ⛔ bao giờ bỏ trống */
+
+/**
+ * 📋 DANH SÁCH LÝ DO BỎ — tường minh, ⛔ phải chuỗi tự do.
+ * 📐 Học `heartbeat-wake.ts:11-27`: họ khai HẰNG SỐ cho từng lý do rồi dựng một
+ *    DANH SÁCH CHO PHÉP + một hàm hỏi. «Thử lại mọi thứ» sai; «bỏ mọi thứ» cũng sai.
+ */
+export const BO_QUA_HAN = 'qua-han';
+export const BO_QUA_TRAN_GIU = 'qua-tran-giu';
+export const BO_QUET_THEO_TUOI = 'quet-theo-tuoi';
+const LY_DO_BIET = new Set([BO_QUA_HAN, BO_QUA_TRAN_GIU, BO_QUET_THEO_TUOI]);
+
+/**
+ * 📐 Học `heartbeat-reason.ts`: lý do rỗng được chuẩn hoá thành MỘT giá trị ổn định,
+ *    ⛔ bao giờ để trống. Lý do trống thì cột «vì sao bỏ» thành vô dụng, mà đó đúng là
+ *    cột ta dựng máy trạng thái này để có.
+ */
+export function chuanHoaLyDo(lyDo?: string): string {
+  const s = (lyDo ?? '').trim();
+  if (!s) return 'khong-ro';
+  return LY_DO_BIET.has(s) ? s : s.slice(0, 60);
+}
+
+/** ⏳ Hạn GIỮ CHỖ khi đã trao mẩu cho một trình duyệt mà chưa được xác nhận.
+ *  🔴 30 GIÂY LÀ SỐ ĐỀ XUẤT, CHƯA ĐO — PM ghi rõ trong đề bài, tôi ghi lại ở đây.
+ *     ⛔ đóng đinh cho tới khi có số thật; ⛔ để nó thành «30 phút» thứ hai. */
+export const HAN_GIU_CHO_MS = 30_000;
+
 export interface YeuCauDanhThuc {
   ma: string;
   ma_o: string;
@@ -62,6 +103,16 @@ export interface YeuCauDanhThuc {
   luc: number;
   da_xu: boolean;
   xu_luc: number | null;
+  /** 🏷 Trạng thái có nhãn. `da_xu` giữ song song cho sổ CŨ còn đọc được. */
+  trang_thai?: TrangThaiMau;
+  /** Vì sao bỏ — BẮT BUỘC khi `trang_thai === 'bo'`. */
+  ly_do?: string;
+  /** Mã trình duyệt đang GIỮ CHỖ mẩu này (⛔ phải mã phiên chat). */
+  giu_boi?: string;
+  /** Hạn giữ chỗ; quá hạn mà chưa xác nhận ⇒ TỰ TRẢ VỀ 'cho'. */
+  giu_han?: number;
+  /** Khoá chống trùng do người gửi cấp — cùng khoá ⇒ trả lại mẩu CŨ. */
+  khoa?: string;
   /**
    * ⏳ Lần gần nhất ô đích được BÁO LÀ ĐANG BẬN. Có mặt = mẩu đang được giữ chờ ô rảnh.
    * Đồng hồ 3 phút tính từ mốc này thay vì từ `luc` — nhưng vẫn chịu trần `TRAN_GIU_MS`
@@ -122,6 +173,24 @@ function ghi(s: So): void {
 }
 
 function donDep(s: So, bayGio: number): So {
+  /**
+   * ↩️ BƯỚC 1 — TRẢ CHỖ TRƯỚC MỌI THỨ KHÁC.
+   * ⚠️ Thứ tự ở đây là thứ dễ làm sai nhất: nếu hỏi «còn dùng được ⛔» TRƯỚC khi trả chỗ,
+   *    mẩu đang giữ-quá-hạn vẫn mang nhãn 'dang_giu' ⇒ bị tính là đã xử ⇒ CHẾT OAN,
+   *    đúng cái lỗ ta dựng lease để bịt.
+   */
+  traVeMauHetHan(s, bayGio);
+
+  /**
+   * 🗑 BƯỚC 2 — mẩu 'cho' mà đã quá hạn thì BỎ **CÓ LÝ DO**, ⛔ để nó lặng lẽ biến mất.
+   *    Trước đây mẩu chỉ rơi khỏi danh sách; nay nó mang nhãn 'bo' + `ly_do` nên tra được.
+   */
+  for (const y of s.hang_doi) {
+    if (trangThai(y) !== 'cho') continue;
+    if (bayGio - y.luc >= TRAN_GIU_MS) { boMau(y, BO_QUA_TRAN_GIU, bayGio); continue; }
+    if (!conDung(y, bayGio)) boMau(y, BO_QUA_HAN, bayGio);
+  }
+
   const giu = s.hang_doi
     // ⏳ Mẩu đang được GIỮ vì ô bận phải sống quá mốc 10 phút — ⛔ thì trần 30 phút
     //    ⛔ bao giờ tới nơi, và mẩu vẫn chết âm thầm y như cũ, chỉ muộn hơn.
@@ -132,12 +201,56 @@ function donDep(s: So, bayGio: number): So {
   // Kêu ở ĐÂY vì đây đúng là chỗ mẩu biến mất ⇒ mỗi mẩu chỉ đi qua đúng MỘT lần.
   // (`baoMauChet` còn nhớ mã mẩu, nên `xemSo` đọc-mà-⛔-ghi cũng ⛔ làm kêu lặp.)
   for (const y of s.hang_doi) {
-    if (!y.da_xu && !giu.includes(y)) {
-      baoMauChet(y, { toanCuc: thamDoCuoiToanCuc, cuaO: thamDoTheoO.get(y.ma_o) ?? 0 }, bayGio);
-    }
+    if (trangThai(y) === 'cho' && !giu.includes(y)) boMau(y, BO_QUET_THEO_TUOI, bayGio);
   }
 
   return { hang_doi: giu, moc_goi: s.moc_goi.filter((t) => bayGio - t < 60_000) };
+}
+
+/**
+ * 🏷 Đọc trạng thái của một mẩu, CHỊU ĐƯỢC sổ cũ ⛔ có trường `trang_thai`.
+ * ⚠️ Sổ trên đĩa lúc nâng cấp vẫn còn mẩu kiểu CŨ. Đọc thẳng `y.trang_thai` là
+ *    `undefined` ⇒ mọi so sánh đều sai âm thầm. Phải quy đổi từ `da_xu`.
+ */
+export function trangThai(y: YeuCauDanhThuc): TrangThaiMau {
+  if (y.trang_thai) return y.trang_thai;
+  return y.da_xu ? 'da_giao' : 'cho';
+}
+
+/** Đặt trạng thái + GIỮ `da_xu` khớp theo, để mã cũ đọc sổ ⛔ hiểu sai. */
+function datTrangThai(y: YeuCauDanhThuc, tt: TrangThaiMau): void {
+  y.trang_thai = tt;
+  y.da_xu = tt !== 'cho';
+}
+
+/**
+ * 🗑 BỎ một mẩu — LUÔN kèm lý do, và LUÔN có tiếng.
+ * 📌 Việc ⑤ của đề: mọi lần bỏ phải kêu. Bỏ im lặng là con bệnh gốc.
+ */
+function boMau(y: YeuCauDanhThuc, lyDo: string, bayGio: number): void {
+  datTrangThai(y, 'bo');
+  y.ly_do = chuanHoaLyDo(lyDo);
+  baoMauChet(y, { toanCuc: thamDoCuoiToanCuc, cuaO: thamDoTheoO.get(y.ma_o) ?? 0 }, bayGio);
+}
+
+/**
+ * ↩️ TRẢ VỀ những mẩu đã trao mà QUÁ HẠN GIỮ CHỖ mà chưa được xác nhận.
+ *
+ * 🐛 Lỗ Hermes tìm ra: bản cũ đánh dấu «đã xử» NGAY lúc trao. Tab chết giữa chừng
+ *    (rớt mạng · đóng tab · lỗi phân tích) ⇒ mẩu coi như đã giao mà **⛔ ai nhận**.
+ * ✅ Nay trao chỉ là GIỮ CHỖ. ⛔ xác nhận trong hạn ⇒ mẩu QUAY LẠI hàng đợi, ⛔ mất.
+ */
+function traVeMauHetHan(s: So, bayGio: number): number {
+  let dem = 0;
+  for (const y of s.hang_doi) {
+    if (trangThai(y) !== 'dang_giu') continue;
+    if ((y.giu_han ?? 0) > bayGio) continue;
+    datTrangThai(y, 'cho');
+    delete y.giu_boi;
+    delete y.giu_han;
+    dem += 1;
+  }
+  return dem;
 }
 
 /**
@@ -149,7 +262,7 @@ function donDep(s: So, bayGio: number): So {
  *   Thiếu vế hai thì một ô bận liên tục sẽ gia hạn mẩu tới vô tận.
  */
 export function conDung(y: YeuCauDanhThuc, bayGio = Date.now()): boolean {
-  if (y.da_xu) return false;
+  if (trangThai(y) !== 'cho') return false;
   if (bayGio - y.luc >= TRAN_GIU_MS) return false;
   const mocDem = Math.max(y.luc, y.giu_toi ?? 0);
   return bayGio - mocDem < HAN_YEU_CAU_MS;
@@ -216,11 +329,62 @@ export function xinLuot(): KetQuaXin {
 }
 
 /** Xếp hàng yêu cầu — gọi SAU khi đã xin được suất và đã tìm ra ô. */
+/**
+ * 🔑 TRA MẨU THEO KHOÁ CHỐNG TRÙNG.
+ *
+ * 🐛 Ca Hermes nêu: người gửi hết giờ chờ rồi gọi lại ⇒ **ghế chạy HAI LẦN, Owner trả
+ *    tiền hai lần**. Cùng một khoá thì phải trả lại mẩu CŨ, ⛔ đẻ mẩu mới.
+ * ⏱ Cửa sổ chống trùng = **đúng bằng đời của mẩu trong sổ** (`GIU_LICH_SU_MS`).
+ *    Tôi ⛔ dựng cửa sổ riêng: thêm một con số nữa là thêm một con số phải đo,
+ *    mà đội này vừa trả giá cho một con số ⛔ ai đo.
+ */
+export function timTheoKhoa(khoa: string, bayGio = Date.now()): YeuCauDanhThuc | null {
+  if (!khoa) return null;
+  const s = donDep(doc(), bayGio);
+  const y = s.hang_doi.find((x) => x.khoa === khoa) ?? null;
+  ghi(s);
+  return y;
+}
+
+export type KetQuaXacNhan = { xong: true } | { xong: false; ly_do: string };
+
+/**
+ * ✅ TRÌNH DUYỆT XÁC NHẬN đã bắt đầu đưa câu vào ô.
+ *
+ * 📌 Gọi SAU KHI `gui()` đã chạy, ⛔ phải trước. Xác nhận trước là nói dối:
+ *    nó khai «đã giao» trong khi việc còn chưa bắt đầu.
+ * 🔁 Xác nhận HAI LẦN là vô hại (trả `xong: true`) — mạng chập thì trình duyệt gửi lại,
+ *    ⛔ nên phạt nó vì cẩn thận.
+ * ⚠️ Nếu giữa lúc trao và lúc xác nhận mà hạn giữ chỗ đã hết, `donDep` đưa mẩu về 'cho'
+ *    ⇒ ở đây trả về THẤT BẠI CÓ LÝ DO, ⛔ im lặng nuốt.
+ */
+export function xacNhanDaGiao(ma: string, maTrinhDuyet: string): KetQuaXacNhan {
+  const bayGio = Date.now();
+  const s = donDep(doc(), bayGio);
+  const y = s.hang_doi.find((x) => x.ma === ma);
+  if (!y) { ghi(s); return { xong: false, ly_do: 'khong-thay-mau' }; }
+
+  const tt = trangThai(y);
+  if (tt === 'da_giao') { ghi(s); return { xong: true }; }
+  if (tt !== 'dang_giu') { ghi(s); return { xong: false, ly_do: `trang-thai-${tt}` }; }
+  if (y.giu_boi && maTrinhDuyet && y.giu_boi !== maTrinhDuyet) {
+    ghi(s);
+    return { xong: false, ly_do: 'khac-trinh-duyet' };
+  }
+
+  datTrangThai(y, 'da_giao');
+  y.xu_luc = bayGio;      // ⏱ mốc giao THẬT — chỉ đặt ở đây, ⛔ đặt lúc trao
+  delete y.giu_han;
+  ghi(s);
+  return { xong: true };
+}
+
 export function xepHang(ts: {
   maO: string;
   maNhanSu: string;
   tuAi: string;
   cauHoi: string;
+  khoa?: string;
 }): YeuCauDanhThuc {
   const bayGio = Date.now();
   const s = donDep(doc(), bayGio);
@@ -232,6 +396,8 @@ export function xepHang(ts: {
     cau_hoi: ts.cauHoi,
     luc: bayGio,
     da_xu: false,
+    trang_thai: 'cho',
+    ...(ts.khoa ? { khoa: ts.khoa } : {}),
     xu_luc: null,
   };
   s.hang_doi.push(yeuCau);
@@ -269,7 +435,11 @@ export interface KetQuaNhan {
  * ⚠️ `maNhanSu = null` (trình duyệt cũ ⛔ khai) ⇒ **⛔ GIAO**. Thà chậm còn hơn giao nhầm người.
  *    Mẩu ⛔ ai nhận sẽ tự chết theo hạn và `baoMauChet` kêu — nên ⛔ im lặng hoàn toàn.
  */
-export function nhanYeuCau(maO: string, maNhanSu: string | null): KetQuaNhan {
+export function nhanYeuCau(
+  maO: string,
+  maNhanSu: string | null,
+  maTrinhDuyet = '',
+): KetQuaNhan {
   const bayGio = Date.now();
   // Ghi nhận TRƯỚC khi dọn: chính lượt thăm dò đang diễn ra này phải được tính.
   ghiNhanThamDo(maO, bayGio);
@@ -282,8 +452,17 @@ export function nhanYeuCau(maO: string, maNhanSu: string | null): KetQuaNhan {
     ghi(s);
     return { y: null, lechGhe, thieuKhai: !maNhanSu && hop.length > 0 };
   }
-  y.da_xu = true;
-  y.xu_luc = bayGio;
+  /**
+   * 🤝 TRAO = GIỮ CHỖ, ⛔ phải «đã xong».
+   * 🐛 Bản cũ đặt `da_xu = true` NGAY tại đây ⇒ tab chết giữa chừng là mẩu coi như đã giao
+   *    mà **⛔ ai nhận**. Nay phải có XÁC NHẬN từ trình duyệt mới sang 'da_giao';
+   *    quá hạn mà im ⇒ `traVeMauHetHan` đưa nó về 'cho'.
+   * ⚠️ `xu_luc` CHỈ đặt lúc XÁC NHẬN — ⛔ đặt ở đây. Cột nghiệm thu ④ của ghế soi
+   *    («đánh dấu đã giao mà ⛔ có mốc giao» = 0) chính là để bắt chỗ này.
+   */
+  datTrangThai(y, 'dang_giu');
+  y.giu_boi = maTrinhDuyet || 'khong-ro';
+  y.giu_han = bayGio + HAN_GIU_CHO_MS;
   ghi(s);
   return { y, lechGhe, thieuKhai: false };
 }
