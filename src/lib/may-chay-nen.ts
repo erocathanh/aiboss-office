@@ -62,12 +62,27 @@ export async function raMotVong(bayGio = Date.now()): Promise<number> {
   const cho = so.hang_doi.filter((y) => y.trang_thai === 'cho');
   if (cho.length === 0) return 0;
 
+  /**
+   * 🔴 ẢNH CHỤP + SỔ NHẬN TRONG VÒNG — hai thứ, KHÔNG phải một.
+   *
+   * 🕳 LỖI THẬT (claude-phong-ban-pm bắt 31/08 20:23, tôi mô phỏng lại ra đúng 2 lượt):
+   *    bản đầu chỉ có ẢNH CHỤP `dsViec()` lấy MỘT LẦN ngoài vòng, còn `chayMotLuot`
+   *    thì gọi KHÔNG `await`. Hai mẩu CÙNG MỘT GHẾ trong cùng một vòng quét:
+   *      mẩu 1 → ghế chưa có trong ảnh ⇒ qua chốt ⇒ khởi chạy
+   *      mẩu 2 → ảnh VẪN CŨ (chưa kịp có pid) ⇒ qua chốt ⇒ **KHỞI CHẠY LẦN HAI**
+   *    ⇒ ghế chạy hai lần, Owner trả tiền hai lần — đúng ca tôi tự gọi là ĐẮT NHẤT,
+   *      và tôi để hở nó ngay trong cái chốt sinh ra để chặn nó.
+   * 📌 `dangKyViec` chỉ xảy ra ở `khiSinh`, tức SAU khi tiến trình đã sinh. Giữa lúc quyết định
+   *    và lúc có pid là một khoảng trống — ảnh chụp không bao giờ lấp được khoảng đó.
+   *    Phải có một sổ RIÊNG của vòng này, cập nhật NGAY lúc quyết định.
+   */
   const dangChayTheoGhe = new Set(dsViec().map((v) => v.ma_nhan_su));
+  const daNhanTrongVong = new Set<string>();
   let daChay = 0;
 
   for (const y of cho) {
-    // ── chốt ②: ghế đang chạy ở đâu đó rồi
-    if (dangChayTheoGhe.has(y.ma_nhan_su)) {
+    // ── chốt ②: ghế đang chạy ở đâu đó rồi, HOẶC vừa được nhận trong CHÍNH vòng này
+    if (dangChayTheoGhe.has(y.ma_nhan_su) || daNhanTrongVong.has(y.ma_nhan_su)) {
       dem.boQuaDangChay++;
       continue;
     }
@@ -83,6 +98,10 @@ export async function raMotVong(bayGio = Date.now()): Promise<number> {
     if (!ket.y) continue; // ai đó nhanh tay hơn — đúng thứ ta muốn
     const xn = xacNhanDaGiao(ket.y.ma, NGUOI_GIU_NEN);
     if (!xn.xong) continue;
+
+    // ⚠️ ĐÁNH DẤU NGAY, trước khi gọi — KHÔNG đợi tới lúc có pid.
+    //    Đặt sau `nhanYeuCau` để mẩu bị người khác nhanh tay lấy mất thì KHÔNG khoá oan ghế.
+    daNhanTrongVong.add(y.ma_nhan_su);
 
     const o = layO(y.ma_o);
     const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
