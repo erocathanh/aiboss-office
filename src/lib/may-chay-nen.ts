@@ -34,7 +34,8 @@
 import { chayMotLuot } from '@/lib/chay-mot-luot';
 import { nhanYeuCau, xacNhanDaGiao, xemSo } from '@/lib/kho-danh-thuc';
 import { dsViec } from '@/lib/kho-tien-trinh';
-import { layO } from '@/lib/kho-phien';
+import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
+import { coPhien, dangChay as dangChayNoiKhac } from '@/lib/doc-phien';
 
 /** Mã người giữ mẩu, để phân biệt với trình duyệt trong sổ. */
 export const NGUOI_GIU_NEN = 'may-chu-nen';
@@ -49,13 +50,27 @@ let dangChay = false;
 let donGio: ReturnType<typeof setInterval> | null = null;
 
 /** Số đo để nghiệm thu — KHÔNG suy từ «không thấy gì». */
-export const dem = { vong: 0, daChay: 0, boQuaDangChay: 0, boQuaCoTrinhDuyet: 0, loi: 0 };
+export const dem = {
+  vong: 0, daChay: 0, boQuaDangChay: 0, boQuaCoTrinhDuyet: 0, loi: 0,
+  /** phiên trong sổ đã hỏng ⇒ phải mở phiên mới */ mophienMoi: 0,
+  /** ghế đang chạy Ở NƠI KHÁC (terminal) ⇒ đứng ngoài */ boQuaChayNoiKhac: 0,
+};
 
 /**
  * Rà MỘT vòng. Trả về số lượt đã khởi chạy trong vòng này.
  * Tách riêng để nghiệm thu gọi thẳng được, KHÔNG phải chờ đồng hồ.
  */
-export async function raMotVong(bayGio = Date.now()): Promise<number> {
+export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Promise<number> {
+  /**
+   * 🔴 CHỐT CÔNG TẮC PHẢI Ở ĐÂY, KHÔNG CHỈ Ở `bat()` — hermes-aiboss-app-review FAIL ⑤, 31/08.
+   *    `raMotVong` được EXPORT. Ai `import` rồi gọi thẳng là đi vòng qua `bat()` hoàn toàn.
+   *    Và chính chú thích cũ của tôi MỜI GỌI làm thế («tách riêng để nghiệm thu gọi thẳng»).
+   * 🔑 Câu tôi khai với Owner — «mặc định TẮT nên nạp vào KHÔNG đổi hành vi» — SAI ở biên mô-đun.
+   *    Một công tắc chỉ gác cửa trước mà bỏ ngỏ cửa sau thì nó KHÔNG phải công tắc.
+   * ⚠️ `chophepKhiTat` chỉ dành cho phép thử, và nó phải được TRUYỀN TỪNG LẦN — không có
+   *    biến toàn cục nào bật nó vĩnh viễn.
+   */
+  if (process.env.CHAY_NEN !== '1' && !chophepKhiTat) return 0;
   dem.vong++;
   const so = xemSo();
   // Chỉ quan tâm mẩu ĐANG CHỜ. Mẩu 'dang_giu' là của người khác — kể cả của chính ta.
@@ -78,6 +93,18 @@ export async function raMotVong(bayGio = Date.now()): Promise<number> {
    */
   const dangChayTheoGhe = new Set(dsViec().map((v) => v.ma_nhan_su));
   const daNhanTrongVong = new Set<string>();
+  /**
+   * 🔴 CHỤP DẤU THĂM DÒ TRƯỚC VÒNG — hermes-aiboss-app-review, phát hiện NGOÀI ĐỀ ①.
+   *    `nhanYeuCau` LUÔN gọi `ghiNhanThamDo`, kể cả khi người gọi là chính bộ nền.
+   *    ⇒ vừa nhận một mẩu là bộ nền TỰ ĐÓNG DẤU như một trình duyệt, rồi mẩu sau trong
+   *      cùng vòng (và cả vòng kế) nhìn dấu của CHÍNH MÌNH mà kết luận «có trình duyệt».
+   * 📌 Đây là lỗi TRÌ HOÃN, không phải chạy trùng — nhưng nó làm bộ nền tự trói tay 45 giây
+   *    sau mỗi mẩu, đúng lúc lẽ ra nó phải làm việc nhiều nhất.
+   */
+  const dauThamDoDauVong = new Map<string, number | undefined>();
+  for (const y of cho) {
+    if (!dauThamDoDauVong.has(y.ma_o)) dauThamDoDauVong.set(y.ma_o, layThamDo(y.ma_o));
+  }
   let daChay = 0;
 
   for (const y of cho) {
@@ -88,7 +115,7 @@ export async function raMotVong(bayGio = Date.now()): Promise<number> {
     }
     // ── chốt ③: còn trình duyệt lái ô này thì nhường
     //    (đọc qua `xemSo` KHÔNG có dấu thăm dò, nên hỏi thẳng kho)
-    const imBaoLau = bayGio - (layThamDo(y.ma_o) ?? 0);
+    const imBaoLau = bayGio - (dauThamDoDauVong.get(y.ma_o) ?? 0);
     if (imBaoLau < IM_CAN_MS) {
       dem.boQuaCoTrinhDuyet++;
       continue;
@@ -104,7 +131,34 @@ export async function raMotVong(bayGio = Date.now()): Promise<number> {
     daNhanTrongVong.add(y.ma_nhan_su);
 
     const o = layO(y.ma_o);
-    const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
+    let maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
+
+    /**
+     * 🔴 HAI CHỐT MÀ ĐƯỜNG CŨ CÓ CÒN ĐƯỜNG NÀY THIẾU — hermes FAIL ⑥, 31/08.
+     *
+     * 🕳 Tôi viết trong `chay-mot-luot.ts` rằng «cố ý KHÔNG gói chốt vào lõi, NGƯỜI GỌI tự lo»,
+     *    rồi người gọi là chính tôi, và tôi KHÔNG lo. Chú thích đó còn LIỆT KÊ chúng ra
+     *    như thể đã có — ai đọc lướt sẽ thấy một danh sách chốt đầy đủ.
+     * 🔑 **Khai một ranh giới KHÔNG phải là đã giữ ranh giới đó.**
+     *
+     * (a) `coPhien` — đường cũ kiểm bản ghi phiên còn sống TRƯỚC khi `--resume`
+     *     (`api/chat/route.ts:68-87`). Thiếu nó ⇒ sổ ô giữ mã phiên đã hỏng ⇒ `--resume` MÙ.
+     *     Vá: hỏng thì MỞ PHIÊN MỚI (`maPhienCu = null`) chứ KHÔNG bỏ mẩu — mẩu đã `da_giao` rồi,
+     *     bỏ ở đây là mất câu của người ta.
+     * (b) `dangChay` — đường cũ chặn ghế đang chạy Ở NƠI KHÁC (cửa sổ dòng lệnh), thứ mà
+     *     `dsViec()` KHÔNG thấy vì nó chỉ biết tiến trình do app sinh.
+     *     Thiếu nó ⇒ terminal đang `--resume P` mà bộ nền cũng `--resume P`
+     *     ⇒ HAI tiến trình ghi CÙNG một `.jsonl`.
+     */
+    if (maPhienCu && !coPhien(y.ma_nhan_su, maPhienCu)) {
+      dem.mophienMoi++;
+      maPhienCu = null;
+    }
+    if (maPhienCu && dangChayNoiKhac(y.ma_nhan_su, maPhienCu, o?.moc_ket_thuc ?? null)) {
+      dem.boQuaChayNoiKhac++;
+      daNhanTrongVong.delete(y.ma_nhan_su); // trả ghế lại, KHÔNG khoá oan
+      continue;
+    }
 
     // KHÔNG `await` — một mẩu chạy chậm KHÔNG được chặn mẩu của ô khác.
     void chayMotLuot(
@@ -117,6 +171,14 @@ export async function raMotVong(bayGio = Date.now()): Promise<number> {
     ).then(
       (kq) => {
         if (kq.loi) dem.loi++;
+        /**
+         * 🔴 GHI MỐC KẾT THÚC — hermes, phát hiện NGOÀI ĐỀ ②.
+         *    Đường cũ ghi mốc này (`api/chat/route.ts:243`); đường nền thì KHÔNG.
+         *    Thiếu nó ⇒ `dangChay` thấy phiên vừa sửa mà KHÔNG có mốc sở hữu
+         *    ⇒ coi ghế là CÒN BẬN tới 5 phút sau khi nó đã xong.
+         */
+        // ⚠️ chữ ký là (maO, mocMs) — KHÔNG phải (maO, maPhien). tsc bắt đúng chỗ này.
+        ghiMocKetThuc(y.ma_o, Date.now());
       },
       () => {
         dem.loi++;
