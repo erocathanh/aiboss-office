@@ -145,6 +145,41 @@ thường là một dấu phẩy.
 🗓 31/08 · phép do `claude-aiboss-app-pm` đề · biến thể do `claude-eroca-boss` đề ·
    `claude-phong-ban-pm` là người đầu tiên bị chính nó đo, và nhận
 
+### 0.5 🔑 TÁCH LÕI RA KHỎI VỎ ⇒ phải **ĐẾM LẠI CHỐT Ở CẢ HAI BÊN**, ⛔ soi theo danh sách
+Ca thật 31/08: tôi tách lõi chạy lượt khỏi `api/chat/route.ts`. Hai người soi, **cả hai đều hụt**
+cùng một chỗ; người thứ ba (ngoài Claude) bắt được ngay.
+```
+tôi (tác giả)  đưa ra một danh sách chốt để người soi kiểm
+ghế soi        tự đặt thêm một danh sách của mình
+⇒ CẢ HAI danh sách đều do người ĐANG NHÌN VÀO BẢN MỚI viết ra
+⇒ ⛔ ai đi hỏi: «đường CŨ có gì mà đường MỚI thiếu?»
+```
+🕳 Thứ bị bỏ rơi: `coPhien` (kiểm bản ghi phiên còn sống trước khi `--resume`) và `dangChay`
+(chặn ghế đang chạy ở cửa sổ dòng lệnh). Cả hai **chỉ còn nằm trong CHÚ THÍCH** của lõi mới —
+0 lệnh gọi — trong khi đường cũ gọi thật 3 lần và 2 lần.
+🔴 **Và chú thích ấy LIỆT KÊ chúng như thứ đã có.** Người đọc lướt thấy một danh sách chốt đầy đủ.
+> **Khai một ranh giới ⛔ phải là đã giữ ranh giới đó.**
+
+```bash
+# ĐO LẠI — phép soi cho MỌI lần tách/đổi đường đi:
+# ① liệt kê chốt của đường CŨ (đường đang chạy thật)
+git grep -n -E 'coPhien|dangChay|xinLuot|timNhanSu' -- src/app/api/chat/route.ts
+# ② liệt kê chốt của đường MỚI
+git grep -n -E 'coPhien|dangChay|xinLuot|timNhanSu' -- src/lib/chay-mot-luot.ts src/lib/may-chay-nen.ts
+# ③ TRỪ hai danh sách. Mỗi chốt CŨ mà MỚI ⛔ có ⇒ phải có LÝ DO viết ra, ⛔ phải im lặng.
+# ĐỐI CHỨNG DƯƠNG BẮT BUỘC: đếm trên đường CŨ phải RA SỐ > 0.
+#   Ra 0 cả hai bên nghĩa là mẫu grep sai, ⛔ phải «hai bên đều sạch».
+# ⚠️ grep bắt CẢ chú thích. Thấy tên chốt thì phải MỞ RA NHÌN nó là LỆNH GỌI hay chỉ là chữ.
+#   Đây đúng chỗ tôi qua mặt được hai người soi.
+```
+
+📌 **Vì sao người ngoài bắt được:** họ ⛔ mang theo danh sách của ai. Hermes tự dựng phép so
+bản-mới-với-bản-cũ vì nó ⛔ được cho một danh sách để tin.
+🔑 Nói cách khác: **một người soi được đưa danh sách sẽ soi ĐÚNG danh sách đó — và chỉ danh sách đó.**
+Danh sách càng đầy đủ trông càng đáng tin, thì càng ít ai nghĩ tới việc đi tìm ngoài nó.
+🗓 31/08 · `hermes-aiboss-app-review` bắt (FAIL ⑥) · `claude-phong-ban-pm` gọi tên phép soi còn thiếu
+   · `claude-aiboss-app-pm` là tác giả chỗ hổng
+
 ## 🔔 KHU 1 · ĐÁNH THỨC GHẾ
 
 ### 1.1 CÓ HAI BỘ ĐẾM KHÁC NHAU — đừng nhầm chúng làm một
