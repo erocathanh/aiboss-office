@@ -86,7 +86,9 @@ grep -c 'dangChay: false' ~/Projects/aiboss-app-chat/src/components/UngDung.tsx 
 
 ### 2.2 CSS nằm ở HAI tệp — `globals.css` nhập `mau09.css` ở dòng 2 ⇒ **globals ĐÈ mau09**
 ```bash
-head -3 ~/Projects/aiboss-app-chat/src/app/globals.css
+grep -n '@import' ~/Projects/aiboss-app-chat/src/app/globals.css
+# ĐỐI CHỨNG DƯƠNG: phải ra ĐÚNG 1 dòng, và nó nhập mau09.css.
+# Ra rỗng ⇒ cấu trúc CSS đã đổi ⇒ mục này LỖI THỜI, sửa ngay.
 ```
 ⇒ Nói «KHÔNG có luật cho X» mà mới grep một tệp là kết luận SAI.
 
