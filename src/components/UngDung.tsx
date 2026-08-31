@@ -1296,7 +1296,9 @@ export default function UngDung({
       const cauDau = (dsORef.current[i]?.cauDauFork ?? '').trim();
       if (cauDau) {
         capNhat(i, { cauDauFork: '' });
-        void guiRef.current(i, cauDau);
+        // 🔴 `true` = ÉP «đã có phiên». Bỏ nó đi là câu dặn đẻ ra phiên THỨ BA
+        //    khi ghế chưa từng có phiên — ref lúc này vẫn là bản CŨ.
+        void guiRef.current(i, cauDau, undefined, true);
       }
     } catch {
       capNhat(i, { dangFork: false, loiDan: '⛔ Không gọi được máy chủ để fork.' });
@@ -1375,7 +1377,31 @@ export default function UngDung({
    * `chuGoi` + `tuAi` chỉ có khi câu đến từ CỔNG ĐÁNH THỨC (ghế khác gửi sang).
    * Người gõ tay thì ⛔ không truyền gì — câu lấy từ ô soạn như cũ.
    */
-  async function gui(i: number, chuGoi?: string, tuAi?: string) {
+  /**
+   * @param daCoPhien ÉP «ô này ĐÃ có phiên», bỏ qua `o.phienHienTai` đọc từ ref.
+   *
+   * 🕳 CA THẬT 31/08 (Owner bắt, `claude-phong-ban-pm` truy ra, và tôi CHẶN KỊP trước khi nạp):
+   *    `forkVeGhe` gọi `capNhat({phienHienTai: mã MỚI})` rồi gọi `gui()` NGAY.
+   *    `capNhat` chỉ xếp một lần vẽ lại; `dsORef.current` gán trong THÂN component (:530)
+   *    ⇒ giữa hai lệnh đó ⛔ có `await` nào ⇒ React CHƯA vẽ lại ⇒ **ref vẫn là bản CŨ**.
+   * 📌 THỨ TỰ DÒNG đúng, THỨ TỰ THỰC THI thì ⛔. Tôi tự viết chú thích cảnh báo đúng chỗ này
+   *    rồi vẫn ngã — vì tôi cho rằng `capNhat` làm ref mới ngay, mà nó ⛔.
+   *
+   * 🔬 HẬU QUẢ THẬT — tôi lần theo đường đi, và nó HẸP HƠN chẩn đoán ban đầu:
+   * ```
+   *   sổ ô SAU fork ĐÃ mang mã MỚI  (fork/route.ts:113 gọi `datO`)
+   *   ca ① ghế ĐANG có phiên cũ ⇒ ref cũ ⛔ null ⇒ phien_moi=false
+   *        ⇒ máy chủ lấy mã từ SỔ Ô = mã MỚI ⇒ ĐÚNG. Ca này KHÔNG hỏng.
+   *   ca ② ghế CHƯA có phiên    ⇒ ref cũ = null ⇒ phien_moi=TRUE
+   *        ⇒ chat/route.ts:59 ép maPhienCu=null ⇒ 🔴 ĐẺ RA PHIÊN THỨ BA
+   * ```
+   * ⇒ Đúng một ca hỏng, và nó hỏng IM LẶNG: ghế vẫn trả lời, Owner tưởng xong.
+   *
+   * ✅ Vì sao truyền tham số chứ ⛔ gán tay vào `dsORef`: gán tay là ghi đè một ref
+   *    React cũng ghi ⇒ đẻ lỗi khác về sau. Tham số thì **⛔ phụ thuộc thời điểm** —
+   *    mà thời điểm chính là thứ vừa lừa cả hai người soi.
+   */
+  async function gui(i: number, chuGoi?: string, tuAi?: string, daCoPhien?: boolean) {
     // ⚠️ Đọc `dsORef` chứ ⛔ đừng đọc `dsO`: hàm này còn được gọi từ bộ thăm dò
     //    (hẹn giờ), nơi bao đóng giữ ảnh chụp CŨ của trạng thái.
     const o = dsORef.current[i];
@@ -1399,7 +1425,8 @@ export default function UngDung({
       if (tuGo) setTimeout(() => tuCao(oGoRefs.current[i]), 0); // ô gõ co lại sau khi xếp hàng
       return;
     }
-    const phienMoiKhong = o.phienHienTai === null;
+    // ⭐ `daCoPhien` ĐÈ lên giá trị đọc từ ref — xem chú thích đầu hàm.
+    const phienMoiKhong = daCoPhien === true ? false : o.phienHienTai === null;
 
     if (tuGo) setTimeout(() => tuCao(oGoRefs.current[i]), 0); // ô gõ co lại sau khi gửi
     capNhat(i, (cu) => ({
