@@ -437,7 +437,7 @@ grep -n 'DS_GHE\|exit 3' ~/Operations/scripts/hen-khoi-dong-lai-app.sh | head -4
 🕳 Ca sinh luật: bộ hẹn canh đúng MỘT ghế, nổ giữa lúc ghế khác đang nói ⇒ **cắt ngang câu của exe**.
 🗓 31/08 · `claude-aiboss-app-pm` (chính tôi gây ra)
 
-### 3.4 Tab cũ tự lộ ra là nó cũ (P1-8) — ba chỗ hở, và cái thứ ba làm nó im ĐÚNG lần nạp đầu
+### 3.8 Tab cũ tự lộ ra là nó cũ (P1-8) — ba chỗ hở, và cái thứ ba làm nó im ĐÚNG lần nạp đầu
 ```bash
 # máy chủ ĐANG PHỤC VỤ bản nào — hỏi thẳng, KHÔNG suy từ mốc tệp
 curl -s -X POST localhost:4319/api/danh-thuc/nhan -H 'Content-Type: application/json' \
@@ -480,6 +480,53 @@ phủ toàn màn, băng nằm trong dòng chảy sẽ bị che SẠCH đúng tr�
 (cùng BUILD_ID) ⇒ băng phải IM. Thiếu nó thì một cái băng **luôn hiện** cũng qua được phép kiểm,
 và ta có thêm một phép kiểm chết. Nó chứng minh ta so BẢN DỰNG, KHÔNG phải so «máy chủ có khởi lại».
 🗓 đo 31/08 16:2x · `claude-aiboss-app-exe` (chỗ hở ③ do `claude-phong-ban-pm` tìm ra) · 7/7 cổng đạt
+
+### 3.9 Cửa hỏng PHẢI NÓI RA (P1-8b) — và ngưỡng báo động chọn thế nào cho khỏi bị bỏ qua
+```bash
+# ĐO khoảng chết mỗi lần nạp — quyết định ngưỡng phải dựa vào ca XẤU NHẤT, KHÔNG phải trung vị
+bash ~/Operations/scripts/do-khoang-chet-nap.sh
+# n=10 · nhỏ nhất 3s · trung vị 9s · LỚN NHẤT 9s   (đo 30-31/08, CHẶN TRÊN)
+# ngưỡng đang dùng: 3 nhịp × 5s = 15s  ⇒ dư 6s so với ca xấu nhất
+```
+🕳 **Ca:** `if (!r.ok) return` bỏ qua lặng lẽ khi cửa lỗi. Nghe như chuyện nhỏ — «trễ một nhịp
+rồi tự khỏi». Nhưng lời gọi lỗi **KHÔNG mang dữ liệu nào**, nên việc phải làm KHÔNG phải «thử lại»
+mà là **cho cái hỏng LÊN TIẾNG**.
+🔑 **Vế nâng nó từ «nhỏ» lên CAO:** cửa hỏng và mã cũ **hay đi cùng nhau**. Đúng lúc app trục trặc
+là lúc người dùng cần biết nhất, mà lại là lúc app câm nhất.
+📌 **Nếp rút ra:** xếp mức cho một chỗ hở thì phải xét cả những chỗ hở nó HAY ĐI KÈM.
+Hai lỗi «nhỏ» xảy ra cùng lúc thì tổng của chúng KHÔNG nhỏ. (Ba người nhìn cùng một dòng,
+hai người xếp nhẹ — người thứ ba nhìn ra chỗ hai lỗ gặp nhau.)
+
+⏱ **CHỌN NGƯỠNG — vì sao 3 chứ KHÔNG phải 1:**
+```
+mỗi lần nạp lại máy chủ đều chết vài giây ⇒ ngưỡng 1 là băng NHẤP NHÁY MỖI LẦN NẠP
+🔑 một băng kêu sai thì người ta học cách bỏ qua nó — và thế là mất luôn những lần nó kêu ĐÚNG
+```
+⚖️ **Con số 3 là số CHỌN theo lý, nhưng ĐÃ có 10 lần nạp thật đứng sau** (bảng trên).
+Người sau muốn sửa thì biết mình đang sửa cái gì, và biết cả giới hạn: đó là **CHẶN TRÊN**,
+khoảng chết thật còn ngắn hơn.
+
+🔀 **MỘT băng cho hai trạng thái, ĐỪNG dựng băng thứ hai:** hai băng giành nhau đỉnh màn,
+mà biến `--cao-bang` chỉ đo được MỘT cái ⇒ cái kia đẩy đáy ra ngoài (xem 3.8).
+Thứ tự: cái Owner **LÀM ĐƯỢC** đứng trước cái anh ấy KHÔNG làm gì được.
+⚠️ **Câu chữ chỉ nói thứ biết chắc:** «đã hỏi 3 lần liên tiếp mà chưa nhận được trả lời».
+KHÔNG nói «app đang hỏng» — ta KHÔNG biết vì sao, và KHÔNG biết app còn chạy việc hay KHÔNG.
+
+🪤 **HAI BẪY ĐO CẮN TRONG CHÍNH VIỆC NÀY — cả hai đều là thước ĐÚNG mà DÙNG SAI:**
+```
+① ĐO SAI LÚC. Phép thử đầu: cho cửa hỏng 4 nhịp rồi CHỜ 26 giây mới nhìn ⇒ ra 0
+   ⇒ suýt kết luận «bản vá KHÔNG chạy». Sự thật: cửa hồi từ nhịp thứ 5, băng hiện RỒI TẮT
+     trước lúc nhìn. Cứu được là nhờ phép thử in kèm BỐI CẢNH («gọi 8 · lỗi 4»), KHÔNG phải
+     chỉ in đúng/sai.
+   ⇒ NẾP: phép thử phải in cả bối cảnh. Rẻ hơn một vòng cả đội đi tìm lỗi ma.
+② ĐỐI CHỨNG DƯƠNG CHỌN SAI MẪU. Kiểm sổ có mục P1-8b chưa, tôi lấy «bang-ma-cu» làm
+   đối chứng dương ⇒ ra 0 ⇒ tưởng thước câm. Thật ra chuỗi đó CHƯA BAO GIỜ có trong sổ.
+   ⇒ Số 0 nói về MẪU, KHÔNG nói về THƯỚC.
+   🔑 Đối chứng dương chỉ có nghĩa khi mẫu là thứ **CHẮC CHẮN CÓ**. Lấy một thứ mình
+     CHƯA KIỂM làm đối chứng thì đó là thêm một ẩn số, KHÔNG phải thêm một điểm tựa.
+```
+🗓 đo 31/08 17:2x · `claude-aiboss-app-exe` (mức CAO do `claude-aiboss-app-pm` nâng ·
+bảng 10 lần nạp do `claude-aiboss-app-pm` rút, tôi chạy lại lệnh tái tạo và KHỚP nguyên văn)
 
 ---
 
