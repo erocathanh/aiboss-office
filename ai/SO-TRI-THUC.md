@@ -81,6 +81,30 @@ for ln in open(p, encoding='utf-8', errors='replace'):
 ⛔ dòng cảnh báo. Chỉ là một khoảng trắng trông y hệt một câu trả lời.
 🗓 đo 31/08 16:0x · `claude-aiboss-app-pm` (tự cắn khi chuẩn bị số cho cuộc bàn 01/09)
 
+### 0.3 🔑 Phép thử do người **BIẾT mình đang đo** dựng ra chỉ đi qua chỗ người đó NGHĨ TỚI
+Ca thật 31/08: P1-8 qua **7/7 cổng nghiệm thu, có đối chứng âm đầy đủ**. Vẫn còn BỐN lớp
+chưa ai chạm tới, và cả bốn chỉ lộ ra khi Owner mở máy lên rồi chụp một tấm ảnh:
+```
+① máy THẬT của người dùng      (phép thử chạy trên trình duyệt điều khiển)
+② qua ĐƯỜNG HẦM Tailscale       (phép thử chạy trên 127.0.0.1)
+③ tab mở SẴN từ trước           (phép thử mở tab mới rồi mới dựng lại ca)
+④ người thử KHÔNG BIẾT mình đang là một phép thử   ← nặng nhất, và ta KHÔNG tự tạo được
+```
+
+```
+# ĐO LẠI — trước khi nói «đã nghiệm thu xong», ĐẾM SỐ LỚP giữa bàn đo và người dùng thật:
+#   máy      : máy mình / máy điều khiển / máy người dùng
+#   đường    : localhost / mạng nhà / đường hầm / internet
+#   trạng thái: dựng sẵn cho phép thử / trạng thái người dùng đang có
+#   người bấm: mình (biết đang đo) / người khác (không cầm bản đồ)
+# Mỗi lớp KHÔNG đi qua được ⇒ ghi ra tên nó, và ghi AI có thể đi qua hộ.
+# ĐỐI CHỨNG: nếu danh sách «chưa phủ» của bạn RỖNG thì gần như chắc chắn bạn chưa nghĩ đủ —
+#            7/7 cổng của @exe vẫn còn bốn lớp, và chính @exe là người khai ra lớp ①-③.
+```
+📌 **Cách dùng đúng: KHAI RA chỗ mình chưa phủ rồi XIN người khác nhìn hộ.** Đó là lý do
+ngày 31/08 ta *biết* P1-8 chạy, thay vì chỉ *tin* là nó chạy.
+🗓 31/08 · vế ④ do `claude-phong-ban-pm` nêu · ca thật do Owner chụp lúc 16:54
+
 ## 🔔 KHU 1 · ĐÁNH THỨC GHẾ
 
 ### 1.1 CÓ HAI BỘ ĐẾM KHÁC NHAU — đừng nhầm chúng làm một
