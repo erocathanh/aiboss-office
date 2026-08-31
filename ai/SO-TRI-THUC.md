@@ -105,6 +105,46 @@ chưa ai chạm tới, và cả bốn chỉ lộ ra khi Owner mở máy lên r�
 ngày 31/08 ta *biết* P1-8 chạy, thay vì chỉ *tin* là nó chạy.
 🗓 31/08 · vế ④ do `claude-phong-ban-pm` nêu · ca thật do Owner chụp lúc 16:54
 
+### 0.4 🔑 CẢ SỔ NÀY SOI **SỐ**. Thứ lọt tới tay Owner hôm nay là một **CÂU**.
+Ngày 31/08 đội dựng đủ đồ nghề cho SỐ: đối chứng dương · đối chứng âm · lệnh tái tạo ·
+đường dẫn bền · «rỗng KHÔNG phải là 0» · «số mở cổng soi kỹ hơn số mô tả» ·
+«n=2 chứng minh phương sai, KHÔNG chứng minh tỉ lệ».
+**Cho CÂU thì không có gì cả.** Một câu chỉ cần nghe xuôi là qua.
+
+🕳 **Ba ca thật, trong MỘT giờ, ba người khác nhau:**
+```
+① claude-aiboss-app-pm  → Owner: «đội làm xong tối nay ⇒ cửa sổ tự đóng, anh KHÔNG cần làm gì»
+② claude-eroca-boss     → chuyển nguyên câu đó đi, sau khi đo BỐN con số quanh nó (đúng cả bốn)
+③ claude-phong-ban-pm   → Owner: «anh chỉ cần một câu tick là đủ»
+```
+Cả ba câu **đều KHÔNG chứa mệnh đề sai nào**. Chúng sai ở chỗ **NỐI**.
+
+```
+# PHÉP KIỂM CHO CÂU — rẻ ngang phép kiểm cho số:
+#   Câu nào có dạng «làm X ⇒ được Y» thì hỏi lại đúng một câu:
+#      «LIỆT KÊ MỌI ĐƯỜNG tới Y. Có đường nào KHÔNG cần một điều kiện tôi CHƯA nói ra không?»
+#   Mọi đường đều cần một điều kiện mà câu không nhắc  ⇒  CÂU ĐÓ SAI, dù nghe xuôi.
+#
+# BIẾN THỂ cho câu «anh KHÔNG cần làm gì» (claude-eroca-boss đặt):
+#      «KHÔNG làm gì thì việc này TỰ đóng không? Chỉ ra cơ chế tự đóng.»
+#   Chỉ không ra  ⇒  câu đó SAI, dù MỌI SỐ quanh nó đều đúng.
+```
+✅ **Phép này bắt được ngay trong giờ nó ra đời:** `claude-phong-ban-pm` áp nó lên câu của
+CHÍNH MÌNH và tìm ra chỗ thiếu — «tick là đủ» sót điều kiện *«và để trình duyệt mở thêm một lúc»*,
+vì chỉ trình duyệt mới chạy được ghế (`/api/chat` gọi từ ĐÚNG 1 chỗ trong `UngDung.tsx`).
+```
+Owner tick VÀ để trình duyệt mở thêm  ⇒ cửa sổ ĐÓNG
+Owner tick RỒI TẮT NGAY               ⇒ quyết định có, cửa sổ VẪN MỞ
+Owner KHÔNG tick                      ⇒ cửa sổ mở
+```
+Ba lối, ba kết cục. Câu cũ gộp hai lối đầu làm một.
+
+📌 **Vì sao loại lỗi này khó nhất:** một SỐ sai thì đối chứng bắt được. Một CÂU sai kiểu này
+**không có mệnh đề nào sai để bắt** — nó chỉ thiếu một điều kiện ở chỗ nối, và chỗ nối
+thường là một dấu phẩy.
+🗓 31/08 · phép do `claude-aiboss-app-pm` đề · biến thể do `claude-eroca-boss` đề ·
+   `claude-phong-ban-pm` là người đầu tiên bị chính nó đo, và nhận
+
 ## 🔔 KHU 1 · ĐÁNH THỨC GHẾ
 
 ### 1.1 CÓ HAI BỘ ĐẾM KHÁC NHAU — đừng nhầm chúng làm một
