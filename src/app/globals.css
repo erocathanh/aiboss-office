@@ -365,3 +365,12 @@ body { padding-top: var(--cao-bang); }
     height: calc(100dvh - var(--cao-bang));
   }
 }
+
+/* 🔀 P1-8b — CÙNG một cái băng, đổi MÀU để phân biệt hai chuyện khác hẳn nhau:
+   vàng = «mã của bạn cũ» (Owner bấm Tải lại là xong)
+   đỏ   = «cửa KHÔNG trả lời» (Owner KHÔNG làm gì được, chỉ cần biết)
+   ⛔ dựng băng thứ hai: hai băng giành nhau đỉnh màn, mà `--cao-bang` chỉ đo được MỘT cái
+   ⇒ cái kia đẩy đáy ra ngoài — đúng chỗ vừa vá ở cổng ⑥. */
+.bang-ma-cu.bang-cua-hong { background: #3a1414; color: #f0a0a0; border-bottom-color: #6b2020; }
+.bang-ma-cu.bang-cua-hong b { color: #ffc9c9; }
+.bang-ma-cu.bang-cua-hong .nut-tai-lai { background: #f0a0a0; border-color: #b95a5a; color: #2a0d0d; }

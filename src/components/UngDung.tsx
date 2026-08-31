@@ -1610,6 +1610,24 @@ export default function UngDung({
   // `null` = CHƯA đo lần nào. ⛔ dùng chuỗi rỗng làm mốc «chưa đo»: rỗng là một GIÁ TRỊ
   //   hợp lệ thật (`next dev`), gộp hai thứ đó là đẻ lại đúng chỗ hở thứ ba.
   const banDungDauTien = useRef<string | null>(null);
+
+  /**
+   * 🔴 CỬA HỎNG PHẢI NÓI RA (@aiboss-app-pm xếp mức CAO, 31/08 16:40).
+   *
+   * 🕳 Trước đây `if (!r.ok) return` bỏ qua lặng lẽ. Tôi từng cãi «chỉ trễ một nhịp rồi tự khỏi»
+   *    — SAI CHỖ: lời gọi lỗi ⛔ MANG dấu vân nào cả, nên ⛔ có gì để so. Việc phải làm ⛔ phải
+   *    là so tiếp, mà là **cho cái hỏng LÊN TIẾNG**, đúng khuôn P1-7.
+   * 📌 Vế @app-pm nêu mà tôi nghĩ chưa tới: **cửa hỏng và mã cũ hay đi cùng nhau.**
+   *    Đúng lúc app trục trặc là lúc tab cần biết nhất, mà lại là lúc nó câm nhất.
+   * ⏱ Ngưỡng 3 lần LIÊN TIẾP (≈15 giây). Vì sao ⛔ phải 1:
+   *    mỗi lần nạp lại máy chủ đều có vài giây chết (đo 31/08: đổi pid mất 3-6 giây)
+   *    ⇒ ngưỡng 1 là băng nhấp nháy mỗi lần nạp. **Một băng kêu sai thì người ta học cách bỏ qua nó**,
+   *    và thế là mất luôn cả những lần nó kêu đúng.
+   * 🔄 Thành công MỘT lần là xoá sạch — ⛔ cộng dồn qua các đợt hỏng rời rạc.
+   */
+  const HONG_LIEN_TIEP_MAX = 3;
+  const demHong = useRef(0);
+  const [cuaHong, datCuaHong] = useState(false);
   const banRef = useRef<HTMLDivElement | null>(null);
 
   /**
@@ -1743,7 +1761,12 @@ export default function UngDung({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ds_o: dsHoi, ds_ban: dsBan, ma_trinh_duyet: maTrinhDuyet.current }),
         });
-        if (!r.ok) return;
+        if (!r.ok) {
+          // Cửa trả mã lỗi ⇒ ⛔ có dấu vân để so. Đếm, và im cho tới khi đủ ngưỡng.
+          demHong.current += 1;
+          if (demHong.current >= HONG_LIEN_TIEP_MAX) datCuaHong(true);
+          return;
+        }
         const j = await r.json();
 
         /**
@@ -1778,6 +1801,13 @@ export default function UngDung({
          *    thì Owner ⛔ bị làm phiền — đó là vế chứng minh ta so BẢN DỰNG, ⛔ phải so
          *    «máy chủ có khởi lại ⛔».
          */
+        // ✅ Một lần trả lời được là cửa còn sống ⇒ xoá sạch, ⛔ để vết hỏng cũ dồn lại.
+        demHong.current = 0;
+        // ⛔ cần `ref` để soi trạng thái hiện thời: React BỎ QUA lần đặt cùng giá trị,
+        // nên gọi thẳng `datCuaHong(false)` mỗi nhịp là vô hại và ⛔ đẻ lần vẽ thừa.
+        // (Bản đầu tôi bịa ra một `cuaHongRef` ⛔ hề tồn tại — thước `tsc` bắt được ngay.)
+        datCuaHong(false);
+
         const coKhoa = j != null && Object.prototype.hasOwnProperty.call(j, 'ban_dung');
         const vanBan = !coKhoa
           ? '(khong-co-khoa)'
@@ -1824,7 +1854,12 @@ export default function UngDung({
           }).catch(() => { /* rớt một nhịp — mẩu sẽ quay lại, ⛔ làm ồn */ });
         }
       } catch {
-        /* mất mạng một nhịp — nhịp sau thử lại, ⛔ đừng làm ồn */
+        /**
+         * Mất mạng / máy chủ đang khởi lại. Một nhịp thì im — nhịp sau thử lại.
+         * Nhưng LIÊN TIẾP đủ ngưỡng thì phải nói: đây ⛔ còn là «một nhịp xui».
+         */
+        demHong.current += 1;
+        if (demHong.current >= HONG_LIEN_TIEP_MAX) datCuaHong(true);
       } finally {
         dangThamDo.current = false;
       }
@@ -1921,11 +1956,29 @@ export default function UngDung({
         *    ⛔ chặn thao tác — để Owner chọn LÚC.
         * ♿ `role="status"` để trình đọc màn hình đọc lên khi băng xuất hiện.
         */}
-      {maCu && (
-        <div className="bang-ma-cu" ref={banRef} role="status">
-          <span>
-            Bản mới đã lên máy chủ. Trang này đang chạy mã <b>CŨ</b>.
-          </span>
+      {(maCu || cuaHong) && (
+        <div className={`bang-ma-cu${maCu ? '' : ' bang-cua-hong'}`} ref={banRef} role="status">
+          {/**
+            * 🔀 MỘT BĂNG, HAI CÂU — ⛔ dựng băng thứ hai.
+            *    Hai băng thì chúng giành nhau chỗ trên đỉnh màn, và biến `--cao-bang` chỉ đo
+            *    được MỘT cái ⇒ cái kia đẩy đáy ra ngoài. Đúng thứ vừa vá xong ở cổng ⑥.
+            * 🥇 `maCu` ĐI TRƯỚC: «mã của bạn cũ» là việc Owner LÀM ĐƯỢC ngay (bấm Tải lại).
+            *    «cửa ⛔ trả lời» thì anh ấy ⛔ làm gì được — báo trước cái làm được.
+            */}
+          {maCu ? (
+            <span>
+              Bản mới đã lên máy chủ. Trang này đang chạy mã <b>CŨ</b>.
+            </span>
+          ) : (
+            /**
+             * ⚠️ NÓI ĐÚNG THỨ BIẾT CHẮC. Ta biết: đã hỏi 3 lần liên tiếp mà ⛔ ai trả lời.
+             *    Ta ⛔ biết vì sao, và ⛔ biết app có còn chạy việc ⛔ ⇒ ⛔ hứa hộ điều đó.
+             */
+            <span>
+              Đã hỏi máy chủ <b>3 lần liên tiếp</b> mà chưa nhận được trả lời. Câu gửi tới các ghế
+              có thể chưa đi được.
+            </span>
+          )}
           <button
             type="button"
             className="nut-tai-lai"
