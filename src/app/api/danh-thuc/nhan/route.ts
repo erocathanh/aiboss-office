@@ -29,30 +29,59 @@ export async function POST(req: NextRequest) {
     return Response.json({ loi: 'Thân yêu cầu không phải JSON.' }, { status: 400 });
   }
 
-  const locMaO = (v: unknown): string[] =>
+  /**
+   * Nhận CẢ HAI dạng: chuỗi `"o-1"` (bản cũ) và vật `{ma_o, ma_nhan_su}` (bản nay).
+   * ⚠️ Dạng cũ ⇒ `ma_nhan_su = null` ⇒ **⛔ được giao** (xem `nhanYeuCau`).
+   *    Tab cũ còn mở thì nó ⛔ nhận được gì, nhưng thà thế còn hơn giao cho NHẦM GHẾ.
+   */
+  const locO = (v: unknown): { ma_o: string; ma_nhan_su: string | null }[] =>
     Array.isArray(v)
-      ? v.filter((x): x is string => typeof x === 'string' && /^o-\d+$/.test(x)).slice(0, 8)
+      ? v
+          .flatMap((x) => {
+            if (typeof x === 'string') {
+              return /^o-\d+$/.test(x) ? [{ ma_o: x, ma_nhan_su: null }] : [];
+            }
+            if (x && typeof x === 'object') {
+              const o = x as { ma_o?: unknown; ma_nhan_su?: unknown };
+              if (typeof o.ma_o === 'string' && /^o-\d+$/.test(o.ma_o)) {
+                return [{
+                  ma_o: o.ma_o,
+                  ma_nhan_su: typeof o.ma_nhan_su === 'string' ? o.ma_nhan_su : null,
+                }];
+              }
+            }
+            return [];
+          })
+          .slice(0, 8)
       : [];
 
-  const dsO = locMaO(than.ds_o);
-  const dsBan = locMaO(than.ds_ban);
+  const dsO = locO(than.ds_o);
+  const dsBan = locO(than.ds_ban);
 
   // ⏳ GIỮ TRƯỚC, NHẶT SAU — ⛔ đảo thứ tự.
   //    Đảo lại thì trong cùng một nhịp, mẩu của ô bận có thể vừa kịp hết hạn ở bước nhặt
   //    rồi mới được giữ ⇒ giữ một cái đã chết, và ⛔ ai biết vì cả hai bước đều «xong».
-  const daGiu = giuChoOBan(dsBan);
+  const daGiu = giuChoOBan(dsBan.map((x) => x.ma_o));
 
   const nhan: Record<
     string,
     { ma: string; ma_nhan_su: string; tu_ai: string; cau_hoi: string; luc: number }
   > = {};
-  for (const maO of dsO) {
-    const y = nhanYeuCau(maO);
+  let lechGhe = 0;
+  let thieuKhai = 0;
+  for (const { ma_o: maO, ma_nhan_su: maNhanSu } of dsO) {
+    const kq = nhanYeuCau(maO, maNhanSu);
+    lechGhe += kq.lechGhe;
+    if (kq.thieuKhai) thieuKhai += 1;
+    const y = kq.y;
     // ⭐ Trả kèm `ma_nhan_su`: mẩu nhắm vào GHẾ, ⛔ vào ô. Ô có thể đã đổi ghế kể từ
     //   lúc xếp hàng ⇒ ⛔ có trường này thì bên nhận ⛔ cách nào biết mình có đúng người.
     if (y) nhan[maO] = { ma: y.ma, ma_nhan_su: y.ma_nhan_su, tu_ai: y.tu_ai, cau_hoi: y.cau_hoi, luc: y.luc };
   }
 
-  // `da_giu` để bên nghiệm thu ĐẾM được, ⛔ phải suy từ việc «⛔ thấy lỗi».
-  return Response.json({ nhan, da_giu: daGiu });
+  /**
+   * Mấy con số này để bên nghiệm thu ĐẾM được, ⛔ phải suy từ việc «⛔ thấy lỗi».
+   * `lech_ghe` > 0 nghĩa là CÓ mẩu đang nằm chờ đúng ghế — ⛔ phải «⛔ có việc gì».
+   */
+  return Response.json({ nhan, da_giu: daGiu, lech_ghe: lechGhe, thieu_khai: thieuKhai });
 }

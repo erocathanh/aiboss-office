@@ -1576,8 +1576,12 @@ export default function UngDung({
        *    vào `ds_ban` là giữ một mẩu suốt 30 phút cho một chỗ ⛔ ai ngồi.
        */
       const coGhe = dsORef.current.map((o, i) => ({ o, i })).filter(({ o }) => o.ns);
-      const dsHoi = coGhe.filter(({ o }) => !o.dangChay && !o.dangNap).map(({ i }) => maOCua(i));
-      const dsBan = coGhe.filter(({ o }) => o.dangChay || o.dangNap).map(({ i }) => maOCua(i));
+      // 🎯 KHAI LUÔN GHẾ đang ngồi trong ô. Máy chủ khớp CẢ ô LẪN ghế mới dám giao —
+      //    ô đổi ghế giữa chừng mà chỉ khớp theo ô thì câu đi tới một Claude KHÁC.
+      const khai = ({ o, i }: { o: OChat; i: number }) =>
+        ({ ma_o: maOCua(i), ma_nhan_su: o.ns!.ten });
+      const dsHoi = coGhe.filter(({ o }) => !o.dangChay && !o.dangNap).map(khai);
+      const dsBan = coGhe.filter(({ o }) => o.dangChay || o.dangNap).map(khai);
       // ⛔ Về sớm khi ⛔ có ô rảnh — vẫn phải báo `ds_ban` để máy chủ GIỮ mẩu.
       //    Về sớm ở đây đúng là chỗ mẩu chết trong khi ta tưởng đã lo xong.
       if (dsHoi.length === 0 && dsBan.length === 0) return;
@@ -1591,7 +1595,10 @@ export default function UngDung({
         });
         if (!r.ok) return;
         const j = await r.json();
-        const nhan = (j?.nhan ?? {}) as Record<string, { tu_ai: string; cau_hoi: string }>;
+        const nhan = (j?.nhan ?? {}) as Record<
+          string,
+          { ma_nhan_su: string; tu_ai: string; cau_hoi: string }
+        >;
 
         for (const [maO, y] of Object.entries(nhan)) {
           const i = Number(maO.slice(2)) - 1;
@@ -1599,6 +1606,15 @@ export default function UngDung({
           const o = dsORef.current[i];
           // Ô vừa bận đi trong lúc chờ mạng → bỏ lượt này, ⛔ đừng chen vào phiên đang chạy.
           if (!o?.ns || o.dangChay) continue;
+          /**
+           * 🎯 CHỐT CUỐI: ô có thể ĐỔI GHẾ trong lúc phản hồi đang bay về.
+           *    Máy chủ đã khớp ghế rồi, đây là lớp thứ hai cho đúng khoảnh khắc đó.
+           * ⚠️ NÓI THẲNG CHỖ CÒN HỞ: máy chủ ĐÃ đánh dấu mẩu là đã-xử trước khi trả về,
+           *    nên bỏ ở đây là **mẩu MẤT**. Cửa sổ chỉ vài mili-giây và mất còn hơn giao
+           *    nhầm người — nhưng đây đúng là chỗ mà việc «máy trạng thái + xác nhận đã nhận»
+           *    (đang chờ đề bài) sẽ vá. ⛔ tự dựng nửa vời ở đây.
+           */
+          if (o.ns.ten !== y.ma_nhan_su) continue;
           void guiRef.current(i, y.cau_hoi, y.tu_ai);
         }
       } catch {

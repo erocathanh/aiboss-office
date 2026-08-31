@@ -35,6 +35,13 @@ export const HAN_YEU_CAU_MS = 3 * 60_000;
  * ⚠️ Nhưng ⛔ được giữ vô hạn: ô bận vĩnh viễn thì mẩu sống mãi, mà **giữ mãi cũng là
  *    một kiểu im lặng** — chỉ khác chỗ nó im ở phía bên kia. Quá trần này thì BỎ,
  *    và mẩu rơi khỏi sổ với `da_xu = false` nên `baoMauChet` tự kêu + tự ghi sổ đếm.
+ *
+ * 🔴 CON SỐ 30 PHÚT LÀ SỐ ĐẶT RA, ⛔ PHẢI SỐ ĐO ĐƯỢC — đính chính 30/08 sau khi Hermes soi.
+ *    Nó KHÔNG lấy từ đâu cả; ai đọc chú thích cũ dễ tưởng nó có căn cứ.
+ *    Đo tại nguồn `~/Development/openclaw/src/infra/heartbeat-wake.ts:94`:
+ *      DEFAULT_RETRY_MS = 1_000  ·  DEFAULT_COALESCE_MS = 250
+ *      ⇒ openclaw **⛔ có hạn sống** cho mẩu bị chặn vì bận — họ THỬ LẠI sau 1 giây.
+ *    ⇒ Cả cách «giữ rồi đặt trần» này còn đang chờ đề bài lại. ⛔ xây tiếp lên nó.
  */
 export const TRAN_GIU_MS = 30 * 60_000;
 
@@ -240,20 +247,45 @@ export function xepHang(ts: {
  *    cùng thăm dò sẽ nhận trùng một yêu cầu ⇒ chạy hai lượt = trả tiền hai lần.
  *    Mất một lượt đánh thức (tải lại trang đúng lúc) rẻ hơn chạy đúp.
  */
-export function nhanYeuCau(maO: string): YeuCauDanhThuc | null {
+export interface KetQuaNhan {
+  y: YeuCauDanhThuc | null;
+  /** Có mẩu hợp lệ cho ô này nhưng nhắm vào GHẾ KHÁC ⇒ TRẢ VỀ hàng đợi, ⛔ giao. */
+  lechGhe: number;
+  /** Trình duyệt ⛔ khai ghế đang ngồi ⇒ ⛔ dám giao (đóng cửa khi ⛔ chắc). */
+  thieuKhai: boolean;
+}
+
+/**
+ * 🎯 LẤY mẩu cho một ô — phải khớp **CẢ Ô LẪN GHẾ**.
+ *
+ * 🐛 CA THẬT (Hermes soi 30/08, xếp mức bảo mật/ngữ cảnh): mẩu ghi CẢ `ma_o` LẪN
+ *    `ma_nhan_su` lúc xếp hàng, nhưng lúc lấy chỉ lọc theo `ma_o`.
+ *    ⇒ Ghế trong ô ĐỔI giữa lúc xếp hàng và lúc giao thì **câu đi tới một Claude KHÁC**.
+ *    Owner nói 30/08: «chuyển giao diện từ phòng Vận Hành qua các phòng khác là tôi HAY LÀM»
+ *    ⇒ ⛔ phải ca hiếm. Người nhận đọc một câu ⛔ dành cho mình, và ⛔ ai biết đã nhầm.
+ *
+ * ✅ Lệch ghế thì **để nguyên trong hàng đợi** — ⛔ đánh dấu đã xử. Ghế đúng quay lại là
+ *    nhận được. Bỏ đi mới là mất; giao nhầm còn tệ hơn mất.
+ * ⚠️ `maNhanSu = null` (trình duyệt cũ ⛔ khai) ⇒ **⛔ GIAO**. Thà chậm còn hơn giao nhầm người.
+ *    Mẩu ⛔ ai nhận sẽ tự chết theo hạn và `baoMauChet` kêu — nên ⛔ im lặng hoàn toàn.
+ */
+export function nhanYeuCau(maO: string, maNhanSu: string | null): KetQuaNhan {
   const bayGio = Date.now();
   // Ghi nhận TRƯỚC khi dọn: chính lượt thăm dò đang diễn ra này phải được tính.
   ghiNhanThamDo(maO, bayGio);
   const s = donDep(doc(), bayGio);
-  const y = s.hang_doi.find((x) => x.ma_o === maO && conDung(x, bayGio));
+  const hop = s.hang_doi.filter((x) => x.ma_o === maO && conDung(x, bayGio));
+  const y = maNhanSu ? hop.find((x) => x.ma_nhan_su === maNhanSu) ?? null : null;
+  // Đếm mẩu BỊ GIỮ LẠI vì lệch ghế — để bên ngoài ĐO được, ⛔ phải suy từ «⛔ thấy gì».
+  const lechGhe = hop.length - (y ? 1 : 0);
   if (!y) {
     ghi(s);
-    return null;
+    return { y: null, lechGhe, thieuKhai: !maNhanSu && hop.length > 0 };
   }
   y.da_xu = true;
   y.xu_luc = bayGio;
   ghi(s);
-  return y;
+  return { y, lechGhe, thieuKhai: false };
 }
 
 /** Xem sổ (chỉ đọc) — để nghiệm thu / tra cứu, ⛔ không đụng gì. */
