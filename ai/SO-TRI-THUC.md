@@ -147,6 +147,37 @@ print('có trang_thai:', sum(1 for x in h if 'trang_thai' in x), '/', len(h))"
 ```
 🗓 31/08 · `claude-phong-ban-pm`
 
+### 3.4 🔑 «IM» ⛔ CÓ NGHĨA «XONG» — và ĐỪNG lấy TRUNG VỊ làm ngưỡng
+```
+phân bố khoảng lặng giữa lượt (đo 3.541 lượt):
+   trung vị 20s   ·   phân vị 90 = 75s   ·   dài nhất 384s
+```
+🕳 **Ca thật 31/08 14:07:49:** bộ hẹn để `IM_CAN=20` — ĐÚNG BẰNG TRUNG VỊ — rồi nổ khi
+«ghế bận nhất im đúng 20s». Nó **cắt ngang hai ô đang nói**. Lấy trung vị làm mốc «đã xong»
+thì **~50% số lần nổ giữa lượt**.
+📌 Ghế đang **chờ công cụ** im **y hệt** ghế đã trả lời xong. Tệp KHÔNG phân biệt hai thứ đó.
+```bash
+# ĐO LẠI: ngưỡng đường-lùi phải là phân vị 90, KHÔNG phải trung vị
+grep -n 'IM_CAN=' ~/Operations/scripts/hen-khoi-dong-lai-app.sh
+# ĐỐI CHỨNG: phải ra 75. Ra 20 ⇒ ai đó hạ lại về trung vị ⇒ sẽ cắt ngang người khác.
+```
+🗓 31/08 · Owner bắt bằng 2 ảnh · `claude-aiboss-app-pm` gây ra và tự đo lại
+
+### 3.5 ✅ HỎI APP, ĐỪNG ĐOÁN — `GET /api/dung` là nguồn sự thật «ai đang chạy»
+```bash
+C=~/.bos-funnel-basic-auth
+curl -s -u "$(sed -n 1p $C|sed -E 's/^[^:]*:[[:space:]]*//'):$(sed -n 2p $C|sed -E 's/^[^:]*:[[:space:]]*//')" \
+  http://127.0.0.1:4319/api/dung
+# ĐỐI CHỨNG DƯƠNG: thân phải chứa "so_o_dang_chay"
+# ĐỐI CHỨNG ÂM   : /api/dung-bia phải ra 404
+```
+**Đo sống 31/08 14:1x:** cửa trả `so_o_dang_chay=2` (app-pm · app-exe) đúng lúc **cả hai đang
+im ở tầng tệp** ⇒ thước-đoán-bằng-mtime sẽ coi chúng là rảnh và nổ.
+🎁 Cửa này dựng ra để **trả lại nút Dừng sau F5**, nhưng nó chữa luôn bài **bộ hẹn nạp**.
+📌 **Một nguồn sự thật thật thì trả lời được cả câu ta chưa nghĩ tới lúc dựng nó.**
+Một phép đoán thì chỉ sai thêm ở mỗi câu mới.
+🗓 31/08 · `claude-aiboss-app-exe` dựng cửa · `claude-aiboss-app-pm` dùng lại cho bộ hẹn
+
 ### 3.3 Bộ hẹn nạp phải canh **MỌI** ghế, và quá trần thì **BÁO chứ ĐỪNG nổ**
 ```bash
 grep -n 'DS_GHE\|exit 3' ~/Operations/scripts/hen-khoi-dong-lai-app.sh | head -4
