@@ -16,19 +16,19 @@
       "ma": "marketing",
       "icon": "📣",
       "ten": "Marketing & Nội dung",
-      "so_nhan_su": 41
+      "so_nhan_su": 39
     },
     {
       "ma": "dao-tao",
       "icon": "🎓",
       "ten": "Đào tạo & Cohort",
-      "so_nhan_su": 28
+      "so_nhan_su": 22
     },
     {
       "ma": "ban-hang",
       "icon": "💰",
       "ten": "Bán hàng & Phễu",
-      "so_nhan_su": 15
+      "so_nhan_su": 14
     },
     {
       "ma": "studio",
@@ -40,7 +40,19 @@
       "ma": "dieu-hanh",
       "icon": "🏢",
       "ten": "Điều hành & Quản trị",
-      "so_nhan_su": 85
+      "so_nhan_su": 93
+    },
+    {
+      "ma": "quan-ly-cu",
+      "icon": "🗄",
+      "ten": "Quản Lý Cũ",
+      "so_nhan_su": 5
+    },
+    {
+      "ma": "quan-ly-truong",
+      "icon": "🏫",
+      "ten": "Quản Lý Trường",
+      "so_nhan_su": 5
     }
   ],
   "nhan_su": [
@@ -373,9 +385,10 @@
     },
     {
       "ten": "claude-bos-funnel-pm",
-      "phong": "ban-hang",
+      "phong": "quan-ly-cu",
       "vai": "Trưởng phòng",
-      "viet_tat": "BF"
+      "viet_tat": "BF",
+      "thu_muc": "/Users/erocathanh"
     },
     {
       "ten": "claude-bos-funnel-pm-r2",
@@ -709,9 +722,10 @@
     },
     {
       "ten": "claude-email-funnel-pm-296",
-      "phong": "marketing",
+      "phong": "quan-ly-cu",
       "vai": "Trưởng phòng",
-      "viet_tat": "EF"
+      "viet_tat": "EF",
+      "thu_muc": "/Users/erocathanh"
     },
     {
       "ten": "claude-email-funnel-pm-r2",
@@ -763,9 +777,10 @@
     },
     {
       "ten": "claude-giao-trinh-eeat",
-      "phong": "dao-tao",
+      "phong": "quan-ly-cu",
       "vai": "Chuyên viên",
-      "viet_tat": "GT"
+      "viet_tat": "GT",
+      "thu_muc": "/Users/erocathanh"
     },
     {
       "ten": "claude-glamorous-services-seed",
@@ -1243,9 +1258,10 @@
     },
     {
       "ten": "claude-tro-ly-dieu-hanh",
-      "phong": "dieu-hanh",
+      "phong": "quan-ly-cu",
       "vai": "Chuyên viên",
-      "viet_tat": "TL"
+      "viet_tat": "TL",
+      "thu_muc": "/Users/erocathanh"
     },
     {
       "ten": "claude-tro-ly-rieng",
@@ -1285,9 +1301,10 @@
     },
     {
       "ten": "claude-web-funnel",
-      "phong": "marketing",
+      "phong": "quan-ly-cu",
       "vai": "Chuyên viên",
-      "viet_tat": "WF"
+      "viet_tat": "WF",
+      "thu_muc": "/Users/erocathanh"
     },
     {
       "ten": "claude-wiki-program-pm",
@@ -1385,43 +1402,38 @@
     },
     {
       "ten": "claude-hieu-truong",
-      "phong": "dao-tao",
+      "phong": "quan-ly-truong",
       "vai": "Hiệu Trưởng",
       "viet_tat": "HT",
-      "nhan": "HIỆU TRƯỞNG",
-      "thu_muc": "/Users/erocathanh"
+      "nhan": "HIỆU TRƯỞNG"
     },
     {
       "ten": "claude-phong-dao-tao",
-      "phong": "dao-tao",
+      "phong": "quan-ly-truong",
       "vai": "Phòng Đào Tạo",
       "viet_tat": "PĐT",
-      "nhan": "PHÒNG ĐÀO TẠO",
-      "thu_muc": "/Users/erocathanh"
+      "nhan": "PHÒNG ĐÀO TẠO"
     },
     {
       "ten": "claude-phong-cong-nghe",
-      "phong": "dao-tao",
+      "phong": "quan-ly-truong",
       "vai": "Phòng Công Nghệ",
       "viet_tat": "PCN",
-      "nhan": "PHÒNG CÔNG NGHỆ",
-      "thu_muc": "/Users/erocathanh"
+      "nhan": "PHÒNG CÔNG NGHỆ"
     },
     {
       "ten": "claude-phong-tai-chinh",
-      "phong": "dao-tao",
+      "phong": "quan-ly-truong",
       "vai": "Phòng Tài Chính",
       "viet_tat": "PTC",
-      "nhan": "PHÒNG TÀI CHÍNH",
-      "thu_muc": "/Users/erocathanh"
+      "nhan": "PHÒNG TÀI CHÍNH"
     },
     {
       "ten": "claude-phong-hanh-chinh",
-      "phong": "dao-tao",
+      "phong": "quan-ly-truong",
       "vai": "Phòng Hành Chính",
       "viet_tat": "PHC",
-      "nhan": "PHÒNG HÀNH CHÍNH",
-      "thu_muc": "/Users/erocathanh"
+      "nhan": "PHÒNG HÀNH CHÍNH"
     }
   ],
   "tong": 225

@@ -374,3 +374,7 @@ body { padding-top: var(--cao-bang); }
 .bang-ma-cu.bang-cua-hong { background: #3a1414; color: #f0a0a0; border-bottom-color: #6b2020; }
 .bang-ma-cu.bang-cua-hong b { color: #ffc9c9; }
 .bang-ma-cu.bang-cua-hong .nut-tai-lai { background: #f0a0a0; border-color: #b95a5a; color: #2a0d0d; }
+
+/* 🗣 Ô nhập CÂU DẶN ĐẦU sau khi fork — nằm dưới nút fork, chiếm trọn hàng.
+   Cỡ chữ ≥16px: dưới mức đó iOS TỰ PHÓNG TO trang khi bấm vào ô, đẩy nút Gửi khỏi màn. */
+.o-cau-dau { width: 100%; margin-top: 6px; font-size: 16px; }

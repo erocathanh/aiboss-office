@@ -404,7 +404,32 @@ export function xacNhanDaGiao(ma: string, maTrinhDuyet: string): KetQuaXacNhan {
   if (!y) { ghi(s); return { xong: false, ly_do: 'khong-thay-mau' }; }
 
   const tt = trangThai(y);
-  if (tt === 'da_giao') { ghi(s); return { xong: true }; }
+  if (tt === 'da_giao') {
+    /**
+     * 🔴 P0-2d (31/08) — Hermes FAIL ①. Bản cũ trả `xong: true` cho MỌI người gọi muộn.
+     *
+     * 🕳 ĐƯỜNG HỎNG, và nó CÓ TỪ TRƯỚC bộ chạy nền:
+     *    ① tab A nhận mẩu ⇒ 'dang_giu' + giu_boi=A + hạn 30 giây
+     *    ② tab A TREO / NGỦ / khoá màn trước khi kịp chạy
+     *    ③ hết hạn ⇒ mẩu tự về 'cho'
+     *    ④ B (tab khác, hoặc bộ nền) nhận lại và CHẠY THẬT
+     *    ⑤ A tỉnh dậy, cầm bản mẩu CŨ, gọi xác nhận
+     *    ⑥ bản cũ thấy 'da_giao' ⇒ trả «xong» cho A ⇒ **A cũng chạy** ⇒ HAI BÊN MỘT CÂU
+     *
+     * ✅ TÁCH HAI CA theo `giu_boi` — ⛔ bỏ hẳn nhánh này:
+     *      CÙNG giu_boi  ⇒ chính người đó gọi LẦN HAI (mạng chập) ⇒ vẫn «xong».
+     *                       Bỏ nhánh này là xác nhận ⛔ còn lặp lại được ⇒ đẻ lỗi khác.
+     *      KHÁC giu_boi  ⇒ NGƯỜI KHÁC đã giao ⇒ người gọi PHẢI biết để ĐỪNG chạy.
+     * ⚠️ `giu_boi` sống qua trạng thái 'da_giao' (chỉ `giu_han` bị xoá) nên so được.
+     *    Ai đổi chỗ xoá `giu_boi` thì chốt này CHẾT LẶNG — nó lại trả «xong» cho mọi người.
+     */
+    if (y.giu_boi && maTrinhDuyet && y.giu_boi !== maTrinhDuyet) {
+      ghi(s);
+      return { xong: false, ly_do: 'khac-trinh-duyet' };
+    }
+    ghi(s);
+    return { xong: true };
+  }
   if (tt !== 'dang_giu') { ghi(s); return { xong: false, ly_do: `trang-thai-${tt}` }; }
   if (y.giu_boi && maTrinhDuyet && y.giu_boi !== maTrinhDuyet) {
     ghi(s);
