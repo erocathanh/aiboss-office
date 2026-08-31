@@ -40,6 +40,20 @@ export function layViec(maO: string): ViecDangChay | null {
   return SO.get(maO) ?? null;
 }
 
+/**
+ * 📋 LIỆT KÊ MỌI Ô ĐANG CHẠY — CHỈ ĐỌC, ⛔ đụng vào tiến trình nào.
+ *
+ * 🐛 VÌ SAO CÓ (P0-7/P1-7, 31/08/2026): trình duyệt tải lại là MẤT SẠCH cờ «đang chạy»
+ *    — nó nằm trong bộ nhớ của trang. Hậu quả nặng nhất ⛔ phải cái đèn, mà là **NÚT DỪNG**:
+ *    sau mỗi lần F5, Owner ⛔ CÒN CÁCH NÀO dừng một ghế đang chạy và đang tiêu tiền.
+ * 📌 Sổ này là NGUỒN SỰ THẬT vì nó nằm ở MÁY CHỦ — trang tải lại bao nhiêu lần cũng ⛔ đụng tới.
+ * ⚠️ GIỚI HẠN PHẢI BIẾT: sổ nằm trong BỘ NHỚ tiến trình máy chủ. Máy chủ khởi lại thì sổ rỗng —
+ *    nhưng lúc đó mấy tiến trình con cũng chết theo, nên sổ rỗng là ĐÚNG SỰ THẬT, ⛔ phải mất dữ liệu.
+ */
+export function dsViec(): Array<{ ma_o: string } & ViecDangChay> {
+  return [...SO.entries()].map(([ma_o, v]) => ({ ma_o, ...v }));
+}
+
 /** Giết việc của một ô. Trả về `true` nếu THẬT SỰ có việc để giết. */
 export function gietViec(maO: string): { da_giet: boolean; pid?: number } {
   const v = SO.get(maO);

@@ -910,6 +910,31 @@ export default function UngDung({
         return;                    // ⛔ chưa biết sổ ghi gì thì ⛔ không được sửa sổ
       }
 
+      /**
+       * 🏃 HỎI MÁY CHỦ «Ô NÀO ĐANG CHẠY» — nguồn sự thật nằm ở MÁY CHỦ, ⛔ ở trang.
+       *
+       * 🐛 Bệnh (P0-7/P1-7): cờ «đang chạy» sống trong bộ nhớ TRANG. Owner bấm F5 là mất,
+       *    và mất theo nó là **NÚT DỪNG** — ⛔ còn cách nào chặn một ghế đang tiêu tiền.
+       * ⚠️ ĐỀ BÀI CHỈ SAI CHỖ, tôi làm đúng Ý nhưng đặt đúng NƠI:
+       *    đề ghi «đổi `dangChay: false` ở :1453». Nhưng ba chỗ có chuỗi đó đều ⛔ phải khối này —
+       *      :300  giá trị khởi tạo ô TRỐNG      · :863 lúc CHỦ ĐỘNG dừng
+       *      :1453 lúc chảy chữ XONG (hạ cờ)     ← đổi chỗ này là hạ cờ sai lúc kết thúc lượt
+       *    Khối khôi phục ⛔ HỀ đặt `dangChay` — nó thừa hưởng `false` từ mặc định.
+       *    ⇒ Phải THÊM ở đây, và ⛔ đụng vào cả ba chỗ kia. (Đúng dặn dò «chỉ một chỗ».)
+       * 🛟 Hỏng cửa này ⇒ coi như ⛔ ai chạy, y như trước. ⛔ để một lỗi mạng chặn cả việc khôi phục.
+       */
+      let dangChayTheoO = new Set<string>();
+      try {
+        const rc = await fetch('/api/dung');
+        if (rc.ok) {
+          const jc = await rc.json();
+          const ds = Array.isArray(jc?.dang_chay) ? jc.dang_chay : [];
+          dangChayTheoO = new Set(
+            ds.map((v: { ma_o?: unknown }) => (typeof v?.ma_o === 'string' ? v.ma_o : '')).filter(Boolean),
+          );
+        }
+      } catch { /* ⛔ hỏi được thì thôi — lùi về «⛔ ai chạy», ⛔ chặn khôi phục */ }
+
       const daDung = new Set<string>();
       for (let i = 0; i < SO_O; i++) {
         const ghi = so[maOCua(i)];
@@ -920,7 +945,9 @@ export default function UngDung({
         // ⛔ Không nhân bản một agent ra nhiều ô — ô sau trùng thì bỏ trống + xoá sổ.
         if (!ns || daDung.has(ten)) { if (i > 0) void ghiO(i, null, null); continue; }
         daDung.add(ten);
-        capNhat(i, { ns });
+        // 🏃 Đặt cờ theo SỰ THẬT ở máy chủ, ⛔ mặc định false nữa.
+        //    Ghế đang chạy ⇒ nút Dừng hiện lại + đèn nháy lại, mà Owner ⛔ phải gõ gì.
+        capNhat(i, { ns, dangChay: dangChayTheoO.has(maOCua(i)) });
         void napDsPhien(i, ten);
 
         const khopNguoi = ghi?.ma_nhan_su === ten;

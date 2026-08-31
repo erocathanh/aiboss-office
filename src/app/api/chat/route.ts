@@ -4,7 +4,7 @@ import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT } from '@/lib/doc-phien';
-import { dangKyViec, xoaViec } from '@/lib/kho-tien-trinh';
+import { dangKyViec, xoaViec, dsViec } from '@/lib/kho-tien-trinh';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
@@ -87,17 +87,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ⛔ LUẬT CỨNG: ⛔ TUYỆT ĐỐI KHÔNG resume phiên ĐANG CHẠY ở terminal khác.
+  // ⛔ LUẬT CỨNG: ⛔ TUYỆT ĐỐI KHÔNG resume phiên ĐANG CHẠY ở nơi khác.
   //    Hai tiến trình cùng ghi một tệp phiên = hỏng bản ghi.
   if (maPhienCu && dangChay(maNhanSu, maPhienCu, o?.moc_ket_thuc ?? null)) {
-    return Response.json(
-      {
-        loi:
-          `Phiên này vừa đổi trong ${NGUONG_SONG_PHUT} phút — nhiều khả năng ĐANG CHẠY ở terminal khác. ` +
-          'Nối vào lúc này sẽ hỏng bản ghi phiên. Hãy đóng phiên bên kia, hoặc mở phiên mới.',
-      },
-      { status: 409 },
-    );
+    /**
+     * 🗣 NÓI ĐÚNG THỨ MÌNH ĐO ĐƯỢC, ⛔ đoán hộ Owner (P0-7, 31/08/2026).
+     *
+     * 🐛 Câu cũ luôn khai «⛔ nhiều khả năng ĐANG CHẠY ở terminal khác» — kể cả khi
+     *    ⛔ có terminal nào. Owner gặp câu đó thì đi tìm một cửa sổ ⛔ tồn tại, trong khi
+     *    thủ phạm là CHÍNH GHẾ TRONG APP. Một lời khai sai còn tốn thời gian hơn ⛔ khai.
+     * ✅ Nay sổ tiến trình của máy chủ trả lời được: ghế đó CÓ nằm trong sổ ⛔.
+     *      CÓ  ⇒ nói thẳng «ghế này đang chạy dở», kèm chạy bao lâu rồi
+     *      ⛔  ⇒ mới được nói «nơi khác», và phải nói rõ đó là SUY ĐOÁN
+     */
+    const dangTrongApp = dsViec().find((v) => v.ma_nhan_su === maNhanSu);
+    const loi = dangTrongApp
+      ? `Ghế này ĐANG CHẠY DỞ ngay trong app (ô ${dangTrongApp.ma_o}, đã chạy ` +
+        `${Math.round((Date.now() - dangTrongApp.bat_dau) / 1000)} giây). ` +
+        'Chờ nó xong, hoặc bấm nút Dừng ở ô đó rồi gửi lại.'
+      : `Phiên này vừa đổi trong ${NGUONG_SONG_PHUT} phút mà sổ tiến trình của app ⛔ có nó. ` +
+        'Nhiều khả năng nó đang chạy ở NƠI KHÁC (cửa sổ dòng lệnh chẳng hạn) — đây là SUY ĐOÁN, ' +
+        '⛔ phải điều app đo được. Nối vào lúc này sẽ hỏng bản ghi phiên; hãy mở phiên mới.';
+    return Response.json({ loi, trong_app: !!dangTrongApp }, { status: 409 });
   }
 
   // ⛔ Chặn mức dùng TRƯỚC khi đẻ tiến trình — agent chạy hoang = tiền thật.
