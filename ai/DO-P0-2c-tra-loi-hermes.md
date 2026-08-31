@@ -84,3 +84,69 @@ npx tsc --noEmit | iconv -f utf-8 -t utf-8 -c | grep -c 'error TS'  →  0
 ĐỐI CHỨNG DƯƠNG: cắm một lỗi kiểu cố ý ⇒ đếm ra 1 ⇒ thước SỐNG (đã chạy, đã xoá tệp thử)
 ```
 ⚠️ **CHƯA DỰNG.** Luật nhà: chỉ `claude-aiboss-app-exe` được chạy `next build`.
+
+---
+
+# 🔴 VÒNG 2 — HERMES ĐÁNH TRƯỢT LẦN NỮA (PASS 1/7 · FAIL 6/7), và nó ĐÚNG
+
+Verdict vòng 2: `ai/VERDICT-hermes-P0-2c-lan2.md`.
+
+## 🙇 TRƯỚC HẾT — TÔI KHAI QUÁ LỜI, VÀ ĐÂY LÀ CHỖ ĐÓ
+Bản trên tôi ghi **«ĐÃ ĐO đầu-tới-cuối»** và **«một lượt nền THẬT»**. Hermes bác:
+phép đo ấy gọi thẳng `chayMotLuot`, **KHÔNG đi qua `raMotVong`** — tức là nó chứng minh
+được **cái lõi**, KHÔNG chứng minh được **bộ chạy nền**. Hai thứ khác nhau, và tôi đặt cho nó
+cái tên rộng hơn thứ mình đo.
+🔑 Đúng thứ tôi vẫn đi bắt ở người khác cả tối: **một lời khai rộng hơn phép đo đỡ nổi.**
+
+## ✅ ĐÃ ĐO LẠI — LẦN NÀY QUA ĐÚNG `raMotVong`
+```
+xepHang(o-6, claude-omni-ads-test)                  → mẩu 47c9aa19… trạng thái 'cho'
+process.env.CHAY_NEN = '1'                          → qua CÔNG TẮC THẬT, KHÔNG dùng chophepKhiTat
+datNguonThamDo(thamDoCuoiCua)                       → y như instrumentation.ts lúc máy chủ khởi
+await raMotVong()                                   → trả về 1
+                                                    dem = {vong:1, daChay:1, loi:0,
+                                                            mophienMoi:0, boQuaChayNoiKhac:0}
+mẩu                                                 → 'cho' ⇒ 'da_giao'
+```
+**Bằng chứng lượt ĐÃ TRẢ LỜI THẬT — theo đúng cách Hermes chỉ:**
+```
+dòng 25  type=user        ← câu hỏi (chứa dấu vân, nên KHÔNG dùng làm bằng chứng)
+dòng 30  type=assistant   ← "P02C-VONG2-221845-29702"   ⇐ ĐÂY mới là bằng chứng phân biệt
+đối chứng âm: dấu vân bịa → 0
+/api/phien của APP ĐANG CHẠY → dấu vân xuất hiện 2 lần (hỏi + đáp)
+```
+📌 Lượt này **NỐI PHIÊN CŨ** nên KHÔNG đẻ tệp `.jsonl` mới — vì thế «đếm số tệp» là thước SAI ở đây.
+Phải soi **dòng assistant bên trong tệp**. Hermes dạy đúng chỗ này ở vòng 1.
+📌 Và vì nối phiên, hai chốt mới ở vị trí mới **đã thực sự chạy**: `mophienMoi:0` (bản ghi còn sống)
+và `boQuaChayNoiKhac:0` (KHÔNG ai đang chạy phiên đó) — cả hai đều CHO QUA, và cho qua là đúng.
+
+## 🔴 LỖI THẬT HERMES BẮT ĐƯỢC — bản vá ⑥b của tôi ĐỔI CHẠY ĐÚP LẤY MẤT MẨU
+```
+bản trước:  nhận mẩu → xác nhận ('da_giao') → MỚI kiểm dangChayNoiKhac → thấy bận → continue
+⇒ mẩu nằm lại 'da_giao' vĩnh viễn. Bộ dọn chỉ đụng mẩu 'cho'.
+```
+Hermes: *«KHÔNG phải cửa sổ mili-giây — nó xảy ra CÓ CHỦ Ý mỗi khi phiên đích đang chạy nơi khác.»**
+🔑 Tôi đổi một hỏng thấy được lấy một hỏng **VÔ HÌNH** — ngược hẳn nguyên tắc chính tôi đặt ra
+cho P0-2d tối nay.
+✅ **Vá:** đưa cả hai chốt phiên lên **TRƯỚC** `nhanYeuCau`. Chưa nhận thì KHÔNG có gì để mất.
+> **ĐỪNG NHẬN thứ mình chưa chắc sẽ làm.**
+
+## ✅ NĂM MỤC CÒN LẠI
+```
+FAIL ⑤ coPhien một mẫu     → nay HAI MẪU cách 1,5s, đúng như api/chat:69-80
+                              (chép chốt mà bỏ điều kiện của nó thì chốt chỉ còn cái tên)
+FAIL ⑥ ghiMocKetThuc       → nay dùng mocTepPhien() + ghi lại ở 1,5s·5s·15s, đúng api/chat:241-247
+                              và CHỈ đóng dấu khi thực sự có phiên (kq.maPhien)
+FAIL ④ chophepKhiTat       → đóng hẳn khi NODE_ENV=production; cửa cho phép thử phải ĐÓNG ở bản thật
+NGOÀI ĐỀ ① chú thích hết hạn → ĐÃ LẬT tại kho-danh-thuc.ts: chú thích cũ bảo «xác nhận SAU khi gui»
+                              trong khi giao diện nay xác nhận TRƯỚC. Giữ lại vế cũ kèm lý do vì sao hết đúng.
+NGOÀI ĐỀ ② datO từ chối lặng → nay TRẢ VỀ boolean. Từ chối là quyền của hàm;
+                              từ chối mà KHÔNG nói ra mới là lỗi.
+```
+
+## 📌 NỢ — giữ nguyên, KHÔNG vá kèm
+```
+· khoá lấy-sửa-ghi chỉ tuần tự TRONG MỘT tiến trình Node ⇒ hai máy chủ thì KHÔNG có khoá
+· 30 giây lease chọn khi CHỈ MỘT người rút — nay hai. Chưa đo lại.
+· mẩu 'da_giao' mà chưa từng chạy thì CHƯA AI CANH (nay khó rơi vào hơn, nhưng đường vẫn còn)
+```

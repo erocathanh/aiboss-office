@@ -35,7 +35,7 @@ import { chayMotLuot } from '@/lib/chay-mot-luot';
 import { nhanYeuCau, xacNhanDaGiao, xemSo } from '@/lib/kho-danh-thuc';
 import { dsViec } from '@/lib/kho-tien-trinh';
 import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { coPhien, dangChay as dangChayNoiKhac } from '@/lib/doc-phien';
+import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
 
 /** Mã người giữ mẩu, để phân biệt với trình duyệt trong sổ. */
 export const NGUOI_GIU_NEN = 'may-chu-nen';
@@ -70,7 +70,14 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
    * ⚠️ `chophepKhiTat` chỉ dành cho phép thử, và nó phải được TRUYỀN TỪNG LẦN — không có
    *    biến toàn cục nào bật nó vĩnh viễn.
    */
-  if (process.env.CHAY_NEN !== '1' && !chophepKhiTat) return 0;
+  /**
+   * 🔴 SIẾT vòng 2 (hermes hỏi «`chophepKhiTat` có phải cửa hậu MỚI KHÔNG»): CÓ, nếu để trần.
+   *    Nó phải truyền TỪNG LẦN nên KHÔNG có biến toàn cục nào bật vĩnh viễn — nhưng bất kỳ
+   *    ai `import` cũng truyền được `true`. ⇒ Đóng hẳn ở bản THẬT, chỉ mở cho phép thử.
+   * 🔑 Một cửa chỉ dành cho phép thử thì phải ĐÓNG ở nơi KHÔNG chạy phép thử.
+   */
+  const choPhep = chophepKhiTat && process.env.NODE_ENV !== 'production';
+  if (process.env.CHAY_NEN !== '1' && !choPhep) return 0;
   dem.vong++;
   const so = xemSo();
   // Chỉ quan tâm mẩu ĐANG CHỜ. Mẩu 'dang_giu' là của người khác — kể cả của chính ta.
@@ -120,6 +127,48 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
       dem.boQuaCoTrinhDuyet++;
       continue;
     }
+    /**
+     * 🔴 HAI CHỐT PHIÊN PHẢI CHẠY **TRƯỚC** KHI NHẬN MẨU — hermes vòng 2, FAIL ①, 31/08.
+     *
+     * 🕳 BẢN TRƯỚC CỦA TÔI ĐẶT CHÚNG SAU `xacNhanDaGiao`, và đó là một lỗi THẬT:
+     * ```
+     * ① nhận mẩu → ② xác nhận ⇒ mẩu thành 'da_giao'
+     * ③ mới kiểm dangChayNoiKhac → thấy bận → `continue`
+     * ⇒ mẩu nằm lại 'da_giao' VĨNH VIỄN. Bộ dọn chỉ đụng mẩu 'cho' (kho-danh-thuc.ts:216-220).
+     *   Câu của Owner biến mất, KHÔNG ai chạy, KHÔNG ai canh.
+     * ```
+     * 🔑 Hermes gọi đúng tên: **«KHÔNG phải cửa sổ mili-giây — nó xảy ra CÓ CHỦ Ý mỗi khi
+     *    phiên đích đang chạy nơi khác.»** Tôi đã đổi «chạy hai lần» lấy «mất hẳn một câu»,
+     *    mà lần này cái mất là **VÔ HÌNH** — đúng thứ tôi vẫn đi bắt ở người khác.
+     * ✅ Luật rút ra: **ĐỪNG NHẬN thứ mình chưa chắc sẽ làm.** Kiểm đủ điều kiện rồi mới lấy mẩu.
+     */
+    const o = layO(y.ma_o);
+    let maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
+
+    /**
+     * (a) `coPhien` — **HAI MẪU CÁCH NHAU**, đúng như đường HTTP (`api/chat/route.ts:69-80`).
+     *     🔴 Bản trước tôi chỉ đo MỘT mẫu. Hermes vòng 2 bắt: một mẫu đơn KHÔNG đủ để
+     *        tuyên một phiên là mất — dễ bắt nhầm đúng lúc tệp đang được thay/đổi tên.
+     *        Chép chốt mà bỏ mất điều kiện của nó thì chốt chỉ còn cái tên.
+     *     Nhánh này chỉ chạy trong ca hiếm nên 1,5 giây KHÔNG làm chậm đường thường.
+     */
+    if (maPhienCu && !coPhien(y.ma_nhan_su, maPhienCu)) {
+      await new Promise((r) => setTimeout(r, 1_500));
+      if (!coPhien(y.ma_nhan_su, maPhienCu)) {
+        dem.mophienMoi++;
+        maPhienCu = null; // mở phiên MỚI, KHÔNG `--resume` mù
+      }
+    }
+
+    /**
+     * (b) `dangChay` — ghế đang chạy Ở NƠI KHÁC (cửa sổ dòng lệnh) thì ĐỨNG NGOÀI.
+     *     Đặt ở đây ⇒ mẩu vẫn nguyên trạng thái `cho`, vòng sau lấy lại được.
+     */
+    if (maPhienCu && dangChayNoiKhac(y.ma_nhan_su, maPhienCu, o?.moc_ket_thuc ?? null)) {
+      dem.boQuaChayNoiKhac++;
+      continue; // ⚠️ CHƯA nhận mẩu ⇒ KHÔNG có gì để trả lại. Đó là điểm của cả bản vá này.
+    }
+
     // ── chốt ①: lấy mẩu qua CHÍNH đường của trình duyệt ⇒ không thể lấy trùng
     const ket = nhanYeuCau(y.ma_o, y.ma_nhan_su, NGUOI_GIU_NEN);
     if (!ket.y) continue; // ai đó nhanh tay hơn — đúng thứ ta muốn
@@ -129,36 +178,6 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
     // ⚠️ ĐÁNH DẤU NGAY, trước khi gọi — KHÔNG đợi tới lúc có pid.
     //    Đặt sau `nhanYeuCau` để mẩu bị người khác nhanh tay lấy mất thì KHÔNG khoá oan ghế.
     daNhanTrongVong.add(y.ma_nhan_su);
-
-    const o = layO(y.ma_o);
-    let maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
-
-    /**
-     * 🔴 HAI CHỐT MÀ ĐƯỜNG CŨ CÓ CÒN ĐƯỜNG NÀY THIẾU — hermes FAIL ⑥, 31/08.
-     *
-     * 🕳 Tôi viết trong `chay-mot-luot.ts` rằng «cố ý KHÔNG gói chốt vào lõi, NGƯỜI GỌI tự lo»,
-     *    rồi người gọi là chính tôi, và tôi KHÔNG lo. Chú thích đó còn LIỆT KÊ chúng ra
-     *    như thể đã có — ai đọc lướt sẽ thấy một danh sách chốt đầy đủ.
-     * 🔑 **Khai một ranh giới KHÔNG phải là đã giữ ranh giới đó.**
-     *
-     * (a) `coPhien` — đường cũ kiểm bản ghi phiên còn sống TRƯỚC khi `--resume`
-     *     (`api/chat/route.ts:68-87`). Thiếu nó ⇒ sổ ô giữ mã phiên đã hỏng ⇒ `--resume` MÙ.
-     *     Vá: hỏng thì MỞ PHIÊN MỚI (`maPhienCu = null`) chứ KHÔNG bỏ mẩu — mẩu đã `da_giao` rồi,
-     *     bỏ ở đây là mất câu của người ta.
-     * (b) `dangChay` — đường cũ chặn ghế đang chạy Ở NƠI KHÁC (cửa sổ dòng lệnh), thứ mà
-     *     `dsViec()` KHÔNG thấy vì nó chỉ biết tiến trình do app sinh.
-     *     Thiếu nó ⇒ terminal đang `--resume P` mà bộ nền cũng `--resume P`
-     *     ⇒ HAI tiến trình ghi CÙNG một `.jsonl`.
-     */
-    if (maPhienCu && !coPhien(y.ma_nhan_su, maPhienCu)) {
-      dem.mophienMoi++;
-      maPhienCu = null;
-    }
-    if (maPhienCu && dangChayNoiKhac(y.ma_nhan_su, maPhienCu, o?.moc_ket_thuc ?? null)) {
-      dem.boQuaChayNoiKhac++;
-      daNhanTrongVong.delete(y.ma_nhan_su); // trả ghế lại, KHÔNG khoá oan
-      continue;
-    }
 
     // KHÔNG `await` — một mẩu chạy chậm KHÔNG được chặn mẩu của ô khác.
     void chayMotLuot(
@@ -177,8 +196,27 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
          *    Thiếu nó ⇒ `dangChay` thấy phiên vừa sửa mà KHÔNG có mốc sở hữu
          *    ⇒ coi ghế là CÒN BẬN tới 5 phút sau khi nó đã xong.
          */
-        // ⚠️ chữ ký là (maO, mocMs) — KHÔNG phải (maO, maPhien). tsc bắt đúng chỗ này.
-        ghiMocKetThuc(y.ma_o, Date.now());
+        /**
+         * 🔴 SỬA vòng 2 (hermes FAIL ⑥): tham số là **MỐC SỬA TỆP**, KHÔNG phải giờ tường.
+         * ```
+         * chữ ký      kho-phien.ts:93   ghiMocKetThuc(maO, mocTep)
+         * đường HTTP  api/chat:241-247  mocTepPhien(...) rồi ghi LẠI ở 1,5s · 5s · 15s
+         * bản trước   Date.now()        ⇒ giờ tường. Claude/hook xả tệp muộn thì mốc SAI,
+         *                                 và `dangChay` chỉ cần moc_ket_thuc !== null là bỏ
+         *                                 phép chặn mtime (doc-phien.ts:487-494).
+         * ```
+         * ⚠️ Và CHỈ đóng dấu khi THỰC SỰ có phiên — `if (maPhienDaDung)` của đường HTTP.
+         *    Lượt chưa từng spawn mà đóng dấu «ta vừa chạy xong» là khai khống.
+         */
+        if (kq.maPhien) {
+          const maP = kq.maPhien;
+          const ghiLai = () => {
+            const m = mocTepPhien(y.ma_nhan_su, maP);
+            if (m !== null) ghiMocKetThuc(y.ma_o, m);
+          };
+          ghiLai();
+          for (const cho2 of [1_500, 5_000, 15_000]) setTimeout(ghiLai, cho2).unref?.();
+        }
       },
       () => {
         dem.loi++;
