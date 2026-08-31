@@ -113,6 +113,10 @@ export interface YeuCauDanhThuc {
   giu_han?: number;
   /** Khoá chống trùng do người gửi cấp — cùng khoá ⇒ trả lại mẩu CŨ. */
   khoa?: string;
+  /** Bỏ LÚC NÀO. ⛔ có trường này thì người đọc phải đi mượn mốc khác, và mốc khác nghĩa khác. */
+  bo_luc?: number;
+  /** Bỏ TỪ trạng thái nào. Ra 'da_giao' là mâu thuẫn TỰ KHAI, khỏi phải suy. */
+  truoc_do?: TrangThaiMau;
   /**
    * ⏳ Lần gần nhất ô đích được BÁO LÀ ĐANG BẬN. Có mặt = mẩu đang được giữ chờ ô rảnh.
    * Đồng hồ 3 phút tính từ mốc này thay vì từ `luc` — nhưng vẫn chịu trần `TRAN_GIU_MS`
@@ -217,10 +221,22 @@ export function trangThai(y: YeuCauDanhThuc): TrangThaiMau {
   return y.da_xu ? 'da_giao' : 'cho';
 }
 
-/** Đặt trạng thái + GIỮ `da_xu` khớp theo, để mã cũ đọc sổ ⛔ hiểu sai. */
+/**
+ * Đặt trạng thái + GIỮ `da_xu` khớp theo, để mã cũ đọc sổ ⛔ hiểu sai.
+ *
+ * 🐛 BẢN ĐẦU CỦA TÔI SAI, và nó làm hỏng SỔ ĐẾM (ghế soi bắt 31/08):
+ *      `y.da_xu = tt !== 'cho'`  ⇒ mẩu bị **BỎ** cũng mang `da_xu = true`
+ *    Mà `bao-mau-chet.ts:132` suy «số lần thử» TỪ `da_xu` ⇒ sổ đếm khai «đã thử 1 lần»
+ *    cho những mẩu **⛔ hề được trao cho tab nào**. Đo có ranh giới sạch:
+ *      trước khi bản này lên: so_lan_thu = 0 · 3/3 mẩu
+ *      sau  khi bản này lên: so_lan_thu = 1 · 7/7 mẩu, mà cả 7 đều ⛔ có `xu_luc`
+ * ✅ `da_xu` phải giữ ĐÚNG nghĩa gốc: **đã trao cho một tab ⛔**, ⛔ phải «⛔ còn chờ».
+ * 📌 Bài học: đổi nghĩa một trường CŨ thì phải đi tìm MỌI kẻ đọc nó. Tôi đổi nghĩa
+ *    rồi mới nhớ ra `bao-mau-chet.ts` cũng đọc — và nó là cái thước cả đội đang cầm.
+ */
 function datTrangThai(y: YeuCauDanhThuc, tt: TrangThaiMau): void {
   y.trang_thai = tt;
-  y.da_xu = tt !== 'cho';
+  y.da_xu = tt === 'dang_giu' || tt === 'da_giao';
 }
 
 /**
@@ -228,9 +244,20 @@ function datTrangThai(y: YeuCauDanhThuc, tt: TrangThaiMau): void {
  * 📌 Việc ⑤ của đề: mọi lần bỏ phải kêu. Bỏ im lặng là con bệnh gốc.
  */
 function boMau(y: YeuCauDanhThuc, lyDo: string, bayGio: number): void {
+  /**
+   * ⚠️ KÊU **TRƯỚC** khi đổi trạng thái — thứ tự ở đây quyết định số đo đúng hay sai.
+   *    `baoMauChet` suy «số lần thử» từ `da_xu`. Đổi trạng thái trước rồi mới kêu thì nó
+   *    đọc `da_xu` của trạng thái MỚI, ⛔ phải của lúc mẩu còn sống.
+   *    Kêu trước ⇒ mẩu chưa từng được trao ra 0, mẩu đã từng được trao ra 1. ĐÚNG cả hai.
+   */
+  baoMauChet(y, { toanCuc: thamDoCuoiToanCuc, cuaO: thamDoTheoO.get(y.ma_o) ?? 0 }, bayGio);
+  // 📓 Ghi lại BỎ TỪ ĐÂU và BỎ LÚC NÀO — để lần sau bản ghi TỰ KỂ, ⛔ bắt ai ghép mảnh.
+  //    Thiếu hai trường này chính là thứ đẩy người đọc sang mượn `xu_luc` (mốc GIAO)
+  //    làm mốc chết — và đó là cách một báo động giả ra đời hôm nay.
+  y.truoc_do = trangThai(y);
+  y.bo_luc = bayGio;
   datTrangThai(y, 'bo');
   y.ly_do = chuanHoaLyDo(lyDo);
-  baoMauChet(y, { toanCuc: thamDoCuoiToanCuc, cuaO: thamDoTheoO.get(y.ma_o) ?? 0 }, bayGio);
 }
 
 /**
@@ -282,7 +309,7 @@ export function giuChoOBan(dsBan: string[], bayGio = Date.now()): number {
   const s = donDep(doc(), bayGio);
   let dem = 0;
   for (const y of s.hang_doi) {
-    if (y.da_xu) continue;
+    if (trangThai(y) !== 'cho') continue;   // ⛔ đọc `da_xu` nữa — nó ⛔ còn nghĩa «đã xong»
     if (!ban.has(y.ma_o)) continue;
     if (bayGio - y.luc >= TRAN_GIU_MS) continue;   // quá trần ⇒ để nó chết đúng hẹn
     y.giu_toi = bayGio;
