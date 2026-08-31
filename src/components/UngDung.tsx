@@ -66,17 +66,41 @@ const dungTruocKhiVe = typeof window !== 'undefined' ? useLayoutEffect : useEffe
  *  danh sách phụ thuộc của hook nào cả. */
 const LECH_COI_LA_DAY = 8;
 
+/**
+ * 🕐 MỐC ĐẦY ĐỦ «HH:mm dd/mm/yyyy» dựng TỪ `luc` (epoch ms).
+ *
+ * 🔴 ⛔ CÓ `luc` ⇒ trả CHUỖI RỖNG. TUYỆT ĐỐI ⛔ suy ngày từ chỗ khác:
+ *    ⛔ lấy hôm nay · ⛔ lấy mốc sửa tệp · ⛔ đoán từ tin liền kề.
+ *    14% mẩu tin ⛔ có mốc — bịa một lần là Owner đọc SAI LỊCH SỬ mà ⛔ có cách nào biết.
+ * ⚠️ ⛔ dựng từ `gio`: `gio` là chuỗi HIỂN THỊ «22:11», cộng ngày vào đó chính là bịa.
+ */
+function mocDayDu(luc?: number): string {
+  if (typeof luc !== 'number' || !Number.isFinite(luc)) return '';
+  const d = new Date(luc);
+  if (Number.isNaN(d.getTime())) return '';
+  const hai = (x: number) => String(x).padStart(2, '0');
+  return `${hai(d.getHours())}:${hai(d.getMinutes())} ${hai(d.getDate())}/${hai(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
 let demMaTin = 0;
 const datMa = () => `t${++demMaTin}`;
 
 interface Tin {
   /** 🔑 Mã riêng do máy khách cấp — xem `datMa()`. ⛔ Đừng thay bằng chỉ số hay `luc`. */
   ma: string;
+  /**
+   * 📜 Tin này ĐẾN TỪ LỊCH SỬ (máy chủ đọc tệp phiên), ⛔ phải tin sinh ra trong lượt đang chạy.
+   * Chỉ tin lịch sử mới hiện MỐC ĐẦY ĐỦ — khung đang sống giữ «HH:mm» cho khỏi lặp
+   * hàng trăm lần cùng một ngày trên cỡ chữ 10px (mau09.css:312 · 9,5px ở bố cục 4 ô :383).
+   */
+  tuLichSu?: boolean;
   ai: 'toi' | 'ho'; chu: string; gio: string; loi?: boolean;
   /**
    * 🕐 MỐC THẬT (epoch ms) — việc ②A, 19/08/2026.
    * `gio` là chuỗi HIỂN THỊ "22:11" ⇒ ⛔ không suy ra được NGÀY. Ca 23:59 → 00:01 hỏng chắc.
-   * ⚠️ TUỲ CHỌN: 11,5% dòng trong tệp phiên thật ⛔ KHÔNG có `timestamp`.
+   * ⚠️ TUỲ CHỌN: **14% dòng** trong tệp phiên thật ⛔ KHÔNG có `timestamp`.
+   *    (đo lại 31/08/2026: app-pm 1.065/7.546 = 14,1% · eroca-boss 630/4.639 = 13,6%.
+   *     Số cũ ghi 11,5% đo ngày 19/08 — ĐÃ TRÔI. Ai đọc lại thì ĐO LẠI, ⛔ tin con số này mãi.)
    *    Bong bóng cũ đang nằm trong bộ nhớ cũng ⛔ không có ⇒ mọi chỗ ĐỌC phải chịu được `undefined`.
    * 📌 Bước này CHỈ thêm dữ liệu — giao diện ⛔ KHÔNG đổi một ly (cổng ③ của việc ②A).
    */
@@ -654,7 +678,8 @@ export default function UngDung({
       if (!ok) throw new Error('danh sách tin có phần tử hỏng — BÁC cả phản hồi');
     }
     // 🔑 Đóng dấu mã NGAY TẠI CỬA VÀO — mọi tin trong bộ nhớ đều phải có mã.
-    return (th as Tin[]).map((t) => ({ ...t, ma: datMa() }));
+    // 📜 Đóng dấu «đến từ lịch sử» NGAY TẠI CỬA VÀO — đây là chỗ DUY NHẤT tin từ máy chủ đi qua.
+    return (th as Tin[]).map((t) => ({ ...t, ma: datMa(), tuLichSu: true }));
   }, []);
 
   /**
@@ -2434,7 +2459,20 @@ export default function UngDung({
                                 loi={t.loi}
                                 dangChay={o.dangChay && Boolean(t.dang)}
                               />
-                              <span className="gio">{t.gio}</span>
+                              {(() => {
+                                /**
+                                 * 🕐 Tin LỊCH SỬ hiện mốc ĐẦY ĐỦ · tin đang sống giữ «HH:mm».
+                                 * Cả hai đều gắn mốc đầy đủ vào `title` ⇒ rê chuột là thấy,
+                                 * ⛔ tốn một dòng chữ nào trên màn.
+                                 * 🔴 Thiếu `luc` ⇒ `dayDu` rỗng ⇒ lùi về `t.gio`, và ⛔ có ngày nào
+                                 *    được vẽ ra. Đó là ý đồ: thà thiếu còn hơn BỊA.
+                                 */
+                                const dayDu = mocDayDu(t.luc);
+                                const hien = t.tuLichSu && dayDu ? dayDu : t.gio;
+                                return (
+                                  <span className="gio" title={dayDu || undefined}>{hien}</span>
+                                );
+                              })()}
                             </div>
                           </div>
                         ))}

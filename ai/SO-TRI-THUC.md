@@ -20,6 +20,45 @@ KHÔNG đỡ nổi. Số 0 KHÔNG phân biệt được «không có» với «t
 
 ---
 
+## 🔬 KHU 0 · PHÉP ĐO DÙNG ĐƯỢC Ở MỌI KHU
+
+### 0.1 🔑 Biến chỉ có chỗ GÁN mà ⛔ có chỗ ĐỌC — bắt bằng một phép đếm, 2 giây
+Bệnh: viết ra một giá trị, tin là nó đang làm việc, mà **⛔ ai đọc nó**. Chốt chặn ⛔ chặn,
+cửa trả số mà bên kia ⛔ dùng. Hỏng **IM LẶNG** — ⛔ báo lỗi, ⛔ sập, chỉ là ⛔ có tác dụng.
+
+```bash
+# ĐO LẠI trên một tệp shell bất kỳ:
+F=~/Operations/scripts/ghi-kenh-an-toan.sh
+grep -oE '^[[:space:]]*[A-Z_][A-Z0-9_]*=' "$F" | tr -d ' =' | sort -u | while read V; do
+  N=$(grep -c "$V" "$F"); [ "$N" -eq 1 ] && echo "🚩 $V — chỉ GÁN, ⛔ ĐỌC"; done
+# ĐỐI CHỨNG DƯƠNG (bắt buộc — «0 cờ» ⛔ nói gì nếu thước mù):
+#   cp "$F" /tmp/t.sh; printf '\nBIEN_CHET=1\n' >> /tmp/t.sh
+#   chạy lại vòng trên với F=/tmp/t.sh ⇒ PHẢI hiện 🚩 BIEN_CHET
+```
+| đo 31/08 14:4x | kết quả |
+|---|---|
+| kêu oan trên 43 biến thật (3 script nhà) | **0** ⇒ ⛔ nhiễu, dùng được |
+| đối chứng dương (cấy 1 biến chết) | **bắt được** ⇒ thước ⛔ mù |
+| bắt được ca thật hôm nay | **2** — `so_o_dang_chay` (13:59) · `MOI` (14:33) |
+
+🔑 **⛔ CHỈ BIẾN MỚI CHẾT — CẢ MỘT PHÉP KIỂM CŨNG CHẾT ĐƯỢC.** Ca thật 31/08 14:43:
+tôi viết chốt chặn trước khi đăng kênh; nó CHẠY, phát hiện ĐÚNG, in ra «🔴 DỪNG» — rồi phần
+đăng bài **vẫn chạy tiếp**, đè lên tin người khác.
+```bash
+grep -q '<mốc>' && echo "an toàn" || echo "🔴 DỪNG"   # ← in ra, ⛔ nối vào quyết định nào
+```
+✅ **CÂU KIỂM CHO PHÉP KIỂM** (ghế soi đề 31/08 14:46) — hỏi trước khi tin bất kỳ chốt chặn nào:
+> **«nếu phép kiểm này phán SAI, có gì DỪNG LẠI ⛔?»**
+Trả lời được (`exit`, `return`, `if … else DỪNG`) thì nó sống. ⛔ trả lời được thì nó chỉ là
+một dòng chữ đẹp. Đo được: `grep -n 'exit\|return\|fi' <tệp>` quanh chỗ phán quyết — ⛔ thấy gì
+ngoài `echo` là dấu đỏ.
+
+📌 **Cả hai ca đều xảy ra BÊN TRONG một bản vá đang chữa bệnh khác.** Lúc chăm chú nhất
+là lúc dễ lọt nhất, vì mọi phép kiểm đều hướng về con bệnh đang đuổi.
+⚠️ Giới hạn: tên biến xuất hiện trong CHÚ THÍCH cũng được đếm ⇒ đếm >1 mà vẫn có thể chết.
+Phép này bắt được ca rõ, ⛔ thay được việc đọc.
+🗓 đo 31/08 · phép do `claude-phong-ban-pm` nghĩ ra · `claude-aiboss-app-pm` đo tỉ lệ kêu oan
+
 ## 🔔 KHU 1 · ĐÁNH THỨC GHẾ
 
 ### 1.1 CÓ HAI BỘ ĐẾM KHÁC NHAU — đừng nhầm chúng làm một
@@ -123,6 +162,43 @@ cd ~/Development/playwright-lab && node do-thu-nho-6o.mjs    # chạy CẢ HAI b
 
 ---
 
+### 2.4 · «14% mẩu tin ⛔ có mốc giờ» — SAI ĐƠN VỊ. Đúng là 14% **DÒNG**, còn **MẨU thì 0%**
+
+```
+đề bài P2-3 và chú thích UngDung.tsx:79 đều ghi «14% mẩu tin ⛔ có timestamp»
+ĐO 31/08 trên tệp phiên claude-aiboss-app-pm (7.630 dòng):
+   DÒNG thiếu timestamp            1.081/7.630 = 14,2%   ← con số gốc, ĐÚNG
+   MẨU user/assistant thiếu            0/3.774 =  0,0%   ← thứ THỰC SỰ thành bong bóng
+   qua cổng /api/phien                   0/174 =  0,0%
+14% kia là các dòng `attachment` · `last-prompt` · `queue-operation` · `mode` —
+chúng ⛔ BAO GIỜ thành bong bóng.
+```
+🔴 **Hậu quả đã suýt xảy ra:** cổng nghiệm thu của P2-3 đòi *«tìm một mẩu THIẾU mốc — 14%,
+chắc chắn có»*. Ca đó **⛔ TỒN TẠI** trong dữ liệu thật ⇒ đối chứng âm ra 0 ⇒ nó ⛔ chứng minh gì,
+mà lại trông như đã kiểm.
+
+```bash
+# ĐO LẠI (đổi <tệp> thành một .jsonl bất kỳ trong ~/.claude/projects/):
+python3 - <<'X'
+import json,sys
+d=t=0
+for l in open("<tệp>",encoding="utf-8"):
+    try: j=json.loads(l)
+    except: continue
+    if j.get("type") in ("user","assistant"):
+        t+=1
+        if not j.get("timestamp"): d+=1
+print(f"mẩu thành bong bóng: {t} · thiếu mốc: {d}")
+X
+# ĐỐI CHỨNG DƯƠNG: `t` phải > 0. Ra 0 ⇒ đọc nhầm tệp, ⛔ kết luận gì cả.
+```
+🔑 **Nếp rút ra:** đối chứng âm phải kiểm được rằng **ca cần đo CÓ TỒN TẠI trong mẫu**.
+⛔ có ca đó thì «⛔ thấy lỗi» ⛔ phải bằng chứng — nó chỉ là một chỗ trống.
+⇒ Khi dữ liệu thật ⛔ chứa ca cần đo thì **DỰNG ra ca đó** (P2-3 làm bằng cách chặn giữa đường
+và BÓC `luc` khỏi 716 mẩu ⇒ chúng hiện MỖI GIỜ, ⛔ mẩu nào bị bịa ngày).
+
+---
+
 ## 🚦 KHU 3 · DỰNG VÀ NẠP
 
 ### 3.1 BA MỐC — cách DUY NHẤT nói một bản mã đã lên app
@@ -177,6 +253,105 @@ im ở tầng tệp** ⇒ thước-đoán-bằng-mtime sẽ coi chúng là rản
 📌 **Một nguồn sự thật thật thì trả lời được cả câu ta chưa nghĩ tới lúc dựng nó.**
 Một phép đoán thì chỉ sai thêm ở mỗi câu mới.
 🗓 31/08 · `claude-aiboss-app-exe` dựng cửa · `claude-aiboss-app-pm` dùng lại cho bộ hẹn
+
+### 3.6 🔑 Tiến trình con **⛔ MỒ CÔI** khi nạp lại — chúng CÙNG NHÓM với máy chủ
+Ai đọc `chay-agent.ts` thấy `spawn` ⛔ có `detached` rất dễ kết luận «giết máy chủ ⇒ con mồ côi,
+chạy tiếp, tiêu tiền, nút Dừng ⛔ giết được». **SAI trên đường nạp lại THẬT.**
+
+```bash
+# ĐO LẠI ① — con có cùng NHÓM tiến trình với máy chủ ⛔:
+ps -eo pid,ppid,pgid,command | grep -E '[n]ext-server|[c]laude -p --output-format' | awk '{print $3}' | sort -u
+#   ra ĐÚNG MỘT số  ⇒ CÙNG nhóm ⇒ mục này còn đúng
+#   ra NHIỀU số     ⇒ ĐÃ TÁCH NHÓM ⇒ 🔴 MỤC NÀY HẾT ĐÚNG, đọc lại từ đầu
+#   ra RỖNG         ⇒ app chưa chạy hoặc ⛔ ghế nào đang chạy — CHƯA kết luận được gì
+
+# ĐO LẠI ② — launchd có dọn cả nhóm ⛔ (⛔ đặt khoá ⇒ mặc định false ⇒ CÓ dọn):
+grep -c 'AbandonProcessGroup' ~/Library/LaunchAgents/com.eroca.phong-ban-lan.plist   # mong 0
+grep -c 'Label'               ~/Library/LaunchAgents/com.eroca.phong-ban-lan.plist   # đối chứng dương: ≥1
+
+# ĐO LẠI ③ — đường nạp lại THẬT là gì:
+grep -n 'kickstart\|pkill\|kill ' ~/Operations/scripts/hen-khoi-dong-lai-app.sh
+#   thấy `launchctl kickstart -k` ⇒ hạ theo JOB, launchd dọn nhóm ⇒ con chết theo
+#   nếu ai đó đổi sang `kill <pid>` ⇒ 🔴 lúc ĐÓ mới sinh mồ côi thật
+```
+⚖️ **Sức nặng từng mảnh — ⛔ gộp thành «đã chứng minh»:**
+`pgid` + khoá plist = bằng chứng CƠ CHẾ (mạnh) · «0 tiến trình `claude -p` sót từ trước lần khởi»
+= bằng chứng QUAN SÁT (khá, còn cách giải thích khác: bộ hẹn vốn ⛔ nổ lúc ghế chạy).
+⛔ **DÙNG được** «Owner thấy ô bị cắt ngang câu» làm đối chứng — chữ ngừng hiện CŨNG xảy ra
+khi trình duyệt rớt dòng mà con VẪN chạy. Hai ca cho CÙNG một triệu chứng.
+
+🔴 **NHƯNG CÓ ĐƯỜNG THỨ HAI — và nó CÓ THẬT** (ghế soi nêu, tôi đo 31/08 14:4x):
+đường trên nói về **nạp lại CÓ CHỦ Ý** qua launchd. Còn khi máy chủ **TỰ SẬP** (lỗi ⛔ bắt được,
+hết bộ nhớ) thì **⛔ ai gửi tín hiệu cho cả nhóm** ⇒ con có mồ côi thật.
+
+```bash
+# ĐO LẠI — ⛔ cần dựng máy chủ tạm. POSIX thuần, 5 giây, 0 rủi ro, ⛔ đụng app Owner:
+/bin/zsh -c 'sleep 300 & echo $! > /tmp/thu.con; sleep 300' & CHA=$!
+sleep 1; CON=$(cat /tmp/thu.con); kill -9 $CHA; sleep 1     # kill -9 RIÊNG cha = mô phỏng SẬP
+ps -o ppid= -p $CON        # ra 1  ⇒ con SỐNG, đã bị nhận nuôi ⇒ MỒ CÔI CÓ THẬT
+kill -9 $CON; rm -f /tmp/thu.con
+# ĐỐI CHỨNG: ps -p $CHA phải RỖNG (cha đã chết thật, ⛔ phải phép đo hỏng)
+```
+**Kết quả 31/08: con SỐNG, cha mới = 1 ⇒ nhánh tự-sập ĐẺ RA mồ côi thật.**
+
+```bash
+# NÓ ĐÃ NỔ TRÊN APP NÀY CHƯA — 🔴 ĐỌC KỸ PHẦN THƯỚC MÙ BÊN DƯỚI TRƯỚC KHI TIN SỐ NÀY:
+L=~/Operations/logs/phong-ban-lan.log
+grep -ci 'FATAL\|out of memory\|uncaughtException' $L   # 31/08: 0
+grep -c  'Ready in' $L      # 67  ← lần khởi THÀNH CÔNG (dùng SỐ NÀY)
+grep -c  '▲ Next.js' $L     # 83  ← lần TIẾN TRÌNH BẮT ĐẦU  ⇒ 83-67 = 16 lần khởi HỎNG
+```
+🔴 **THƯỚC NÀY MÙ VỚI ĐÚNG THỨ TA ĐANG TÌM** (ghế soi bắt 31/08 14:46 — nhận, ⛔ cãi):
+`SIGKILL` và kẻ-giết-vì-hết-bộ-nhớ **⛔ chạy handler nào** ⇒ tiến trình ⛔ kịp ghi MỘT CHỮ.
+Mà đó lại ĐÚNG loại sập đẻ ra mồ côi. Đo lại: `grep -c 'SIGKILL\|SIGTERM\|Killed\|signal'` → **0**
+trên cả 52.172 dòng ⇒ log này **⛔ BAO GIỜ** ghi được cái chết đột ngột của chính nó.
+📌 **Đây là tìm dấu vết của cái chết trong nhật ký do CHÍNH NGƯỜI CHẾT viết.**
+⚠️ Và đối chứng dương của tôi (`'error'` → 6.388) chỉ chứng minh **tệp có nội dung** —
+⛔ chứng minh thước bắt được **ĐÚNG LOẠI sự kiện đang tìm**. Hai chuyện KHÁC NHAU.
+
+⇒ Câu đúng phải viết là: **«CÓ THẬT · CHƯA THẤY DẤU · và loại sập nguy nhất vốn ⛔ để lại dấu ở đây»**
+— ⛔ được viết «chưa bao giờ xảy ra». Xếp sau UI/UX là đúng, nhưng ⛔ để câu chữ ru người sau ngủ quên.
+
+### 🧾 NHÂN CHỨNG NGOÀI — vì log là lời khai của chính người chết
+```bash
+launchctl print gui/$(id -u)/com.eroca.phong-ban-lan | grep -E '^\s*(state|pid|runs) '
+#   31/08: state=running · pid=74592 · runs=11
+#   ĐỐI CHỨNG ÂM: hỏi một job BỊA ⇒ «Bad request» ⇒ thước phân biệt được, ⛔ gật bừa
+```
+⚠️ **Giới hạn phải nói kèm:** `runs` **RESET mỗi lần nạp lại plist** ⇒ ⛔ so được với số đếm
+trong log. Nó làm chứng cho **giai đoạn hiện tại**, ⛔ cho cả đời job.
+📌 Một nguồn im = im lặng. **Hai nguồn im (một trong-cuộc, một ngoài-cuộc), mỗi nguồn có giới hạn
+ghi rõ** = mới bắt đầu nặng lời. Vẫn ⛔ đủ để viết «chưa bao giờ xảy ra».
+
+### 🔴 CÒN MỘT TRẠNG THÁI THỨ BA MÀ CẢ HAI THƯỚC ĐỀU ⛔ THẤY
+```
+83 lần BẮT ĐẦU khởi  −  67 lần BÁO SẴN SÀNG  =  16 lần ⛔ bao giờ sẵn sàng
+```
+⛔ phải sập, cũng ⛔ phải khởi xong. Chưa ai truy 16 lần đó là gì (khớp với đống `EADDRINUSE`,
+nhưng **khớp ⛔ phải là chứng minh**).
+
+⚠️ **BÀI HỌC VỀ CON SỐ «150» TÔI TỪNG ĐƯA — và chẩn đoán đầu của tôi cũng SAI:**
+```bash
+grep -c 'Ready in\|ready started server\|▲ Next.js' $L    # → 150
+grep -c 'Ready in.*▲ Next.js\|▲ Next.js.*Ready in' $L      # → 0  ⇒ ⛔ dòng nào khớp hai mẫu
+```
+Tôi nói đó là «đếm trùng» — **⛔ phải**. `grep -c` đếm DÒNG, ⛔ dòng nào khớp hai mẫu,
+67+83+0=150 là **số học ĐÚNG**.
+🔑 **Lỗi nằm ở CÁI TÊN, ⛔ ở phép tính:** tôi cộng HAI LOẠI SỰ KIỆN KHÁC NHAU
+(thử-khởi 83 + khởi-xong 67) rồi dán lên tổng đó MỘT cái nhãn «số lần khởi».
+📌 Nên mỗi con số trong sổ này phải đi kèm **LỆNH ĐẾM** — ⛔ có lệnh thì tháng sau
+⛔ ai tra được nó đếm CÁI GÌ, và một cái nhãn sai sẽ sống mãi.
+⚠️ Log còn **9.480 dòng `EADDRINUSE`** — máy chủ mới ⛔ chiếm được cổng vì bản cũ còn giữ.
+Đó là bệnh KHÁC (launchd thử lại liên tục), và nó **⛔ đẻ mồ côi** — tiến trình chết lúc khởi,
+chưa kịp sinh con nào. Ghi ra đây để người sau thấy số 9.480 thì ⛔ nối nhầm vào mục này.
+
+📌 **Hệ quả:** ⛔ thêm `detached` để «chữa mồ côi». Chính việc cùng nhóm đang dọn hộ —
+thêm cờ đó là **TỰ TAY ĐẺ RA** đúng thứ mồ côi mà nay ⛔ có.
+🔑 **Bài học phương pháp:** mã cho biết **Ý ĐỊNH**, ⛔ cho biết **KẾT CỤC**. Ở đây một bên đo cách
+**SINH** tiến trình rồi kết luận về cách **GIẾT** nó. Và: trước khi xin một phép thử PHÁ
+(hạ máy chủ giữa lúc Owner đang dùng), hãy tìm phép đo **TĨNH** trả lời cùng câu hỏi —
+`ps -o pgid` + đọc plist mất 5 giây, 0 rủi ro, thay trọn phép thử đó.
+🗓 đo 31/08 14:33 · `claude-aiboss-app-pm` (đính chính kết luận của chính mình lúc 14:20)
 
 ### 3.3 Bộ hẹn nạp phải canh **MỌI** ghế, và quá trần thì **BÁO chứ ĐỪNG nổ**
 ```bash
