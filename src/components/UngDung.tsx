@@ -916,24 +916,48 @@ export default function UngDung({
        * 🐛 Bệnh (P0-7/P1-7): cờ «đang chạy» sống trong bộ nhớ TRANG. Owner bấm F5 là mất,
        *    và mất theo nó là **NÚT DỪNG** — ⛔ còn cách nào chặn một ghế đang tiêu tiền.
        * ⚠️ ĐỀ BÀI CHỈ SAI CHỖ, tôi làm đúng Ý nhưng đặt đúng NƠI:
-       *    đề ghi «đổi `dangChay: false` ở :1453». Nhưng ba chỗ có chuỗi đó đều ⛔ phải khối này —
+       *    đề ghi «đổi cờ-đang-chạy về false ở :1453». Nhưng ba chỗ mang chuỗi ấy đều ⛔ phải khối này —
+       * 🔤 (Chú thích này CỐ Ý ⛔ viết nguyên chuỗi cần đếm. Ghế soi đo 31/08: viết nguyên vào
+       *    chú thích thì mọi phép ĐẾM CHUỖI ra 4 thay vì 3, và người sau đi tìm chỗ thứ tư ⛔ có.
+       *    Họ hàng với bẫy «bộ rút gọn đổi hình dạng câu lệnh» — thước dính vào thứ ⛔ phải mã.)
        *      :300  giá trị khởi tạo ô TRỐNG      · :863 lúc CHỦ ĐỘNG dừng
        *      :1453 lúc chảy chữ XONG (hạ cờ)     ← đổi chỗ này là hạ cờ sai lúc kết thúc lượt
-       *    Khối khôi phục ⛔ HỀ đặt `dangChay` — nó thừa hưởng `false` từ mặc định.
+       *    Khối khôi phục ⛔ HỀ đặt cờ-đang-chạy — nó thừa hưởng giá trị sai từ mặc định.
+       * 🔤 (Chú thích này CỐ Ý ⛔ viết nguyên chuỗi «cờ hạ» ở dạng mã — ghế soi đo 31/08:
+       *    viết nguyên vào chú thích thì mọi phép ĐẾM CHUỖI đều ra 4 thay vì 3, và người sau
+       *    đi tìm một chỗ thứ tư ⛔ tồn tại. Bẫy họ hàng với «bộ rút gọn đổi hình dạng câu lệnh».)
        *    ⇒ Phải THÊM ở đây, và ⛔ đụng vào cả ba chỗ kia. (Đúng dặn dò «chỉ một chỗ».)
        * 🛟 Hỏng cửa này ⇒ coi như ⛔ ai chạy, y như trước. ⛔ để một lỗi mạng chặn cả việc khôi phục.
        */
       let dangChayTheoO = new Set<string>();
+      /**
+       * 🔴 HAI LOẠI RỖNG, ⛔ được gộp làm một (ghế soi bắt 31/08 — lỗ do CHÍNH TÔI đào):
+       *      rỗng vì THẬT SỰ ⛔ ai chạy    ⇒ hiện rảnh là ĐÚNG
+       *      rỗng vì ⛔ HỎI ĐƯỢC cửa      ⇒ hiện rảnh là NÓI DỐI, và nó **lấy mất nút Dừng**
+       *                                     trên một ô đang chạy thật
+       * 🕳 Tôi thêm `so_o_dang_chay` ở cổng CHỈ để phân biệt hai loại đó, rồi bên đọc
+       *    (chính đây) **⛔ hề dùng tới**. Hai đầu của một hợp đồng ⛔ khớp nhau.
+       *    Đúng con bệnh P0-7 đang chữa — «giao diện nói dối và lấy mất cái phanh» — chỉ khác lối vào.
+       * ✅ Nay: hỏng thì VẪN khôi phục (⛔ chặn), nhưng phải NÓI RA.
+       */
+      let hoiDuocAiChay = false;
       try {
         const rc = await fetch('/api/dung');
         if (rc.ok) {
           const jc = await rc.json();
-          const ds = Array.isArray(jc?.dang_chay) ? jc.dang_chay : [];
-          dangChayTheoO = new Set(
-            ds.map((v: { ma_o?: unknown }) => (typeof v?.ma_o === 'string' ? v.ma_o : '')).filter(Boolean),
-          );
+          // ⚠️ Đòi CẢ HAI trường mới coi là hỏi được. Chỉ có mảng thì ⛔ phân biệt được
+          //    «cửa mới trả rỗng» với «cửa CŨ ⛔ có trường đó» — lại một loại rỗng thứ ba.
+          if (Array.isArray(jc?.dang_chay) && typeof jc?.so_o_dang_chay === 'number') {
+            hoiDuocAiChay = true;
+            dangChayTheoO = new Set(
+              (jc.dang_chay as Array<{ ma_o?: unknown }>)
+                .map((v) => (typeof v?.ma_o === 'string' ? v.ma_o : ''))
+                .filter(Boolean),
+            );
+          }
         }
       } catch { /* ⛔ hỏi được thì thôi — lùi về «⛔ ai chạy», ⛔ chặn khôi phục */ }
+      datChuaBietAiChay(!hoiDuocAiChay);
 
       const daDung = new Set<string>();
       for (let i = 0; i < SO_O; i++) {
@@ -1539,6 +1563,12 @@ export default function UngDung({
    * phiên từng ô giữ nguyên vì ⛔ không ô nào bị tháo khỏi cây giao diện.
    */
   const [toanMan, datToanMan] = useState<number | null>(null);
+  /**
+   * 🚩 «Tôi ⛔ hỏi được máy chủ ai đang chạy» — app phải NÓI RA, ⛔ im lặng hiện rảnh.
+   * 📌 Im lặng ở đây ⛔ phải chuyện thẩm mỹ: nó lấy mất NÚT DỪNG trên ô đang tiêu tiền,
+   *    mà Owner ⛔ có cách nào biết vì sao nút biến mất.
+   */
+  const [chuaBietAiChay, datChuaBietAiChay] = useState(false);
 
   /**
    * 🔭 PHÓNG TO / THU LẠI đổi chiều cao MỌI ô ⇒ phải neo lại — nhưng CHỈ ô nào TRƯỚC ĐÓ
@@ -2366,6 +2396,18 @@ export default function UngDung({
                           * 📌 App BIẾT mình đọc hụt thì app phải NÓI RA. Im lặng khuyết còn tệ
                           *    hơn báo lỗi: Owner sẽ tưởng hội thoại đó ⛔ từng tồn tại.
                           */}
+                        {/**
+                          * 🚩 KHAI RA khi ⛔ hỏi được «ai đang chạy». Hiện ở MỌI ô có ghế, vì hậu quả
+                          *    là của TỪNG ô: ô này có thể đang chạy mà nút Dừng ⛔ hiện.
+                          * ⛔ gộp «⛔ ai chạy» với «⛔ hỏi được» — hai thứ trông giống hệt nhau trên
+                          *    màn hình, mà một cái là sự thật còn một cái là lời nói dối.
+                          */}
+                        {chuaBietAiChay && (
+                          <div className="moc-ngay canh-hut">
+                            ⚠️ Chưa hỏi được máy chủ xem ghế nào đang chạy — nút Dừng có thể chưa hiện
+                            dù ghế đang chạy thật. Tải lại trang để hỏi lại.
+                          </div>
+                        )}
                         {o.catDongDai && (
                           <div className="moc-ngay canh-hut">
                             ⚠️ Có một đoạn quá lớn nên app đọc hụt — phần trên đây khuyết một khúc.
