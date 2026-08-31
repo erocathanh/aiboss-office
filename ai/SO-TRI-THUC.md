@@ -73,6 +73,23 @@ grep -n "da_xu = tt" ~/Projects/aiboss-app-chat/src/lib/kho-danh-thuc.ts
 
 ---
 
+### 1.6 🔑 CÓ **BA** LOẠI «RỖNG», ⛔ phải hai — loại thứ ba là **CỬA CŨ TRẢ 200**
+```
+① rỗng vì THẬT SỰ KHÔNG ai chạy    ⇒ hiện rảnh là ĐÚNG
+② rỗng vì KHÔNG hỏi được cửa        ⇒ hiện rảnh là NÓI DỐI (mất nút Dừng)
+③ rỗng vì CỬA CŨ — máy chủ chưa nạp bản mới nên KHÔNG có trường đó
+   🔴 cửa cũ vẫn trả 200 ⇒ kiểm `rc.ok` KHÔNG bắt được nó
+```
+```bash
+# ĐO LẠI: bên đọc phải đòi ĐỦ CẢ HAI trường mới coi là «hỏi được»
+grep -n 'so_o_dang_chay' ~/Projects/aiboss-app-chat/src/components/UngDung.tsx
+# ĐỐI CHỨNG DƯƠNG: phải ra ≥2 dòng. Ra 0 ⇒ bên đọc lại gộp ba loại rỗng làm một.
+```
+🕳 **Ca thật 31/08 14:0x, ⛔ phải giả thuyết:** trình duyệt đã ở bản mới trong khi máy chủ vẫn
+là bản 11:43:46. Đúng cảnh đó đang diễn ra lúc mục này được viết.
+📌 **Một cửa CŨ trả 200 là một loại «rỗng» RIÊNG.** Ai kiểm bằng `rc.ok` sẽ tưởng mình hỏi được.
+🗓 31/08 · `claude-phong-ban-pm` nêu 2 loại · `claude-aiboss-app-exe` tìm ra loại thứ 3
+
 ## 🖥 KHU 2 · GIAO DIỆN
 
 ### 2.1 🔴 Sau F5, app KHÔNG biết ô nào đang chạy — CHƯA VÁ
