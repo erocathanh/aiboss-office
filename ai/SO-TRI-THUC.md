@@ -59,6 +59,28 @@ là lúc dễ lọt nhất, vì mọi phép kiểm đều hướng về con bệ
 Phép này bắt được ca rõ, ⛔ thay được việc đọc.
 🗓 đo 31/08 · phép do `claude-phong-ban-pm` nghĩ ra · `claude-aiboss-app-pm` đo tỉ lệ kêu oan
 
+### 0.2 🔴 `grep` của vỏ lệnh **CÂM** trên tệp có byte hỏng — trả RỖNG mà ⛔ báo lỗi
+Nhật ký bộ canh (`scripts/.mc-<ghế>/log`, 7.673 dòng) chứa byte ⛔ hợp lệ. Hậu quả:
+```bash
+grep -c '31/08' "$L"     # → RỖNG. ⛔ phải 0. ⛔ có thông báo lỗi nào.
+LC_ALL=C grep -c ...     # → VẪN RỖNG (⛔ chữa được)
+wc -l < "$L"             # → 7673   ⇒ tệp CÓ nội dung, ⛔ phải rỗng
+```
+🕳 Ca thật 31/08 16:0x: tôi đọc số RỖNG đó thành **«ghế này chưa bị gọi lần nào hôm nay»**.
+Sai hoàn toàn — đo lại bằng Python ra **26 lần gọi**.
+```python
+# ĐO LẠI cho ĐÚNG — Python, mở với errors='replace':
+for ln in open(p, encoding='utf-8', errors='replace'):
+    if '31/08' in ln: ...
+# ĐỐI CHỨNG DƯƠNG BẮT BUỘC: đếm TỔNG dòng phải > 0.
+#   Ra 0 cả tổng ⇒ thước câm. Tổng > 0 mà lọc ra 0 ⇒ lúc đó mới là «⛔ có».
+```
+📌 **«Rỗng» ở đây là LOẠI RỖNG THỨ TƯ**: ⛔ phải «⛔ có», ⛔ phải «⛔ còn biết»,
+⛔ phải «cửa cũ trả 200» — mà là **«thước ⛔ đọc nổi tờ giấy»**.
+🔑 Nguy hơn cả ba loại kia vì nó **⛔ kèm bất kỳ dấu hiệu nào**: ⛔ lỗi, ⛔ mã thoát khác 0,
+⛔ dòng cảnh báo. Chỉ là một khoảng trắng trông y hệt một câu trả lời.
+🗓 đo 31/08 16:0x · `claude-aiboss-app-pm` (tự cắn khi chuẩn bị số cho cuộc bàn 01/09)
+
 ## 🔔 KHU 1 · ĐÁNH THỨC GHẾ
 
 ### 1.1 CÓ HAI BỘ ĐẾM KHÁC NHAU — đừng nhầm chúng làm một
@@ -162,7 +184,7 @@ cd ~/Development/playwright-lab && node do-thu-nho-6o.mjs    # chạy CẢ HAI b
 
 ---
 
-### 2.4 · «14% mẩu tin ⛔ có mốc giờ» — SAI ĐƠN VỊ. Đúng là 14% **DÒNG**, còn **MẨU thì 0%**
+### 2.5 · «14% mẩu tin ⛔ có mốc giờ» — SAI ĐƠN VỊ. Đúng là 14% **DÒNG**, còn **MẨU thì 0%**
 
 ```
 đề bài P2-3 và chú thích UngDung.tsx:79 đều ghi «14% mẩu tin ⛔ có timestamp»

@@ -62,3 +62,156 @@ không tự chạy vì sợ hai nơi cùng gọi một phiên). Dịch vụ ngo�
 ## Q-004 · 30/08/2026 · Nơi để tài liệu AI của dự án
 **Chốt:** `~/Projects/aiboss-app-chat/ai/`, khuôn theo `claude-master-app/ai/` và `youtube-modeling/ai/`.
 **Ai chốt:** Owner.
+
+## [2026-08-30 09:3x] BỎ `navigator.locks` khỏi P0-2a — và vì sao vẫn ghi lại nó
+
+**Chốt:** ⛔ dùng `navigator.locks` để chống hai tab cùng nhặt yêu cầu. Bỏ điều khoản ⑫ khỏi hợp đồng.
+**Số đo lúc chốt:** `kho-danh-thuc.ts` 0 async/await thật (chữ `await` duy nhất nằm trong chú thích
+dòng 17) · `nhan/route.ts` chỉ một `await` ở dòng 20 rồi đồng bộ tới hết · đúng MỘT tiến trình nghe
+cổng 4319 (pid 16624) · 0 cấu hình cluster ⇒ hai tab ⛔ chen được vào nhau ⇒ bệnh ⛔ tồn tại.
+**Ai chốt:** `claude-phong-ban-pm` tự rút đề bài của mình, `claude-aiboss-app-pm` đo lại và đồng ý.
+**Điều kiện mở lại:** phép T3-doi-chung (hai tab, một yêu cầu, bản CHƯA SỬA) ra ĐỎ.
+
+⚠️ **GIỮ LẠI CHO NGƯỜI SAU — lỗ của `navigator.locks`, kẻo ai đó lại chọn nó rồi vấp:**
+```
+navigator.locks ĐÒI SECURE CONTEXT.
+chay-lan.sh:102  exec npx next start -H 0.0.0.0 -p 4319
+  localhost:4319      → secure     ⇒ navigator.locks CÓ
+  http://<IP-LAN>:4319 → ⛔ secure ⇒ navigator.locks = undefined  (đường Owner mở bằng điện thoại)
+⇒ Cắm thẳng = trên Mac có khoá, trên điện thoại ÂM THẦM ⛔ khoá gì.
+   Và phép thử chạy ở localhost sẽ XANH trong khi bệnh còn nguyên ở đường dùng hằng ngày.
+⇒ Ai dùng nó: BẮT BUỘC phát hiện tính năng + lùi về BroadcastChannel (⛔ đòi secure context),
+   và phép thử phải chạy CẢ localhost LẪN IP-LAN, in ra đang ở nhánh nào.
+```
+
+## [2026-08-30 09:1x] HOÃN v3 (lease/ack) · làm S1 S2 S3 trước · 🗓 HẸN ĐỌC SỐ 06/09/2026
+
+**Chốt:** ⛔ viết v3 bây giờ. Làm ba lát nhỏ S1 S2 S3, chạy một tuần, **06/09/2026 đọc số rồi mới quyết**
+v3 hay P0-2b lên trước.
+
+**Số đo lúc chốt (30/08):**
+```
+lượt chạy thật, 3.541 lượt / 18 ghế : trung vị 20 GIÂY · >3 phút 1% · >8 phút 0%
+   ⇒ hạn 3 phút hiện tại ĐÃ phủ 99% ⇒ «bận quá hạn» là bệnh HIẾM
+ca chuông chết 08:00:17 (hết hạn 08:03:17): ô đích RẢNH 07:57:48→08:08:43 (655 giây)
+   ⇒ ⛔ phải «bận quá hạn». Thủ phạm: ⛔ CÓ AI THĂM DÒ (trình duyệt đóng / tab ẩn)
+   ⇒ thuộc cửa ①②, thứ v3 ⛔ chạm tới, CHỈ P0-2b chữa
+ca mất tin ĐO ĐƯỢC tới nay: 1, và nó thuộc cửa ①②
+sổ hàng đợi giữ 10 phút ⇒ ⛔ đếm được quá khứ ⇒ bộ đếm phải VỪA CHẠY VỪA ĐẾM
+```
+**Ai chốt:** `claude-aiboss-app-pm`, sau khi Owner nói *«cứ làm đi, sai thì sửa… việc đo lại sau 1 tuần
+là việc đưa vào FILE của thư mục ai chứ ⛔ phải nói trên chat rồi lại quên»*.
+
+**Điều kiện mở lại / cách quyết ngày 06/09:**
+```
+chạy:  bash ai/do-lai-06-09.sh
+       (đã thử 3 đường: thiếu sổ → KÊU · sổ 40 ca → in bảng · sổ có dòng hỏng → BÁO)
+đọc:   cửa ①② vs cửa ④⑤
+       ①② > ④⑤ ⇒ P0-2b LÊN TRƯỚC       ④⑤ ≥ ①② ⇒ v3 LÊN TRƯỚC
+       0 ca cả tuần ⇒ HOÃN CẢ HAI, làm việc khác
+⚠️ Đối chứng bắt buộc: tổng cửa phải BẰNG tổng dòng sổ. Lệch ⇒ ⛔ tin tỉ lệ.
+```
+**Lật lại:** v3 đầy đủ nằm ở `ai/NGHIEN-CUU-heartbeat.md` mục «v3 — HỢP ĐỒNG BẰNG BẢNG TRƯỜNG + SỐ»
+(600 dòng, đã qua 1 cửa gật + 1 cửa bác). ⛔ vứt gì cả — chỉ chờ số gọi tên.
+
+🕳 **Vì sao có mục này:** 30/08 cả nhà soi SÁU VÒNG một cơ chế, hai cửa duyệt, mà **⛔ ai hỏi
+«bệnh đó có phải bệnh đang giết ta ⛔»**. Chính tôi khai «lượt chạy 2–5 phút» để chốt con số
+mà ⛔ hề đo — đo ra là 20 giây. Đừng lặp lại: **ĐỌC SỐ RỒI HÃY QUYẾT.**
+
+## [2026-08-30 09:2x] 🔴 CHẶN: đồng hồ 1 tuần CHƯA chạy — máy chủ còn ở bản cũ
+
+**Sự việc:** `claude-aiboss-app-exe` giao S1 S2 S3 xong, commit `31a3dbb`, build xanh. Nhưng:
+```
+máy chủ đang phục vụ : pid 16624 · khởi 29/08 20:55:11
+commit 31a3dbb        : 30/08 09:18:42        ⇒ máy chủ GIÀ HƠN 12,5 GIỜ
+.next dựng lúc        : 30/08 09:18:07        ⇒ bản dựng ĐÃ SẴN, chỉ chờ nạp
+~/Operations/dem-cua-mat-tin.jsonl : CHƯA TỒN TẠI (0 dòng)
+```
+⇒ **S1 ⛔ chạy dòng nào. Tuần đo CHƯA bắt đầu.**
+🔴 Tới 06/09 mà ⛔ ai khởi động lại ⇒ `do-lai-06-09.sh` in «⛔ có sổ đếm ⇒ S1 CHƯA chạy»
+⇒ ta lại quyết bằng CẢM GIÁC — đúng thứ cả ngày 30/08 dựng ra để tránh.
+
+**Ai phát hiện:** `claude-aiboss-app-exe` tự nêu trong báo cáo bàn giao, ⛔ giấu.
+**Vì sao exe ⛔ tự restart:** cắt ngang lượt của ghế khác + luật đòi Owner xác nhận.
+**Điều kiện gỡ chặn:** Owner đồng ý khởi động lại (kiểu hẹn-tách-rời để ⛔ cắt lượt đang chạy).
+**Nghiệm thu sau khi gỡ:** `ps -o lstart -p <pid mới>` phải MỚI hơn 09:18:42 · cổng 4319 → 200
+kèm đối chứng âm 404 · và ca mất tin đầu tiên phải sinh dòng trong sổ đếm.
+
+## [2026-08-30 09:25:03] ✅ GỠ CHẶN S0 — đồng hồ 1 tuần BẮT ĐẦU CHẠY
+
+**Owner cho phép:** *«tôi ⛔ giao việc ghế nào ngoài team build app lúc này, nên khởi động lần này
+là phụ thuộc team em»*.
+**Số đo, do script TỰ ĐO TỰ GHI (`/tmp/khoi-dong-lai-30-08.log`):**
+```
+kickstart          09:24:58
+pid CŨ  16624 khởi 29/08 20:55:11   (bản CŨ, ⛔ có S1)
+pid MỚI 51256 khởi 30/08 09:25:03   ⇒ SAU commit 31a3dbb (09:18:42) ⇒ ĐANG CHẠY BẢN CÓ S1 ✅
+cổng 4319   200 · thân 168.297 byte
+ĐỐI CHỨNG ÂM 404 · thân 6.244 byte  ⇒ vỏ KHÁC thân ⇒ cái 200 là trang THẬT
+sổ ô còn đủ 6 ô                      ⇒ ⛔ mất liên kết ô↔phiên
+sổ đếm S1: chưa có — ĐÚNG, nó chỉ sinh khi có ca mất tin ĐẦU TIÊN
+```
+🗓 **MỐC ĐỒNG HỒ: 30/08/2026 09:25:03 → đọc số 06/09/2026** bằng `bash ai/do-lai-06-09.sh`.
+
+🕳 **BÀI HỌC VẬN HÀNH — khởi động lại giữa lượt thì ĐUÔI LƯỢT BIẾN MẤT KHỎI SỔ CHAT**
+```
+Owner thấy tin của tôi đứt ngang giữa câu sau khi F5, tưởng việc ⛔ chạy.
+Sự thật: việc CHẠY ĐỦ. Máy chủ chết giữa lúc ghế đang ghi ⇒ phần đuôi ⛔ kịp vào bản ghi phiên.
+⇒ VIỆC XONG mà DẤU VẾT MẤT — nguy hơn việc ⛔ xong, vì người đọc kết luận ngược.
+✅ Cách chống (đã dùng ở đây, giữ làm nếp): mọi việc có thể GIẾT CHÍNH MÌNH thì phải
+   để script TỰ ĐO TỰ GHI ra tệp NGOÀI lượt. Bằng chứng phải sống lâu hơn người tạo ra nó.
+```
+
+---
+
+## Q-005 · 30/08/2026 09:37 · Đổi tên máy trong mạng riêng: `openclaw` → `aiboss`
+**Chốt:** đổi. Owner ra lệnh, lý do: không muốn app của mình mang tên một dự án khác.
+
+**Địa chỉ MỚI để vào app từ điện thoại:**
+```
+https://aiboss.tailcd520a.ts.net:8443/      ← app aiboss-app-chat (proxy về 127.0.0.1:4319)
+https://aiboss.tailcd520a.ts.net/           ← openclaw            (proxy về 127.0.0.1:18789)
+```
+
+**Số đo TRƯỚC khi bấm (09:37:46):**
+```
+tên máy cũ  openclaw · DNS openclaw.tailcd520a.ts.net
+tên «aiboss» có trùng máy nào trong 5 máy của tailnet: KHÔNG
+31 tệp trên máy trỏ vào tên cũ (~/Operations 6 · aiboss-app-chat 1 · openclaw 4 · ~/.claude 20)
+```
+
+**Một chỗ SUÝT HỎNG, ghi lại vì nó sẽ lặp với bất kỳ ai đổi tên máy lần sau:**
+```
+Đổi tên xong: DNS tên mới phân giải ĐÚNG · app nội bộ 127.0.0.1:4319 vẫn 200
+NHƯNG CẢ HAI CỬA VẪN CHẾT — vì cấu hình `tailscale serve` còn gắn CỨNG tên cũ.
+   `tailscale serve status` sau khi đổi tên vẫn in «openclaw.tailcd520a.ts.net»
+CHỮA: tailscale serve reset, rồi dựng lại ĐÚNG hai đường theo mốc đã ghi trước khi bấm:
+   tailscale serve --bg --https=443  http://127.0.0.1:18789
+   tailscale serve --bg --https=8443 http://127.0.0.1:4319
+📌 Bài học: đổi tên máy KHÔNG tự kéo theo cấu hình phục vụ. Ghi mốc TRƯỚC khi bấm là thứ cứu được,
+   vì nếu không có mốc thì sau khi reset sẽ không ai nhớ hai đường đó trỏ vào cổng nào.
+```
+
+**Nghiệm thu (09:39:27) — xoá tệp tạm trước MỖI lần gọi:**
+```
+aiboss.tailcd520a.ts.net:8443/        → 401 ·     12 byte   app, đúng lớp hỏi mật khẩu
+aiboss.tailcd520a.ts.net/             → 200 · 14.406 byte   openclaw
+openclaw.tailcd520a.ts.net:8443/      → 000                  tên cũ đã chết, đúng dự đoán
+khong-co-may-nay...:8443/             → 000                  ĐỐI CHỨNG ÂM
+⇒ 401 = máy thật trả lời · 000 = tên không phân giải ⇒ hai loại phân biệt được rõ
+```
+
+**Hai chỗ phép đo của tôi bị hở, sửa rồi mới lấy số:**
+```
+① không xoá tệp tạm giữa các lần gọi ⇒ dòng THẤT BẠI vẫn hiện «14.406 byte» của lần TRƯỚC
+   ⇒ suýt thành bằng chứng giả cho một địa chỉ đã chết
+② đối chứng âm SAI TẦNG: một đường dẫn bịa trên CÙNG máy cũng trả 401,
+   vì lớp mật khẩu chặn trước khi tới trang ⇒ không phân biệt được gì.
+   Phải đổi sang một TÊN MÁY không tồn tại thì mới phân biệt.
+```
+
+**Lùi lại:** `tailscale set --hostname=openclaw` rồi dựng lại serve y hệt hai dòng trên.
+**Nhật ký đầy đủ:** `~/Operations/tra-cuu/2026-08-30_doi-ten-may-tailscale.log`
+**Còn nợ:** rà 31 tệp trỏ tên cũ — đọc từng chỗ để tách cấu hình sống khỏi sổ sách, chưa làm.
+
+(ghi 30/08/2026 09:46 London · claude-phong-ban-pm — Owner giao lưu sổ sau khi đổi tên xong)
