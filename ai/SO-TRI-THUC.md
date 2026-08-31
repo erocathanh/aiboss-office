@@ -382,6 +382,50 @@ grep -n 'DS_GHE\|exit 3' ~/Operations/scripts/hen-khoi-dong-lai-app.sh | head -4
 🕳 Ca sinh luật: bộ hẹn canh đúng MỘT ghế, nổ giữa lúc ghế khác đang nói ⇒ **cắt ngang câu của exe**.
 🗓 31/08 · `claude-aiboss-app-pm` (chính tôi gây ra)
 
+### 3.4 Tab cũ tự lộ ra là nó cũ (P1-8) — ba chỗ hở, và cái thứ ba làm nó im ĐÚNG lần nạp đầu
+```bash
+# máy chủ ĐANG PHỤC VỤ bản nào — hỏi thẳng, KHÔNG suy từ mốc tệp
+curl -s -X POST localhost:4319/api/danh-thuc/nhan -H 'Content-Type: application/json' \
+     -d '{"ds_o":[],"ds_ban":[]}' | python3 -m json.tool | grep ban_dung
+# ĐỐI CHỨNG DƯƠNG: so với đĩa — hai số PHẢI khớp sau khi nạp
+cat .next/BUILD_ID
+```
+🔴 **Giả thuyết 404 ĐÃ BỊ BÁC BẰNG SỐ — đừng ai đi lại đường này.**
+Ai cũng đoán «nạp xong, tab cũ xin bó JS cũ ⇒ bó đổi tên ⇒ 404 ⇒ vỡ giao diện». Đo 31/08:
+bó cũ `page-fdeb465ab3c8b19d.js` VẪN CÒN trên đĩa sau lần dựng mới (đối chứng dương: bó của
+bản mới cũng có ⇒ lệnh `ls` KHÔNG mù). **Next GIỮ LẠI bó cũ qua các lần dựng.**
+⇒ Cơ chế hỏng thật thì tới nay CHƯA AI ĐO ĐƯỢC. Nên bản vá KHÔNG đoán tab hỏng kiểu gì —
+nó chỉ khai một sự thật kiểm được: **mã máy chủ hiện là bản nào.**
+
+🕳 **CHỖ HỞ ③ — thứ đáng nhớ nhất, và suýt lọt:**
+«lần đầu tiên thì nhớ, đừng báo» ngầm giả định lần đầu đó xảy ra NGAY SAU KHI TẢI TRANG.
+Ở lần nạp ĐẦU TIÊN sau khi tính năng lên, máy chủ cũ chưa có khoá ⇒ tab nhận khoá lần đầu
+là SAU khi nạp ⇒ bị coi là «lần đầu» ⇒ IM. **Cơ chế chỉ chạy đúng từ lần thứ HAI.**
+```
+CHỮA: gộp thành MỘT dấu vân, phân biệt ba trạng thái, KHÔNG gộp hai cái sau làm một:
+   KHÔNG có khoá   → '(khong-co-khoa)'   máy chủ chưa có tính năng
+   có khoá, rỗng   → ''                  next dev (KHÔNG sinh BUILD_ID)
+   có khoá, có giá → mã bản dựng
+   ô nhớ khởi tạo `null`, KHÔNG phải chuỗi rỗng — rỗng là một GIÁ TRỊ HỢP LỆ THẬT.
+```
+🔑 **Bài học phương pháp:** một cờ «đã thấy lần đầu chưa» mà dùng CHUỖI RỖNG làm mốc «chưa thấy»
+là gộp «chưa đo» với «đo được rỗng». Cùng họ với «RỖNG khác 0» ở mục 0.2 — chỉ khác chỗ áp dụng.
+
+📏 **ĐO chiều cao băng, ĐỪNG gõ số cứng** — số thật khác nhau theo máy:
+```
+màn 1440×900 → băng cao 49px      màn 390×844 (điện thoại) → 76px (xuống 2 dòng)
+```
+Định gõ «44px» thì SAI ở CẢ HAI. Dùng ResizeObserver ghi vào biến CSS, mặc định `0px`
+⇒ khi KHÔNG có băng thì mọi phép `calc` là phép trừ 0, bố cục hiện tại KHÔNG đổi một ly.
+⚠️ Và phải bọc đúng `@media` như mau09 — globals ĐÈ mau09, viết trần là giẫm nhánh màn hẹp.
+⚠️ Băng phải `position:fixed` z-index **trên 60**: màn ≤1040px có `.cot-3.mo-khu{inset:0;z-index:60}`
+phủ toàn màn, băng nằm trong dòng chảy sẽ bị che SẠCH đúng trên máy Owner đang dùng.
+
+🔬 **Cổng nghiệm thu quan trọng nhất là ĐỐI CHỨNG ÂM:** nạp lại máy chủ mà KHÔNG dựng lại
+(cùng BUILD_ID) ⇒ băng phải IM. Thiếu nó thì một cái băng **luôn hiện** cũng qua được phép kiểm,
+và ta có thêm một phép kiểm chết. Nó chứng minh ta so BẢN DỰNG, KHÔNG phải so «máy chủ có khởi lại».
+🗓 đo 31/08 16:2x · `claude-aiboss-app-exe` (chỗ hở ③ do `claude-phong-ban-pm` tìm ra) · 7/7 cổng đạt
+
 ---
 
 ## ⛔ KHU 4 · CẤM ĐỘNG
