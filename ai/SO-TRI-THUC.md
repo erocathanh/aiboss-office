@@ -530,6 +530,53 @@ bảng 10 lần nạp do `claude-aiboss-app-pm` rút, tôi chạy lại lệnh t
 
 ---
 
+### 3.10 🔑 CÓ **HAI** cách cho một ghế thấy phiên cũ — tài liệu trước nay chỉ kể MỘT
+Ai đọc tài liệu cũ sẽ tưởng **fork** là đường duy nhất. Sai, và fork là đường ĐẮT hơn.
+
+| | cách A · **FORK** | cách B · **ĐẶT CHỖ ĐỨNG** |
+|---|---|---|
+| làm gì | chép phiên về kho ghế, cấp mã MỚI | cho ghế đứng NGAY tại thư mục chứa phiên |
+| giữ được | **6,5%** (đo 20/08: 19.305 → 1.257 dòng) | **100%** |
+| khoá | (không có) | `thu_muc` trong hồ sơ ghế |
+| dùng khi | phiên ở kho mà ghế KHÔNG thể đứng vào | phiên ở thư mục ghế đứng được |
+
+```bash
+# ĐO LẠI — ghế nào đang dùng cách B:
+python3 -c "
+import json,os
+d=json.load(open(os.path.expanduser('~/Projects/aiboss-app-chat/du-lieu/nhan-su.json')))
+g=d['nhan_su']; co=[x for x in g if x.get('thu_muc')]
+print('ghe=%d · co thu_muc=%d' % (len(g),len(co)))
+[print(' ',x['ten'],x['thu_muc']) for x in co]"
+# 31/08: 225 ghế · 5 có thu_muc (trọn bộ «Quản Lý Trường»), đều trỏ /Users/erocathanh
+# ĐỐI CHỨNG DƯƠNG: tra 'claude-eroca-boss' phải ra True · tra một tên bịa phải ra False
+```
+
+🔴 **BẪY ĐỌC TỆP NÀY — tôi cắn BA lần liền trong 5 phút:** `nhan-su.json` KHÔNG phải một danh sách.
+Nó là `{phong_ban:[7], nhan_su:[225], tong:int}`. Tôi ĐOÁN hình dạng rồi `list(d.values())`
+⇒ ra **3 ghế**, rồi ra **0 ghế**. Cả hai đều vô nghĩa mà **trông y như số đo**.
+📌 **Ba lần ra ba con số khác nhau ⇒ lỗi ở PHÉP ĐỌC, đừng đổ cho dữ liệu.** Mở cấu trúc ra NHÌN
+trước khi viết vòng lặp: `print(type(d), list(d.keys()))` — hai giây, chặn được cả ba lần sai.
+
+🎯 **Vì sao cách B đúng cho bộ «Quản Lý Trường»** (chú thích thiết kế có sẵn `nhan-su.ts:22-28`):
+kho phiên được SUY TỪ chỗ đứng. Năm phiên Owner muốn nối nằm ở kho `-Users-erocathanh`.
+Không đặt chỗ đứng thì `--resume` đi tìm ở `-Users-erocathanh-claude-hieu-truong`
+và **không bao giờ thấy** — ghế mở ra TRỐNG.
+⇒ Người làm việc đó ngày 30/08 chọn ĐÚNG. **Tài liệu thiếu, không phải thiết kế sai.**
+
+🔬 **VÀ MỘT SỐ ĐO CHẶN ĐƯỜNG, nay đã có** (31/08, phiên rác + hai lượt thật):
+```
+claude -p --append-system-prompt 'ten ban la ZORBAX'          → tạo phiên
+claude -p --resume <mã> --append-system-prompt 'ten ban la QUIXNAR' + hỏi tên
+   ⇒ trả lời: QUIXNAR        ⇒ ✅ HAI CỜ CHẠY CÙNG NHAU, lời dặn MỚI ĐƯỢC NẠP
+```
+Quan trọng vì `chay-agent.ts:179-183` dùng `else if`: **nối phiên cũ thì lời dặn KHÔNG bao giờ nạp**
+⇒ ghế chạy bằng `--resume` chưa từng nghe câu «bạn là ghế X», nên nó tự xưng tên trong trí nhớ cũ.
+Nó KHÔNG sai — **nó chưa từng được báo.**
+⚠️ `else if` đó **không có chú thích nào**, trong khi MỌI cờ quanh nó (`:160-176`) đều có chú thích
+giải thích lý do. Bằng chứng nghiêng về SÓT hơn là cố ý — nhưng đó là suy đoán, chưa phải kết luận.
+🗓 31/08 · `claude-phong-ban-pm` phát hiện tài liệu kể một nửa + tìm ra `else if` · `claude-aiboss-app-pm` đo lại
+
 ## ⛔ KHU 4 · CẤM ĐỘNG
 ```
 src/middleware.ts:65              realm="phong-ban-ai"  ← đổi = mọi thiết bị Owner bị hỏi lại mật khẩu
