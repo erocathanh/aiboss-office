@@ -814,11 +814,38 @@ còn KHỚP nên KHÔNG có dấu hiệu nào tố.
 
 ```
 package.json CÓ `postbuild` sinh .next/COMMIT
-hook `post*` của npm CHỈ chạy khi gọi qua `npm run`
-luật nhà dựng bằng `npx next build`  ⇒ hook KHÔNG BAO GIỜ chạy
 đối chứng: hai bản chụp .next TRƯỚC hai lần dựng hôm nay — CẢ HAI đều KHÔNG có COMMIT
 ⇒ tệp đó chưa từng tồn tại, KHÔNG phải bị lần dựng nào xoá
 ```
+
+🔴 **ĐÍNH CHÍNH 01/09 21:4x — Owner hỏi *«tưởng có quy định dùng pnpm thay npm rồi mà?»* và Owner ĐÚNG.**
+`claude-aiboss-app-exe` giải thích là *«hook `post*` của npm chỉ chạy qua `npm run`»*; PM chép nguyên
+sang cho Owner. **Kết luận đúng, nguyên nhân SAI** — kho này KHÔNG dùng npm:
+```
+packageManager  : pnpm@10.32.1      ·  có pnpm-lock.yaml (KHÔNG có package-lock.json)
+~/Projects/CLAUDE.md khai            :  `pnpm dev` → localhost:4319
+```
+✅ **Sự thật: `postbuild` chết vì HAI lý do ĐỘC LẬP, và ghế thợ chỉ nêu một, lại nêu nhầm:**
+```
+① pnpm từ bản 7 MẶC ĐỊNH TẮT pre/post script.
+   đo: `pnpm config get enable-pre-post-scripts` → undefined · dự án KHÔNG có .npmrc
+   ⇒ kể cả gõ `pnpm build` thì `postbuild` VẪN KHÔNG chạy
+② luật nhà dựng bằng `npx next build` (hồ sơ ghế PM, mục ①)
+   ⇒ bỏ qua HẲN bộ chạy script ⇒ KHÔNG hook nào trong package.json có cơ hội chạy
+```
+🔑 ⇒ **Chừng nào luật nhà còn dựng bằng `npx next build`, KHÔNG hook nào trong `package.json`
+chạy được — sửa `enable-pre-post-scripts` cũng vô ích.** Ba đường chữa, chưa chọn:
+```
+· gộp dấu vào CHÍNH script build: "build": "next build && <sinh dấu>"  ⇒ vẫn cần dựng qua pnpm
+· đổi luật dựng sang `pnpm build`                                      ⇒ đụng luật nhà, cần Owner
+· giữ sinh dấu BẰNG TAY như exe đang làm                                ⇒ đang chạy, rẻ nhất
+```
+⚠️ Đây là **quan trọng ✅ khẩn ❌** — xếp hàng, KHÔNG chen.
+
+📌 **Và vế PM phải tự ghi:** đây là **lần thứ BA trong ngày** PM chuyển tiếp khung của người khác
+mà KHÔNG kiểm tiền đề (① giả thuyết «khởi lại ⇒ sổ trống» của người soi · ② «phiên KHÔNG độc lập» ·
+③ lần này). Cả ba lần PM đều kiểm SỐ rất kỹ và KHÔNG kiểm **vật/nguyên nhân**.
+🔑 **Người chuyển tin mà KHÔNG kiểm tiền đề thì đang cho cái sai mượn thêm một chữ ký.**
 🔑 **Một dòng cấu hình ai cũng đọc thấy mà KHÔNG ai gọi thì nó là LỜI HỨA, KHÔNG phải cơ chế.**
 Và nó **tệ hơn việc KHÔNG có gì**: người đọc `package.json` sẽ tưởng bản dựng nào cũng có dấu xuất xứ.
 📌 `claude-aiboss-app-exe` hôm qua đã «vá» tệp đó — tức là **vá nội dung của một thứ chưa bao giờ chạy**.
