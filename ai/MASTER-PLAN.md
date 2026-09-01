@@ -981,6 +981,55 @@ vào một nhãn «tab quay lại thì mất chữ», rồi lấy mức khẩn c
 
 ---
 
+## 4p. 🔴 TẦNG THỨ BA — máy khách hỏi ĐÚNG MỘT LẦN rồi tin mãi. Đây là tầng Owner NHÌN THẤY.
+
+> `claude-aiboss-app-exe` tìm ra, `claude-phong-ban-pm` đo lại và xác nhận (01/09 22:2x).
+> **Nó ĐỘC LẬP với hai tầng ta đã biết** — vá xong ① và ② thì màn hình VẪN nói dối.
+
+```
+① sổ nằm trong BỘ NHỚ    ⇒ khởi lại là trống          ⇒ báo THIẾU   (phía máy chủ)
+② dsViec KHÔNG kiểm pid  ⇒ tiến trình chết mà sổ còn  ⇒ báo THỪA    (phía máy chủ)
+③ MÁY KHÁCH hỏi MỘT LẦN lúc tải trang rồi TIN MÃI     ⇒ màn hình sai (phía trình duyệt)
+```
+**Số đo:**
+```
+fetch('/api/dung') trong UngDung.tsx: ĐÚNG 2 chỗ
+   :975  POST — Owner bấm nút DỪNG        ·  :1055 GET — chỉ trong đường khôi phục lúc TẢI TRANG
+   ĐỐI CHỨNG DƯƠNG 'fetch(' → 11 chỗ ⇒ thước đọc được lời gọi mạng · ĐỐI CHỨNG ÂM cửa bịa → 0
+cờ «đang chạy» hạ được ở: :973 (bấm Dừng) · :1671 (CUỐI vòng đọc luồng)
+⇒ luồng chết thì :1671 KHÔNG bao giờ tới ⇒ cờ KẸT, và KHÔNG đường tự động nào gỡ
+```
+🔑 **KỂ CẢ khi sổ máy chủ đúng tuyệt đối, màn hình Owner vẫn sai** — vì nó KHÔNG hỏi lại.
+📌 Và nó giải thích trọn ca Owner chụp 31/08: *F5 lần 1 thấy 2 ô · F5 lần 2 thấy 3 ô*.
+**Mỗi lần F5 là một lần hỏi mới**, nên số đổi; giữa hai lần F5 thì màn hình đứng im dù sự thật đã đổi.
+
+### 💡 VÀ ĐÂY LÀ THỨ LÀM VIỆC RẺ ĐI MỘT BẬC
+> `claude-aiboss-app-exe`: *«bộ bắt bận→rảnh ĐÃ CÓ SẴN (`UngDung.tsx:2137-2146`), chỉ đang nối vào SAI VIỆC»*
+
+Nó phát hiện được ô vừa chuyển từ **bận sang rảnh**, rồi gọi một hàm **KHÔNG đọc lịch sử** — đúng
+hàm PM đã đo sáng nay là `napLichSu` xuất hiện **0 lần** trong khối đó.
+🔑 **Đồ nghề đã có, dây nối sai chỗ.** Loại phát hiện này đổi bài toán từ «dựng cơ chế mới» thành
+«nối lại một dây» — và nó chỉ thấy được khi có người đọc mã, KHÔNG thấy được bằng cách đo hành vi.
+
+### 🎯 XẾP HẠNG — đổi THỨ TỰ, KHÔNG đổi mức khẩn
+```
+quan trọng ✅  (đây là tầng Owner NHÌN THẤY: đèn sai · F5 mới thấy · ô im sau khi luồng đứt)
+khẩn      ❌  (cái đau MỖI NGÀY — tắt màn hình rồi mở lại — đã chữa xong ở P0)
+⇒ VẪN xếp hàng. NHƯNG lên ĐẦU hàng P1, TRƯỚC cả P1a.
+```
+**Ba lý do nó đứng trước P1a:**
+```
+· RẺ   — bộ bắt bận→rảnh đã có sẵn, chỉ nối lại dây
+· ĐỘC LẬP — KHÔNG cần P1a xong trước; vá được ngay
+· ĐÚNG TẦNG — nó là tầng Owner thấy, hai tầng kia Owner KHÔNG thấy trực tiếp
+```
+⚠️ **PM nói rõ: đây KHÔNG phải lần nâng hạng thứ hai.** 22:2x PM đã trót nâng ca F5 lên «khẩn» rồi
+phải hạ xuống. Lần này chỉ **đổi thứ tự trong cùng một bậc** — mức khẩn giữ nguyên là ❌.
+🔑 Đổi hạng thì phải có lý do MỚI về mức ĐAU; đổi thứ tự thì chỉ cần lý do mới về GIÁ và PHỤ THUỘC.
+Hai việc khác nhau, và trộn chúng là cách một hàng đợi mất kỷ luật.
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
