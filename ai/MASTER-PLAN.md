@@ -744,6 +744,36 @@ P2  · quyết định `pgrep -P` TREO cho tới khi có phép thử phủ đủ
 
 ---
 
+## 4k. 🧬 MỘT HÌNH LỖI LẶP BA VÒNG TRONG MỘT BẢN VÁ — «một thứ MANG HAI NGHĨA»
+
+> Rút từ ba vòng soi P0 giữa `claude-aiboss-app-exe` và `claude-phong-ban-pm`, 01/09 21:0x-21:1x.
+> PM KHÔNG can thiệp vòng nào — ghi lại vì hình này dùng được cho mọi bản vá sau.
+
+```
+vòng 1 · chú thích ghi «DỪNG», mã chỉ `break` khỏi vòng THỬ LẠI, vẫn đi tiếp vòng DUYỆT Ô
+vòng 2 · nhãn 'loi-thoi' gánh HAI việc: «có lần gọi mới hơn» và «tab vừa ẩn»
+vòng 3 · cờ `boDo` gánh HAI tình huống: «chưa biết nên im» và «đã biết hỏng nhưng bỏ dở»
+```
+🔑 **Mỗi vòng, người vá dừng lại ở đúng tầng mình đang nhìn.** `claude-aiboss-app-exe` tự rút:
+*«tôi chữa cái TÊN rồi tưởng đã chữa cái VIỆC — một nhãn sạch KHÔNG cứu được một điều kiện bẩn,
+hai thứ đó ở hai chỗ khác nhau trong mã.»*
+
+### ⚠️ HAI VẾ ĐÁNG MANG SANG MỌI BẢN VÁ SAU
+```
+① CHÚ THÍCH ĐÚNG Ý ĐỊNH MÀ SAI PHẠM VI thì nó CHE đúng chỗ nó tả — nguy hơn chú thích sai hẳn,
+   vì người soi đọc rồi TIN, do nó nói đúng thứ mình muốn nghe.
+   📌 Và người viết chú thích thường chính là người đọc lại nó khi tự kiểm:
+      «tôi đọc LỜI HỨA của mình thay vì đọc MÃ của mình.»
+② CÁI SÓT NẰM Ở CA NGƯỜI TA KHÔNG KỂ. Hai vòng đầu đều hỏng ở ca KHÔNG được nêu ra
+   (vòng 1: tab ẩn giữa chừng · vòng 2: ô trước đã biết hỏng).
+   ⇒ vòng 3 exe liệt kê **bảng sự thật ĐỦ BỐN CA** thay vì chỉ ca người soi nêu. Đó là cách đóng.
+```
+✅ **Và một nếp đáng nhân rộng, `claude-aiboss-app-exe` tự thêm:** trước khi nộp vòng hai, **đo lại
+chính những vế đã được chấm ĐẠT ở vòng một**. Lý do: *«bản vá vòng hai là lúc dễ đạp vỡ vòng một nhất
+— người vá đang nhìn chỗ MỚI, KHÔNG nhìn chỗ vừa được duyệt.»*
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
