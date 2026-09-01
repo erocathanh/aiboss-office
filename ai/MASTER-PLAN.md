@@ -915,6 +915,37 @@ lẫn `HEAD-LUC-DONG-DAU`, kèm ghi chú vì sao hai thứ đó có thể khác 
 
 ---
 
+## 4n. 🕳 HAI CÁI IM TRONG MỘT VIỆC — P0 nằm trên đĩa 40 phút mà KHÔNG ai báo lỗi
+
+Bản dựng P0 xong lúc **21:17**. Tới **21:5x vẫn chưa nạp**. KHÔNG ai làm sai một bước nào, và
+KHÔNG có một thông báo lỗi nào. Hai người cùng đứng im, vì hai lý do khác nhau:
+
+```
+① exe  — đọc quyết định HẸP hơn phạm vi thật của nó
+     Owner quyết  : một QUY TRÌNH  («round-5 ②C: tự canh, nạp khi cả sáu ô cùng im»)
+     exe đọc      : một LẦN CHO PHÉP  ⇒ ngồi chờ một chữ Owner đã nói từ 10:46
+
+② PM  — coi «đã GHI KÊNH» là «đã GIAO»
+     PM ghi câu gỡ chặn lên kênh 21:2x rồi đi làm việc khác
+     mà chính hồ sơ ghế PM viết: «kênh là chỗ ĐỂ LẠI, KHÔNG phải chỗ GỌI»
+     ⇒ hai lượt liền PM báo cáo Owner như thể việc đang trôi
+```
+🔑 **Cả hai cái im này KHÔNG sinh ra lỗi.** Việc chỉ nằm đó, và người ngoài nhìn vào tưởng nó đang
+chạy. Owner là người phát hiện — bằng đúng một câu: *«chưa hề thấy exe nhắc gì tới vụ hẹn nạp»*.
+
+⚠️ **PM có sẵn phép đo mà KHÔNG dùng:** đếm số lần exe nhắc «hẹn nạp» (ra 0, đối chứng dương
+`postbuild` ra 17) và đếm tiến trình `hen-khoi-dong-lai-app` (ra 0). **Hai lệnh, mười giây** —
+và PM chỉ chạy chúng SAU khi Owner hỏi.
+📌 **Giao việc xong phải ĐO xem người ta có NHẬN KHÔNG.** «Đã báo» KHÔNG phải «đã giao»;
+«đã giao» KHÔNG phải «đang chạy». Ba trạng thái, và chỉ trạng thái thứ ba mới đẩy việc đi.
+
+🔑 **Hình chung của cả hai:** *đọc một thứ HẸP hơn phạm vi thật của nó*. exe đọc hẹp một quyết định;
+PM đọc hẹp nghĩa của chữ «giao». Cùng họ với mọi lỗi phạm vi trong ngày (mục 4h ⑤ · 4j · 4k) —
+nhưng hai cái này rơi vào **phối hợp**, KHÔNG phải phép đo. Và phối hợp thì KHÔNG có đối chứng dương
+tự nhiên nào: **im lặng của người kia trông y hệt như họ đang làm.**
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
