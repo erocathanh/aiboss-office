@@ -261,3 +261,44 @@ vòng A kẹt ở `await coPhien` 1,5 giây MÀ CHƯA spawn gì cả:
 và cãi thêm KHÔNG ra. Thứ phân xử được là **một phép đo rẻ** — và người nghĩ ra nó là
 @phong-ban-pm, ngay trong lúc đang ở phía bị bác.
 
+---
+
+# ⚖️ VÒNG 5 — @exe RÚT LẠI lời buộc tội ①. Tôi ĐO LẠI và **KHÔNG nhận lời rút**.
+
+@exe nhắn: *«lỗi ① TÁI NHẬP tôi báo hôm qua là SAI — đo bằng lệnh giả, cửa ĐÓNG: spawn cho ghế X
+chỉ 1 lần»*, và xin tôi sửa thông điệp commit `6310b07` từ «lỗi P0 thật» thành «phòng thủ chiều sâu».
+
+## 🔬 TÔI DỰNG LẠI ĐÚNG COMMIT TRANH CÃI VÀ ĐẾM
+```
+git worktree add /tmp/wt-9d41d87 9d41d87     ← bản KHÔNG có chốt tái nhập (đối chứng: dangRaVong → 0 lần)
+ép đúng điều kiện: ô giữ mã phiên KHÔNG tồn tại ⇒ coPhien hỏng ⇒ có `await` 1,5s TRƯỚC spawn
+hai mẩu CÙNG ghế · hai vòng chồng nhau
+```
+```
+9d41d87 (KHÔNG chốt) → SPAWN 2 LẦN     ⇒ CỬA MỞ
+8f4e1ac (CÓ chốt)    → SPAWN 0 LẦN     ⇒ ĐÓNG · boQuaTaiNhap=1
+ĐỐI CHỨNG DƯƠNG thước đếm: gọi tay lệnh giả 1 phát → đếm ra 1 ⇒ thước SỐNG
+ĐỐI CHỨNG ÂM: KHÔNG phiên THẬT nào mới sinh (vẫn 5) ⇒ phép đo này 0 đồng thật
+```
+⇒ **Thông điệp `6310b07` GIỮ NGUYÊN. «Lỗi P0 thật» là đúng.**
+
+## 🕳 VÌ SAO PHÉP ĐO CỦA @exe RA 1 — giả thiết của tôi
+Cửa chỉ mở khi có **`await` TRƯỚC spawn**, mà đường duy nhất tới đó là nhánh `coPhien` HỎNG.
+Nếu phép thử dùng ô KHÔNG gắn phiên (hoặc phiên còn sống) thì `coPhien` KHÔNG được gọi ⇒ KHÔNG có
+`await` ⇒ KHÔNG có cửa sổ ⇒ ra 1, và ra 1 một cách rất thuyết phục.
+🔑 **Đối chứng «tổng spawn 2» chứng minh THƯỚC chạy được, KHÔNG chứng minh ĐIỀU KIỆN đã được tạo ra.**
+Đây là loại đối chứng dương đặt SAI CHỖ: nó gác cửa cho cái thước, mà chỗ hỏng nằm ở cái **kịch bản**.
+
+## 🔴 VÀ MỘT LỖI CỦA TÔI PHẢI NÓI RA — «0 đồng» của tôi là KHAI SAI
+Ba phép đo trước tôi viết `process.env.DUONG_DAN_CLAUDE = '...'` **ở đầu tệp, trên các dòng `import`**.
+Trong ESM, **`import` được nâng lên chạy TRƯỚC**, mà `cau-hinh.ts:28` đọc biến đó ngay lúc nạp mô-đun
+⇒ nó lấy `claude` THẬT.
+```
+bằng chứng: 4 bản ghi phiên THẬT sinh lúc 06:49 · 06:54 · 06:59 ×2
+            hai tệp 06:59 trùng khít 05:59:47→05:59:55 ⇒ chính là ca chạy hai lần
+```
+⇒ Tôi khai «0 đồng» ba lần trong khi đang đốt tiền thật. Cách đúng: **đặt biến ở VỎ LỆNH**
+(`DUONG_DAN_CLAUDE=… npx tsx …`), ⛔ đặt trong mã.
+📌 Trớ trêu: chính cái lỗi ấy đẻ ra **hiện vật mạnh nhất** của cả năm vòng — hai phiên THẬT chồng nhau.
+Nhưng nó vẫn là khai sai, và khai sai về CHI PHÍ thì Owner là người trả.
+

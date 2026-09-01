@@ -64,6 +64,17 @@ export const dem = {
  * 🔴 CHỐT TÁI NHẬP — MỨC MÔ-ĐUN, ⛔ để trong hàm.
  *    (claude-phong-ban-pm bắt vòng 3, 01/09 — lỗi P0 THẬT, đúng chỗ tôi tự khai là ngờ nhất)
  *
+ * 🧾 ĐÃ BỊ TRANH CÃI RỒI ĐO LẠI (01/09): `claude-aiboss-app-exe` rút lại lời buộc tội, nói cửa
+ *    KHÔNG hở. Tôi dựng lại ĐÚNG commit 9d41d87 bằng lệnh claude GIẢ và ĐẾM:
+ * ```
+ * 9d41d87 (KHÔNG chốt) → SPAWN 2 LẦN   ⇐ cửa MỞ THẬT
+ * 8f4e1ac (CÓ chốt)    → SPAWN 0 LẦN   · boQuaTaiNhap=1
+ * đối chứng dương thước đếm: gọi tay 1 phát → 1
+ * ```
+ *    Cửa CHỈ mở khi có `await` TRƯỚC spawn — đường duy nhất tới đó là nhánh `coPhien` hỏng.
+ *    Phép thử nào ⛔ ép được nhánh ấy sẽ ra «1 lần» một cách rất thuyết phục.
+ * ⚠️ ĐỪNG gỡ chốt này vì đọc thấy ai đó bảo «cửa đóng». Chạy lại phép đếm trước đã.
+ *
  * 🕳 ĐƯỜNG HỎNG:
  * ```
  * `daNhanTrongVong` là biến CỤC BỘ, sinh mới mỗi lần gọi `raMotVong`.
