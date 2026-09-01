@@ -2061,27 +2061,61 @@ export default function UngDung({
            */
           const CHO = [0, 1_500, 4_000];
           let conHong = false;
+          /**
+           * 🔴 VÁ VÒNG 2 (@phong-ban-pm soi 21:03, KHÔNG ĐẠT hai chỗ) — hai lỗi RIÊNG BIỆT,
+           *    và cả hai đều nằm ở chỗ tab ẩn lại giữa chừng:
+           *
+           *  ① `break` cũ chỉ thoát vòng THỬ LẠI, KHÔNG thoát vòng DUYỆT Ô.
+           *     Chú thích ghi «DỪNG», mã lại đi tiếp sang ô kế và VẪN gọi mạng cho từng ô.
+           *     🔑 Một chú thích đúng ý định mà sai phạm vi thì nó CHE đúng chỗ nó tả — người soi
+           *        sau đọc chú thích rồi tin, vì nó nói đúng thứ mình muốn nghe.
+           *     ⇒ nay có cờ `boDo` để thoát CẢ HAI vòng.
+           *
+           *  ② nhãn `'loi-thoi'` bị tôi dùng cho HAI việc khác nghĩa:
+           *        nghĩa gốc: có lần gọi MỚI HƠN vượt mặt ⇒ ĐÚNG thiết kế
+           *        tôi thêm : tab vừa ẩn ⇒ tôi bỏ dở
+           *     Hệ quả: nhánh `'hong'` KHÔNG chạy ⇒ cờ báo bị HẠ ⇒ KHÔNG có băng, dù ô đó
+           *     THẬT SỰ chưa lấy được tin cũ. Đúng hình «mất LẶNG» mà bản vá này đi chữa,
+           *     và cái im ấy còn ĐỘI LỐT một trạng thái thành-công-có-lý-do.
+           *     ⇒ nay tách hẳn nhãn `'bo-do'`, và khi bỏ dở thì KHÔNG ĐỘNG tới cờ báo.
+           */
+          let boDo = false;
           for (let i = 0; i < dsORef.current.length; i += 1) {
             const o = dsORef.current[i];
             if (!o?.ns || !o.phienHienTai) continue;
             // KHÔNG giật lịch sử của ô ĐANG CHẢY CHỮ hoặc ĐANG NẠP — nó tự có tin mới rồi.
             if (o.dangChay || o.dangNap) continue;
-            let ket: 'xong' | 'loi-thoi' | 'hong' = 'hong';
+            let ket: 'xong' | 'loi-thoi' | 'hong' | 'bo-do' = 'hong';
             for (let l = 0; l < CHO.length; l += 1) {
               if (CHO[l] > 0) await new Promise((r) => setTimeout(r, CHO[l]));
-              // Tab ẩn lại giữa chừng ⇒ DỪNG. KHÔNG nạp tiếp cho một màn KHÔNG ai nhìn.
-              if (document.visibilityState !== 'visible') { ket = 'loi-thoi'; break; }
+              // Tab ẩn lại giữa chừng ⇒ DỪNG HẲN, cả ô này lẫn mọi ô còn lại.
+              if (document.visibilityState !== 'visible') { ket = 'bo-do'; boDo = true; break; }
               ket = await napLichSu(i, o.ns.ten, o.phienHienTai);
               // 'loi-thoi' = có lần gọi MỚI HƠN vượt mặt ⇒ ĐÚNG thiết kế, KHÔNG thử lại.
               if (ket === 'xong' || ket === 'loi-thoi') break;
             }
             if (ket === 'hong') conHong = true;
+            if (boDo) break;   // ⇐ thoát vòng DUYỆT Ô, đúng thứ chú thích cũ đã hứa mà mã KHÔNG làm
           }
           /**
            * 🔴 HẾT LƯỢT MÀ VẪN TRƯỢT ⇒ NÓI RA. KHÔNG im.
            *    Cờ này TỰ TẮT ngay lần tỉnh dậy kế tiếp nếu lấy được — Owner KHÔNG phải tự tắt tay.
+           * ⚠️ BỎ DỞ thì KHÔNG ĐỘNG tới cờ: ta chưa biết ô đó lấy được hay chưa, nên KHÔNG được
+           *    hạ một cảnh báo đang hiện, cũng KHÔNG được dựng một cảnh báo chưa có cơ sở.
+           *    Tab hiện lại là hiệu ứng này chạy lại từ đầu ⇒ nó tự trả lời ở lượt sau.
+           *
+           * 🔴 VÁ VÒNG BA (@phong-ban-pm soi 21:09) — bản trước ghi `if (!boDo)` và nó NUỐT một
+           *    cái hỏng ĐÃ BIẾT CHẮC:
+           *      ô 1 thử đủ 3 lượt, trượt cả 3  ⇒ conHong = true   ⇐ biết chắc
+           *      ô 2 tab ẩn giữa chừng          ⇒ boDo = true ⇒ break
+           *      `if (!boDo)` ⇒ KHÔNG báo, dù ô 1 hỏng thật.
+           * 🔑 GỐC: `boDo` gánh HAI nghĩa ở chỗ RA QUYẾT ĐỊNH —
+           *      nghĩa cần: «ô ĐANG XÉT chưa có kết luận» ⇒ đừng phán về NÓ
+           *      nghĩa mã : «cả vòng chưa có kết luận»    ⇒ vứt luôn kết luận về ô ĐÃ xong
+           *    Đây ĐÚNG cái hình tôi vừa gỡ khỏi nhãn `'loi-thoi'` ở vòng hai: tôi sửa chỗ ĐẶT
+           *    TÊN mà chưa sửa chỗ RA QUYẾT ĐỊNH. Một nhãn sạch KHÔNG cứu được một điều kiện bẩn.
            */
-          datTinhLaiHong(conHong);
+          if (conHong || !boDo) datTinhLaiHong(conHong);
         } finally {
           dangLamMoi.current = false;
         }
