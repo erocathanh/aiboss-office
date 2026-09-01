@@ -597,6 +597,62 @@ ba ghế dồn cả buổi vào ① và ② (quan trọng ✅ khẩn ❌) trong 
 
 ---
 
+## 4i. 🔁 BA KHỐI TÔI LÀM MẤT LÚC GỘP SỔ — lấy lại từ `git show 2f968da:KE-HOACH.md`
+
+> 🔴 **Tôi khai «đã gộp về đây» lúc 20:4x. Sai — tôi chỉ chép SÁU MỤC Owner liệt kê, còn phần
+> tôi tự viết trong ngày thì rơi mất.** Đo: `PHIÊN VỐN ĐÃ` 0 · `chạy terminal thường` 0 ·
+> `HAI CHIỀU CẦN HAI CÁCH` 0 (bản cũ đều có 1). `claude-phong-ban-pm` nghiệm thu «6/6 đã vào» —
+> đúng với sáu mục Owner nêu, nhưng **KHÔNG ai kiểm phần tôi tự làm mất.**
+> 🔑 **Gộp sổ mà chỉ kiểm danh sách người khác đưa thì chỉ bắt được cái người ta nhớ nhắc.**
+> Đây đúng là thứ tôi vừa cảnh báo trong `KE-HOACH.md`: hai cuốn sổ thì trôi. Nó trôi ngay lúc gộp.
+
+### 🔻 ĐƯỜNG ② (`detached: true`) — **RỚT KHỎI BÀN**, đo 01/09 20:5x
+```
+lệnh có kết quả trả về / tổng lệnh, đếm trên bản ghi phiên:
+   claude-aiboss-app-exe đếm    : 0 mồ côi / 5.651
+   claude-phong-ban-pm  đếm     : 0 mồ côi / 5.720
+   mồ côi DUY NHẤT trong mỗi phép đo = chính lệnh của NGƯỜI ĐANG ĐO
+🔑 đối chứng dương TỰ XUẤT HIỆN, và ở CHỖ KHÁC NHAU giữa hai người ⇒ thước sống, tự chứng minh mình
+```
+📌 Cả ba ghế cân đường ② dựa trên một giả định **chưa ai đo**: «lần nạp cắt ngang lượt đang chảy».
+Đo ra **0/5.720**. Bàn cách chữa suốt hai vòng cho một ca **KHÔNG xảy ra**.
+🔑 **ĐO CÁI HỎNG TRƯỚC KHI BÀN CÁCH CHỮA.**
+
+### 🔁 KHỐI ①: PHIÊN VỐN ĐÃ ĐỘC LẬP — câu hỏi ban đầu đặt SAI VẬT
+```
+ghế RẢNH thì KHÔNG TỒN TẠI dưới dạng tiến trình:  6 ghế — tiến trình sống chỉ 1-2
+phiên là TỆP:  exe 10.298 mẩu trước lần nạp + 242 sau · soi 12.948 + 485 · CÙNG MỘT TỆP
+Owner hỏi «PHIÊN có độc lập KHÔNG» ⇒ CÓ, đã có sẵn
+ba ghế đi đo «TIẾN TRÌNH có độc lập KHÔNG» ⇒ KHÔNG
+```
+🔑 Mọi số đúng, mọi đối chứng xanh, kết luận vẫn lệch — **vì đo nhầm VẬT.**
+**Đối chứng dương KHÔNG bắt được lỗi này.** Thứ THẬT SỰ chết theo app: (a) lượt đang chảy ·
+(b) cửa sổ để nhìn/gõ · (c) sổ nói ai đang chạy. **KHÔNG phải phiên.**
+
+### 🔁 KHỐI ②: BA ĐƯỜNG cho «ghế sống độc lập» — và cái giá của từng đường
+```
+① chạy terminal thường  → ghế RỜI KHỎI app: KHÔNG ô, KHÔNG nhận đánh thức
+   ⚠️ và bản ghi phiên nằm ở kho theo CWD của terminal ⇒ cwd khác thì app KHÔNG THẤY phiên đó
+      (đúng ca «Quản Lý Trường» 01/09: 4/5 ghế KHÔNG có kho phiên vì mở từ thư mục khác)
+② detached              → 🔻 RỚT, xem trên
+③ làm như openclaw      → launchd + sổ trên đĩa + dọn xác mồ côi; giải đúng gốc, lớn hơn hẳn
+```
+⚠️ **Chọn ①/③ CHƯA quyết — và KHÔNG cần quyết để bắt đầu P1a.**
+
+### 🔁 KHỐI ③: HAI CHIỀU SAI CỦA SỔ CẦN HAI CÁCH CHỮA KHÁC NHAU
+```
+chiều BÁO THỪA  : kiểm pid trước khi trả về — chữa TẠI CHỖ ĐỌC, rẻ
+chiều BÁO THIẾU : kiểm pid KHÔNG cứu được. Sổ TRỐNG thì KHÔNG có pid nào để mà kiểm.
+                  ⇒ phải đổi NGUỒN SỰ THẬT, KHÔNG phải thêm một phép kiểm.
+```
+🔑 **Một phép kiểm chỉ lọc được thứ ĐANG CÓ trong sổ; nó KHÔNG dựng lại được thứ đã mất khỏi sổ.**
+⚠️ Và bẫy trong chính cách chữa chiều B (`claude-aiboss-app-exe` nêu): bền hoá xuống đĩa rồi thì
+**phải đối chiếu pid lúc ĐỌC LÊN**, KHÔNG chỉ lúc ghi — nếu KHÔNG thì nó đổi từ «quên sạch sau khi
+khởi lại» thành **«nhớ dai những thứ đã chết»**. **Chữa một chiều mà KHÔNG nhìn chiều kia là DỜI lỗi,
+KHÔNG phải VÁ lỗi.**
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
