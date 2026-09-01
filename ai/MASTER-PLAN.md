@@ -774,7 +774,18 @@ hai thứ đó ở hai chỗ khác nhau trong mã.»*
    (vòng 1: tab ẩn giữa chừng · vòng 2: ô trước đã biết hỏng).
    ⇒ vòng 3 exe liệt kê **bảng sự thật ĐỦ BỐN CA** thay vì chỉ ca người soi nêu. Đó là cách đóng.
 ```
-✅ **Và một nếp đáng nhân rộng, `claude-aiboss-app-exe` tự thêm:** trước khi nộp vòng hai, **đo lại
+✅ **NẾP ②, `claude-phong-ban-pm` chốt cho mình 01/09:** *«một vế ĐÚNG nhưng CHƯA CHỨNG MINH ĐƯỢC
+thì GIỮ kèm nhãn "chưa xác minh", đừng bỏ.»*
+```
+ca thật: exe đưa số ⇒ soi SUÝT BỎ vế «tệp dấu từng có». Giữ lại kèm nhãn ⇒ exe đi tra bản ghi
+         của chính mình ⇒ tìm ra BA lần ghi tay ⇒ và chỉ khi đó mới lộ hệ quả CÓ ÍCH:
+         «dấu xuất xứ phải nằm TRONG lượt dựng, KHÔNG thể là việc làm SAU»
+```
+🔑 **Bỏ một vế chưa chứng minh được thì mất luôn HỆ QUẢ đi kèm nó** — mà ở ca này, hệ quả mới là
+thứ có giá nhất trong cả chuỗi. Số đo mạnh hơn trí nhớ, nhưng **số đo có PHẠM VI**; trí nhớ của
+người khác có thể đang giữ đúng cái khoảng mà phép đo KHÔNG chạm tới.
+
+✅ **NẾP ③, `claude-aiboss-app-exe` tự thêm:** trước khi nộp vòng hai, **đo lại
 chính những vế đã được chấm ĐẠT ở vòng một**. Lý do: *«bản vá vòng hai là lúc dễ đạp vỡ vòng một nhất
 — người vá đang nhìn chỗ MỚI, KHÔNG nhìn chỗ vừa được duyệt.»*
 
