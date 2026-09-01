@@ -532,7 +532,19 @@ thủ phạm: mat-canh-ghe.sh:180 `| cut -c1-95` — `cut -c` cắt theo BYTE d�
 ```
 📌 **Chuỗi ba lỗi đáng nhớ:** PM chẩn sai → Owner quyết dựa trên chẩn đoán đó → exe thi hành → exe đo
 lại thấy KHÔNG cứu được. **Một quyết định đúng quy trình vẫn sai nếu tiền đề sai, và KHÔNG lớp duyệt
-nào bắt được điều đó.** Cách chữa thật: thêm `| iconv -f utf-8 -t utf-8 -c` sau chỗ cắt. **CHƯA làm.**
+nào bắt được điều đó.** Cách chữa thật: thêm `| iconv -f utf-8 -t utf-8 -c` sau chỗ cắt.
+✅ **ĐÃ VÁ 01/09 20:5x** (`mat-canh-ghe.sh`, PM vá — một dòng, đúng hạn mức PM được phép sửa mã).
+Chứng minh bằng BA phép, KHÔNG chỉ bằng lời:
+```
+① TÁI HIỆN được bệnh : 'a'*93 + 'ế'  →  cut -c1-95  ⇒ KHÔNG còn là utf-8 hợp lệ
+② VÁ ĂN              : thêm `iconv -c` ⇒ hợp lệ trở lại
+③ ĐỐI CHỨNG ÂM       : chuỗi thuần ASCII ⇒ hai bản GIỐNG HỆT ⇒ iconv KHÔNG xén oan dữ liệu lành
+md5 trước f6bbbf35… → sau c458c9a4… · `bash -n` sạch
+```
+⚠️ **Phép chứng minh ĐẦU của PM đã HỎNG và phải làm lại:** chuỗi thử đầu tiên KHÔNG tạo ra byte hỏng
+(bản «bẩn» vẫn hợp lệ utf-8), tức là nó **KHÔNG tái hiện được bệnh** — nếu cứ thế báo «vá xong» thì đó
+là một lời khai KHÔNG có cơ sở. Phải tính để mốc cắt rơi ĐÚNG GIỮA một ký tự nhiều byte mới tái hiện được.
+🔑 **Vá xong mà chưa từng tái hiện được bệnh thì KHÔNG biết mình vừa chữa cái gì.**
 
 ### ⑥ `claudecodeui` ĐÃ GIẢI XONG BÀI «MÀN HÌNH NÓI DỐI» — ta có 0 tệp làm việc đó
 ```
