@@ -74,6 +74,56 @@ Mã đã thông (dòng này chứng minh `batMotLan()` chạy tới cuối). **B
 ```
 **Cách đo lại:** `grep -rl 'CHẾ ĐỘ KỊCH BẢN' ~/claude-*/CLAUDE.md | wc -l` phải ra 0.
 
+### 🔴 ⑤b SỔ «Ô ĐANG CHẠY» SAI ĐƯỢC CẢ HAI CHIỀU — và BA chỗ đang tựa vào nó để QUYẾT ĐỊNH
+> Nêu bởi `claude-phong-ban-pm` (kênh 01/09), Owner giao đưa vào kế hoạch. Tôi đo lại từng vế.
+
+**Cuốn sổ:** `src/lib/kho-tien-trinh.ts:25` — `const SO = new Map<string, ViecDangChay>()`,
+nằm trong BỘ NHỚ tiến trình máy chủ.
+
+```
+CHIỀU A · BÁO THỪA  (đã chứng minh bằng ĐỌC MÃ, chắc chắn)
+  dsViec() chỉ đổ Map ra, KHÔNG kiểm pid còn sống
+  ⇒ tiến trình chết mà chưa ai gọi xoaViec ⇒ đèn sáng MÃI MÃI
+  đo: `grep -cE 'kill\(' src/lib/kho-tien-trinh.ts` → 1 (chỉ ở gietViec, KHÔNG ở dsViec)
+
+CHIỀU B · BÁO THIẾU  (CÒN TRANH CHẤP — chưa ai chứng minh)
+  lời khai   : máy chủ khởi lại ⇒ sổ trống sạch ⇒ ô đang chảy chữ mà đèn tắt
+  bằng chứng : Owner CHỤP MÀN HÌNH ca này ngày 31/08
+  phản biện  : chú thích ngay trong kho-tien-trinh.ts cãi lại — «máy chủ khởi lại thì sổ rỗng,
+               nhưng lúc đó mấy tiến trình con cũng chết theo, nên sổ rỗng là ĐÚNG SỰ THẬT»
+  tôi đo 01/09: tiến trình claude có ppid=1 → 0   (đối chứng dương: tổng claude → 21)
+  🔴 SỐ 0 ĐÓ KHÔNG PHÂN XỬ ĐƯỢC GÌ: tôi chụp một khoảnh khắc KHÔNG có lần khởi lại nào trong đó.
+     Một ảnh chụp KHÔNG bác được một khoảnh khắc.
+```
+✅ **PHÉP THỬ PHẢI LÀM để phân xử chiều B** (chưa ai làm):
+```
+① cho một ô chạy một lượt DÀI   ② khởi lại máy chủ GIỮA lúc đó
+③ đo ngay: tiến trình con còn sống KHÔNG (ps ppid) · và dsViec() trả về gì
+con CHẾT theo  ⇒ chú thích đúng, chiều B là bệnh KHÁC (trình duyệt? SSE?) — phải đi tìm lại
+con CÒN SỐNG  ⇒ sổ NÓI DỐI, và Owner đã nhìn thấy đúng
+```
+
+#### 🔑 VẾ ĐÁNG VÀO KẾ HOẠCH KHÔNG PHẢI CÁI ĐÈN — mà là BA CHỖ TỰA VÀO CÙNG CUỐN SỔ ĐỂ QUYẾT ĐỊNH
+```
+① may-chay-nen.ts            4 chỗ dùng sổ  ⇒ tưởng ghế RẢNH ⇒ CHẠY CHỒNG lên lượt đang chạy
+② hen-khoi-dong-lai-app.sh   3 chỗ dùng sổ  ⇒ tưởng sáu ô rảnh ⇒ NẠP GIỮA LÚC ghế đang làm
+③ UngDung.tsx (`dangChay`)  37 chỗ dùng sổ  ⇒ lọc ô nhận đánh thức ⇒ lời gọi RƠI IM LẶNG
+```
+📌 **Cái đèn chỉ là chỗ Owner NHÌN THẤY ĐƯỢC.** Ba chỗ trên hỏng lặng — và ② là chỗ đắt nhất:
+nó nạp lại app, giết mọi ghế giữa lượt, đúng thứ nhà mình vừa dựng cả một bộ hẹn để tránh.
+
+#### ⚠️ HAI CHIỀU CẦN HAI CÁCH CHỮA KHÁC NHAU — đừng vá một chiều rồi tưởng xong
+```
+chiều A (thừa)  : kiểm pid còn sống trước khi trả về — chữa TẠI CHỖ ĐỌC, rẻ
+chiều B (thiếu) : kiểm pid KHÔNG cứu được. Sổ trống thì KHÔNG có pid nào để mà kiểm.
+                  Phải dựng lại được sổ sau khi khởi lại, hoặc lấy sự thật từ HỆ ĐIỀU HÀNH
+                  thay vì từ một Map — tức là đổi NGUỒN SỰ THẬT, không phải thêm một phép kiểm.
+```
+🔑 **Một phép kiểm chỉ lọc được thứ ĐANG CÓ trong sổ; nó KHÔNG dựng lại được thứ đã mất khỏi sổ.**
+Vá chiều A xong mà tưởng xong cả hai thì chiều B còn nguyên, và nó là chiều Owner nhìn thấy.
+
+---
+
 ### ⑥ Các mảnh hạ tầng còn lại
 ```
 · gộp N ô vào MỘT luồng SSE (trần 6 kết nối HTTP/1.1) — bắt buộc trước khi tăng số ô
