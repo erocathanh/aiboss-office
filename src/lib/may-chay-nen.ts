@@ -55,30 +55,40 @@ export const dem = {
   /** phiên trong sổ đã hỏng ⇒ phải mở phiên mới */ mophienMoi: 0,
   /** ghế đang chạy Ở NƠI KHÁC (terminal) ⇒ đứng ngoài */ boQuaChayNoiKhac: 0,
   /** lượt CHẠY THẬT mà `datO` từ chối buộc vào ô ⇒ «lượt vô hình» */ buocOThatBai: 0,
+  /** vòng bị bỏ vì vòng trước CHƯA xong ⇒ chốt tái nhập đã chặn */ boQuaTaiNhap: 0,
 };
+
+/**
+ * 🔴 CHỐT TÁI NHẬP — MỨC MÔ-ĐUN, ⛔ để trong hàm.
+ *    (claude-phong-ban-pm bắt vòng 3, 01/09 — lỗi P0 THẬT, đúng chỗ tôi tự khai là ngờ nhất)
+ *
+ * 🕳 ĐƯỜNG HỎNG:
+ * ```
+ * `daNhanTrongVong` là biến CỤC BỘ, sinh mới mỗi lần gọi `raMotVong`.
+ * Nhịp 10 giây + tôi vừa thêm `await` 1,5 giây vào giữa vòng ⇒ hai vòng CHỒNG NHAU.
+ * vòng A: mẩu ①  của ghế X → sổ RIÊNG của A → qua chốt → chạy
+ * vòng B: mẩu ②  của ghế X → sổ RIÊNG của B (RỖNG) → qua chốt → CHẠY LẦN HAI
+ * ```
+ * 🔑 `nhanYeuCau` ⛔ cứu được: nó chặn HAI NGƯỜI GIÀNH MỘT MẨU,
+ *    ⛔ chặn MỘT GHẾ nhận HAI MẨU KHÁC NHAU.
+ * 📌 Tôi ngờ đúng chỗ mà ⛔ đi tới cùng: tôi ghi «chưa có chốt chặn tái nhập» vào đề bài
+ *    rồi vẫn nộp. **Nêu một chỗ ngờ ⛔ phải là đã xử nó.**
+ */
+let dangRaVong = false;
 
 /**
  * Rà MỘT vòng. Trả về số lượt đã khởi chạy trong vòng này.
  * Tách riêng để nghiệm thu gọi thẳng được, KHÔNG phải chờ đồng hồ.
  */
-export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Promise<number> {
+async function raMotVongLoi(bayGio: number): Promise<number> {
   /**
    * 🔴 CHỐT CÔNG TẮC PHẢI Ở ĐÂY, KHÔNG CHỈ Ở `bat()` — hermes-aiboss-app-review FAIL ⑤, 31/08.
    *    `raMotVong` được EXPORT. Ai `import` rồi gọi thẳng là đi vòng qua `bat()` hoàn toàn.
    *    Và chính chú thích cũ của tôi MỜI GỌI làm thế («tách riêng để nghiệm thu gọi thẳng»).
    * 🔑 Câu tôi khai với Owner — «mặc định TẮT nên nạp vào KHÔNG đổi hành vi» — SAI ở biên mô-đun.
    *    Một công tắc chỉ gác cửa trước mà bỏ ngỏ cửa sau thì nó KHÔNG phải công tắc.
-   * ⚠️ `chophepKhiTat` chỉ dành cho phép thử, và nó phải được TRUYỀN TỪNG LẦN — không có
-   *    biến toàn cục nào bật nó vĩnh viễn.
    */
-  /**
-   * 🔴 SIẾT vòng 2 (hermes hỏi «`chophepKhiTat` có phải cửa hậu MỚI KHÔNG»): CÓ, nếu để trần.
-   *    Nó phải truyền TỪNG LẦN nên KHÔNG có biến toàn cục nào bật vĩnh viễn — nhưng bất kỳ
-   *    ai `import` cũng truyền được `true`. ⇒ Đóng hẳn ở bản THẬT, chỉ mở cho phép thử.
-   * 🔑 Một cửa chỉ dành cho phép thử thì phải ĐÓNG ở nơi KHÔNG chạy phép thử.
-   */
-  const choPhep = chophepKhiTat && process.env.NODE_ENV !== 'production';
-  if (process.env.CHAY_NEN !== '1' && !choPhep) return 0;
+  if (process.env.CHAY_NEN !== '1') return 0;
   dem.vong++;
   const so = xemSo();
   // Chỉ quan tâm mẩu ĐANG CHỜ. Mẩu 'dang_giu' là của người khác — kể cả của chính ta.
@@ -214,6 +224,15 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
         if (kq.maPhien) {
           const maP = kq.maPhien;
           const ghiLai = () => {
+            /**
+             * 🔴 KIỂM Ô CÒN LÀ CỦA MÌNH ⛔ (claude-phong-ban-pm bắt vòng 3).
+             *    Mốc này ghi lại tới 15 giây SAU khi lượt xong. Trong 15 giây đó Owner
+             *    có thể đổi ghế trong ô, hoặc mở phiên khác ⇒ đóng dấu «lượt của TA vừa
+             *    chạy xong» lên một ô ĐÃ ĐỔI CHỦ ⇒ `dangChay` đọc mốc ấy mà tưởng ô rảnh.
+             * 🔑 Một phép ghi có HẸN GIỜ phải kiểm lại điều kiện LÚC NÓ NỔ, ⛔ lúc nó được hẹn.
+             */
+            const oNay = layO(y.ma_o);
+            if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP) return;
             const m = mocTepPhien(y.ma_nhan_su, maP);
             if (m !== null) ghiMocKetThuc(y.ma_o, m);
           };
@@ -229,6 +248,23 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
     daChay++;
   }
   return daChay;
+}
+
+/**
+ * Rà MỘT vòng. Vỏ ngoài giữ CHỐT TÁI NHẬP — vòng trước chưa xong thì vòng này ĐỨNG NGOÀI.
+ * `try/finally` để một cú ném giữa chừng ⛔ khoá kẹt cửa mãi mãi.
+ */
+export async function raMotVong(bayGio = Date.now()): Promise<number> {
+  if (dangRaVong) {
+    dem.boQuaTaiNhap++;
+    return 0;
+  }
+  dangRaVong = true;
+  try {
+    return await raMotVongLoi(bayGio);
+  } finally {
+    dangRaVong = false;
+  }
 }
 
 /**

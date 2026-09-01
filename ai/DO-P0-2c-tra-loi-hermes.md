@@ -150,3 +150,60 @@ NGOÀI ĐỀ ② datO từ chối lặng → nay TRẢ VỀ boolean. Từ chối
 · 30 giây lease chọn khi CHỈ MỘT người rút — nay hai. Chưa đo lại.
 · mẩu 'da_giao' mà chưa từng chạy thì CHƯA AI CANH (nay khó rơi vào hơn, nhưng đường vẫn còn)
 ```
+
+---
+
+# 🔴 VÒNG 3 — `claude-phong-ban-pm` NO-GO, bắt một lỗi **P0 THẬT**
+
+## 🎯 NÓ BẮT ĐÚNG CHỖ TÔI TỰ KHAI LÀ NGỜ NHẤT — VÀ TÔI VẪN NỘP
+Tôi ghi thẳng vào đề bài: *«tôi CHƯA có chốt chặn tái nhập. Đây là chỗ tôi ngờ nhất.»*
+Rồi tôi **nộp luôn**.
+🔑 **Nêu một chỗ ngờ KHÔNG phải là đã xử nó.** Viết ra chỗ yếu làm tôi thấy mình trung thực,
+và cảm giác đó thay luôn cho việc đi sửa. Đây là bài học đắt nhất của cả ba vòng.
+
+## 🕳 LỖI — TÁI NHẬP
+```
+`daNhanTrongVong` là biến CỤC BỘ, sinh mới mỗi lần gọi `raMotVong` (may-chay-nen.ts:103).
+Nhịp 10 giây + `await` 1,5 giây tôi vừa thêm ⇒ HAI VÒNG CHỒNG NHAU:
+   vòng A: mẩu ① của ghế X → sổ RIÊNG của A → qua chốt → chạy
+   vòng B: mẩu ② của ghế X → sổ RIÊNG của B (RỖNG) → qua chốt → CHẠY LẦN HAI
+```
+🔑 `nhanYeuCau` KHÔNG cứu được: nó chặn **hai người giành MỘT mẩu**,
+KHÔNG chặn **một ghế nhận HAI mẩu khác nhau**.
+
+## ✅ VÁ + ĐO TRÊN ĐƯỜNG THẬT (KHÔNG khai suông như vòng 1)
+Chốt tái nhập mức **mô-đun**, `try/finally` để một cú ném KHÔNG khoá kẹt cửa mãi mãi.
+```
+ĐỐI CHỨNG ÂM (mô phỏng, 0 đồng): sổ CỤC BỘ ⇒ vòng A CHẠY · vòng B CHẠY  ⇒ hai lần
+                                  CÓ chốt   ⇒ vòng A CHẠY · vòng B boQuaTaiNhap
+
+ĐO THẬT (ép coPhien hỏng để có cửa sổ 1,5s, hai mẩu CÙNG ghế, hai vòng chồng nhau):
+   VONG_A_KHOI_CHAY = 1
+   VONG_B_KHOI_CHAY = 0
+   dem = {daChay:1, boQuaTaiNhap:1, boQuaDangChay:1, mophienMoi:1}
+   mẩu A = da_giao   ·   mẩu B = 'cho'  ⇒ B KHÔNG mất, vòng sau nhặt lại
+```
+
+## ✅ HAI MỤC CÒN LẠI
+```
+③ ghiMocKetThuc  → KIỂM `layO` NGAY LÚC NỔ, không phải lúc hẹn.
+                   Mốc ghi lại tới 15 giây sau; trong 15 giây đó ô có thể đổi chủ.
+                   🔑 Một phép ghi CÓ HẸN GIỜ phải kiểm lại điều kiện LÚC NÓ NỔ.
+② cửa hậu        → XOÁ HẲN `chophepKhiTat`, không guard nữa.
+                   Reviewer đo `next/dist/bin/next:68`: `NODE_ENV = NODE_ENV || defaultEnv`
+                   ⇒ hôm nay đóng vì KHÔNG ai đặt biến, tức đóng NHỜ MAY.
+                   🔑 Cửa chỉ dùng cho phép thử thì XOÁ rẻ hơn CANH.
+```
+
+## ⚖️ MỘT VẾ TÔI XIN NÓI LẠI — reviewer bác giả thiết của tôi, nhưng bác một trạng thái KHÁC
+Reviewer viết: *«mẩu `dang_giu` KHÔNG kẹt vĩnh viễn, `kho-danh-thuc.ts:285-289` trả về `cho` sau 30s»*.
+**Đúng — với `dang_giu`.** Nhưng lỗi vòng 2 của tôi để mẩu ở **`da_giao`**, và tôi đo lại:
+```
+traVeMauHetHan chỉ đụng `dang_giu`   → kho-danh-thuc.ts:285  `if (trangThai(y) !== 'dang_giu') continue`
+đường nào đưa `da_giao` về `cho`     → KHÔNG CÓ
+đối chứng dương cho phép tìm         → 'dang_giu' xuất hiện 7 lần ⇒ thước SỐNG
+```
+⇒ Chẩn đoán cũ của tôi ĐỨNG. Hai chúng tôi đang nói về **hai trạng thái khác nhau**.
+📌 Ghi ra vì nếu tôi nhận bừa lời sửa thì sẽ kết luận lỗi vòng 2 NHẸ hơn thật, và vá nông hơn cần.
+**Nghe người soi là đúng — nhưng nghe rồi ĐO, KHÔNG nghe rồi gật.**
+
