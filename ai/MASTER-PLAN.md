@@ -1063,6 +1063,27 @@ Chỉ hỏi *«đầu ra có hợp lệ KHÔNG»* — mà `iconv -c` bảo đả
 ✅ **CÁCH ĐÚNG (đo được):** khai bảng mã UTF-8 cho lệnh cắt ⇒ nó cắt theo KÝ TỰ, giữ nguyên chữ,
 và vẫn hợp lệ. `iconv -c` khi đó là **lớp chắn cuối**, KHÔNG còn là lớp chữa chính.
 
+### 🔴 HỆ QUẢ: TIÊU CHÍ NGHIỆM THU CỦA PM CŨNG VÔ NGHĨA — lần thứ BA trong ngày
+PM đặt: *«≥42 dòng mới trong sổ tỷ-lệ-nền-cao-nhất, hỏng = 0»*. `claude-phong-ban-pm` xin ghi rõ,
+và đúng:
+```
+số «0 dòng hỏng» sau bản vá iconv KHÔNG phải bằng chứng bản vá ĐÚNG
+`iconv -c` bảo đảm «0 dòng hỏng mã hoá» BẰNG ĐỊNH NGHĨA — nó xanh dù ta chữa gốc hay chỉ vứt ký tự
+```
+`claude-aiboss-app-exe` đang đếm dở (**60 dòng · 0 hỏng**) và **tự RÚT LẠI**: *«chờ thêm 40 dòng nữa
+cũng KHÔNG biết thêm gì»*. Đúng — thước đó đã mù từ lúc bản vá được chọn.
+
+📌 **Ba tiêu chí đạt-rỗng, cùng một người viết, cùng một ngày:**
+```
+① «dòng mới hỏng = 0»          ⇒ đạt khi KHÔNG có dòng mới          (exe bắt, 20:48)
+② «đầu ra là utf-8 hợp lệ»     ⇒ iconv -c bảo đảm bằng định nghĩa   (hermes bắt, 21:0x)
+③ «≥42 dòng, hỏng = 0»         ⇒ cùng lý do ②, chỉ đổi cỡ mẫu       (phong-ban-pm bắt, 22:36)
+```
+🔑 Cả ba đều là **tiêu chí đo CÁI DỄ ĐO thay vì cái CẦN BIẾT**. Và ③ đau nhất: nó được viết ra
+**SAU KHI** đã bị chỉ ra ①, tức là PM đã biết bệnh mà vẫn tái phát — vì PM chỉ sửa **cỡ mẫu**,
+KHÔNG sửa **thứ được đếm**.
+✅ **Thước đúng phải đếm thứ KHÁC:** «ký tự lành có còn nguyên KHÔNG» — chứ KHÔNG phải «có byte hỏng KHÔNG».
+
 ---
 
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
