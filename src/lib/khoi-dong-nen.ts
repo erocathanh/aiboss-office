@@ -24,7 +24,33 @@
  *    kéo `node:*` sang edge nữa. Đây là đường có BẰNG CHỨNG (exe đã dựng xanh khi vắng
  *    `instrumentation.ts`), KHÔNG phải mẹo qua mặt bộ gộp bó.
  *
- * ⚖️ CÁI GIÁ, nói thẳng — đây là MỘT BƯỚC LÙI VỀ BẢO ĐẢM, KHÔNG phải hoà:
+ * ⚖️ CÁI GIÁ — tôi ghi SAI ở bản trước, `claude-phong-ban-pm` bác và tôi đo lại thì bạn ấy đúng:
+ *    đây là bước lùi về **ĐỘ TRỄ** (≤90 giây), KHÔNG phải mất **BẢO ĐẢM**. Xem khối 🔗 dưới.
+ *
+ * 🔗 PHỤ THUỘC NGOÀI KHO NÀY — thứ đang GÁNH bảo đảm «bật sau khi máy chủ khởi».
+ *    Ghi ở đây vì KHÔNG có chỗ nào khác trong kho app chỉ ra nó:
+ * ```
+ * ~/Operations/scripts/mat-canh-ghe.sh:20   GET http://localhost:4319/api/danh-thuc
+ *   · lời gọi này VÔ ĐIỀU KIỆN — nó là phép thử máy-chủ-còn-sống, chạy MỌI lượt quét,
+ *     kể cả khi KHÔNG có tin nào. Chốt thoát sớm «hết tin» nằm mãi dòng 184, tức là SAU.
+ *   · và nó TỰ CHỨNG MINH: script chỉ đi tiếp khi nhận đúng mã 200 ⇒ 200 nghĩa là
+ *     handler ĐÃ CHẠY ⇒ `batMotLan()` ở route.ts:34 đã được gọi.
+ *   · 6 bộ quét nền đang nạp thật (đo bằng `launchctl print`, KHÔNG đếm tệp plist;
+ *     đối chứng dương: tên bịa trả lỗi), tất cả `StartInterval = 90`.
+ * ⇒ máy chủ khởi xong thì trong ≤90 giây có người gõ cửa và bộ nền bật.
+ *   KHÔNG cần trình duyệt, KHÔNG cần tin mới, KHÔNG cần ai bấm gì.
+ * ```
+ * 🔴 **GỠ BỘ QUÉT NỀN LÀ MẤT BẢO ĐẢM NÀY** — và app sẽ KHÔNG hề biết. Ba hình mất, ghi cụ thể
+ *    để người sau nhận ra lúc đang sửa, chứ đừng nhận ra lúc hỏng:
+ * ```
+ * ① gỡ/dừng plist com.eroca.mat-canh-*        ⇒ hết người gõ cửa
+ * ② dời lời gọi dòng 20 xuống SAU chốt dòng 184 ⇒ hết tin thì hết gõ ⇒ bảo đảm thành có-lúc-có-lúc-không
+ * ③ đổi nó thành HEAD, hoặc trỏ sang cửa khác   ⇒ vẫn ra 200 mà KHÔNG chạy handler này nữa
+ * ```
+ * 🔑 **Một phụ thuộc KHÔNG được ghi ở đâu cả thì nó là cái bẫy đang chờ**: nó có thật, nó chạy tốt,
+ *    và KHÔNG ai biết nó tồn tại cho tới đúng lúc nó mất.
+ *
+ * ⚖️ Còn đây là phần vẫn ĐÚNG từ bản trước — cơ chế đã đổi họ:
  *    `instrumentation.ts` là móc VÒNG ĐỜI (Next tự gọi lúc khởi). Bốn cửa dưới đây là móc
  *    LƯU LƯỢNG (phải có ai gõ cửa). Bộ nền nay bật ở LƯỢT GỌI ĐẦU TIÊN vào một trong bốn cửa:
  *      /api/dung · /api/danh-thuc · /api/danh-thuc/nhan · /api/chat
@@ -39,8 +65,7 @@
  *         cái cửa mình chỉ, thấy im, rồi kết luận ngược.
  *    · `/api/danh-thuc/nhan` được trình duyệt thăm dò theo `setInterval` (UngDung.tsx:2008)
  *      ⇒ hễ Owner mở app là bật, KHÔNG cần chờ bộ canh.
- * ⚠️ NHƯNG cả hai đều là PHỤ THUỘC VẬN HÀNH NGOÀI APP. Tắt/gỡ bộ canh + KHÔNG mở trình duyệt
- *    = bộ nền ngủ suốt đời tiến trình. Ghi ra để người sau ĐO, đừng đoán.
+ * ⚠️ Cả hai đều là PHỤ THUỘC VẬN HÀNH NGOÀI APP — xem khối 🔗 trên để biết mất nó thì mất gì.
  * 🔬 Muốn kiểm: khởi máy chủ rồi KHÔNG gõ cửa nào, xem `[chay-nen]` có in KHÔNG trong sổ.
  */
 /**
