@@ -836,16 +836,35 @@ sang cho Owner. **Kết luận đúng, nguyên nhân SAI** — kho này KHÔNG d
 packageManager  : pnpm@10.32.1      ·  có pnpm-lock.yaml (KHÔNG có package-lock.json)
 ~/Projects/CLAUDE.md khai            :  `pnpm dev` → localhost:4319
 ```
-✅ **Sự thật: `postbuild` chết vì HAI lý do ĐỘC LẬP, và ghế thợ chỉ nêu một, lại nêu nhầm:**
+🔴 **ĐÍNH CHÍNH THỨ BA (21:43) — và lần này lời khai sai là CỦA PM.**
+PM viết vào plan: *«pnpm từ bản 7 MẶC ĐỊNH TẮT pre/post ⇒ kể cả `pnpm build` cũng KHÔNG chạy»*.
+`claude-aiboss-app-exe` **thử thật ở thư mục vứt đi, lặp hai lần**:
 ```
-① pnpm từ bản 7 MẶC ĐỊNH TẮT pre/post script.
-   đo: `pnpm config get enable-pre-post-scripts` → undefined · dự án KHÔNG có .npmrc
-   ⇒ kể cả gõ `pnpm build` thì `postbuild` VẪN KHÔNG chạy
-② luật nhà dựng bằng `npx next build` (hồ sơ ghế PM, mục ①)
-   ⇒ bỏ qua HẲN bộ chạy script ⇒ KHÔNG hook nào trong package.json có cơ hội chạy
+pnpm 10.32.1 · `pnpm build`  → postbuild CHẠY  (cả hai lần)
+`npm run build`              → postbuild CHẠY  ⇐ ĐỐI CHỨNG DƯƠNG: thước SỐNG
+gọi THẲNG nhị phân           → KHÔNG chạy      ⇐ ĐỐI CHỨNG ÂM: đúng cách nhà đang gọi
 ```
-🔑 ⇒ **Chừng nào luật nhà còn dựng bằng `npx next build`, KHÔNG hook nào trong `package.json`
-chạy được — sửa `enable-pre-post-scripts` cũng vô ích.** Ba đường chữa, chưa chọn:
+⇒ **pnpm 10.32.1 CÓ chạy pre/post.** Vế «tắt từ bản 7» đúng với pnpm 7, nhưng **pnpm 9 trở đi đã bật
+lại** — và kho này chạy 10.32.1. `claude-phong-ban-pm` cũng khai y hệt và cũng đã nhận sai.
+
+🕳 **GỐC LỖI, và nó là của tôi:**
+```
+tôi chạy : `pnpm config get enable-pre-post-scripts`  →  undefined
+tôi suy  : undefined = chưa bật = TẮT
+sự thật  : «CHƯA ĐẶT» KHÔNG nói gì về MẶC ĐỊNH — và mặc định ĐỔI giữa các bản pnpm
+```
+🔑 **Tôi đọc một giá trị CẤU HÌNH rồi suy ra HÀNH VI, thay vì chạy thử hành vi đó.**
+Và tôi **KHÔNG hề dựng đối chứng dương** — chưa một lần hỏi «`postbuild` có chạy được KHÔNG, trong
+điều kiện nào?». Cả ngày tôi đòi người khác đối chứng dương, rồi tự mình bỏ qua nó ở đúng chỗ này.
+⚠️ Đây là lời khai sai THỨ BA về cùng một mục, và là lời **đầu tiên do chính tôi đo ra**.
+
+✅ **NGUYÊN NHÂN THẬT — đo được, chỉ MỘT:**
+```
+nhà gõ THẲNG `npx next build`, KHÔNG đi qua script gói
+⇒ móc `postbuild` KHÔNG BAO GIỜ có cơ hội được gọi
+```
+📌 **Hai lời giải sai dẫn tới CÙNG MỘT hành động sai:** «đổi trình chạy script là xong» — mà đổi xong
+vẫn hỏng, vì thủ phạm là CÁCH GỌI chứ KHÔNG phải trình chạy. Ba đường chữa, chưa chọn:
 ```
 · gộp dấu vào CHÍNH script build: "build": "next build && <sinh dấu>"  ⇒ vẫn cần dựng qua pnpm
 · đổi luật dựng sang `pnpm build`                                      ⇒ đụng luật nhà, cần Owner
