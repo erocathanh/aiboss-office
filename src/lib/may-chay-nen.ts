@@ -53,6 +53,8 @@ let donGio: ReturnType<typeof setInterval> | null = null;
 export const dem = {
   vong: 0, daChay: 0, boQuaDangChay: 0, boQuaCoTrinhDuyet: 0, loi: 0,
   /** phiên trong sổ đã hỏng ⇒ phải mở phiên mới */ mophienMoi: 0,
+  /** KHÔNG thấy bản ghi phiên ⇒ BỎ QUA, ⛔ tự ý mở phiên mới (vứt lịch sử là ⛔ lùi được) */
+  boQuaKhongThayPhien: 0,
   /** ghế đang chạy Ở NƠI KHÁC (terminal) ⇒ đứng ngoài */ boQuaChayNoiKhac: 0,
   /** lượt CHẠY THẬT mà `datO` từ chối buộc vào ô ⇒ «lượt vô hình» */ buocOThatBai: 0,
   /** vòng bị bỏ vì vòng trước CHƯA xong ⇒ chốt tái nhập đã chặn */ boQuaTaiNhap: 0,
@@ -166,8 +168,30 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
     if (maPhienCu && !coPhien(y.ma_nhan_su, maPhienCu)) {
       await new Promise((r) => setTimeout(r, 1_500));
       if (!coPhien(y.ma_nhan_su, maPhienCu)) {
-        dem.mophienMoi++;
-        maPhienCu = null; // mở phiên MỚI, KHÔNG `--resume` mù
+        /**
+         * 🔴 ĐỔI HẲN Ở VÒNG 4 — `claude-phong-ban-pm` bắt, và đây là lỗi NẶNG NHẤT cả ba vòng.
+         *
+         * 🕳 BẢN TRƯỚC TÔI ĐẶT `maPhienCu = null` ⇒ MỞ PHIÊN MỚI. Đo trên dữ liệu sống 01/09:
+         * ```
+         * claude-hieu-truong       kho CÓ · 2 tệp
+         * claude-phong-dao-tao     KHÔNG có kho
+         * claude-phong-cong-nghe   KHÔNG có kho
+         * claude-phong-tai-chinh   KHÔNG có kho
+         * claude-phong-hanh-chinh  KHÔNG có kho
+         * đối chứng dương: claude-aiboss-app-exe 8 tệp ⇒ thước SỐNG
+         * ```
+         * `coPhien` chỉ tìm trong kho CỦA CHÍNH GHẾ ĐÓ — một thư mục duy nhất. Mà 4/5 ghế
+         * «Quản Lý Trường» KHÔNG có kho, đúng lúc Owner vừa nạp 5 mã phiên vào 5 ô ấy.
+         * ⇒ Bật bộ nền lên là nó VỨT ĐÚNG CÁI MÃ Owner vừa nạp, và chỉ `dem.mophienMoi++`.
+         *   Owner thấy ghế mất trí nhớ mà KHÔNG có một dòng nào chỉ ra vì sao.
+         *
+         * 🔑 **VỨT LỊCH SỬ thì KHÔNG LÙI ĐƯỢC. BỎ QUA thì LÙI ĐƯỢC.**
+         *   Bộ nền KHÔNG đủ tư cách quyết một việc không lùi được — nó chỉ thấy MỘT thư mục,
+         *   trong khi phiên có thể nằm ở thư mục khác (đúng ca ghế «Quản Lý Trường» tự khai).
+         * ⇒ Bỏ qua mẩu, để nguyên trạng thái `cho`, đếm riêng. Người thật quyết.
+         */
+        dem.boQuaKhongThayPhien++;
+        continue;
       }
     }
 

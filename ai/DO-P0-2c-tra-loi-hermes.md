@@ -207,3 +207,57 @@ traVeMauHetHan chỉ đụng `dang_giu`   → kho-danh-thuc.ts:285  `if (trangTh
 📌 Ghi ra vì nếu tôi nhận bừa lời sửa thì sẽ kết luận lỗi vòng 2 NHẸ hơn thật, và vá nông hơn cần.
 **Nghe người soi là đúng — nhưng nghe rồi ĐO, KHÔNG nghe rồi gật.**
 
+---
+
+# 🔴 VÒNG 4 — lỗi NẶNG NHẤT của cả bốn vòng, và một cuộc BẤT ĐỒNG được phân xử bằng phép đo
+
+## 🔴 `coPhien` hỏng ⇒ bản trước TỰ VỨT PHIÊN CỦA OWNER (claude-phong-ban-pm bắt)
+Đo trên dữ liệu sống 01/09:
+```
+claude-hieu-truong       kho CÓ · 2 tệp
+claude-phong-dao-tao     KHÔNG có kho
+claude-phong-cong-nghe   KHÔNG có kho
+claude-phong-tai-chinh   KHÔNG có kho
+claude-phong-hanh-chinh  KHÔNG có kho
+đối chứng dương: claude-aiboss-app-exe 8 tệp ⇒ thước SỐNG
+```
+`coPhien` chỉ tìm trong kho CỦA CHÍNH GHẾ ĐÓ. 4/5 ghế «Quản Lý Trường» KHÔNG có kho, đúng lúc
+Owner vừa nạp 5 mã phiên vào 5 ô ấy ⇒ bật bộ nền là nó **VỨT ĐÚNG CÁI MÃ Owner vừa nạp**,
+và chỉ tăng một bộ đếm.
+🔑 **VỨT LỊCH SỬ thì KHÔNG LÙI ĐƯỢC. BỎ QUA thì LÙI ĐƯỢC.**
+Bộ nền chỉ thấy MỘT thư mục, nên nó KHÔNG đủ tư cách quyết một việc không lùi được.
+✅ Vá: bỏ qua mẩu, giữ nguyên `cho`, đếm `boQuaKhongThayPhien`. Người thật quyết.
+```
+ĐO: hai mẩu, ghế KHÔNG có bản ghi phiên
+    boQuaKhongThayPhien=2 · daChay=0 · mophienMoi=0
+⇒ KHÔNG mẩu nào bị vứt, KHÔNG phiên nào bị mở đè.
+```
+
+## ⚖️ HAI NGƯỜI SOI BẤT ĐỒNG VỀ ① — phân xử bằng HIỆN VẬT, 0 đồng
+```
+@exe            : P0 THẬT — «vòng B chụp dsViec() khi pid CHƯA sinh nên ảnh trống»
+@phong-ban-pm   : CHƯA CHỨNG MINH — «spawn đồng bộ, khiSinh chạy ngay, hai điều kiện loại trừ nhau»
+```
+Phương pháp đo là của @phong-ban-pm: trỏ `DUONG_DAN_CLAUDE` vào một script giả in một dòng JSON
+rồi thoát ⇒ spawn THẬT, pid THẬT, `khiSinh` THẬT, 0 đồng.
+
+**Kết quả — @phong-ban-pm ĐÚNG về cơ chế @exe nêu:**
+```
+gọi chayMotLuot rồi ĐỌC NGAY trong cùng một nhịp:
+   dsViec() = ["claude-omni-ads-test"]   ⇒ dangKyViec chạy ĐỒNG BỘ, cùng nhịp
+⇒ cửa mà @exe mô tả («pid chưa sinh») KHÔNG mở.
+```
+
+**NHƯNG cửa sổ CÓ THẬT — ở chỗ CẢ HAI đều bỏ sót:**
+```
+vòng A kẹt ở `await coPhien` 1,5 giây MÀ CHƯA spawn gì cả:
+   GIUA_AWAIT dsViec() = []   ⇒ ảnh chụp của vòng B sẽ TRỐNG THẬT
+```
+⇒ Kết luận của @exe (có cửa) ĐÚNG; lý do của @exe SAI.
+   Lý lẽ của @phong-ban-pm ĐÚNG; kết luận «chưa chứng minh» thì HỤT.
+✅ Giữ chốt tái nhập. Đo: `VONG_B=0 · boQuaTaiNhap=1`.
+
+🔑 **Bài học của vòng này:** hai người soi cãi nhau bằng lý luận thì mỗi người đúng một nửa,
+và cãi thêm KHÔNG ra. Thứ phân xử được là **một phép đo rẻ** — và người nghĩ ra nó là
+@phong-ban-pm, ngay trong lúc đang ở phía bị bác.
+
