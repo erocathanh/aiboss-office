@@ -946,6 +946,41 @@ tự nhiên nào: **im lặng của người kia trông y hệt như họ đang 
 
 ---
 
+## 4o. ✅ P0 «TAB NGỦ RỒI TỈNH» — **OWNER NGHIỆM THU TRÊN BẢN SỐNG, ĐẠT** (01/09 22:2x)
+
+> Owner nguyên văn: *«tôi mới tắt màn hình 1 phút quay lại thấy chữ ô này load hết lên, vậy là chạy
+> ĐÚNG Ý tôi rồi. TRƯỚC KIA nó sẽ báo fail tôi phải F5.»*
+
+```
+TRƯỚC : tắt màn hình → quay lại → «load fail», phải F5, và F5 vài lần mới thấy
+SAU   : tắt màn hình 1 phút → quay lại → chữ TỰ load hết lên
+```
+🔑 **Đây là nghiệm thu duy nhất KHÔNG ghế nào tự cấp được cho mình.** Cả ba ghế đo được «mã đúng ·
+dựng xanh · bó có dấu vân · đã nạp» — nhưng câu *«nó có hết đau KHÔNG»* thì chỉ người ĐANG ĐAU trả
+lời được. Mọi phép đo của ta là điều kiện CẦN; câu này mới là điều kiện ĐỦ.
+
+### 🔻 VÀ OWNER TÁCH HAI CA MÀ PM ĐÃ GỘP LÀM MỘT
+> *«hình tôi chụp chỉ là lỗi load sau khi F5, KHÔNG phải tắt màn hình rồi mở lại. HAI CASE KHÁC NHAU.»*
+
+```
+ca ① TẮT MÀN HÌNH rồi mở lại   ⇒ P0 ĐÃ CHỮA XONG  ✅   (Owner xác nhận trên bản sống)
+ca ② F5 GIỮA LƯỢT              ⇒ CHƯA chữa, và nó là ca KHÁC HẲN
+```
+⚠️ **PM đã xếp ca ② là «P0 mới, khẩn ✅» và rung ghế thợ lúc 22:2x. SAI XẾP HẠNG.** Áp lại đúng
+hai tiêu chí sau khi Owner nói rõ:
+```
+ca ② quan trọng ✅  (mất chữ thật)
+     khẩn      ❌  (cái đau MỖI NGÀY của Owner là ca ①, và ca ① đã xong.
+                    Ca ② chỉ nổ khi Owner CHỦ ĐỘNG F5 giữa lượt — hiếm, và có đường vòng)
+⇒ XẾP HÀNG, KHÔNG chen. Hạ xuống P1b (chung gốc «luồng bám lại được»).
+```
+🔑 **Gốc lỗi xếp hạng của PM:** thấy Owner gửi ảnh kèm chữ «lỗi» thì gán ngay là khẩn, mà KHÔNG hỏi
+*«ca này có phải cái đau HÀNG NGÀY KHÔNG, hay là một ca hiếm Owner tự dựng ra để chụp?»*
+📌 Cùng họ với mọi lỗi phạm vi trong ngày, lần này ở tầng **XẾP ƯU TIÊN**: PM gộp hai ca khác nhau
+vào một nhãn «tab quay lại thì mất chữ», rồi lấy mức khẩn của ca này áp cho ca kia.
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
