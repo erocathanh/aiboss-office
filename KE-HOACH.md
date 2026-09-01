@@ -86,22 +86,16 @@ CHIỀU A · BÁO THỪA  (đã chứng minh bằng ĐỌC MÃ, chắc chắn)
   ⇒ tiến trình chết mà chưa ai gọi xoaViec ⇒ đèn sáng MÃI MÃI
   đo: `grep -cE 'kill\(' src/lib/kho-tien-trinh.ts` → 1 (chỉ ở gietViec, KHÔNG ở dsViec)
 
-CHIỀU B · BÁO THIẾU  (CÒN TRANH CHẤP — chưa ai chứng minh)
-  lời khai   : máy chủ khởi lại ⇒ sổ trống sạch ⇒ ô đang chảy chữ mà đèn tắt
-  bằng chứng : Owner CHỤP MÀN HÌNH ca này ngày 31/08
-  phản biện  : chú thích ngay trong kho-tien-trinh.ts cãi lại — «máy chủ khởi lại thì sổ rỗng,
-               nhưng lúc đó mấy tiến trình con cũng chết theo, nên sổ rỗng là ĐÚNG SỰ THẬT»
-  tôi đo 01/09: tiến trình claude có ppid=1 → 0   (đối chứng dương: tổng claude → 21)
-  🔴 SỐ 0 ĐÓ KHÔNG PHÂN XỬ ĐƯỢC GÌ: tôi chụp một khoảnh khắc KHÔNG có lần khởi lại nào trong đó.
-     Một ảnh chụp KHÔNG bác được một khoảnh khắc.
+CHIỀU B · BÁO THIẾU  ⇒ 🔴 GIẢ THUYẾT «MÁY CHỦ KHỞI LẠI» **ĐÃ BỊ BÁC** — xem mục ⑤c
+  Owner nói rõ 01/09: ca chụp màn hình 31/08 **KHÔNG có khởi lại, KHÔNG có nạp lại** — hệ thống
+  bình thường. Owner để trình duyệt NGỦ rồi quay lại.
+  ⇒ bệnh nằm ở phía TRÌNH DUYỆT, KHÔNG ở cuốn sổ này.
 ```
-✅ **PHÉP THỬ PHẢI LÀM để phân xử chiều B** (chưa ai làm):
-```
-① cho một ô chạy một lượt DÀI   ② khởi lại máy chủ GIỮA lúc đó
-③ đo ngay: tiến trình con còn sống KHÔNG (ps ppid) · và dsViec() trả về gì
-con CHẾT theo  ⇒ chú thích đúng, chiều B là bệnh KHÁC (trình duyệt? SSE?) — phải đi tìm lại
-con CÒN SỐNG  ⇒ sổ NÓI DỐI, và Owner đã nhìn thấy đúng
-```
+📌 Ba ghế đã bàn HAI VÒNG về «máy chủ khởi lại thì sổ trống» — **bàn về một ca chưa từng xảy ra.**
+🔑 **Chúng tôi có ẢNH của hiện tượng mà KHÔNG hỏi người chụp bối cảnh.** Rồi mỗi người mang một
+giả thuyết hợp lý tới ghép vào, và ghép rất khớp. **Một giả thuyết khớp với hiện tượng KHÔNG chứng
+minh được nó là nguyên nhân** — nhất là khi chưa ai hỏi «lúc đó máy đang làm gì».
+⚠️ Chiều A (báo thừa) vẫn ĐÚNG và vẫn đáng vá — nó chứng minh bằng đọc mã, KHÔNG dựa vào ca ảnh.
 
 #### 🔑 VẾ ĐÁNG VÀO KẾ HOẠCH KHÔNG PHẢI CÁI ĐÈN — mà là BA CHỖ TỰA VÀO CÙNG CUỐN SỔ ĐỂ QUYẾT ĐỊNH
 ```
@@ -164,6 +158,57 @@ Vá chiều A xong mà tưởng xong cả hai thì chiều B còn nguyên, và n
 Sổ bền mà KHÔNG đối chiếu thì nó đổi từ «quên sạch sau khi khởi lại» thành **«nhớ dai những thứ đã
 chết»** — tức là làm chiều A NẶNG THÊM, vì nay cái sai sống qua cả lần khởi lại.
 🔑 **Chữa một chiều mà KHÔNG nhìn chiều kia thì đó là DỜI lỗi, KHÔNG phải VÁ lỗi.**
+
+---
+
+### 🔴 ⑤c TAB NGỦ RỒI TỈNH ⇒ MẤT LUỒNG, KHÔNG TỰ NỐI LẠI — đây mới là ca Owner chụp 31/08
+
+**Bối cảnh THẬT, Owner kể 01/09:**
+```
+để trình duyệt NGỦ → quay lại → «load fail», KHÔNG đọc được tin cũ
+F5 → đọc được tin cũ
+NHƯNG ô đang nhả chữ thì KHÔNG nhả tiếp; phải chờ, F5 vài lần mới thấy tin
+⇒ KHÔNG tự nạp lại được — khác hẳn lúc có đánh thức
+```
+
+**Đo tại nguồn (01/09) — hai chỗ, cả hai khớp mô tả:**
+```
+① 'visibilitychange' trong src/  → 0 tệp
+   'addEventListener' trong src/ → 3 tệp   ⇐ ĐỐI CHỨNG DƯƠNG, thước KHÔNG mù
+   mà `document.hidden` lại được dùng ở 2 chỗ (UngDung.tsx:1543 · :1845) để NGỦ
+   ⇒ CÓ đường ĐI NGỦ, KHÔNG có đường TỈNH DẬY. Tab ẩn thì mọi vòng dừng;
+     tab hiện lại thì KHÔNG có gì khởi động chúng lại.
+
+② 'EventSource' → 0 tệp  ·  'getReader' → 1 tệp  (UngDung.tsx:1607 `r.body.getReader()`)
+   ⇒ luồng chữ là FETCH-READER, KHÔNG phải EventSource.
+   🔑 `EventSource` TỰ nối lại khi đứt. Fetch-reader thì KHÔNG — vòng `for(;;)` gặp `done`
+      là **break, hết**. KHÔNG nhánh nối lại, KHÔNG cách bám lại vào lượt đang chạy.
+```
+
+#### 🔑 VÌ SAO F5 CHỮA NỬA NÀY MÀ KHÔNG CHỮA NỬA KIA
+```
+tin CŨ       : nằm trong .jsonl do chính `claude` ghi ⇒ tải lại trang là đọc lại được  ✅
+chữ ĐANG nhả : chỉ sống trong luồng HTTP đang mở. Luồng đứt ⇒ chữ đó MẤT khỏi máy khách,
+               và máy chủ KHÔNG giữ bản phát lại ⇒ F5 bao nhiêu lần cũng KHÔNG lấy lại  ❌
+```
+📌 Nên «F5 vài lần mới thấy» KHÔNG phải là F5 có tác dụng — mà là **phải chờ lượt đó KẾT THÚC**,
+lúc ấy chữ mới vào `.jsonl` rồi F5 mới thấy. Owner đang chờ TIẾN TRÌNH, KHÔNG phải chờ trang.
+
+#### ✅ HAI LỚP VÁ, ĐỘ KHÓ KHÁC HẲN — đừng gộp làm một
+```
+LỚP 1 (rẻ) — chữa «load fail + KHÔNG đọc được tin cũ»
+   thêm listener `visibilitychange`: tab hiện lại ⇒ tải lại lịch sử + bật lại các vòng đã ngủ
+   ⇒ Owner KHÔNG phải F5 nữa. KHÔNG đụng kiến trúc.
+
+LỚP 2 (khó) — chữa «ô đang nhả chữ thì mất»
+   phải có luồng BÁM LẠI ĐƯỢC: máy chủ giữ bản phát lại của lượt đang chạy, máy khách nối lại
+   và xin từ mốc đã nhận. Đổi sang EventSource KHÔNG đủ: nó nối lại được, nhưng máy chủ
+   vẫn KHÔNG có gì để phát lại.
+```
+⚠️ **LỚP 2 chung gốc với mục ① (giữ tiến trình sống)** — cả hai đều vì app KHÔNG có bản ghi bền của
+một lượt ĐANG chạy. Ai làm ① thì cân nhắc làm luôn, đừng vá riêng rồi phải vá lại.
+
+**Cách đo lại:** `grep -rc 'visibilitychange' src/` phải >0 (lớp 1) · và có đường xin phát lại từ một mốc (lớp 2).
 
 ---
 
