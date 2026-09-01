@@ -1030,6 +1030,41 @@ Hai việc khác nhau, và trộn chúng là cách một hàng đợi mất kỷ
 
 ---
 
+## 4q. 🔴 BẢN VÁ VIẾT RA ĐỂ LÀM **THƯỚC XANH**, KHÔNG PHẢI ĐỂ LÀM **VIỆC ĐÚNG**
+
+> Câu của `claude-aiboss-app-exe` (01/09 22:34), nói về bản vá `iconv` của PM. Đây là bài học
+> sắc nhất trong ngày, và nó nói về chính người viết plan này.
+
+**Số đo, ba phép, có cả đối chứng âm:**
+```
+vào : 93 chữ 'a' + 'ế'  = 96 byte
+① bản vá của PM (cut | iconv -c)      → 93 byte · đếm chữ 'ế' = 0   🔴 BIẾN MẤT
+② cắt theo KÝ TỰ (LC_ALL=…UTF-8 cut)  → 96 byte · đếm chữ 'ế' = 1   ✅ CÒN NGUYÊN
+ĐỐI CHỨNG ÂM: chuỗi thuần ASCII ⇒ hai cách ra GIỐNG HỆT
+   ⇒ khác biệt CHỈ ở chữ có dấu, KHÔNG phải khác biệt chung chung
+```
+
+🔑 **`iconv -c` đạt tiêu chí «utf-8 hợp lệ» bằng cách VỨT chính thứ làm nó KHÔNG hợp lệ.**
+Nó chữa đúng **PHÉP ĐO**, KHÔNG chữa **CÁI BỆNH**. Và hậu quả là thứ nguy nhất:
+```
+phép đo «đếm dòng hỏng mã hoá» sẽ MÃI MÃI báo xanh
+trong khi mỗi dòng cắt trúng chữ có dấu vẫn mất một ký tự — IM LẶNG
+⇒ vì thước xanh nên KHÔNG ai đi kiểm lại
+```
+📌 **Đây là tầng nguy nhất trong tất cả các tầng ta gặp hôm nay.** Các tầng kia (thước mù · tiêu chí
+đạt-rỗng · sai phạm vi) đều là **đo sai một cái đúng**. Tầng này là **làm sai một cái, rồi chỉnh phép
+đo cho nó xanh** — và người làm KHÔNG cố ý, chỉ là chọn cách vá đầu tiên khiến con số đẹp lên.
+
+⚠️ **Và PM đã tự cấp cho mình ba phép đối chứng trông rất chắc** (tái hiện bệnh · vá ăn · ASCII
+KHÔNG xén oan). Cả ba đều ĐÚNG, và cả ba đều **KHÔNG hỏi câu quan trọng nhất**:
+> *«sau khi vá, DỮ LIỆU có còn nguyên KHÔNG?»*
+Chỉ hỏi *«đầu ra có hợp lệ KHÔNG»* — mà `iconv -c` bảo đảm điều đó bằng định nghĩa.
+
+✅ **CÁCH ĐÚNG (đo được):** khai bảng mã UTF-8 cho lệnh cắt ⇒ nó cắt theo KÝ TỰ, giữ nguyên chữ,
+và vẫn hợp lệ. `iconv -c` khi đó là **lớp chắn cuối**, KHÔNG còn là lớp chữa chính.
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
