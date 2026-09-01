@@ -653,6 +653,40 @@ KHÔNG phải VÁ lỗi.**
 
 ---
 
+## 4i-bis. ⚠️ ĐÍNH CHÍNH LỊCH SỬ KHO — commit `9cb977d` chứa mã KHÔNG thuộc thông điệp của nó
+
+```
+9cb977d  20:33  «MASTER PLAN 4h: dán trọn ngày 01/09 …»   ⇐ thông điệp nói TÀI LIỆU
+   KE-HOACH.md                380 dòng   · của claude-aiboss-app-pm
+   ai/MASTER-PLAN.md          123 dòng   · của claude-aiboss-app-pm
+   src/components/UngDung.tsx 101 dòng   · CỦA claude-aiboss-app-exe — bản vá P0 tab-tỉnh-lại,
+                                           **CHƯA QUA SOI tại thời điểm commit**
+```
+🔴 **Hậu quả khác hai lần trước trong ngày:** hai lần kia là mất việc (`reset --hard`) và ghi sai sổ.
+Lần này là **một CỔNG bị đi vòng** — luật nhà là `soi ĐẠT → dựng → commit`, mà mã này vào kho trước
+khi được soi. Ai dựng lại từ nhánh chính trong quãng đó là dựng bản chưa qua cổng.
+✅ App Owner AN TOÀN suốt quãng đó: `.next` vẫn giữ `z7cetgZ5f…` (bản đã soi, nạp 10:58:51).
+✅ Nội dung KHÔNG mất: `claude-aiboss-app-exe` so **hash** (`414d4f56` trong commit = trên đĩa), KHÔNG đếm chuỗi.
+
+📌 **KHÔNG sửa lịch sử** (`claude-aiboss-app-exe` xin như vậy): sửa thì mọi hash đổi, mà hôm nay cả đội
+vừa dùng chính hash để chứng minh phục hồi đúng. Ghi đính chính ở đây để người đọc sổ sau ba tháng
+KHÔNG đi tìm nhầm chỗ.
+
+### ✅ ĐÃ CẮM CHẶN — `.git/hooks/pre-commit`, vì LỜI HỨA đã thất bại một lần rồi
+PM tự rút cách chữa lúc 10:12 (`git commit -- <đường dẫn>`) **rồi vẫn tái phạm lúc 20:33.**
+```
+LUẬT : một commit KHÔNG được vừa mang tài liệu (.md) vừa mang mã (src/) — tách làm hai commit
+ĐO   : ① chỉ .md          ⇒ CHO QUA  ✅ (đối chứng dương)
+       ② có cả .md và src/ ⇒ CHẶN     ✅ (đối chứng âm — dựng đúng ca hỏng để thử)
+```
+🔑 **Lời hứa KHÔNG chặn được thứ mình làm mà KHÔNG để ý.** Ba lần trong một ngày, cùng một hình, và
+người gây ra KHÔNG lần nào cố ý — nên nó sẽ lặp lại cho tới khi có một cái chặn chạy TRƯỚC khi commit
+thành hình.
+⚠️ `claude-aiboss-app-exe` cũng đổi nếp phía mình: **mã CHỜ SOI thì KHÔNG nằm trong chỉ mục** —
+vì chính thói quen `git add` sớm là bề mặt để cả ba lần quét trúng.
+
+---
+
 ## 4j. 🔴 NGƯỜI SOI NGOÀI NHÀ: **FAIL 6/6 · NO-GO** — và điểm mù CHUNG của cả ba ghế
 
 > `hermes-aiboss-app-review` (khác hãng), 01/09 21:0x. Owner phải nhắc *«đừng quên nhân sự mình có»*
