@@ -66,7 +66,7 @@ export function layTatCa(): So {
   return doc();
 }
 
-export function datO(maO: string, maNhanSu: string | null, maPhien: string | null): void {
+export function datO(maO: string, maNhanSu: string | null, maPhien: string | null): boolean {
   /**
    * 🚧 CHẶN Ô NGOÀI TẦM — sổ ⛔ BAO GIỜ được đẻ lại mục mà app ⛔ vẽ nổi.
    *
@@ -79,7 +79,15 @@ export function datO(maO: string, maNhanSu: string | null, maPhien: string | nul
    */
   if (!oTrongTam(maO)) {
     console.warn(`[kho-phien] ⛔ BỎ QUA ghi sổ cho ô NGOÀI TẦM «${maO}» (app chỉ có ${SO_O} ô).`);
-    return;
+    /**
+     * 🔴 TRẢ VỀ `false` — hermes vòng 2, NGOÀI ĐỀ ②, 31/08.
+     *    Bỏ qua thì vẫn đúng (ô ngoài tầm là sổ bẩn, KHÔNG phải người dùng sai).
+     *    Nhưng bản trước trả `void` ⇒ người gọi KHÔNG có cách nào biết mắt xích
+     *    «buộc lượt vào ô» vừa THẤT BẠI. Lượt vẫn chạy, chữ vẫn vào `.jsonl`,
+     *    chỉ là app KHÔNG bao giờ gán nó vào đâu — đúng định nghĩa «lượt VÔ HÌNH».
+     * 🔑 Từ chối là quyền của hàm. Từ chối mà KHÔNG nói ra thì mới là lỗi.
+     */
+    return false;
   }
   const s = doc();
   const cu = s[maO];
@@ -87,6 +95,7 @@ export function datO(maO: string, maNhanSu: string | null, maPhien: string | nul
   const giuMoc = cu?.ma_phien === maPhien ? (cu?.moc_ket_thuc ?? null) : null;
   s[maO] = { ma_nhan_su: maNhanSu, ma_phien: maPhien, cap_nhat: Date.now(), moc_ket_thuc: giuMoc };
   ghi(s);
+  return true;
 }
 
 /** Ghi mốc "lượt của TA vừa chạy xong" — gọi NGAY SAU khi tiến trình con thoát. */

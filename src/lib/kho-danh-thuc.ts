@@ -147,6 +147,18 @@ export function ghiNhanThamDo(maO: string, bayGio = Date.now()): void {
   thamDoTheoO.set(maO, bayGio);
 }
 
+/**
+ * Trình duyệt thăm dò ô này lần cuối lúc nào (`undefined` = CHƯA lần nào kể từ khi máy chủ khởi).
+ *
+ * 🎯 Sinh ra cho bộ chạy nền (P0-2c): nó phải biết ô nào CÒN người lái để đứng ngoài.
+ * ⚠️ Sổ nằm TRONG BỘ NHỚ. Máy chủ khởi lại là rỗng ⇒ `undefined` nghĩa là
+ *    **«tôi KHÔNG BIẾT»**, KHÔNG phải «chắc chắn không ai mở app».
+ *    Người đọc phải tự chọn phía an toàn cho ca của mình — xem `may-chay-nen.ts`.
+ */
+export function thamDoCuoiCua(maO: string): number | undefined {
+  return thamDoTheoO.get(maO);
+}
+
 function doc(): So {
   try {
     const j = JSON.parse(fs.readFileSync(TEP, 'utf8')) as Partial<So>;
@@ -378,8 +390,14 @@ export type KetQuaXacNhan = { xong: true } | { xong: false; ly_do: string };
 /**
  * ✅ TRÌNH DUYỆT XÁC NHẬN đã bắt đầu đưa câu vào ô.
  *
- * 📌 Gọi SAU KHI `gui()` đã chạy, ⛔ phải trước. Xác nhận trước là nói dối:
- *    nó khai «đã giao» trong khi việc còn chưa bắt đầu.
+ * 🔄 **ĐÃ LẬT 31/08 (P0-2d) — chú thích cũ nay SAI, giữ lại để người sau khỏi tin nhầm:**
+ *    *«gọi SAU KHI `gui()` đã chạy, KHÔNG phải trước — xác nhận trước là nói dối»*.
+ *    Vế ấy ĐÚNG **khi cửa này chưa biết TỪ CHỐI**: lúc đó xác nhận chỉ là một lời khai,
+ *    nên khai trước khi làm đúng là nói dối. Nay cửa BIẾT từ chối (`khac-trinh-duyet`),
+ *    xác nhận thành một phép XIN PHÉP — mà xin phép thì phải xin TRƯỚC khi làm.
+ * ⇒ Giao diện nay gọi **XÁC NHẬN TRƯỚC, CHẠY SAU** (`UngDung.tsx:1970-1981`). Đừng đảo lại.
+ * 🔑 Bài học ghi kèm: **một lý do đúng lúc viết sẽ ÂM THẦM SAI ĐI khi thứ nó dựa vào đổi,
+ *    và KHÔNG có phép thử nào báo.** Chú thích này từng sống sót qua cả một vòng soi.
  * 🔁 Xác nhận HAI LẦN là vô hại (trả `xong: true`) — mạng chập thì trình duyệt gửi lại,
  *    ⛔ nên phạt nó vì cẩn thận.
  * ⚠️ Nếu giữa lúc trao và lúc xác nhận mà hạn giữ chỗ đã hết, `donDep` đưa mẩu về 'cho'

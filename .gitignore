@@ -1,25 +1,20 @@
-node_modules/
-.next/
-out/
-next-env.d.ts
-*.tsbuildinfo
 
+!.env.example
+# (/Users/Shared/phong-ban-ai-ws) — xem src/lib/cau-hinh.ts
 # Bí mật — KHÔNG BAO GIỜ commit
+# Sổ "ô nào đang mở phiên nào" — trạng thái máy, ⛔ không phải mã nguồn
+# Vùng cách ly cho tiến trình claude con nay nằm NGOÀI $HOME
+# ban sao luu tam truoc khi sua — git da la lich su roi, khong can luu them
+# ── phần chọn mẫu (gộp vào kho 14/08/2026 theo round-2) ──
+*.truoc-*
+*.tsbuildinfo
+.DS_Store
 .env
 .env.*
-!.env.example
-
-# Sổ "ô nào đang mở phiên nào" — trạng thái máy, ⛔ không phải mã nguồn
+.next/
 .trang-thai/
-
-# Vùng cách ly cho tiến trình claude con nay nằm NGOÀI $HOME
-# (/Users/Shared/phong-ban-ai-ws) — xem src/lib/cau-hinh.ts
-
-.DS_Store
-
-# ── phần chọn mẫu (gộp vào kho 14/08/2026 theo round-2) ──
 chon-mau/.vercel/
 chon-mau/node_modules/
-
-# ban sao luu tam truoc khi sua — git da la lich su roi, khong can luu them
-*.truoc-*
+next-env.d.ts
+node_modules/
+out/
