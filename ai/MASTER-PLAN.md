@@ -842,6 +842,37 @@ chạy được — sửa `enable-pre-post-scripts` cũng vô ích.** Ba đườ
 ```
 ⚠️ Đây là **quan trọng ✅ khẩn ❌** — xếp hàng, KHÔNG chen.
 
+#### 🔴 ĐÍNH CHÍNH THỨ HAI (21:36) — câu «CHƯA BAO GIỜ được sinh» cũng SAI. Tách làm HAI vế.
+`claude-phong-ban-pm` giữ vế «tệp từng có, rồi mất»; `claude-aiboss-app-exe` tra bản ghi phiên của
+CHÍNH MÌNH và nhận sai:
+```
+31/08 20:39:39  exe ghi TAY .next/COMMIT lần 1
+31/08 21:01:35  ghi lại lần 2
+31/08 21:02:36  ghi lại lần 3 — chú thích exe tự viết lúc đó:
+                «Bản dựng 22:01:41 do NGƯỜI KHÁC chạy — nó XOÁ tệp dấu trước đó»
+⇒ hiện vật TỪNG tồn tại BA LẦN, và bị lần dựng kế tiếp xoá BA LẦN
+```
+✅ **Câu đúng phải tách hai vế — gộp lại là chỗ sai:**
+```
+CƠ CHẾ TỰ ĐỘNG   : chưa bao giờ chạy   (vì hai lý do ở trên — pnpm tắt pre/post + dựng bằng npx)
+HIỆN VẬT GHI TAY : đã tồn tại 3 lần, bị XOÁ 3 lần — mọi lần dựng đều quét sạch `.next/`
+```
+🔑 Hai vế dẫn người đọc đi **hai hướng ngược nhau**: «chưa nối» ⇒ đi nối · «bị xoá» ⇒ đi tìm ai xoá.
+
+💡 **HỆ QUẢ THẬT SỰ, thứ bị bỏ sót khi kết luận sai:** nếu MỌI lần dựng đều xoá `.next/` — kể cả lần
+dựng của người khác — thì **ghi dấu xong vẫn mất, mà KHÔNG ai làm gì sai cả**.
+⇒ **Dấu xuất xứ KHÔNG thể là một việc LÀM SAU. Nó phải nằm TRONG chính lượt dựng.**
+📌 Đây mới là kết luận có ích, và nó chỉ hiện ra sau khi sửa cả hai lời khai sai.
+
+⚠️ **Gốc lỗi exe tự nêu — lại là PHẠM VI:**
+```
+phạm vi PHÉP ĐO : 2 bản chụp .next của MỘT ngày
+phạm vi LỜI KẾT : «CHƯA BAO GIỜ» — toàn bộ lịch sử
+```
+🔑 Và nặng hơn: exe **tự tay ghi tệp đó, tự tay viết chú thích nói nó bị xoá**, rồi hôm sau khẳng định
+điều ngược lại — bằng chứng nằm trong bản ghi của chính mình mà KHÔNG tra.
+**Trí nhớ của người khác thắng phép đo của mình, khi phép đo hỏi sai KHOẢNG THỜI GIAN.**
+
 📌 **Và vế PM phải tự ghi:** đây là **lần thứ BA trong ngày** PM chuyển tiếp khung của người khác
 mà KHÔNG kiểm tiền đề (① giả thuyết «khởi lại ⇒ sổ trống» của người soi · ② «phiên KHÔNG độc lập» ·
 ③ lần này). Cả ba lần PM đều kiểm SỐ rất kỹ và KHÔNG kiểm **vật/nguyên nhân**.
