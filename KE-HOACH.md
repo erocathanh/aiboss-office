@@ -17,6 +17,37 @@ người sau **biết được nó mục ở đâu**, KHÔNG phải đoán.
 
 ---
 
+## 🎯 THỨ TỰ ƯU TIÊN — luật hai tiêu chí (Owner đặt 01/09)
+
+> **Một việc chỉ được CHEN NGANG khi thoả CẢ HAI: quan trọng VÀ khẩn cấp.**
+> Thoả một tiêu chí thì XẾP HÀNG, KHÔNG chen. Đây là luật chặn việc, KHÔNG phải lời khuyên.
+
+🕳 **Ca sinh ra luật (01/09, chính tôi):** cả buổi chiều tôi và hai ghế kia đo đạc quanh mục ⑤b/⑤d
+— sổ «ô đang chạy» và ngưỡng bộ hẹn. Cả hai **quan trọng nhưng KHÔNG khẩn**: 110-504 hiện vật nói
+nó *sẽ* trượt, mà **chưa trúng lần nào**. Trong khi ⑤c — tab ngủ rồi tỉnh — là thứ Owner **đang đau
+mỗi ngày**, và lớp vá 1 của nó **rẻ**. Tôi ghi ⑤c vào sổ rồi đi làm việc khác.
+📌 **Việc thú vị hút người làm mạnh hơn việc quan trọng.** ⑤b/⑤d là câu đố hay — có số để đo, có
+người tranh luận. ⑤c chỉ là thêm một listener. Nên nó bị đẩy xuống, KHÔNG phải vì ai quyết thế.
+
+| Bậc | Việc | Quan trọng | Khẩn | Vì sao xếp đây |
+|---|---|---|---|---|
+| **P0** | **⑤c LỚP 1** — listener `visibilitychange` | ✅ Owner mất việc, phải F5 nhiều lần | ✅ xảy ra **mỗi ngày** | Thoả CẢ HAI. Và **rẻ nhất bảng** — một listener, KHÔNG đụng kiến trúc. Làm trước. |
+| **P1** | **① giữ TIẾN TRÌNH SỐNG** (+ ⑤c lớp 2 · ② · phần lớn ⑥) | ✅ gỡ 3 thứ cùng lúc, cắt chỗ tốn lớn nhất | ❌ 18 ngày chưa làm mà app vẫn chạy | Quan trọng NHẤT bảng nhưng KHÔNG khẩn ⇒ **lên lịch làm tử tế**, đừng để nó bị việc vặt chen mãi. ⑤c lớp 2 chung gốc — làm luôn một thể. |
+| **P2** | ③ bộ chạy nền đang TẮT | 🟡 vừa | ❌ | Chỉ cần Owner trả lời MỘT câu «bật hay KHÔNG». Rẻ, nhưng chờ Owner. |
+| **P2** | ⑤b chiều A — đèn sáng mãi | 🟡 Owner thấy đèn sai | ❌ | Chứng minh bằng đọc mã, vá tại chỗ đọc. Xếp hàng. |
+| **P2** | ⑤d ngưỡng bộ hẹn (đã QUYẾT) | ✅ nạp giữa lượt = mất việc | ❌ chưa trúng lần nào | Đã quyết xong, exe thi hành **khi rảnh**. KHÔNG chen. |
+| **P3** | ④ Hermes chưa nối vào app | ❌ ghế gọi qua dòng lệnh được rồi | ❌ | Tiện, KHÔNG cần. |
+| **P3** | ⑤ 3/12 hồ sơ ghế còn khối kịch bản | 🟡 | ❌ | Dọn dẹp. |
+| **P3** | ⑦ `chon-mau/` đẩy hỏng | ❌ bản cũ vẫn phục vụ đúng | ❌ | Có đường vòng đang chạy. |
+| — | ⑥ gộp SSE · nối lại khi rớt mạng · cộng dồn mức dùng | — | — | **Chặn bởi P1.** Đừng khởi động riêng. |
+| — | CHƯA deploy app | — | — | **Chốt của Owner**, KHÔNG phải việc tồn. |
+
+🔑 **Cách dùng bảng này khi có việc mới ập tới:** hỏi đúng hai câu — *quan trọng KHÔNG?* và
+*khẩn KHÔNG?* Thiếu một câu trả lời «có» thì **ghi vào bảng rồi quay lại việc đang làm**.
+⚠️ Việc mới luôn có vẻ khẩn vì nó vừa xuất hiện. **Mới KHÔNG phải là khẩn.**
+
+---
+
 ## ✅ ĐÃ XONG — có bằng chứng đo được (01/09)
 
 | # | Việc | Bằng chứng | Cách đo lại |
