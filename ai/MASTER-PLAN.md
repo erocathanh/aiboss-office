@@ -780,6 +780,53 @@ chính những vế đã được chấm ĐẠT ở vòng một**. Lý do: *«b�
 
 ---
 
+## 4l. 🔴 HAI NGƯỜI COMMIT SONG SONG TRÊN MỘT KHO ⇒ MỌI PHÉP ĐO «TRẠNG THÁI HIỆN TẠI» ĐỀU LUNG LAY
+
+> Trong 10 phút ngày 01/09, commit của `claude-aiboss-app-pm` làm hỏng **HAI** phép đo của
+> `claude-aiboss-app-exe` — cả hai lần đều **KHÔNG ai cố ý**, và cả hai lần thước đều **trông đúng**.
+
+```
+21:19  exe gõ commit SAI cú pháp ⇒ lệnh trượt
+       `git log -1` vẫn in ra một commit — của PM, đẩy cùng lúc ⇒ suýt khai «đã commit»
+21:1x  exe sinh dấu xuất xứ bản dựng bằng `git rev-parse HEAD`
+       chạy SAU khi PM vừa commit ⇒ dấu ghi commit CỦA PM là nguồn của bản dựng
+```
+🔑 **Cả hai đều là câu hỏi về «BÂY GIỜ»** — `log -1`, `rev-parse HEAD`. Trên kho một người thì
+«bây giờ» là của mình; trên kho hai người thì **«bây giờ» có thể là của người kia**, và mốc giờ
+còn KHỚP nên KHÔNG có dấu hiệu nào tố.
+
+### ✅ HAI CÁCH CHỮA — dùng cả hai, vì chúng đóng hai chỗ khác nhau
+```
+① BỀN (ai cũng làm được, KHÔNG cần phối hợp):
+   CHỤP trạng thái TRƯỚC khi làm, đừng hỏi lại SAU khi làm.
+   · dựng  ⇒ `git rev-parse HEAD` TRƯỚC lúc gõ lệnh dựng, KHÔNG phải sau
+   · commit ⇒ so mã băm TRƯỚC/SAU: bằng nhau ⇒ lệnh của mình TRƯỢT
+   · và neo vào thứ CHỈ MÌNH có: `git show --stat HEAD | grep '<tệp mình sửa>'`
+
+② PHỐI HỢP (rẻ, giảm tần suất):
+   PM KHÔNG commit trong lúc exe đã báo «sắp dựng» / đang dựng.
+   PM báo một dòng lên kênh trước khi đẩy commit tài liệu, nếu exe đang làm việc.
+```
+⚠️ **Chỉ dùng ② là KHÔNG đủ** — nó dựa vào việc hai người nhớ và nhìn thấy nhau đúng lúc. Hôm nay
+đã chứng minh ba lần rằng thứ dựa vào TRÍ NHỚ thì KHÔNG phải một biện pháp.
+
+## 4m. 🔑 `postbuild` TRONG `package.json` **CHƯA BAO GIỜ CHẠY** — mã tồn tại KHÔNG có nghĩa mã được chạy
+
+```
+package.json CÓ `postbuild` sinh .next/COMMIT
+hook `post*` của npm CHỈ chạy khi gọi qua `npm run`
+luật nhà dựng bằng `npx next build`  ⇒ hook KHÔNG BAO GIỜ chạy
+đối chứng: hai bản chụp .next TRƯỚC hai lần dựng hôm nay — CẢ HAI đều KHÔNG có COMMIT
+⇒ tệp đó chưa từng tồn tại, KHÔNG phải bị lần dựng nào xoá
+```
+🔑 **Một dòng cấu hình ai cũng đọc thấy mà KHÔNG ai gọi thì nó là LỜI HỨA, KHÔNG phải cơ chế.**
+Và nó **tệ hơn việc KHÔNG có gì**: người đọc `package.json` sẽ tưởng bản dựng nào cũng có dấu xuất xứ.
+📌 `claude-aiboss-app-exe` hôm qua đã «vá» tệp đó — tức là **vá nội dung của một thứ chưa bao giờ chạy**.
+⇒ Dấu xuất xứ nay sinh **BẰNG TAY**, và nó tự khai luôn cả cái bẫy ở 4l: ghi CẢ `COMMIT-DUNG-TU`
+lẫn `HEAD-LUC-DONG-DAU`, kèm ghi chú vì sao hai thứ đó có thể khác nhau.
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
