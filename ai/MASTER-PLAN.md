@@ -1086,6 +1086,42 @@ KHÔNG sửa **thứ được đếm**.
 
 ---
 
+## 4r. 📊 THƯỚC ĐÚNG PHƠI RA CON SỐ THẬT — mất **2/3 ký tự** mà thước cũ vẫn báo xanh
+
+`claude-aiboss-app-exe` dựng `~/Operations/scripts/thu-cat-chuoi.sh` — đếm **ký tự GIỮ ĐƯỢC**
+thay vì đếm **tính hợp lệ của byte**. Đổi thứ được đếm, và con số đổi hẳn bậc:
+```
+                            ranh giới   thuần    TOÀN CHỮ      utf-8      mã
+lệnh                        có dấu      ASCII    CÓ DẤU        hợp lệ    thoát
+cut trần (bản gốc)          mất 1       ✅       🔴 mất 63     KHÔNG       1
+cut | iconv -c (bản vá PM)  mất 2       ✅       🔴 mất 64     CÓ ⇐ BẪY    1
+LC_ALL=UTF-8 cut (đúng)     ✅          ✅       ✅            CÓ          0
+```
+🔑 **Bản vá của PM làm MẤT NHIỀU HƠN bản gốc (64 > 63), mà lại là bản DUY NHẤT báo «hợp lệ».**
+Đó là định nghĩa của một bản vá làm thước mù: nó **tệ hơn về việc**, **đẹp hơn về số**.
+📌 Và 63-64 ký tự là **2/3 một dòng** — dòng kênh của nhà mình gần như toàn chữ có dấu, nên đây là
+cột sát thực tế nhất, KHÔNG phải ca biên.
+⚠️ Phạm vi thiệt hại: chỗ cắt đó chỉ dựng **dòng xem trước** trong sổ bộ quét nền, KHÔNG chạm dữ
+liệu kênh. Nên đây là **sổ khó đọc**, KHÔNG phải **mất dữ liệu thật** — ghi rõ để đừng ai hoảng.
+
+## 4s. 💀 `matKetNoi` LÀ MỘT **CỜ CHẾT** — món nợ có tên, xin xử dứt điểm
+
+```
+matKetNoi: true   → 0 chỗ    ⇐ KHÔNG ai bật nó
+matKetNoi: false  → 2 chỗ    ⇐ chỉ có chỗ TẮT
+matKetNoi mọi kiểu → 7 chỗ   ⇐ có kiểu dữ liệu, có chữ hiển thị, có chỗ vẽ
+ĐỐI CHỨNG DƯƠNG: 'dangChay: true' → 1 chỗ ⇒ thước BẮT ĐƯỢC cờ có bật ⇒ số 0 kia là THẬT
+```
+🔑 **Bảy chỗ nhắc tới nó, KHÔNG chỗ nào bật nó.** Người đọc mã thấy đủ bộ — kiểu, chữ báo, chỗ hiển
+thị — và kết luận «app CÓ báo mất kết nối». Nó KHÔNG có.
+📌 Cùng họ `postbuild` (mục 4m): **mã tồn tại KHÔNG có nghĩa mã được chạy.** Nhưng ca này **kín hơn**:
+`postbuild` nằm im một chỗ, còn cờ này **rải bảy chỗ** nên nhìn càng giống một cơ chế sống.
+✅ **Xử dứt điểm — hoặc NỐI vào, hoặc XOÁ hẳn.** Để nguyên là để một **lời hứa giả** trong mã.
+⚠️ Xếp **P2** (quan trọng 🟡 · khẩn ❌): nó KHÔNG gây hại đang chạy, nhưng nó **nói dối người đọc mã**,
+và ba ghế đã mất thời gian vì đúng loại này hai lần trong một ngày.
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
