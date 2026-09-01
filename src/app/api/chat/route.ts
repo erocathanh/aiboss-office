@@ -8,6 +8,7 @@ import { dangKyViec, xoaViec, dsViec } from '@/lib/kho-tien-trinh';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
+import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,7 @@ function goi(du_lieu: unknown): Uint8Array {
 }
 
 export async function POST(req: NextRequest) {
+  batMotLan(); // 🚀 cửa Node có nhịp gọi dày nhất — hermes FAIL ⑤
   const khach = nhanDangKhach(req.headers);
 
   let than: { ma_o?: unknown; ma_nhan_su?: unknown; cau_hoi?: unknown; phien_moi?: unknown };

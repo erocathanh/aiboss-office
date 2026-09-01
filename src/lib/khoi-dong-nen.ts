@@ -72,6 +72,23 @@ let dangBat = false;
 export function batMotLan(): void {
   if (daBat || dangBat) return;
   dangBat = true;
+  /**
+   * 🔴 HẸN RA NGOÀI ĐƯỜNG YÊU CẦU — `hermes-aiboss-app-review` FAIL ⑥, 01/09.
+   *
+   * 🕳 Bản trước gọi thẳng, ĐỒNG BỘ, và các cửa gọi nó TRƯỚC cả `req.json()`:
+   * ```
+   * POST có thân JSON hỏng
+   *   TRƯỚC bản vá: parse hỏng → trả 400
+   *   SAU  bản vá : nạp cả đồ thị `may-chay-nen` + dựng đồng hồ → RỒI MỚI phát hiện JSON hỏng → 400
+   * ⇒ lượt đầu chậm thêm, và TÁC DỤNG PHỤ xảy ra TRƯỚC khi xác thực đầu vào.
+   * ```
+   * 🔑 **Một lời gọi «rẻ» đặt trước cửa kiểm tra thì nó KHÔNG còn rẻ nữa — nó thành cái giá
+   *    mà MỌI yêu cầu phải trả, kể cả yêu cầu sai.**
+   * ✅ Hẹn ở đây, KHÔNG phải ở nơi gọi: người gọi KHÔNG thể quên, và mọi cửa chỉ tốn đúng một dòng.
+   *    `setImmediate` chạy sau khi lượt hiện tại nhả — bộ nền vẫn thức trong cùng nhịp,
+   *    nhưng KHÔNG nằm trong đường đo thời gian đáp của ai cả.
+   */
+  setImmediate(() => {
   try {
     // Cắm nguồn dấu thăm dò TRƯỚC khi bật — thiếu bước này thì chốt ③ chạy bằng mặc định
     // «coi như có trình duyệt» và bộ nền đứng ngoài mãi mãi (an toàn, nhưng vô dụng).
@@ -90,4 +107,5 @@ export function batMotLan(): void {
   } finally {
     dangBat = false; // dù thành hay bại đều nhả cờ đua — KHÔNG để nó kẹt
   }
+  });
 }

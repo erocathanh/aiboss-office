@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nhanYeuCau, giuChoOBan } from '@/lib/kho-danh-thuc';
+import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs';
 
@@ -78,6 +79,7 @@ const BAN_DUNG: string = (() => {
  *    = 48 lượt gọi mỗi phút cho một việc thường xuyên rỗng. Gộp còn 12.
  */
 export async function POST(req: NextRequest) {
+  batMotLan(); // 🚀 cửa Node có nhịp gọi dày nhất — hermes FAIL ⑤
   let than: { ds_o?: unknown; ds_ban?: unknown; ma_trinh_duyet?: unknown };
   try {
     than = await req.json();
