@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { gietViec, layViec, dsViec } from '@/lib/kho-tien-trinh';
+import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,7 @@ export const dynamic = 'force-dynamic';
  * ⚠️ Cổng này ⛔ BAO GIỜ được giết tiến trình. Muốn giết thì đi cửa POST, và phải KHAI ý định.
  */
 export async function GET() {
+  batMotLan(); // 🚀 bật bộ chạy nền MỘT LẦN — cửa này chạy runtime 'nodejs'
   const ds = dsViec();
   return Response.json({
     dang_chay: ds.map((v) => ({
@@ -40,6 +42,7 @@ export async function GET() {
  * Ý định phải được KHAI, ⛔ không suy từ một tín hiệu mơ hồ.
  */
 export async function POST(req: NextRequest) {
+  batMotLan(); // 🚀 bật bộ chạy nền MỘT LẦN — cửa này chạy runtime 'nodejs'
   let than: { ma_o?: unknown };
   try {
     than = await req.json();

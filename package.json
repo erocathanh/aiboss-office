@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start -p 4319",
     "lint": "next lint",
-    "postbuild": "{ git rev-parse HEAD; git status --porcelain -- src du-lieu | sed \"s/^/# CAY-BAN /\"; } > .next/COMMIT 2>/dev/null || true"
+    "postbuild": "{ git rev-parse HEAD; echo \"# BUILD_ID: $(cat .next/BUILD_ID 2>/dev/null)\"; git status --porcelain -- src du-lieu | sed \"s/^/# CAY-BAN /\"; } > .next/COMMIT 2>/dev/null || true"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

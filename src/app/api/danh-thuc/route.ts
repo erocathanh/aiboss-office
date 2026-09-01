@@ -3,6 +3,7 @@ import { layTatCa } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { CAU_HINH } from '@/lib/cau-hinh';
 import { xinLuot, xepHang, xemSo, timTheoKhoa, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
+import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,11 +31,13 @@ interface Than {
 }
 
 export async function GET() {
+  batMotLan(); // 🚀 bật bộ chạy nền MỘT LẦN — cửa này chạy runtime 'nodejs'
   // Xem sổ để nghiệm thu / tra "ai gọi ai lúc nào". Chỉ đọc.
   return Response.json({ ...xemSo(), han_yeu_cau_ms: HAN_YEU_CAU_MS });
 }
 
 export async function POST(req: NextRequest) {
+  batMotLan(); // 🚀 bật bộ chạy nền MỘT LẦN — cửa này chạy runtime 'nodejs'
   let than: Than;
   try {
     than = (await req.json()) as Than;

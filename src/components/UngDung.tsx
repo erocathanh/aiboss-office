@@ -1371,8 +1371,21 @@ export default function UngDung({
         capNhat(i, {
           phienChoFork: ma,
           loiDan:
-            `⛔ Đọc được mã ${ma.slice(0, 8)}… nhưng KHÔNG thấy nội dung ở kho của ghế này. ` +
-            'Phiên đó mở từ THƯ MỤC KHÁC — bản ghi tra theo nơi phiên được mở.',
+            /**
+             * 🎨 SỬA 01/09/2026 (@app-pm khoanh, @exe làm) — ca thật: Owner bấm fork ở
+             *    «Quản Lý Trường», thấy dòng này mở đầu bằng ký hiệu CẤM nên đọc thành
+             *    «app hỏng», chụp màn hình gửi đi. Luồng chạy ĐÚNG; chỉ CHỮ nói sai việc.
+             * 📌 Ba vế phải có, thiếu vế nào là Owner lại quyết sai:
+             *    ① KHÔNG tô cảnh báo cho một trạng thái BÌNH THƯỜNG
+             *    ② nói rõ Fork ĐÁNH ĐỔI GÌ — nó KHÔNG lùi lại được
+             *    ③ chìa LỐI ĐÚNG trước, Fork sau
+             */
+            `Mã ${ma.slice(0, 8)}… đọc được. Bản ghi của phiên đó nằm ở kho của THƯ MỤC KHÁC, ` +
+            'nên ghế này chưa đọc thẳng được — đây là trạng thái bình thường, KHÔNG phải app hỏng.\n' +
+            '· Nối NGUYÊN VẸN (nên làm trước): khai `thu_muc` cho ghế trong `du-lieu/nhan-su.json` ' +
+            'rồi dựng lại — giữ đủ nội dung, KHÔNG mất gì.\n' +
+            '· Fork là đường CUỐI: bản mới chỉ mang theo khoảng 6,5% nội dung ' +
+            '(đo 20/08: 19.305 → 1.257 dòng), và phần mất KHÔNG lấy lại được.',
         });
         return;
       }
@@ -2678,6 +2691,8 @@ export default function UngDung({
                             </button>
                             <span className="ghi-chu-fork">
                               Tạo bản MỚI mang mã riêng cho ghế này. Bản gốc ⛔ KHÔNG bị đụng — app đo lại và báo số.
+                              {' '}<b>Đánh đổi:</b> bản mới chỉ mang theo khoảng 6,5% nội dung (đo 20/08: 19.305 → 1.257 dòng);
+                              phần mất KHÔNG lấy lại được. Khai <code>thu_muc</code> cho ghế là lối giữ đủ.
                             </span>
                             {/**
                               * 🗣 CÂU DẶN ĐẦU — tuỳ chọn. Gửi NGAY sau khi fork xong.

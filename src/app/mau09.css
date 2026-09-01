@@ -466,6 +466,8 @@
 }
 .nut-chu.manh:hover{background:var(--vang-sang); color:var(--navy)}
 .dan-ket-qua{
+  /* 🔤 pre-line: lời báo nay có nhiều dòng (lối đúng / lối cuối) — KHÔNG có nó thì dính thành một khối */
+  white-space:pre-line;
   margin-top:8px; font-size:12.5px; line-height:1.6; color:var(--kem);
   background:rgba(0,0,0,.25); border-radius:7px; padding:8px 11px;
   word-break:break-word;               /* mã phiên dài ⛔ không được đẩy khung phình ra */
