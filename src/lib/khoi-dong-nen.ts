@@ -50,12 +50,28 @@
 import { bat as batBoNen, datNguonThamDo } from '@/lib/may-chay-nen';
 import { thamDoCuoiCua } from '@/lib/kho-danh-thuc';
 
+/**
+ * 🔴 HAI CỜ, KHÔNG PHẢI MỘT — `claude-phong-ban-pm` bắt 01/09.
+ *
+ * 🕳 Bản trước tôi đặt `daBat = true` NGAY ĐẦU, chú thích ghi «chống hai lời gọi sát nhau».
+ *    Ý chống đua thì đúng, nhưng nó **khoá luôn đường thử lại**:
+ * ```
+ * daBat = true  →  try { … } catch { console.error }
+ * ⇒ hỏng MỘT lần là chết VĨNH VIỄN: mọi lời gọi sau `return` ngay,
+ *   bộ nền tắt tới lần khởi máy chủ kế, mà dấu vết chỉ là MỘT dòng lỗi trôi qua từ lâu.
+ * ```
+ * 🔑 **Một cờ KHÔNG gánh nổi hai việc**: «đang làm, đừng chen» và «làm xong rồi, thôi». Gộp chúng
+ *    vào một biến thì thất bại bị ghi nhầm thành thành công.
+ * ✅ Nay: `dangBat` chống đua · `daBat` chỉ bật ở CUỐI nhánh thành công.
+ *    Hỏng thì cả hai về `false` ⇒ lời gọi sau còn thử lại, KHÔNG im lặng chịu chết.
+ */
 let daBat = false;
+let dangBat = false;
 
 /** Gọi ở đầu mọi cửa API chạy runtime `nodejs`. An toàn khi gọi nhiều lần. */
 export function batMotLan(): void {
-  if (daBat) return;
-  daBat = true; // đặt TRƯỚC khi làm — hai lời gọi sát nhau thì lời sau đứng ngoài ngay
+  if (daBat || dangBat) return;
+  dangBat = true;
   try {
     // Cắm nguồn dấu thăm dò TRƯỚC khi bật — thiếu bước này thì chốt ③ chạy bằng mặc định
     // «coi như có trình duyệt» và bộ nền đứng ngoài mãi mãi (an toàn, nhưng vô dụng).
@@ -66,8 +82,12 @@ export function batMotLan(): void {
         ? '[chay-nen] ĐÃ BẬT — máy chủ sẽ tự rút mẩu khỏi hàng đợi khi KHÔNG có trình duyệt lái.'
         : '[chay-nen] TẮT (đặt CHAY_NEN=1 để bật). App chạy y như cũ.',
     );
+    daBat = true; // ✅ CHỈ đặt ở CUỐI nhánh thành công
   } catch (e) {
-    // Bật bộ nền hỏng thì KHÔNG được làm chết một lượt chat thật. Nhưng phải KÊU.
-    console.error('[chay-nen] KHÔNG bật được:', e instanceof Error ? e.message : e);
+    // Bật bộ nền hỏng thì KHÔNG được làm chết một lượt chat thật. Nhưng phải KÊU,
+    // và phải để lần sau CÒN THỬ LẠI — đó là chỗ bản trước của tôi khoá chết.
+    console.error('[chay-nen] KHÔNG bật được (sẽ thử lại ở lượt gọi sau):', e instanceof Error ? e.message : e);
+  } finally {
+    dangBat = false; // dù thành hay bại đều nhả cờ đua — KHÔNG để nó kẹt
   }
 }
