@@ -36,6 +36,43 @@ import { nhanYeuCau, xacNhanDaGiao, xemSo } from '@/lib/kho-danh-thuc';
 import { dsViec } from '@/lib/kho-tien-trinh';
 import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
+import fs from 'node:fs';
+import path from 'node:path';
+
+/**
+ * 🔴 GHI XUỐNG ĐĨA mẩu bị bỏ qua vì KHÔNG tìm thấy bản ghi phiên.
+ *    (claude-phong-ban-pm bắt vòng 5 — cửa do CHÍNH bản vá vòng 4 của tôi mở ra)
+ *
+ * 🕳 Vòng 4 tôi sửa «vứt phiên» thành «bỏ qua mẩu». Nhưng mẩu bỏ qua giữ nguyên `cho`,
+ *    mà `conDung()` cho mẩu `cho` chết sau `HAN_YEU_CAU_MS` = **3 phút**
+ *    ⇒ câu của Owner biến mất LẶNG. Tôi chỉ dời cái mất từ PHIÊN sang CÂU.
+ * 🔑 Đây là lần thứ BA cùng một hình trong một đêm: **vá một cái mất vô hình bằng một cái
+ *    mất vô hình khác.** Chỉ đếm trong bộ nhớ thì tắt máy chủ là mất sạch, và Owner
+ *    KHÔNG có cách nào biết mình vừa mất một câu.
+ * ✅ Nên: ghi XUỐNG ĐĨA, nối thêm, KHÔNG bao giờ ném — một việc phụ trợ ⛔ được chặn vòng chạy.
+ */
+function ghiCanNguoi(y: { ma: string; ma_o: string; ma_nhan_su: string; cau_hoi: string }, maPhien: string): void {
+  try {
+    const thuMuc = path.join(process.cwd(), '.trang-thai');
+    fs.mkdirSync(thuMuc, { recursive: true });
+    fs.appendFileSync(
+      path.join(thuMuc, 'can-nguoi.jsonl'),
+      JSON.stringify({
+        luc: new Date().toISOString(),
+        ly_do: 'khong-thay-ban-ghi-phien',
+        ma_mau: y.ma,
+        ma_o: y.ma_o,
+        ma_nhan_su: y.ma_nhan_su,
+        ma_phien_trong_so: maPhien,
+        cau_hoi: y.cau_hoi.slice(0, 300),
+        ghi_chu: 'Mẩu BỎ QUA, giữ nguyên "cho". Nó sẽ HẾT HẠN sau 3 phút nếu KHÔNG ai xử.',
+      }) + '\n',
+      'utf8',
+    );
+  } catch {
+    /* ghi sổ hỏng thì KỆ — ⛔ được chặn vòng chạy vì một việc phụ trợ */
+  }
+}
 
 /** Mã người giữ mẩu, để phân biệt với trình duyệt trong sổ. */
 export const NGUOI_GIU_NEN = 'may-chu-nen';
@@ -202,6 +239,10 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
          * ⇒ Bỏ qua mẩu, để nguyên trạng thái `cho`, đếm riêng. Người thật quyết.
          */
         dem.boQuaKhongThayPhien++;
+        // 🔴 GHI XUỐNG ĐĨA — bộ đếm nằm trong bộ nhớ, tắt máy chủ là mất sạch.
+        //    Mẩu này sẽ HẾT HẠN sau 3 phút (kho-danh-thuc.ts `conDung` · HAN_YEU_CAU_MS)
+        //    ⇒ nếu ⛔ ghi ra thì câu của Owner mất mà ⛔ ai biết.
+        ghiCanNguoi(y, maPhienCu);
         continue;
       }
     }
