@@ -54,6 +54,7 @@ export const dem = {
   vong: 0, daChay: 0, boQuaDangChay: 0, boQuaCoTrinhDuyet: 0, loi: 0,
   /** phiên trong sổ đã hỏng ⇒ phải mở phiên mới */ mophienMoi: 0,
   /** ghế đang chạy Ở NƠI KHÁC (terminal) ⇒ đứng ngoài */ boQuaChayNoiKhac: 0,
+  /** lượt CHẠY THẬT mà `datO` từ chối buộc vào ô ⇒ «lượt vô hình» */ buocOThatBai: 0,
 };
 
 /**
@@ -190,6 +191,8 @@ export async function raMotVong(bayGio = Date.now(), chophepKhiTat = false): Pro
     ).then(
       (kq) => {
         if (kq.loi) dem.loi++;
+        // 🔴 lượt chạy mà KHÔNG buộc được vào ô ⇒ đếm riêng, đừng trộn vào `loi`.
+        if (kq.buocOThatBai) dem.buocOThatBai++;
         /**
          * 🔴 GHI MỐC KẾT THÚC — hermes, phát hiện NGOÀI ĐỀ ②.
          *    Đường cũ ghi mốc này (`api/chat/route.ts:243`); đường nền thì KHÔNG.

@@ -75,6 +75,11 @@ export interface KetQuaLuot {
   pid: number | null;
   /** `null` nếu chạy trót lọt. */
   loi: string | null;
+  /**
+   * `true` ⇒ lượt ĐÃ CHẠY nhưng `datO` từ chối buộc nó vào ô (ô ngoài tầm).
+   * Người gọi PHẢI xử — đây đúng ca «lượt vô hình»: tốn tiền mà app KHÔNG gán vào đâu.
+   */
+  buocOThatBai: boolean;
 }
 
 /**
@@ -97,10 +102,11 @@ export async function chayMotLuot(
   const { maO, maNhanSu, cauHoi, maPhienCu, tinHieuHuy } = vao;
 
   const ns = timNhanSu(maNhanSu);
-  if (!ns) return { maPhien: maPhienCu, pid: null, loi: `Không có nhân sự "${maNhanSu}".` };
+  if (!ns) return { maPhien: maPhienCu, pid: null, loi: `Không có nhân sự "${maNhanSu}".`, buocOThatBai: false };
 
   let pid: number | null = null;
   let maPhien: string | null = maPhienCu;
+  let buocOThatBai = false;
 
   nhan({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) });
 
@@ -143,7 +149,24 @@ export async function chayMotLuot(
       if (mau.loai === 'phien') {
         // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
         maPhien = mau.ma_phien;
-        datO(maO, maNhanSu, mau.ma_phien); // ← MẮT XÍCH ③: buộc lượt vào ĐÚNG ô
+        /**
+         * ← MẮT XÍCH ③: buộc lượt vào ĐÚNG ô.
+         * 🔴 PHẢI ĐỌC GIÁ TRỊ TRẢ VỀ (hermes vòng 2, NGOÀI ĐỀ ②).
+         *    `datO` từ chối ô ngoài tầm và chỉ ghi một dòng nhật ký MÁY CHỦ.
+         *    Vòng 2 tôi cho nó trả `boolean` — nhưng KHÔNG ai đọc, nên nó vẫn câm
+         *    y như cũ. **Cho một hàm biết nói mà KHÔNG ai nghe thì chưa sửa gì cả.**
+         * ⚠️ KHÔNG dừng lượt: tiến trình đã sinh, giết ở đây là đốt tiền mà chẳng cứu ai.
+         *    Nhưng phải KÊU — lượt KHÔNG buộc được vào ô chính là «lượt VÔ HÌNH».
+         */
+        if (!datO(maO, maNhanSu, mau.ma_phien)) {
+          buocOThatBai = true;
+          nhan({
+            loai: 'loi',
+            thong_diep:
+              `Lượt CHẠY THẬT nhưng KHÔNG buộc được vào ô «${maO}» (ô ngoài tầm). ` +
+              `Chữ vẫn nằm trong bản ghi phiên ${mau.ma_phien}, mở lại ghế là đọc được.`,
+          });
+        }
         nhan({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) });
       } else if (mau.loai === 'chu') {
         nhan({ loai: 'chu', chu: mau.chu });
@@ -153,11 +176,11 @@ export async function chayMotLuot(
         nhan({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token });
       }
     }
-    return { maPhien, pid, loi: null };
+    return { maPhien, pid, loi: null, buocOThatBai };
   } catch (e) {
     const thongDiep = e instanceof Error ? e.message : 'Lỗi không rõ.';
     nhan({ loai: 'loi', thong_diep: thongDiep });
-    return { maPhien, pid, loi: thongDiep };
+    return { maPhien, pid, loi: thongDiep, buocOThatBai };
   } finally {
     // Rút khỏi sổ tiến trình — CHỈ rút đúng pid của mình (xem `xoaViec`).
     if (pid !== null) xoaViec(maO, pid);
