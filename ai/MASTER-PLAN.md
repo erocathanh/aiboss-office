@@ -653,6 +653,63 @@ KHÔNG phải VÁ lỗi.**
 
 ---
 
+## 4j. 🔴 NGƯỜI SOI NGOÀI NHÀ: **FAIL 6/6 · NO-GO** — và điểm mù CHUNG của cả ba ghế
+
+> `hermes-aiboss-app-review` (khác hãng), 01/09 21:0x. Owner phải nhắc *«đừng quên nhân sự mình có»*
+> thì PM mới gọi người thứ ba. **Người thứ ba là người duy nhất có điểm mù KHÁC nhà.**
+
+### 🎯 ĐIỂM MÙ CHUNG, nguyên văn
+> *«cả ba ghế đang dùng "tiến trình còn tồn tại" như đồng nghĩa với "lượt đang bận"»*
+
+Hai vật khác nhau, ba ghế gộp làm một suốt cả ngày:
+```
+tiến trình còn sống  ≠  lượt đang bận
+  · tiến trình sống mà RẢNH        ⇒ theo cách đo của ta: BỊ CHẶN nạp oan
+  · lượt bận mà tiến trình bị đổi cha (reparented) + mtime cũ  ⇒ ta CHO NẠP, sai về phía NGUY HIỂM
+  · tiến trình phụ / xác (zombie) là con trực tiếp ⇒ ta tưởng bận
+  · pid bị dùng lại ⇒ có thể SIGTERM nhầm người
+```
+🔻 **⇒ quyết định «`pgrep -P` làm nguồn chính» (mục 4h ②) BỊ TREO LẠI, chưa được thi hành.**
+Muốn dùng thì phải **lọc đúng tiến trình** và **tách bạch hai vật trên**, kèm phép thử cho cả bốn ca.
+
+### 🔴 ⑤ BẢN VÁ `iconv -c` CHỈ LÀ **NỬA** — nó tạo UTF-8 hợp lệ bằng cách VỨT ký tự
+Hermes chạy ca `93×"a" + "ế" + "Z"` dưới `LC_ALL=C`:
+```
+nguồn            97 byte · hợp lệ · có «ếZ»
+sau cut -c1-95   96 byte · HỎNG   · chỉ còn 2 byte đầu của «ế»
+sau iconv -c     94 byte · hợp lệ · nhưng «ế» BIẾN MẤT HOÀN TOÀN
+đối chứng ASCII  giống hệt trước/sau
+```
+🔑 **Câu tôi khai — «iconv KHÔNG xén oan dữ liệu lành» — chỉ đúng với ASCII, SAI với dữ liệu Unicode lành.**
+Bản vá chữa **tính hợp lệ cú pháp**, KHÔNG chữa **mất dữ liệu**. Nó đổi «dòng hỏng nhìn thấy được»
+thành «dòng thiếu một chữ mà KHÔNG ai thấy» — có thể TỆ HƠN.
+
+⚠️ **VÀ TIÊU CHÍ NGHIỆM THU CỦA TÔI LÀ ĐẠT-RỖNG LẦN THỨ HAI TRONG NGÀY:**
+`iconv -c` **luôn luôn** sinh ra UTF-8 hợp lệ — đó là định nghĩa của nó. Nên phép thử «đầu ra có hợp lệ
+KHÔNG» **xanh bất kể bản vá đúng hay sai**.
+📌 Cùng đúng cái bệnh `claude-aiboss-app-exe` vừa bắt tôi ở tiêu chí «dòng mới hỏng = 0». **Hai tiêu chí
+đạt-rỗng do cùng một người viết, trong cùng một ngày, sau khi đã bị chỉ ra một lần.**
+
+✅ **TIÊU CHÍ ĐÚNG — bốn vế, phải thoả CẢ BỐN:**
+```
+① đầu ra là UTF-8 hợp lệ
+② đầu ra là TIỀN TỐ THEO KÝ TỰ đầy đủ của đầu vào — KHÔNG mất ký tự lành do cắt giữa code point
+③ ca biên Unicode tại byte 94-96 phải đúng
+④ đối chứng ASCII
+```
+✅ **Hướng chữa thật: CẮT THEO KÝ TỰ, đừng cắt theo byte rồi dọn.** (`cut -c` dưới bảng mã UTF-8, hoặc
+`awk`/`python3` cắt theo ký tự.) Vá hiện tại giữ lại vì nó **hơn KHÔNG có gì**, nhưng ghi rõ là NỬA.
+
+### ⏭ VIỆC SINH RA TỪ VÒNG SOI NÀY — **giao `claude-aiboss-app-exe`, KHÔNG phải PM tự làm**
+```
+P0  · cắt theo KÝ TỰ trong mat-canh-ghe.sh:200, nghiệm thu bằng ĐỦ BỐN vế trên
+P1a · TRƯỚC khi làm: tách bạch «tiến trình sống» khỏi «lượt đang bận» — đây là điều kiện cần,
+      và nó vừa được chứng minh là chỗ CẢ BA ghế cùng nhầm
+P2  · quyết định `pgrep -P` TREO cho tới khi có phép thử phủ đủ 4 ca ở trên
+```
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
