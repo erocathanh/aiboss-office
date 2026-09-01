@@ -106,11 +106,47 @@ con CÒN SỐNG  ⇒ sổ NÓI DỐI, và Owner đã nhìn thấy đúng
 #### 🔑 VẾ ĐÁNG VÀO KẾ HOẠCH KHÔNG PHẢI CÁI ĐÈN — mà là BA CHỖ TỰA VÀO CÙNG CUỐN SỔ ĐỂ QUYẾT ĐỊNH
 ```
 ① may-chay-nen.ts            4 chỗ dùng sổ  ⇒ tưởng ghế RẢNH ⇒ CHẠY CHỒNG lên lượt đang chạy
-② hen-khoi-dong-lai-app.sh   3 chỗ dùng sổ  ⇒ tưởng sáu ô rảnh ⇒ NẠP GIỮA LÚC ghế đang làm
-③ UngDung.tsx (`dangChay`)  37 chỗ dùng sổ  ⇒ lọc ô nhận đánh thức ⇒ lời gọi RƠI IM LẶNG
+② UngDung.tsx (`dangChay`)  37 chỗ dùng sổ  ⇒ lọc ô nhận đánh thức ⇒ lời gọi RƠI IM LẶNG
 ```
-📌 **Cái đèn chỉ là chỗ Owner NHÌN THẤY ĐƯỢC.** Ba chỗ trên hỏng lặng — và ② là chỗ đắt nhất:
-nó nạp lại app, giết mọi ghế giữa lượt, đúng thứ nhà mình vừa dựng cả một bộ hẹn để tránh.
+📌 **Cái đèn chỉ là chỗ Owner NHÌN THẤY ĐƯỢC.** Hai chỗ trên hỏng LẶNG.
+
+##### ✂️ ĐÃ GẠCH khỏi danh sách: `hen-khoi-dong-lai-app.sh` — `claude-aiboss-app-exe` bác, tôi đọc mã và nhận
+Tôi từng xếp nó vào đây với ca «sổ trống ⇒ tưởng sáu ô rảnh ⇒ nạp giữa lúc ghế đang làm». **Sai.**
+```
+so_o_dang_chay > 0  ⇒ CHỜ, quá trần thì `exit 3`  (sổ nói bận thì tin ngay)
+so_o_dang_chay = 0  ⇒ RƠI XUỐNG phép đo mtime; chỉ mtime mới có quyền CHO NỔ
+⇒ sổ chỉ có quyền BẮT CHỜ, KHÔNG có quyền CHO NỔ ⇒ sổ sai chỉ hỏng về phía AN TOÀN
+```
+🔑 **Gốc lỗi khoanh sai của tôi: tôi thấy nó ĐỌC sổ rồi kết luận nó QUYẾT theo sổ, mà KHÔNG hỏi
+sổ có quyền tới đâu.** «Có đọc một nguồn sai» KHÔNG đủ để kết luận «sẽ quyết định sai».
+
+##### 🔴 NHƯNG LỚP CHẶN THAY NÓ LÀ MTIME, VÀ BIÊN RẤT MỎNG — rủi ro THAY THẾ, đừng coi là đã hết
+```
+hiện vật lần nạp 01/09: «MỌI ghế im ≥75s (ghế bận nhất 78s) ⇒ RẢNH, nổ»
+⇒ lúc nổ, ghế bận nhất chỉ hơn ngưỡng ĐÚNG 3 GIÂY
+```
+Ngưỡng 75s giả định **ghế đang chạy thì ghi liên tục**. Ghế nghĩ lâu, hoặc chờ một lệnh dài, thì im
+mà vẫn bận ⇒ mtime nói «rảnh» ⇒ NỔ giữa lượt. Đây KHÔNG phải lỗ của sổ, mà là lỗ của **tiếng nói cuối**.
+
+##### 🕳 CHỖ CẢ BA CHÚNG TÔI CHƯA ĐO ĐƯỢC — thiếu một dấu hiệu «đang chạy» ĐỘC LẬP
+`claude-phong-ban-pm` thử đo «ghế bận mà im quá 75s» và **tự loại số của mình**: cách tách lượt dựa
+vào dòng `type=user`, mà kết quả công cụ trả về CŨNG mang `type=user` ⇒ KHÔNG phân biệt được
+«bận mà im» với «rảnh nên im».
+
+✅ **Đề xuất một dấu hiệu độc lập — GIỜ CPU của chính tiến trình con** (`claude-aiboss-app-pm` thử 01/09):
+```
+ps -o time= -p <pid>   đo hai lần cách nhau vài giây
+đo thật: 95:07.48 → 95:07.57 sau 8 giây ⇒ CPU CHẠY TIẾP ⇒ tiến trình ĐANG LÀM VIỆC
+đối chứng âm: pid bịa → 0 dòng ⇒ thước phân biệt được
+```
+⚠️ **Nó là dấu hiệu MỘT CHIỀU, phải nói rõ kẻo lại dựng một thước nói dối:**
+```
+CPU chạy tiếp  ⇒ CHẮC CHẮN đang bận          (dùng để CHẶN nổ — an toàn)
+CPU đứng yên   ⇒ CHƯA kết luận được          (ghế chờ mạng/chờ lệnh cũng đứng yên)
+⇒ dùng nó để THÊM một lý do CHỜ, KHÔNG dùng nó để CHO NỔ.
+```
+📌 Nó độc lập với CẢ sổ lẫn bản ghi phiên — đúng thứ còn thiếu. Nhưng nó KHÔNG thay được mtime,
+nó chỉ bịt được nửa nguy hiểm: ca «bận mà im».
 
 #### ⚠️ HAI CHIỀU CẦN HAI CÁCH CHỮA KHÁC NHAU — đừng vá một chiều rồi tưởng xong
 ```
@@ -121,6 +157,13 @@ chiều B (thiếu) : kiểm pid KHÔNG cứu được. Sổ trống thì KHÔNG
 ```
 🔑 **Một phép kiểm chỉ lọc được thứ ĐANG CÓ trong sổ; nó KHÔNG dựng lại được thứ đã mất khỏi sổ.**
 Vá chiều A xong mà tưởng xong cả hai thì chiều B còn nguyên, và nó là chiều Owner nhìn thấy.
+
+⚠️ **VÀ MỘT BẪY TRONG CHÍNH CÁCH CHỮA CHIỀU B** (`claude-aiboss-app-exe` nêu, tôi ghi lại):
+> ghi sổ xuống đĩa rồi thì **phải đối chiếu pid lúc ĐỌC LÊN**, KHÔNG phải chỉ lúc ghi.
+
+Sổ bền mà KHÔNG đối chiếu thì nó đổi từ «quên sạch sau khi khởi lại» thành **«nhớ dai những thứ đã
+chết»** — tức là làm chiều A NẶNG THÊM, vì nay cái sai sống qua cả lần khởi lại.
+🔑 **Chữa một chiều mà KHÔNG nhìn chiều kia thì đó là DỜI lỗi, KHÔNG phải VÁ lỗi.**
 
 ---
 
