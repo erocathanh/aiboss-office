@@ -55,12 +55,46 @@ người tranh luận. ⑤c chỉ là thêm một listener. Nên nó bị đẩy
 là cha nó; trang chỉ là cửa sổ nhìn vào. Mọi thứ còn lại (sổ trên đĩa · dọn xác lượt mồ côi · cọc bàn
 giao hạn 60 giây) là để **sống chung với việc khởi lại**, KHÔNG phải để tránh khởi lại.
 
+#### 🔴 ĐÍNH CHÍNH 01/09 17:3x — **PHIÊN VỐN ĐÃ ĐỘC LẬP.** Câu hỏi ban đầu đặt sai vật.
+Hai ghế đo độc lập, khớp nhau:
+```
+① ghế KHÔNG phải tiến trình sống lâu
+   6 ghế trong app — tiến trình ghế đang sống: 2 (exe đo) · 1 (soi đo)
+   ⇒ ghế RẢNH thì KHÔNG TỒN TẠI dưới dạng tiến trình. Sinh lúc mở lượt, chết lúc trả lời xong.
+② phiên là TỆP, KHÔNG phải tiến trình
+   exe : 10.298 mẩu TRƯỚC lần nạp · 242 mẩu SAU · CÙNG MỘT TỆP
+   soi : 12.948 mẩu TRƯỚC · 485 mẩu SAU · CÙNG MỘT TỆP
+   ⇒ máy chủ chết rồi lên lại, phiên KHÔNG mất một mẩu nào
+```
+🔑 **Phiên và tiến trình là HAI VẬT khác nhau.** Phiên là cuốn sổ trên đĩa; tiến trình chỉ là người
+ghi vào sổ trong lúc một lượt đang chảy. Máy chủ chết ⇒ **mất người ghi, KHÔNG mất cuốn sổ.**
+```
+Owner hỏi   : «PHIÊN có sống độc lập với app KHÔNG»  ⇒ CÓ, và đã có sẵn
+ta đi đo     : «TIẾN TRÌNH có sống độc lập KHÔNG»     ⇒ KHÔNG
+⇒ mọi số đều đúng, mọi phép kiểm đều xanh, và kết luận vẫn lệch — vì đo nhầm VẬT.
+```
+📌 Cùng họ với thứ ta bắt nhau cả ngày, nhưng ở tầng cao hơn con số: **đo đúng một vật, mà đó KHÔNG
+phải vật người ta hỏi.** Đối chứng dương KHÔNG bắt được lỗi này.
+
+**⇒ VẬY THỨ GÌ THẬT SỰ CHẾT THEO APP:**
+```
+(a) LƯỢT đang chảy    ·  (b) CỬA SỔ để nhìn và gõ vào phiên  ·  (c) SỔ nói ai đang chạy
+KHÔNG phải: phiên.
+```
+**⇒ CÂU HỎI ĐÚNG phải là:** *«làm sao có thứ RA LỆNH cho ghế chạy lượt kế tiếp khi KHÔNG ai mở trình
+duyệt?»* — đó đúng chỗ openclaw đặt launchd vào, KHÔNG phải chỗ «làm cho tiến trình sống lâu hơn».
+
 **Ba đường, và vì sao P1a đứng trước cả ba:**
 ```
 ① chạy terminal thường  → ghế RỜI KHỎI app: KHÔNG ô, KHÔNG nhận đánh thức
                            ⇒ mất đúng thứ app sinh ra để Owner khỏi phải gõ tay
-② thêm `detached: true`  → 🔴 NỬA giải pháp, có thể TỆ HƠN hiện tại: tiến trình sống mà sổ vẫn
-                           trong RAM ⇒ khởi lại xong app MẤT DẤU chính đứa con nó vừa đẻ
+                           ⚠️ VÀ MỘT CÁI MẤT NỮA (exe nêu): bản ghi phiên nằm ở kho theo CWD của
+                           terminal ⇒ cwd khác thì app KHÔNG THẤY phiên đó nữa. Đúng ca «Quản Lý
+                           Trường» Owner gặp sáng nay: 4/5 ghế KHÔNG có kho phiên vì mở từ thư mục khác.
+② thêm `detached: true`  → 🔴 HẸP HƠN CẢ «nửa giải pháp» (đính chính 17:3x): nó CHỈ cứu một
+                           LƯỢT ĐANG CHẢY đúng lúc máy chủ nạp lại. Ghế GIỮA HAI LƯỢT thì KHÔNG có
+                           tiến trình nào để mà cứu. Và cảnh báo «mồ côi» cũng hẹp theo — chỉ xảy ra
+                           với lượt đang chảy.
 ③ làm như openclaw       → giải đúng gốc, nhưng lớn hơn hẳn mấy chỗ vá đang chờ
 ```
 📌 **Sổ bền + đối chiếu tiến trình là phần GIAO NHAU của cả ba.** Tự nó đã chữa hai chiều sai Owner
