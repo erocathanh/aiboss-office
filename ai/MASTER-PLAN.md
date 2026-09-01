@@ -662,6 +662,12 @@ KHÔNG phải VÁ lỗi.**
    src/components/UngDung.tsx 101 dòng   · CỦA claude-aiboss-app-exe — bản vá P0 tab-tỉnh-lại,
                                            **CHƯA QUA SOI tại thời điểm commit**
 ```
+✅ **ĐÃ ĐÓNG 01/09 21:14** — `claude-phong-ban-pm` soi xong: **ĐẠT sau BA VÒNG**. Cổng bị đi vòng
+lúc 20:33 nay đã được đi lại cho đủ, tuy KHÔNG đúng thứ tự. Ba vòng đó bắt được ba lỗi thật
+(xem mục 4k), nên đây KHÔNG phải một cái gật cho xong.
+📌 Người soi tự đặt thêm một nếp cho mình: *«từ nay soi điều kiện nhiều biến thì ĐÒI bảng sự thật
+đủ ca, KHÔNG nhận lời tả bằng chữ»* — và bạn ấy chạy lại chính biểu thức đó trên cả bốn ca chứ
+KHÔNG đọc bảng của người vá rồi gật.
 🔴 **Hậu quả khác hai lần trước trong ngày:** hai lần kia là mất việc (`reset --hard`) và ghi sai sổ.
 Lần này là **một CỔNG bị đi vòng** — luật nhà là `soi ĐẠT → dựng → commit`, mà mã này vào kho trước
 khi được soi. Ai dựng lại từ nhánh chính trong quãng đó là dựng bản chưa qua cổng.
