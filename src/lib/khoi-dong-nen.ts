@@ -30,6 +30,26 @@
  * ⚠️ Nếu sau này MỌI thứ tự gõ cửa đều tắt, bộ nền sẽ ngủ tới lời gọi kế. Ghi ra để người sau
  *    biết mà đo, đừng đoán.
  */
+/**
+ * 🔄 SỬA NGAY TRONG NGÀY (01/09, trước khi hai người soi kịp trả lời):
+ *    bản đầu tôi dùng `require()` ĐỘNG trong hàm — thừa hưởng nỗi sợ từ `instrumentation.ts`.
+ * 🔴 Nhưng nỗi sợ đó KHÔNG áp vào đây, và cái `require` ấy lại đẻ ra một rủi ro MỚI:
+ *    mã nguồn là ESM, nếu `require` KHÔNG tồn tại lúc chạy thì `batMotLan()` ném lỗi,
+ *    mà tôi bọc `try/catch` ⇒ **hỏng LẶNG**: bộ nền KHÔNG BAO GIỜ bật, log in một dòng
+ *    mà KHÔNG ai đọc. Tôi tự ghi đó là «chỗ tôi ngờ nhất» rồi vẫn nộp — đúng cái nết
+ *    `claude-phong-ban-pm` đã bắt tôi hôm nay: **nêu một chỗ ngờ KHÔNG phải là đã xử nó.**
+ * ✅ Đo lại thì NHẬP TĨNH ở đây là an toàn, và an toàn vì một lý do CỤ THỂ:
+ * ```
+ * src/middleware.ts nhập DUY NHẤT 'next/server'  ⇒ KHÔNG chạm chuỗi này
+ * api/dung + api/danh-thuc đều `export const runtime = 'nodejs'`
+ * ⇒ đồ thị nhập của chúng nằm HẲN trong bó NODE. Nhập tĩnh ở đây KHÔNG chạm bó edge.
+ * ```
+ * 🔑 Thứ kéo `node:*` sang edge là `instrumentation.ts` — tệp bị dựng cho CẢ HAI runtime.
+ *    Nó đi rồi thì KHÔNG cần mẹo nào nữa. **Đừng giữ một mẹo sau khi lý do của nó đã hết.**
+ */
+import { bat as batBoNen, datNguonThamDo } from '@/lib/may-chay-nen';
+import { thamDoCuoiCua } from '@/lib/kho-danh-thuc';
+
 let daBat = false;
 
 /** Gọi ở đầu mọi cửa API chạy runtime `nodejs`. An toàn khi gọi nhiều lần. */
@@ -37,15 +57,10 @@ export function batMotLan(): void {
   if (daBat) return;
   daBat = true; // đặt TRƯỚC khi làm — hai lời gọi sát nhau thì lời sau đứng ngoài ngay
   try {
-    // ⚠️ `require` động, gọi TRONG hàm: giữ chuỗi phụ thuộc nằm hẳn trong bó node.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const may = require('@/lib/may-chay-nen') as typeof import('@/lib/may-chay-nen');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const kho = require('@/lib/kho-danh-thuc') as typeof import('@/lib/kho-danh-thuc');
     // Cắm nguồn dấu thăm dò TRƯỚC khi bật — thiếu bước này thì chốt ③ chạy bằng mặc định
     // «coi như có trình duyệt» và bộ nền đứng ngoài mãi mãi (an toàn, nhưng vô dụng).
-    may.datNguonThamDo(kho.thamDoCuoiCua);
-    const bat = may.bat();
+    datNguonThamDo(thamDoCuoiCua);
+    const bat = batBoNen();
     console.log(
       bat
         ? '[chay-nen] ĐÃ BẬT — máy chủ sẽ tự rút mẩu khỏi hàng đợi khi KHÔNG có trình duyệt lái.'
