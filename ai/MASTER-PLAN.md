@@ -403,7 +403,7 @@ dòng «358 phút» in lúc 12:05 · PM sửa CUA_SO lúc 12:10
 ⇒ lúc in, cửa sổ VẪN là 6 giờ ⇒ 358 phút ĐÚNG tại thời điểm đó
 ⇒ 12:35 nó in «28 phút» theo hằng số MỚI ⇒ công thức chạy đúng
 ```
-📌 Bài học chung: **một dòng nhật ký cũ ⛔ sai — nó đúng với cấu hình lúc nó được ghi.**
+📌 Bài học chung: **một dòng nhật ký cũ KHÔNG sai — nó đúng với cấu hình lúc nó được ghi.**
 Đọc log cũ bằng cấu hình MỚI là một dạng của bệnh «trộn hai bản» ta đã cắn ba lần hôm nay.
 
 ## 4g. 📚 SỔ TRI THỨC DỰ ÁN — Owner nêu 31/08, đã dựng `ai/SO-TRI-THUC.md`
@@ -463,6 +463,127 @@ kênh append-only + nhật ký phiên cho đúng việc đó, và hai thứ đó
   ⇒ biến cả cuốn sổ thành thứ TỰ KIỂM. Đây mới là chỗ nó thắng mọi tệp ghi chú.
 · nối vào linh hồn ghế: mọi ghế đội app ĐỌC SỔ TRƯỚC khi hỏi/đoán/đi đo lại từ đầu
 ```
+
+## 4h. 🗓 NGÀY 01/09 — sáu thứ Owner nhắc, và THỨ TỰ ƯU TIÊN cho toàn plan
+
+> ✍️ `claude-aiboss-app-pm` dán 01/09 20:4x. Owner đo lúc 20:2x: tệp này sửa lần cuối **31/08 13:56**,
+> cả ngày 01/09 chưa vào một dòng — Owner đếm ngay trong tệp (đối chứng dương `P0-2`→5, `Owner`→36).
+> 🔴 **Lỗi của PM:** tôi dựng một tệp kế hoạch THỨ HAI (`KE-HOACH.md`) vì KHÔNG biết tệp này tồn tại.
+> Nay đã gộp về đây; `KE-HOACH.md` chỉ còn là con trỏ. **Hai cuốn sổ cho một dự án là chắc chắn trôi.**
+
+### ① SỔ «Ô ĐANG CHẠY» SAI ĐƯỢC CẢ HAI CHIỀU
+```
+BÁO THỪA  (chắc chắn, chứng minh bằng đọc mã)
+   kho-tien-trinh.ts  dsViec() chỉ đổ Map ra, KHÔNG kiểm pid còn sống
+   đo: grep -cE 'kill\(' kho-tien-trinh.ts → 1, và nó nằm ở gietViec, KHÔNG ở dsViec
+   ⇒ tiến trình chết mà chưa ai gọi xoaViec ⇒ đèn sáng MÃI MÃI
+
+BÁO THIẾU  (kho-tien-trinh.ts:25 `const SO = new Map<…>()` — sổ nằm trong BỘ NHỚ)
+   ⚠️ giả thuyết «máy chủ khởi lại ⇒ sổ trống» ĐÃ BỊ OWNER BÁC 01/09: ca ảnh 31/08 KHÔNG có
+      khởi lại nào. Xem ③ và ⑤c dưới — bệnh thật nằm ở phía trình duyệt.
+```
+
+### ② BA CHỖ TỰA VÀO CUỐN SỔ ĐÓ ĐỂ **QUYẾT ĐỊNH** — cái đèn chỉ là chỗ Owner nhìn thấy
+```
+may-chay-nen.ts             4 chỗ  ⇒ tưởng ghế RẢNH ⇒ chạy chồng lên lượt đang chạy
+UngDung.tsx (`dangChay`)   37 chỗ  ⇒ lọc ô nhận đánh thức ⇒ lời gọi RƠI IM LẶNG
+hen-khoi-dong-lai-app.sh    3 chỗ  ⇒ ✂️ ĐÃ GẠCH: sổ chỉ có quyền BẮT CHỜ (`exit 3`), KHÔNG có
+                                     quyền CHO NỔ — nhánh còn lại rơi xuống mtime ⇒ hỏng về phía AN TOÀN
+```
+🔑 Gốc lỗi khoanh sai của PM: **thấy nó ĐỌC sổ rồi kết luận nó QUYẾT theo sổ, mà KHÔNG hỏi sổ có
+quyền tới đâu.** «Có đọc một nguồn sai» KHÔNG đủ để kết luận «sẽ quyết định sai».
+⚠️ Gạch xong thì **mtime thành tiếng nói cuối duy nhất**, ngưỡng 75s — và nó MỎNG:
+```
+lần nạp 01/09 nổ khi ghế bận nhất im 78s ⇒ hơn ngưỡng ĐÚNG 3 GIÂY
+ca «ghế BẬN mà im >75s»: exe đếm 481 · phong-ban-pm đếm 504 (lệch về CỠ, thuận về CHIỀU)
+```
+✅ **ĐÃ QUYẾT (PM, 01/09):** bộ hẹn chỉ nổ khi **CẢ HAI** nói rảnh — `pgrep -P <pid máy chủ>` → 0 con
+(nguồn CHÍNH, hệ điều hành giữ) **VÀ** mọi ghế im ≥75s (lớp hai). Đo thật: `pgrep -P 39808` ra đúng
+2 con `claude -p …` = đúng 2 lượt đang chạy; đối chứng âm pid bịa → 0; đối chứng dương tổng claude → 19.
+📌 Giữ CẢ HAI lớp vì chúng hỏng ở **hai chỗ khác nhau** — `pgrep` hở khi máy chủ vừa khởi lại (con cũ
+thành mồ côi). **Hai lớp cùng tựa vào một cuốn sổ thì chúng KHÔNG còn là hai lớp.**
+
+### ③ P0-2c ĐÃ NẠP 10:58:51 — dựng XANH, và có BẰNG CHỨNG SỐNG
+```
+Compiled successfully 1 · Failed to compile 0 · UnhandledSchemeError 0
+bó edge gồm ĐÚNG 2 tệp; node:fs · node:path · node:os · node:crypto · node:child_process → CẢ 5 = 0
+   đối chứng dương trên chính bó edge: 'PHONGBAN' → 1 ⇒ thước ĐỌC ĐƯỢC
+nhật ký máy chủ: «[chay-nen] TẮT (đặt CHAY_NEN=1 để bật). App chạy y như cũ.»
+```
+🔑 **Dòng nhật ký đó là bằng chứng SỐNG:** nó chỉ in ra khi `batMotLan()` chạy tới cuối trên máy chủ
+thật ⇒ đường dây THÔNG. Bộ nền tắt là vì **biến `CHAY_NEN` chưa đặt**, KHÔNG phải vì mã hỏng.
+⏭ **Bật hay KHÔNG bật là một quyết định triển khai chưa ai ra** — cần Owner trả lời một câu.
+
+### ④ ROUND-4 OWNER ĐÃ QUYẾT (09:29 01/09) và ROUND-5 (10:46)
+```
+round-4 ① cửa sổ nạp : B — chờ P0-2c xong rồi nạp MỘT LẦN   ✅ đã thi hành 10:58:51
+round-4 ② sổ bộ canh : A — duyệt sửa ký tự mũi tên           ⚠️ xem ⑤, chẩn đoán này SAI
+round-5 ① vòng soi thứ ba : C — cấp chìa nhưng KHÔNG chặn
+round-5 ② thời điểm nạp   : C — tự canh, nạp khi cả sáu ô cùng im  ✅ đã thi hành
+```
+Trang đã đóng dấu: `aiboss-app-noibo.erocathanh.com/round-5/` (banner + badge, đo trên bản sống).
+
+### ⑤ 🔴 CHẨN ĐOÁN MŨI TÊN **SAI** — thủ phạm thật là `cut -c1-95` dưới bảng mã C
+```
+Owner duyệt round-4 ② dựa trên chẩn đoán của PM: «ký tự mũi tên làm hỏng dòng sổ»
+SỰ THẬT: 3.901/3.901 dòng hỏng VẪN CÒN mũi tên nguyên vẹn
+thủ phạm: mat-canh-ghe.sh:180 `| cut -c1-95` — `cut -c` cắt theo BYTE dưới bảng mã C (launchd)
+          ⇒ chém ĐÔI một ký tự nhiều byte
+```
+📌 **Chuỗi ba lỗi đáng nhớ:** PM chẩn sai → Owner quyết dựa trên chẩn đoán đó → exe thi hành → exe đo
+lại thấy KHÔNG cứu được. **Một quyết định đúng quy trình vẫn sai nếu tiền đề sai, và KHÔNG lớp duyệt
+nào bắt được điều đó.** Cách chữa thật: thêm `| iconv -f utf-8 -t utf-8 -c` sau chỗ cắt. **CHƯA làm.**
+
+### ⑥ `claudecodeui` ĐÃ GIẢI XONG BÀI «MÀN HÌNH NÓI DỐI» — ta có 0 tệp làm việc đó
+```
+~/Development/claudecodeui/server/modules/providers/services/sessions-watcher.service…  ⇐ chokidar
+đẩy sự kiện ra trình duyệt (ws / event-stream): 8 tệp
+ĐỐI CHỨNG ÂM (chuỗi bịa): 0
+
+app ta: chokidar | fs.watch | watchFile trong src/ → 0 tệp
+        ĐỐI CHỨNG DƯƠNG ('readFile' trong src/) → 5 tệp ⇒ thước SỐNG, số 0 là THẬT
+```
+🔑 **Nó THEO DÕI TỆP rồi ĐẨY sự kiện; ta thì HỎI THEO NHỊP và chỉ hỏi khi tab đang hiện.**
+Đây là câu trả lời kiến trúc cho **cả họ bệnh**: P1-7 (đèn KHÔNG nháy sau khi mở lại trình duyệt) ·
+⑤c dưới đây (tab ngủ rồi tỉnh thì tin cũ đứng im) · và cả chiều BÁO THIẾU ở ①.
+⚠️ Cùng họ với **chỉ thị 4c** («heartbeat phải học GIỐNG HỆT openclaw») — cả hai đều nói: **đổi từ
+HỎI sang ĐƯỢC BÁO.**
+
+### ⑤c · TAB NGỦ RỒI TỈNH — ca Owner chụp 31/08, nay đã tìm ra ĐÚNG nguyên nhân
+**Bối cảnh thật (Owner nói 01/09):** KHÔNG có khởi lại, KHÔNG có nạp lại. Để trình duyệt NGỦ rồi quay
+lại ⇒ «load fail», KHÔNG đọc được tin cũ; F5 thì đọc được; nhưng ô đang nhả chữ thì KHÔNG nhả tiếp.
+```
+đo bởi claude-aiboss-app-exe (01/09), đã có đối chứng dương ĐỔI MẪU sau khi mẫu đầu thất bại:
+   trong khối thamDoMotNhip: napLichSu 0 · docLichSu 0 · napThem 0
+      (đối chứng dương cùng khối: datCuaHong 4 · ban_dung 4 · fetch 2 ⇒ thước sống)
+   napLichSu chỉ được gọi 5 chỗ, CẢ 5 là hành động MỞ ĐẦU (:931 :1075 :1152 :1262 :1278)
+   visibilitychange · pageshow · onfocus · online trong UngDung.tsx → 0 chỗ
+   napLichSu:809  `if (!kq) return;`  ⇒ trượt một lần là IM LUÔN, KHÔNG thử lại, KHÔNG báo
+```
+🔑 **KHÔNG phải một cái hỏng — là một đường CHƯA TỪNG ĐƯỢC NỐI.** Đi tìm chỗ hỏng thì KHÔNG thấy,
+vì thứ chưa tồn tại KHÔNG để lại dấu hỏng nào.
+⚠️ Giả thuyết PM «nghi nhất» (trình duyệt bóp cổ đồng hồ) **đúng sự việc, KHÔNG phải nguyên nhân**:
+đồng hồ vẫn cắm, nhịp kế tiếp vẫn chạy — nhưng nhịp đó KHÔNG hề đọc lịch sử.
+
+### 🎯 THỨ TỰ ƯU TIÊN TOÀN PLAN — luật hai tiêu chí (Owner đặt 01/09)
+> **Chỉ được CHEN NGANG khi thoả CẢ HAI: quan trọng VÀ khẩn. Thoả một thì XẾP HÀNG.**
+
+| Bậc | Việc | Q.trọng | Khẩn | Ghi chú |
+|---|---|---|---|---|
+| **P0** | **⑤c lớp 1** — nối đường «tab tỉnh ⇒ đọc lại lịch sử» + nhánh thử lại có hạn | ✅ Owner mất tin, phải F5 | ✅ **mỗi ngày** | ĐANG LÀM (exe). Rẻ nhất bảng. |
+| **P0** | ⑤ vá `cut -c1-95` bằng `iconv -c` | ✅ sổ hỏng 3.901 dòng | 🟡 | Một dòng. Owner đã duyệt nhầm hướng, phải sửa lại cho đúng thủ phạm. |
+| **P1a** | bền hoá sổ «ô đang chạy» + đối chiếu pid (gồm ①) | ✅ **phần GIAO NHAU của mọi đường** | ❌ | Bước một. Làm nó thì KHÔNG đường nào biến nó thành công thừa. |
+| **P1b** | ⑥ **theo dõi tệp + ĐẨY sự kiện** (kiểu `claudecodeui`) | ✅ giải cả HỌ bệnh: P1-7 · ⑤c lớp 2 · báo thiếu ở ① | ❌ | Cùng gốc với chỉ thị 4c. Đừng vá lẻ từng cái. |
+| **P1c** | ① giữ TIẾN TRÌNH SỐNG (`--input-format`) + ② cháy hạn mức | ✅ cắt chỗ tốn lớn nhất | ❌ | 18 ngày chưa động. **Lên lịch tử tế**, đừng để việc vặt chen mãi. |
+| **P2** | ③ bật `CHAY_NEN` (chờ Owner 1 câu) · ②-đã-quyết `pgrep -P` cho bộ hẹn | 🟡 | ❌ | Xếp hàng. |
+| **P3** | Hermes chưa nối vào app (0 dòng gọi thật) · 3/12 hồ sơ ghế còn khối kịch bản · `chon-mau/` | ❌ | ❌ | Có đường vòng đang chạy. |
+
+⚠️ **Việc mới ập tới:** hỏi đúng hai câu → thiếu một chữ «có» thì **ghi vào bảng rồi quay lại việc đang
+làm**. KHÔNG mở điều tra, KHÔNG rủ ghế khác đo cùng.
+🔑 **MỚI KHÔNG PHẢI LÀ KHẨN.** Và **việc THÚ VỊ hút người làm mạnh hơn việc QUAN TRỌNG** — chiều 01/09
+ba ghế dồn cả buổi vào ① và ② (quan trọng ✅ khẩn ❌) trong khi ⑤c thì chỉ được ghi vào sổ rồi bỏ đó.
+
+---
 
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 

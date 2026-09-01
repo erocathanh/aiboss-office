@@ -801,12 +801,25 @@ export default function UngDung({
 
 
   /* ---------- Nạp LỊCH SỬ THẬT của một phiên vào một ô ---------- */
-  const napLichSu = useCallback(async (i: number, ten: string, maPhien: string) => {
+  /**
+   * 🔁 TRẢ VỀ KẾT QUẢ (P0 tab-tỉnh-lại · 01/09/2026) — trước đây hàm này trả `void`,
+   *    nên NGƯỜI GỌI KHÔNG PHÂN BIỆT ĐƯỢC «đã nạp» với «trượt rồi im».
+   *    Đường tỉnh-dậy cần thử lại, mà muốn thử lại thì phải BIẾT mình vừa trượt.
+   * ⚠️ Ba kết quả, và hai cái KHÔNG-thành-công KHÁC HẲN nhau — gộp lại là thử lại oan:
+   *      'xong'     nạp được
+   *      'loi-thoi' lần gọi này BỊ LẦN MỚI HƠN VƯỢT MẶT ⇒ ĐÚNG như thiết kế, KHÔNG thử lại
+   *      'hong'     gọi mạng/máy chủ trượt thật ⇒ MỚI đáng thử lại
+   * 📌 Bốn đường gọi cũ (:931 :1075 :1152 :1262 :1278) đều BỎ QUA giá trị trả về
+   *    ⇒ hành vi của chúng KHÔNG đổi một chút nào.
+   */
+  const napLichSu = useCallback(async (
+    i: number, ten: string, maPhien: string,
+  ): Promise<'xong' | 'loi-thoi' | 'hong'> => {
     const ma = xinMaMoi(i);
     capNhat(i, { dangNap: true });
     try {
       const kq = await docLichSu(ten, maPhien, undefined, () => conMoiNhat(i, ma));
-      if (!kq) return; // lỗi thời ⇒ bỏ im lặng
+      if (!kq) return 'loi-thoi'; // lỗi thời ⇒ bỏ im lặng, và KHÔNG đáng thử lại
       /**
        * 🐛 ĐÂY LÀ CHỖ XOÁ LỊCH SỬ ĐANG SỐNG TRÊN MÁY OWNER — có từ `d359bb6` 17/08.
        *    Ba lỗi trong một hàm: ⛔ kiểm `r.ok` · `isArray(…) : []` biến thân lỗi thành RỖNG ·
@@ -831,8 +844,10 @@ export default function UngDung({
         viTri: kq.viTri,
         catDongDai: kq.catDai,
       });
+      return 'xong';
     } catch {
       /* GIỮ NGUYÊN tin đang có — ⛔ BAO GIỜ gán tin: [] ở đây. */
+      return 'hong';
     } finally {
       // Chỉ lần gọi MỚI NHẤT được hạ cờ — ⛔ thì vòng xoay tắt trong khi lần kia còn bay.
       if (conMoiNhat(i, ma)) capNhat(i, { dangNap: false });
@@ -1752,6 +1767,12 @@ export default function UngDung({
   const HONG_LIEN_TIEP_MAX = 3;
   const demHong = useRef(0);
   const [cuaHong, datCuaHong] = useState(false);
+  /**
+   * 🔴 CỜ «TỈNH DẬY MÀ LẤY LẠI TIN CŨ KHÔNG ĐƯỢC» (P0 · 01/09/2026).
+   * 📌 Owner chốt khi giao việc: *«hết lượt thử mà vẫn trượt thì phải HIỆN RA, KHÔNG được im —
+   *    im lặng chính là bệnh, sửa xong mà vẫn im thì ta chỉ đổi một cái im này lấy cái im khác»*.
+   */
+  const [tinhLaiHong, datTinhLaiHong] = useState(false);
   const banRef = useRef<HTMLDivElement | null>(null);
 
   /**
@@ -2011,6 +2032,66 @@ export default function UngDung({
   }, [thamDoMotNhip]);
 
   /**
+   * 👁 TAB TỈNH LẠI ⇒ ĐỌC LẠI TỆP PHIÊN (P0 · 01/09/2026, Owner giao).
+   *
+   * 🕳 TRIỆU CHỨNG: tab ngủ rồi mở lại, Owner MẤT tin cũ, phải F5 nhiều lần. XẢY RA MỖI NGÀY.
+   * 🔬 GỐC — đo trước khi vá, và nó KHÔNG phải cái ta tưởng:
+   *      vòng thăm dò gọi `napLichSu` **0 lần** (đối chứng dương cùng khối: datCuaHong 4 · fetch 2)
+   *      `napLichSu` chỉ được gọi ở 5 chỗ, CẢ 5 đều là hành động MỞ ĐẦU
+   *      `visibilitychange` · `pageshow` · `onfocus`: **0 chỗ** trong tệp này
+   *    ⇒ Đây KHÔNG phải một cái HỎNG. Đây là một đường CHƯA TỪNG ĐƯỢC NỐI.
+   *      Ai đi tìm chỗ hỏng sẽ KHÔNG bao giờ thấy — vì KHÔNG có chỗ nào hỏng cả.
+   *
+   * 🔥 CHỐNG NÓNG MÁY VẪN NGUYÊN: hiệu ứng này nằm NGOÀI `thamDoMotNhip`, và nó chỉ chạy đúng
+   *    lúc tab CHUYỂN SANG HIỆN. Tab ẩn thì nó KHÔNG gọi mạng lần nào — yêu cầu Owner 17/08 KHÔNG rẻ đi.
+   */
+  const dangLamMoi = useRef(false);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const khiDoi = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (dangLamMoi.current) return;          // đang chạy thì thôi, KHÔNG chồng lượt
+      dangLamMoi.current = true;
+      void (async () => {
+        try {
+          /**
+           * 🔁 THỬ LẠI CÓ HẠN, GIÃN DẦN — Owner khoanh: chỉ cho ĐƯỜNG NÀY.
+           *    Bốn đường gọi `napLichSu` còn lại KHÔNG đụng tới, chúng đang chạy đúng.
+           * ⏱ 0ms · 1,5s · 4s: lần đầu ngay, hai lần sau chờ đủ để mạng/máy chủ hồi.
+           */
+          const CHO = [0, 1_500, 4_000];
+          let conHong = false;
+          for (let i = 0; i < dsORef.current.length; i += 1) {
+            const o = dsORef.current[i];
+            if (!o?.ns || !o.phienHienTai) continue;
+            // KHÔNG giật lịch sử của ô ĐANG CHẢY CHỮ hoặc ĐANG NẠP — nó tự có tin mới rồi.
+            if (o.dangChay || o.dangNap) continue;
+            let ket: 'xong' | 'loi-thoi' | 'hong' = 'hong';
+            for (let l = 0; l < CHO.length; l += 1) {
+              if (CHO[l] > 0) await new Promise((r) => setTimeout(r, CHO[l]));
+              // Tab ẩn lại giữa chừng ⇒ DỪNG. KHÔNG nạp tiếp cho một màn KHÔNG ai nhìn.
+              if (document.visibilityState !== 'visible') { ket = 'loi-thoi'; break; }
+              ket = await napLichSu(i, o.ns.ten, o.phienHienTai);
+              // 'loi-thoi' = có lần gọi MỚI HƠN vượt mặt ⇒ ĐÚNG thiết kế, KHÔNG thử lại.
+              if (ket === 'xong' || ket === 'loi-thoi') break;
+            }
+            if (ket === 'hong') conHong = true;
+          }
+          /**
+           * 🔴 HẾT LƯỢT MÀ VẪN TRƯỢT ⇒ NÓI RA. KHÔNG im.
+           *    Cờ này TỰ TẮT ngay lần tỉnh dậy kế tiếp nếu lấy được — Owner KHÔNG phải tự tắt tay.
+           */
+          datTinhLaiHong(conHong);
+        } finally {
+          dangLamMoi.current = false;
+        }
+      })();
+    };
+    document.addEventListener('visibilitychange', khiDoi);
+    return () => document.removeEventListener('visibilitychange', khiDoi);
+  }, [napLichSu]);
+
+  /**
    * ⚡ Ô vừa BẬN → RẢNH ⇒ thăm dò NGAY, ⛔ ngồi đợi hết nhịp 5 giây (việc ③ của P0-2a).
    *
    * 🔤 «Vết bận» là một chuỗi 0/1 theo ô. Dùng chuỗi thay vì mảng để React so được bằng
@@ -2096,7 +2177,7 @@ export default function UngDung({
         *    ⛔ chặn thao tác — để Owner chọn LÚC.
         * ♿ `role="status"` để trình đọc màn hình đọc lên khi băng xuất hiện.
         */}
-      {(maCu || cuaHong) && (
+      {(maCu || cuaHong || tinhLaiHong) && (
         <div className={`bang-ma-cu${maCu ? '' : ' bang-cua-hong'}`} ref={banRef} role="status">
           {/**
             * 🔀 MỘT BĂNG, HAI CÂU — ⛔ dựng băng thứ hai.
@@ -2108,6 +2189,20 @@ export default function UngDung({
           {maCu ? (
             <span>
               Bản mới đã lên máy chủ. Trang này đang chạy mã <b>CŨ</b>.
+            </span>
+          ) : tinhLaiHong ? (
+            /**
+             * 🔴 THÊM 01/09/2026 (P0 tab-tỉnh-lại). Owner chốt: hết lượt thử mà vẫn trượt thì
+             *    phải HIỆN RA. Trước bản vá này, tab tỉnh dậy mà lấy tin cũ KHÔNG được thì nó
+             *    IM — và cái im đó chính là bệnh Owner gặp mỗi ngày.
+             * ⚠️ NÓI ĐÚNG THỨ BIẾT CHẮC: ta biết đã thử 3 lần và trượt cả 3.
+             *    Ta KHÔNG biết vì sao, và KHÔNG biết tin cũ còn nguyên trên máy chủ hay KHÔNG.
+             * 🥈 Xếp SAU `maCu` và TRƯỚC `cuaHong`, theo đúng lẽ đã ghi ở trên: báo trước cái
+             *    Owner LÀM ĐƯỢC. «Tải lại» chữa được ca này; «cửa KHÔNG trả lời» thì KHÔNG.
+             */
+            <span>
+              Tab vừa mở lại nhưng <b>chưa lấy được tin cũ</b> (đã thử 3 lần). Danh sách bên dưới
+              có thể đang thiếu tin mới.
             </span>
           ) : (
             /**
