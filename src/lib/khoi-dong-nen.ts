@@ -24,11 +24,24 @@
  *    kéo `node:*` sang edge nữa. Đây là đường có BẰNG CHỨNG (exe đã dựng xanh khi vắng
  *    `instrumentation.ts`), KHÔNG phải mẹo qua mặt bộ gộp bó.
  *
- * ⚖️ CÁI GIÁ, nói thẳng: bộ nền nay bật ở LƯỢT GỌI ĐẦU TIÊN vào một cửa API, KHÔNG phải lúc
- *    máy chủ khởi. Nhưng nó vẫn KHÔNG cần trình duyệt: bộ canh gõ `/api/dung` mỗi 90 giây,
- *    bộ hẹn nạp cũng gõ cửa đó. Máy tự sinh lời gọi cho chính mình.
- * ⚠️ Nếu sau này MỌI thứ tự gõ cửa đều tắt, bộ nền sẽ ngủ tới lời gọi kế. Ghi ra để người sau
- *    biết mà đo, đừng đoán.
+ * ⚖️ CÁI GIÁ, nói thẳng — đây là MỘT BƯỚC LÙI VỀ BẢO ĐẢM, KHÔNG phải hoà:
+ *    `instrumentation.ts` là móc VÒNG ĐỜI (Next tự gọi lúc khởi). Bốn cửa dưới đây là móc
+ *    LƯU LƯỢNG (phải có ai gõ cửa). Bộ nền nay bật ở LƯỢT GỌI ĐẦU TIÊN vào một trong bốn cửa:
+ *      /api/dung · /api/danh-thuc · /api/danh-thuc/nhan · /api/chat
+ *    Máy chủ vẫn có thể phục vụ /api/o · /api/phien · /api/fork · /api/danh-thuc/xac-nhan
+ *    mà KHÔNG bật gì — đó là ca hỏng THẬT, KHÔNG phải giả định.
+ *
+ * 📏 SỐ ĐO thay cho lời trấn an (01/09):
+ *    · bộ canh `mat-canh-ghe.sh:20` gõ `/api/danh-thuc` — `StartInterval = 90` giây,
+ *      `launchctl print` khai `runs = 2495`. ⇒ thực tế bật trong ≤ ~90 giây sau khi khởi.
+ *      ⚠️ Bản chú thích trước ghi nhầm là `/api/dung`. `hermes-aiboss-app-review` bắt được.
+ *      🔑 **Chú thích chỉ SAI CỬA thì hại hơn KHÔNG có chú thích** — người sau đi đo đúng
+ *         cái cửa mình chỉ, thấy im, rồi kết luận ngược.
+ *    · `/api/danh-thuc/nhan` được trình duyệt thăm dò theo `setInterval` (UngDung.tsx:2008)
+ *      ⇒ hễ Owner mở app là bật, KHÔNG cần chờ bộ canh.
+ * ⚠️ NHƯNG cả hai đều là PHỤ THUỘC VẬN HÀNH NGOÀI APP. Tắt/gỡ bộ canh + KHÔNG mở trình duyệt
+ *    = bộ nền ngủ suốt đời tiến trình. Ghi ra để người sau ĐO, đừng đoán.
+ * 🔬 Muốn kiểm: khởi máy chủ rồi KHÔNG gõ cửa nào, xem `[chay-nen]` có in KHÔNG trong sổ.
  */
 /**
  * 🔄 SỬA NGAY TRONG NGÀY (01/09, trước khi hai người soi kịp trả lời):
