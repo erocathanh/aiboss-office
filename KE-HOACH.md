@@ -32,7 +32,8 @@ người tranh luận. ⑤c chỉ là thêm một listener. Nên nó bị đẩy
 | Bậc | Việc | Quan trọng | Khẩn | Vì sao xếp đây |
 |---|---|---|---|---|
 | **P0** | **⑤c LỚP 1** — listener `visibilitychange` | ✅ Owner mất việc, phải F5 nhiều lần | ✅ xảy ra **mỗi ngày** | Thoả CẢ HAI. Và **rẻ nhất bảng** — một listener, KHÔNG đụng kiến trúc. Làm trước. |
-| **P1** | **① giữ TIẾN TRÌNH SỐNG** (+ ⑤c lớp 2 · ② · phần lớn ⑥) | ✅ gỡ 3 thứ cùng lúc, cắt chỗ tốn lớn nhất | ❌ 18 ngày chưa làm mà app vẫn chạy | Quan trọng NHẤT bảng nhưng KHÔNG khẩn ⇒ **lên lịch làm tử tế**, đừng để nó bị việc vặt chen mãi. ⑤c lớp 2 chung gốc — làm luôn một thể. |
+| **P1a** | **BỀN HOÁ SỔ + đối chiếu tiến trình** (hút luôn ⑤b) | ✅ là **phần GIAO NHAU của mọi đường** | ❌ | **Bước MỘT của P1.** Làm nó thì KHÔNG đường nào biến nó thành công thừa — xem 🧭 dưới bảng. |
+| **P1b** | **① giữ TIẾN TRÌNH SỐNG** (+ ⑤c lớp 2 · ② · phần lớn ⑥) | ✅ gỡ 3 thứ cùng lúc, cắt chỗ tốn lớn nhất | ❌ 18 ngày chưa làm mà app vẫn chạy | Quan trọng NHẤT bảng nhưng KHÔNG khẩn ⇒ **lên lịch làm tử tế**. ⑤c lớp 2 chung gốc — làm một thể. **Chỉ bắt đầu SAU P1a.** |
 | **P2** | ③ bộ chạy nền đang TẮT | 🟡 vừa | ❌ | Chỉ cần Owner trả lời MỘT câu «bật hay KHÔNG». Rẻ, nhưng chờ Owner. |
 | **P2** | ⑤b chiều A — đèn sáng mãi | 🟡 Owner thấy đèn sai | ❌ | Chứng minh bằng đọc mã, vá tại chỗ đọc. Xếp hàng. |
 | **P2** | ⑤d ngưỡng bộ hẹn (đã QUYẾT) | ✅ nạp giữa lượt = mất việc | ❌ chưa trúng lần nào | Đã quyết xong, exe thi hành **khi rảnh**. KHÔNG chen. |
@@ -41,6 +42,31 @@ người tranh luận. ⑤c chỉ là thêm một listener. Nên nó bị đẩy
 | **P3** | ⑦ `chon-mau/` đẩy hỏng | ❌ bản cũ vẫn phục vụ đúng | ❌ | Có đường vòng đang chạy. |
 | — | ⑥ gộp SSE · nối lại khi rớt mạng · cộng dồn mức dùng | — | — | **Chặn bởi P1.** Đừng khởi động riêng. |
 | — | CHƯA deploy app | — | — | **Chốt của Owner**, KHÔNG phải việc tồn. |
+
+### 🧭 VÌ SAO «BỀN HOÁ SỔ» ĐỨNG TRƯỚC — Owner hỏi 01/09, `claude-phong-ban-pm` tra openclaw
+> Owner: *«có cách nào để phiên của em cứ chạy terminal, KHÔNG liên quan App KHÔNG? openclaw làm
+> kiểu gì mà tôi tắt trình duyệt nó vẫn chạy?»*
+
+**Vì sao ghế chết theo app** (đo tại chuỗi cha): `shell ← claude -p ← next-server ← npm exec next start`
+⇒ ghế là **CHÁU** của máy chủ Next, và `chay-agent.ts:219` spawn **KHÔNG** có `detached: true`.
+
+**openclaw giải bằng gì:** `~/.openclaw/gateway-supervisor-restart-handoff.json → "supervisorMode": "launchd"`
+🔑 **Nó KHÔNG giải bằng một mẹo trong mã — nó đổi CHỖ ĐỨNG của tiến trình.** Trang web chưa bao giờ
+là cha nó; trang chỉ là cửa sổ nhìn vào. Mọi thứ còn lại (sổ trên đĩa · dọn xác lượt mồ côi · cọc bàn
+giao hạn 60 giây) là để **sống chung với việc khởi lại**, KHÔNG phải để tránh khởi lại.
+
+**Ba đường, và vì sao P1a đứng trước cả ba:**
+```
+① chạy terminal thường  → ghế RỜI KHỎI app: KHÔNG ô, KHÔNG nhận đánh thức
+                           ⇒ mất đúng thứ app sinh ra để Owner khỏi phải gõ tay
+② thêm `detached: true`  → 🔴 NỬA giải pháp, có thể TỆ HƠN hiện tại: tiến trình sống mà sổ vẫn
+                           trong RAM ⇒ khởi lại xong app MẤT DẤU chính đứa con nó vừa đẻ
+③ làm như openclaw       → giải đúng gốc, nhưng lớn hơn hẳn mấy chỗ vá đang chờ
+```
+📌 **Sổ bền + đối chiếu tiến trình là phần GIAO NHAU của cả ba.** Tự nó đã chữa hai chiều sai Owner
+nhìn thấy; nó là **điều kiện cần** của ③; và nếu sau này thêm `detached` thì nó chính là thứ giữ cho
+ghế mồ côi vẫn tìm lại được. **Làm trước thì KHÔNG đường nào biến nó thành công thừa.**
+⚠️ Chọn ① / ② / ③ thì **CHƯA quyết** — và cũng chưa cần quyết để bắt đầu P1a.
 
 🔑 **Cách dùng bảng này khi có việc mới ập tới:** hỏi đúng hai câu — *quan trọng KHÔNG?* và
 *khẩn KHÔNG?* Thiếu một câu trả lời «có» thì **ghi vào bảng rồi quay lại việc đang làm**.
