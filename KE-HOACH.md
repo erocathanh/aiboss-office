@@ -161,6 +161,53 @@ chết»** — tức là làm chiều A NẶNG THÊM, vì nay cái sai sống qu
 
 ---
 
+### ✅ ⑤d NGƯỠNG «RẢNH» CỦA BỘ HẸN NẠP — đã QUYẾT 01/09, chờ `claude-aiboss-app-exe` thi hành
+
+**Vấn đề:** sau khi gạch cuốn sổ khỏi bộ hẹn (⑤b), `mtime` thành **tiếng nói cuối duy nhất**, ngưỡng 75s.
+Hai phép đếm độc lập nói nó MỎNG:
+```
+claude-aiboss-app-exe   110 lần ghế ĐANG BẬN mà im >75s · trung vị 107-203s
+claude-phong-ban-pm     504 lần                          · trung vị 196-214s · dài nhất 800-880s
+lần nạp 01/09: ghế bận nhất 78s ⇒ hơn ngưỡng ĐÚNG 3 GIÂY
+```
+⚠️ Hai số lệch gần 5 lần và **chưa ai hợp nhất được**. Ghi cả hai — **lệch về CỠ, thuận về CHIỀU**,
+nên đủ để quyết. Chọn lấy một số là giả vờ đã hợp nhất.
+
+#### ✅ QUYẾT: hỏi thẳng HỆ ĐIỀU HÀNH, KHÔNG nâng ngưỡng, KHÔNG hỏi cuốn sổ
+```
+Bộ hẹn chỉ nổ khi CẢ HAI cùng nói rảnh:
+   ① pgrep -P <pid máy chủ> → 0 con     (nguồn CHÍNH — hệ điều hành giữ, KHÔNG ai quên xoá được)
+   ② mọi ghế im ≥75s theo mtime          (giữ nguyên, làm lớp thứ hai)
+```
+**Đo thật 01/09** (máy chủ pid 39808): `pgrep -P` ra ĐÚNG 2 con, cả hai là `claude -p --output-format
+stream-json …` — đúng hai lượt đang chạy. Cháu là MCP + một `/bin/zsh -c` của chính lượt đang đo.
+Đối chứng âm: `pgrep -P <pid bịa>` → 0. Đối chứng dương: tổng `claude` trên máy = 19 ⇒ thước lọc đúng.
+
+🔑 **Vì sao hơn cả ba đường được đề xuất:** nó KHÔNG dùng chung điểm hỏng với thứ nào.
+```
+sổ trong bộ nhớ : hỏng khi khởi lại · hỏng khi quên xoaViec
+mtime           : hỏng khi ghế BẬN MÀ IM
+con của máy chủ : tiến trình PHẢI có mặt suốt lượt ⇒ KHÔNG báo thiếu được
+```
+📌 **Chỗ cả ba ghế đi vòng:** bộ hẹn KHÔNG cần biết **ô NÀO** bận — chỉ cần biết **có lượt nào đang
+chạy KHÔNG**. Bàn hai vòng về một cuốn sổ ánh xạ ô↔ghế, trong khi câu hỏi thật KHÔNG cần ánh xạ đó.
+
+⚠️ **GIỮ CẢ HAI LỚP.** Ca hở của ①: máy chủ vừa khởi lại thì con của máy chủ CŨ thành mồ côi,
+`pgrep -P` mới KHÔNG thấy. Lúc đó mtime là lớp bắt. **Hai lớp hỏng ở HAI chỗ khác nhau — đó mới là
+hai lớp thật.** (Áp đúng câu `claude-aiboss-app-exe` rút: *hai lớp cùng tựa vào một cuốn sổ thì
+chúng KHÔNG còn là hai lớp*.)
+
+**Ba đường bị loại, ghi lý do để KHÔNG ai dựng lại:**
+```
+nâng ngưỡng 75s→300s : chỉ đẩy lùi ranh giới. Đo dài nhất 800-880s ⇒ 300s VẪN trượt,
+                       mà mỗi lần nạp phải chờ lâu hơn — trả giá mà KHÔNG hết bệnh.
+hỏi `bat_dau`        : tựa vào ĐÚNG cuốn sổ đang hỏng.
+giữ nguyên           : 110 (hoặc 504) hiện vật nói nó sẽ trượt, chỉ là chưa trúng lần nào.
+```
+**Cách đo lại:** `grep -c 'pgrep -P' ~/Operations/scripts/hen-khoi-dong-lai-app.sh` phải >0.
+
+---
+
 ### 🔴 ⑤c TAB NGỦ RỒI TỈNH ⇒ MẤT LUỒNG, KHÔNG TỰ NỐI LẠI — đây mới là ca Owner chụp 31/08
 
 **Bối cảnh THẬT, Owner kể 01/09:**
