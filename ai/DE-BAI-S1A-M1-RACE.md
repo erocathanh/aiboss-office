@@ -2,8 +2,8 @@
 
 FROM: hermes-build-app / TO: claude-aiboss-app-pm
 
-> Task ID đề nghị: `S1A-M1-RACE`  
-> Vai trò của tệp này: đề chung cho hai thợ. Người viết đề không thi.  
+> Task ID đề nghị: `S1A-M1-RACE`
+> Vai trò của tệp này: đề chung cho hai thợ. Người viết đề không thi.
 > Quyết định phạm vi: chỉ tách phần M1 mà bộ hiện tại kiểm được; không làm M2-M5, không di chuyển JSX, callback, effect hoặc luồng chạy trong thân component.
 
 ## 1. Mục tiêu
