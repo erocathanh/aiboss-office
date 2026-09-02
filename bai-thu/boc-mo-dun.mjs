@@ -12,7 +12,7 @@
  *    · KHÔNG `new Date`/`Math.random`. Thứ dính mấy cái đó nằm NGOÀI tầm phủ, và
  *    `bai-thu/README.md` liệt kê đúng phần KHÔNG phủ được kèm số dòng.
  */
-import ts from '../node_modules/typescript/lib/typescript.js';
+import ts from './nap-typescript.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

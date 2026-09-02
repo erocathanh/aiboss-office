@@ -11,7 +11,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import ts from '../node_modules/typescript/lib/typescript.js';
+import ts from './nap-typescript.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 

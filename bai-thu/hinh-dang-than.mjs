@@ -18,7 +18,7 @@
  *    Nó KHÔNG bắt được «cùng hình dạng nhưng chạy ra kết quả khác» — ví dụ ai đó đổi một dấu
  *    so sánh bên trong một hàm con. Muốn bắt cái đó thì phải CHẠY, và chạy thì phải giả lập.
  */
-import ts from '../node_modules/typescript/lib/typescript.js';
+import ts from './nap-typescript.mjs';
 import fs from 'node:fs';
 
 export function kyHieuThan(duongDan, tenHam = 'UngDung') {
