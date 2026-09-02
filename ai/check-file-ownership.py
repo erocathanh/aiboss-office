@@ -48,6 +48,15 @@ def main() -> int:
         print(f"LỖI: {loi}", file=sys.stderr)
         return 2
 
+    danh_sach_rong = []
+    if not danh_sach_a:
+        danh_sach_rong.append(f"DANH_SACH_A ({sys.argv[1]})")
+    if not danh_sach_b:
+        danh_sach_rong.append(f"DANH_SACH_B ({sys.argv[2]})")
+    if danh_sach_rong:
+        print(f"LỖI: danh sách rỗng: {', '.join(danh_sach_rong)}", file=sys.stderr)
+        return 2
+
     giao = sorted(set(danh_sach_a) & set(danh_sach_b))
     if not giao:
         return 0
