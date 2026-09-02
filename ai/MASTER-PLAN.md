@@ -2,6 +2,7 @@
 > 📅 Dựng 30/08/2026 · 👤 `claude-phong-ban-pm` (App Reviewer) soạn theo lệnh Owner
 > 🎯 Nguồn duy nhất về hướng đi. Việc cụ thể nằm ở `TASK_BOARD.md`, lý do chốt nằm ở `DECISION_LOG.md`.
 > ⚠️ Mọi con số dưới đây **đo lúc 07:01 ngày 30/08/2026**. Số quá một ngày thì ĐO LẠI, đừng chép.
+> 🔒 **Trước khi dựng bất cứ gì: `ai/PROTOCOL-review-hash.md`** — verdict phải dán vào một bản CỤ THỂ.
 
 ---
 
@@ -1106,6 +1107,14 @@ liệu kênh. Nên đây là **sổ khó đọc**, KHÔNG phải **mất dữ li
 
 ## 4s. 💀 `matKetNoi` LÀ MỘT **CỜ CHẾT** — món nợ có tên, xin xử dứt điểm
 
+> 🔴 **CẢNH BÁO CHỐNG ĐỌC NHẦM (thêm 02/09 15:3x, `claude-phong-ban-pm` nêu):**
+> Bản vá «giữ tay cầm» CÓ sửa `UngDung.tsx` (md5 `f353d9bf…` → `b3867fd2…`) nhưng **KHÔNG chạm lỗ này**.
+> Đo lại sau bản vá: `matKetNoi: true` ⇒ **0 lần** (đối chứng dương: `matKetNoi: false` ⇒ 2 · tổng 7
+> ⇒ thước sống). **Lỗ CÒN NGUYÊN.**
+> 🔑 Rủi ro là chuyện đọc, KHÔNG phải chuyện mã: người sau thấy «tệp đó đã sửa trong bản tay cầm»
+> rất dễ đọc thành «tệp đó đã được xử». **Một lần sửa tệp hứa nhiều hơn phần nó thật sự sửa** —
+> cùng họ với «chú thích hứa nhiều hơn mã», chỉ khác lối vào.
+
 ```
 matKetNoi: true   → 0 chỗ    ⇐ KHÔNG ai bật nó
 matKetNoi: false  → 2 chỗ    ⇐ chỉ có chỗ TẮT
@@ -1216,6 +1225,411 @@ nhưng nó KHÔNG biết có ai đang soi — nó chỉ biết sáu ô có im ha
 ⇒ **danh tính LƯỢT mất trên đường truyền** — cùng một ô đổi ghế/phiên thì KHÔNG phân biệt được.
 
 ---
+
+## 4v. 🔇 NÚT DỪNG: vế an toàn của bản vá đứng trên MỘT ĐƯỜNG LÙI **KHÔNG TỒN TẠI**
+
+`claude-phong-ban-pm` chốt: đọc KHÔNG được dấu vân giờ khởi thì **KHÔNG bắn**, và biện hộ bằng:
+
+> *Owner mất đường Dừng TRONG app — còn giết được từ cửa sổ dòng lệnh ⇒ LÙI ĐƯỢC.*
+
+**Đo tại nguồn (02/09 ~10:26, `claude-aiboss-app-pm`):**
+```
+UngDung.tsx:975-979
+   await fetch('/api/dung', { method:'POST', … });
+   ← hết. KHÔNG .json() · KHÔNG đọc da_giet · KHÔNG đọc pid
+UngDung.tsx:980   catch { /* mạng chập thì bấm lại */ }
+```
+⇒ Máy khách **vứt câu trả lời đi**. Khi dấu vân đọc hỏng:
+```
+máy chủ : KHÔNG bắn, trả da_giet:false          ← đúng, an toàn
+màn hình: y hệt lúc dừng THÀNH CÔNG              ← Owner tưởng xong, bỏ đi
+sự thật : tiến trình VẪN CHẠY, vẫn tiêu tiền
+```
+🔑 **Nguyên tắc phải sửa lại cho đủ:** «chọn MẤT MÁT thay vì RỦI RO» chỉ đúng khi **cái mất
+được NÓI RA**. Mất trong im lặng thì nó KHÔNG còn là mất mát — nó là **một lời nói dối mới**,
+đúng con bệnh đang chữa, chỉ dời từ cuốn sổ sang cái nút. Đường lùi mà người dùng KHÔNG biết
+là cần lùi thì bằng KHÔNG có.
+
+**CHỐT của @app-pm (02/09):** giữ vế «KHÔNG đọc được thì KHÔNG bắn», kèm điều kiện cứng —
+```
+① máy chủ: THÊM vi_sao ∈ { khong_co_viec · dong_rac · khong_doc_duoc_dau_van }
+           GIỮ da_giet kiểu boolean (KHÔNG đổi hình dạng cửa API)
+② máy khách: ĐỌC phản hồi, riêng ca ③ HIỆN một câu kèm PID THẬT
+③ hai phần vào CÙNG MỘT lần vá — tách ra là để lại một quãng nút Dừng câm mà mặt vẫn tươi
+```
+`ps -o lstart=` chỉ có ở macOS/Linux ⇒ máy khác hệ rơi vào ca ③ MỌI lần bấm. Có ①②③ thì
+giả định môi trường đó hiện ra bằng một câu chữ, thay vì bằng một cái nút chết câm.
+
+---
+
+## 4w. 🔔 MỘT TRƯỜNG LÝ DO CÓ SẴN, KHAI LÀ **BẮT BUỘC**, VÀ RỖNG 4/4
+
+Nhặt được đúng lúc đi giao việc — chuông rơi, mở sổ chuông ra đọc thì thấy (02/09 10:27):
+```
+10:19:54 o-3 phong-ban-pm  tu=claude-aiboss-app-exe  bo   vi_sao_bo=None
+10:20:04 o-3 phong-ban-pm  tu=mat-canh-kenh          bo   vi_sao_bo=None
+10:23:51 o-2 app-pm        tu=mat-canh-kenh          bo   vi_sao_bo=None
+10:24:14 o-4 app-exe       tu=claude-aiboss-app-pm   bo   vi_sao_bo=None
+```
+```ts
+src/lib/kho-danh-thuc.ts:108
+   /** Vì sao bỏ — BẮT BUỘC khi `trang_thai === 'bo'`. */
+```
+**4 trên 6 chuông trong 10 phút bị bỏ. Cả bốn KHÔNG ghi lý do — dù mã khai là bắt buộc.**
+
+🔑 **Bài học ghép thẳng vào 4v:** thêm một trường lý do **mới là MỘT PHẦN BA việc**.
+```
+① có trường trong cửa API        ← phần dễ, ai cũng nhớ
+② có người GHI ở MỌI lối thoát   ← chỗ rơi
+③ có người ĐỌC và HIỆN ra        ← chỗ rơi
+thiếu ② hoặc ③ ⇒ y hệt vi_sao_bo: một trường đẹp, rỗng, và làm người soi YÊN TÂM GIẢ
+```
+⇒ Nghiệm thu `vi_sao` của `gietViec` phải là: **chỉ ra ĐỦ các lối ra** đều có gán, và **đối
+chứng dương** — ép rơi vào ca ③ rồi xem màn hình có hiện đúng pid hay KHÔNG.
+
+**🕳 Cái giá đã trả bằng người thật:** chuông exe rung `@phong-ban-pm` lúc 10:19:54 **bốc hơi**,
+chuông @app-pm rung exe lúc 10:24:14 **bốc hơi**. Từ 10:20 tới 12:31 — **2 giờ 11 phút** — exe
+ngồi im. Nhìn từ ngoài thì đọc thành «ô thợ ngồi chơi». **Đọc thế là SAI: lệnh chưa bao giờ tới
+nơi.** Rung lại lúc 12:31 khi Owner đang mở tab ⇒ **tới sau 10 giây**.
+📌 Chuông chỉ đi được khi trình duyệt Owner mở app VÀ tab đang HIỆN. Tab bị che ⇒ vòng thăm dò
+ngủ ⇒ mọi lệnh giao rơi vào hư không, **và KHÔNG một dòng nào báo.**
+⚠️ Nếp bắt buộc từ nay: **rung xong phải ĐO `mtime` bản ghi ghế kia. HTTP 200 chỉ là XẾP HÀNG.**
+
+**Xếp hạng (theo luật hai tiêu chí):** ghi `vi_sao_bo` cho đủ = **quan trọng ✅ · khẩn ❌**
+⇒ vào hàng đợi, KHÔNG chen ngang P0. Nhưng nó là **thứ hai** sau P0, vì mọi việc giao trong
+hệ này đều đi qua cái chuông đó.
+
+---
+
+## 4x. 🧷 BA LUẬT RÚT RA LÚC VÁ `vi_sao` (02/09 12:36-12:45)
+
+**① KHÔNG biết thì KHÔNG suy — và KHÔNG biết thì cũng KHÔNG được XOÁ.**
+`claude-aiboss-app-exe` tự bắt lỗi trong chính bản vá của mình: ca `khong_doc_duoc_dau_van`
+đang `SO.delete(maO)` rồi mới trả về.
+```
+vừa thừa nhận KHÔNG xác minh được  ⇒ cũng KHÔNG có cơ sở để XOÁ
+xoá ⇒ tiến trình còn sống, sổ trống ⇒ nút Dừng biến mất ⇒ rơi LẠI vào câu ⑥
+```
+Nay ca đó **GIỮ dòng**. Nó lộ ra vì bị buộc kể **TỪNG lối ra làm gì với sổ** — bảng bốn dòng đó
+KHÔNG phải thủ tục giấy tờ, nó là thứ đã bắt được lỗi.
+
+**② Trường bắt buộc thì khai bằng KIỂU, đừng khai bằng CHÚ THÍCH.**
+```
+vi_sao_bo   khai «BẮT BUỘC» trong chú thích  ⇒ rỗng 4/4, KHÔNG ai biết   (xem 4w)
+vi_sao      khai bằng kiểu, KHÔNG dấu `?`     ⇒ bỏ ở bất kỳ lối nào ⇒ tsc CHẶN (thử đủ 4/4)
+```
+🔑 **Lời hứa trong chú thích chỉ ràng buộc người ĐÃ ĐỌC nó. Kiểu ràng buộc cả người chưa từng nghe.**
+
+**③ Đừng gộp thứ ĐO ĐƯỢC vào thứ KHÔNG đo được rồi bỏ cả cụm.**
+exe xếp trọn phép thử ca ③ vào ô bất khả thi vì «cần trình duyệt». Chia ra thì hai phần ba
+đo được bằng `curl`:
+```
+③a máy chủ trả đúng vi_sao + đúng pid   curl được   ⇐ bắt buộc
+③b máy khách ĐỌC được JSON đó           curl được   ⇐ bắt buộc
+③c chữ HIỆN ra màn hình                 cần MỘT lần nhìn bằng mắt
+```
+📌 **Việc chỉ-Owner-làm-được phải là thứ CUỐI CÙNG còn lại**, và chỉ tiêu tới sau khi máy đã xanh.
+Bắt Owner nhìn một thứ mà `curl` đã đủ bác bỏ là tiêu nhầm thứ đắt nhất trong hệ này.
+
+⚠️ **Ép ca ③ thì phải dọn sạch:** md5 trước → sửa tạm → đo (kèm ĐỐI CHỨNG ÂM: một lần Dừng
+bình thường phải KHÔNG ra `vi_sao` đó) → `git checkout -- <tệp>` → md5 lại, phải TRÙNG.
+**KHÔNG dùng `reset --hard`** (xoá việc người khác trong cùng cây). Bản vá tạm CẤM vào commit —
+đã có ca `9cb977d` mang theo mã chưa ai soi.
+
+---
+
+## 4y. 🔌 OWNER HỎI 02/09 ~12:50: «có mắt canh riêng, có nhịp tim riêng rồi, sao vẫn phải mở trình duyệt gõ *làm tiếp đi* thì anh em mới gọi nhau?»
+
+> Owner dặn: **chưa gấp thì xếp vào đây xử sau.** Mục này là chỗ xếp — kèm ĐỦ số đo để
+> người làm sau KHÔNG phải đo lại từ đầu.
+
+### ① Vì sao vẫn kẹt — mắt canh KHÔNG hỏng, hỏng ở CHẶNG CUỐI
+
+```
+mắt canh (launchd, 6 bộ, StartInterval 90)  ✅ sống ngoài lượt, chính nó đánh thức PM hôm nay
+   ↓ ghi vào hàng đợi  POST /api/danh-thuc   ✅ chạy, trả 200
+   ↓ ai RÚT mẩu ra và KHỞI một lượt?         🔴 ĐÚNG MỘT NGƯỜI: TRÌNH DUYỆT
+   ↓ ghế chạy
+```
+🔑 **Trình duyệt KHÔNG phải cái chuông — nó là ĐỘNG CƠ.** Đo 31/08 (đã ghi trong
+`chay-mot-luot.ts`): `/api/chat` là đường DUY NHẤT sinh ghế, và nó được gọi từ ĐÚNG MỘT chỗ —
+`UngDung.tsx`. Tab bị che ⇒ vòng thăm dò ngủ ⇒ mẩu nằm im 3 phút rồi hết hạn.
+📌 Nên thêm mắt canh nữa KHÔNG cứu được. Chuông kêu to hơn KHÔNG làm động cơ nổ máy.
+
+### ② 🟢 THỨ OWNER HỎI **ĐÃ ĐƯỢC DỰNG RỒI** — 576 dòng, đã vào kho, và đang **TẮT**
+
+```
+src/lib/chay-mot-luot.ts   191 dòng   tách LÕI chạy một lượt ra khỏi VỎ HTTP/SSE
+src/lib/may-chay-nen.ts    385 dòng   máy chủ TỰ rút mẩu khỏi hàng đợi và chạy
+src/lib/khoi-dong-nen.ts             công tắc, bật từ mọi cửa runtime 'nodejs'
+commit 423696f · 20916a1 · 8f4e1ac   (P0-2c, viết 31/08 đúng cho câu than này của Owner)
+```
+**Bằng chứng nó đang TẮT — lời khai của CHÍNH APP, KHÔNG phải suy luận:**
+```
+~/Operations/logs/phong-ban-lan.log:52266   ← đúng lần khởi 08:43 của máy chủ đang chạy
+  [chay-nen] TẮT (đặt CHAY_NEN=1 để bật). App chạy y như cũ.
+launchctl print com.eroca.phong-ban-lan → environment KHÔNG có CHAY_NEN
+plist KHÔNG có khoá EnvironmentVariables
+```
+⚠️ **Bẫy đo đã cắn khi tìm câu này:** `ps eww <pid>` để đọc biến môi trường ⇒ macOS KHÔNG cho,
+trả rỗng. Đối chứng dương cứu: `PATH` cũng ra **0 lần** ⇒ thước chết ⇒ số kia vô giá trị.
+**Sổ log của app mới là nguồn nói thật.**
+
+Tắt là **CỐ Ý**: *«Bật là một QUYẾT ĐỊNH nhìn thấy được, KHÔNG phải hệ quả của việc nạp.»*
+
+### ③ 🔴 VÌ SAO CHƯA BẬT ĐƯỢC HÔM NAY — nó ĂN ĐÚNG cuốn sổ đang hỏng
+
+Đọc MÃ, KHÔNG đọc chú thích:
+```
+may-chay-nen.ts:162   const dangChayTheoGhe = new Set(dsViec().map(v => v.ma_nhan_su));
+may-chay-nen.ts:180   if (dangChayTheoGhe.has(...)) → BỎ QUA
+```
+`dsViec()` chính là cuốn sổ P0 đang chữa — **sổ nói dối được CẢ HAI CHIỀU**.
+```
+sổ báo THIẾU (câu ⑥, đã bắt tại trận)  ⇒ chốt ② hở ⇒ bộ nền khởi lượt THỨ HAI
+                                       ⇒ ghế chạy hai lần, Owner trả tiền hai lần
+```
+Chính tệp đó gọi ca này là **«ca ĐẮT NHẤT»**.
+⚖️ **Nói cho công bằng:** còn một chốt ĐỘC LẬP ở `:254` (`dangChayNoiKhac`, đọc mốc tệp `.jsonl`
+chứ KHÔNG đọc sổ) — nhiều khả năng nó đỡ được. **Nhưng CHƯA AI ĐO.**
+📌 «Nhiều khả năng đỡ được» KHÔNG phải giấy phép bật một thứ mà giá của sai là tiền thật.
+
+### ④ ĐƯỜNG ĐI — bốn bước, mỗi bước có cổng riêng
+
+```
+B0  🆕 HAI CỬA SINH TIẾN TRÌNH PHẢI DÙNG CÙNG MỘT KHOÁ, TRÊN TRỤC Ô  (thêm 02/09 13:5x)
+    · /api/chat khoá theo Ô (`datCho(maO)`) · may-chay-nen khoá theo GHẾ (`dangChayTheoGhe`)
+    · hai khoá KHÁC TRỤC thì KHÔNG bao giờ chặn được nhau
+    · đo: may-chay-nen.ts có `datCho` 0 lần · đối chứng dương chat/route.ts có 2 lần ⇒ thước sống
+    🔑 Trục Ô duy nhất theo CẤU TRÚC (đúng 6, khoá o-1..o-6). Trục GHẾ duy nhất chỉ theo THÓI QUEN
+       — `api/o/route.ts` KHÔNG có phép kiểm nào cấm một ghế ngồi hai ô.
+    🔴 Bật CHAY_NEN=1 mà chưa làm B0 ⇒ mở đúng cuộc đua: hai tiến trình cho MỘT ô,
+       Owner trả tiền HAI LẦN. Chính `may-chay-nen.ts` gọi đây là «ca ĐẮT NHẤT».
+B1  xong P0 sổ tiến trình (đang chạy)     ⇒ dsViec hết nói dối ⇒ chốt ② mới đứng được
+B2  ĐO chốt :254 MỘT MÌNH: ép sổ báo thiếu, xem bộ nền có khởi lượt hai KHÔNG
+    ĐỐI CHỨNG DƯƠNG bắt buộc: ép ca chắc chắn PHẢI khởi ⇒ nó có khởi thật KHÔNG
+B3  bật CHAY_NEN=1 ở plist · khởi lại · ĐÒI sổ log in dòng BẬT (đừng đòi dòng TẮT vắng mặt)
+B4  nghiệm thu THẬT: đóng hẳn trình duyệt · rung một ghế · ĐO mtime .jsonl ghế đó
+    ⇐ đây mới là câu trả lời cho Owner. Mọi bước trên chỉ là điều kiện.
+```
+
+### ⑤ XẾP HẠNG — **quan trọng ✅ · khẩn ❌ ⇒ NGAY SAU P0, KHÔNG chen ngang**
+Đau MỖI NGÀY (02/09 mất **2 giờ 11 phút**: hai lệnh giao bốc hơi, ba ghế đứng im, Owner phải
+làm người đưa tin). Nhưng B1 là **điều kiện nhân quả** của B3 — bật trước khi sổ hết nói dối là
+đổi «việc đứng im» lấy «chạy hai lần và trả tiền hai lần». Đứng im thì thấy được; trả tiền hai
+lần thì KHÔNG.
+📌 Xếp sau P0 ở đây KHÔNG phải thủ tục xếp hàng — **là dây chuyền nhân quả.**
+
+---
+
+## 4z. 🔁 MẮT CANH GỌI LẠI VỀ TIN ĐÃ XỬ — mỗi lần là MỘT LƯỢT CHẠY THẬT, tiền thật
+
+**Đo 02/09 12:49 (sổ của chính mắt canh, `~/Operations/scripts/.mc-<ghế>/log`):**
+```
+12:43:33  rung 2/68  · quét tới dòng 23229
+12:43:16            ← tin verdict của @phong-ban-pm nằm ở dòng 23231, tức SAU mốc quét
+12:45     PM tự đọc kênh, KHÔNG chờ mắt canh
+12:47     PM trả lời xong, đăng chốt
+12:49:33  rung 3/68  · «1 tin · đầu: [12:43] FROM: claude-phong-ban-pm»   ⇐ tin ĐÃ XỬ XONG
+```
+🔑 **Mắt canh KHÔNG sai.** Nó lọc đúng tin của chính mình (`:161 grep -vE "FROM: $TOI"`), và nó
+gọi đúng một tin có thật gửi cho mình. Chỗ lệch là **NHỊP**: nó quét 90 giây một lần, còn ghế thì
+đọc kênh ngay khi đang chạy. Ghế đi trước cái mốc.
+
+⇒ Hệ quả: **một lượt chạy đầy đủ bị tiêu cho một tin đã xử xong.** Ghế phải mở tệp, đọc, đối chiếu,
+rồi mới biết là mình đã làm rồi.
+
+🔧 **Hướng (chưa làm):** ghế nào tự đọc kênh thì tự đẩy `.moc` của mắt canh tới **số dòng ĐÚNG LÚC
+NÓ ĐỌC** — KHÔNG phải tới cuối tệp.
+⚠️ Đẩy tới cuối tệp là **nuốt mất** tin vừa tới trong lúc mình đang đọc. Cái sửa này hỏng về phía
+NGUY HIỂM nếu làm ẩu, nên phải kèm đối chứng: sau khi đẩy mốc, tin kế tiếp vẫn phải gọi được.
+
+**Xếp hạng: quan trọng ✅ · khẩn ❌.** Tốn tiền đều đặn nhưng KHÔNG chặn việc nào.
+📌 Ghi lại cả chuyện tôi mất ba lượt đo mới ra kết luận «KHÔNG phải lỗi». Việc đo thì hấp dẫn,
+nhưng nó đúng loại việc mà luật hai tiêu chí bảo phải XẾP HÀNG, KHÔNG phải đuổi theo.
+
+### 🔬 BỔ SUNG 12:55 — `claude-aiboss-app-exe` đo ĐỘC LẬP và tìm ra GỐC sâu hơn bản trên
+
+Nó đo trên ghế nó, ba lượt liên tiếp bị đốt không:
+```
+12:38:15  rung dải →23122  ·  mốc exe lúc ấy 23122   ⇒ đã đọc rồi
+12:44:16  rung dải →23319  ·  mốc exe lúc ấy 23387   ⇒ đã đọc rồi
+12:51:46  rung dải →23497  ·  mốc exe lúc ấy 23497   ⇒ đã đọc rồi
+```
+🔑 **Gốc KHÔNG phải «mắt canh chậm 90 giây» như tôi ghi ở trên — mà là CỔNG ĐĂNG BÀI.**
+Cổng bắt ghế đọc HẾT kênh mới cho đăng ⇒ mỗi lần ghế trả lời, mốc của nó nhảy tới cuối kênh.
+Bộ canh quét sau đó thấy tin «chưa đọc theo sổ của NÓ» và rung — cho đúng thứ ghế vừa trả lời xong.
+📌 **Hai phép đo CÙNG ĐÚNG mà ghép lại thành SAI.** Soi từng cái một thì cái nào cũng qua — đây là
+loại lỗi khó thấy hơn hẳn «một cái hỏng», và nó là hệ quả CẤU TRÚC nên nó lặp lại đều đặn.
+
+**Đề xuất của exe (nó KHÔNG tự sửa vì `mat-canh-ghe.sh` là hạ tầng CHUNG mọi ghế):**
+```
+trước khi rung, bộ canh TRA mốc đọc của ghế:  ~/Operations/.moc-doc-cua-toi-<ghế>/<kênh>.moc
+   mốc ghế >= dải định rung  ⇒ BỎ rung, nhưng VẪN đẩy mốc của bộ canh lên
+   mốc ghế thấp hơn          ⇒ RUNG như cũ
+   tệp mốc thiếu / đọc hỏng  ⇒ RUNG như cũ   ⇐ KHÔNG đọc được thì KHÔNG suy
+```
+⚠️ **TRA, KHÔNG GỘP.** Gộp hai mốc làm một là mất tính độc lập — mà chính cái độc lập ấy là lý do
+bộ canh còn bắt được khi sổ đọc của ghế sai.
+⚠️ **Đối chứng bắt buộc khi sửa:** phải chứng minh nó VẪN RUNG khi mốc ghế còn thấp. Thiếu phép này
+là đổi một cái chuông kêu thừa lấy **một cái chuông câm** — và cái câm thì KHÔNG ai phát hiện.
+
+**Chỗ exe nói rõ là SUY chứ KHÔNG phải ĐO:** nó chỉ đo trên ghế mình; các ghế khác cùng đi qua cổng
+đăng bài nên «cho là» cũng dính. Và chưa ai đếm tổng số lượt bị đốt cả ngày.
+
+---
+
+## 5a. 🔀 «QUẢN LÝ CŨ» NỐI VÀO ĐÚNG PHIÊN TERMINAL ĐANG MỞ — hai cửa cùng ghi MỘT tệp
+
+> Owner báo 02/09 ~12:5x. Owner xếp: **chưa gấp, nghiên cứu sau.**
+> 📸 Chứng cứ đã cứu khỏi đường dọn rác:
+> `~/idea/inbox/phong-ban-ai-boss/chung-cu/2026-09-02-quan-ly-cu-fork-eeat/` (3 ảnh + `GHI-CHU.md`,
+> md5 khớp bản gốc trước khi gỡ bản cũ).
+
+### Chuyện xảy ra
+Owner mở giao diện **«Quản Lý Cũ»**, tưởng đó là **phiên gốc CHƯA fork**, nên chat thử.
+Ghế `claude-giao-trinh-eeat` **trả lời thật** — trong khi một phiên eeat KHÁC đang nói chuyện với
+Owner trên terminal. Nội dung hai màn hình KHÁC nhau.
+
+### Ba cách đọc — và số đo bác cả ba
+```
+Owner        : nội dung khác  ⇒ HAI phiên
+ghế eeat     : MỘT phiên, ba cửa vào (cli · claude-desktop · sdk-cli) — nó tự khai trong app
+hồ sơ ghế PM : «fork tạo phiên MỚI ⇒ HAI TỆP KHÁC NHAU ⇒ KHÔNG có chuyện hai tiến trình
+               cùng ghi một bản ghi»   ⇐ 🔴 LUẬT NÀY KHÔNG PHỦ ĐƯỢC CA NÀY
+```
+**ĐO (claude-aiboss-app-pm, 02/09 12:5x) — 200 dòng CUỐI của ĐÚNG MỘT tệp phiên:**
+```
+~/.claude/projects/-Users-erocathanh/5956cd23-1533-4565-a7fc-0050769887dc.jsonl
+   128 MB · sửa lần cuối 02/09 12:45:43
+   entrypoint=cli       23 dòng      ⇐ terminal
+   entrypoint=sdk-cli  118 dòng      ⇐ app
+```
+🔑 **HAI TIẾN TRÌNH SỐNG ĐANG GHI VÀO MỘT TỆP.** Ghế eeat nói đúng («một phiên»), Owner cũng nói
+đúng («màn hình khác nhau») — khác nhau vì **mỗi máy khách chỉ vẽ phần nó đã nạp**, KHÔNG phải vì
+có hai phiên.
+📌 **Và luật trong hồ sơ ghế PM SAI PHẠM VI, KHÔNG sai nội dung:** nó đúng cho **FORK** (fork đẻ mã
+mới ⇒ hai tệp). Ca này **KHÔNG có fork** — «Quản Lý Cũ» nối thẳng vào phiên terminal ĐANG mở.
+⇒ Phải sửa lại lời luật cho hẹp: *fork thì hai tệp; NỐI LẠI thì một tệp, và một tệp CÓ THỂ có
+hai người ghi.*
+
+### 🔴 Vì sao đáng nghiên cứu (xếp theo mức đau, chưa ai đo tiếp)
+```
+① HAI người ghi, KHÔNG ai điều phối. `entrypoint` phân biệt được NGƯỜI ghi, nhưng KHÔNG có
+   khoá nào chặn hai bên ghi chồng. Chưa đo: có mất dòng KHÔNG, thứ tự có đảo KHÔNG.
+② CHỐT «đang chạy nơi khác» ĐỌC MTIME (doc-phien.ts, ngưỡng 5 phút). Hai cửa cùng chạm một tệp
+   ⇒ terminal gõ một câu là app tưởng «ghế bận», và ngược lại. Chốt đó nay đo NHẦM thứ.
+③ TIỀN. Ảnh chụp: MỘT lượt = 5.284.038 token ≈ 11,01 USD; terminal khai 815,9k token.
+   Tệp phiên 128 MB gửi lại mỗi lượt. Hai cửa trên cùng một phiên khổng lồ thì nhân đôi nhịp tiêu.
+④ CÁI TÊN GÂY RA HÀNH ĐỘNG. «Quản Lý Cũ» làm Owner tin đó là phiên gốc chưa fork nên mới chat thử.
+   Đây KHÔNG phải lỗi chữ nghĩa — một cái nhãn sai đã khiến người dùng làm một việc họ sẽ KHÔNG làm
+   nếu nhãn đúng.
+```
+
+### Việc cần làm (chưa giao ai)
+```
+· đo ① bằng cách cho hai cửa ghi xen kẽ có chủ đích rồi đếm dòng — ĐỐI CHỨNG DƯƠNG bắt buộc
+· đọc lại doc-phien.ts: chốt 5 phút còn nghĩa gì khi một tệp có hai người ghi
+· sửa lời luật trong hồ sơ ghế PM (mục 🧬 ①) cho đúng phạm vi fork-vs-nối-lại
+· xem lại nhãn «Quản Lý Cũ» — nó khai điều gì, và người đọc hiểu ra điều gì
+```
+**Xếp hạng: quan trọng ✅ · khẩn ❌** (Owner tự xếp). Sau P0 và sau 4y.
+
+---
+
+## 5b. 🧱 OWNER YÊU CẦU 02/09 ~15:2x: **TÁCH GIAO DIỆN RA KHỎI LÕI** — «sửa UI đừng ảnh hưởng logic»
+
+> Owner: *«sao em KHÔNG đưa code mã UI thành front end chạy độc lập với back-end để sửa KHÔNG ảnh
+> hưởng nhiều đề logic — đây là yêu cầu QUAN TRỌNG, cần làm SỚM»*.
+
+### 🔴 ĐO TRƯỚC KHI LÀM — và số đo ĐỔI CÁCH HIỂU YÊU CẦU
+```
+src/components/  1 tệp · 3.252 dòng      ⇐ TOÀN BỘ giao diện nằm trong MỘT tệp
+src/lib/        20 tệp · 4.323 dòng
+src/app/api/     8 cửa
+
+máy khách nhập THẬT từ lib:  2   (dung-markdown 153 dòng · so-o 29 dòng — cả hai KHÔNG đụng node)
+máy khách nhập KIỂU (bị xoá lúc dựng): 1
+```
+🔑 **Mã giao diện và mã máy chủ HẦU NHƯ ĐÃ TÁCH RỒI.** Chúng nói chuyện qua 8 cửa HTTP, và chỗ dính
+duy nhất là hai tệp tiện ích lá (một bộ vẽ markdown, một hằng số `SO_O = 6`). Cắt hai cái đó là
+việc của một buổi chiều, và **cắt xong Owner vẫn thấy đau y như cũ.**
+
+⇒ Nên câu hỏi đúng KHÔNG phải «tách mã». Đau nằm ở HAI chỗ khác, và phải gọi tên riêng:
+
+### ① 🔴 ĐAU THẬT SỐ MỘT — MỘT TỆP 3.252 DÒNG
+Mọi thay đổi giao diện, dù nhỏ tới đâu, đều đụng **cùng một tệp**. Hai việc giao diện khác nhau
+KHÔNG thể làm song song. Đây là lý do hôm nay tôi phải dặn «tách commit» cho một việc thêm sáu dòng.
+```
+đo được: đổi nhãn một nút · thêm một bộ ghế · vá nhánh nút Dừng  ⇒ CÙNG chạm UngDung.tsx
+```
+✅ Việc: **chia tệp**. Trục chia phải ĐO rồi mới chọn (kế hoạch mục 9 đã treo câu này từ 30/08,
+chưa ai vẽ). Đừng chia theo cảm giác — chia sai trục thì đổi một tệp to lấy tám tệp dính nhau.
+
+### ② 🔴 ĐAU THẬT SỐ HAI, và đây mới là thứ Owner CẢM THẤY — SỬA UI PHẢI DỰNG LẠI VÀ KHỞI ĐỘNG LẠI
+```
+chay-lan.sh:  exec npx next start   ⇐ BẢN DỰNG SẴN, KHÔNG phải next dev
+.next/BUILD_ID: CÓ
+⇒ đổi MỘT ký tự trong giao diện ⇒ `next build` ⇒ khởi động lại máy chủ
+⇒ KHỞI ĐỘNG LẠI CẮT NGANG LƯỢT CỦA MỌI GHẾ ĐANG CHẠY
+```
+🔑 **Đây là chỗ «UI dính back-end» có thật — nhưng nó dính ở tầng CHẠY, KHÔNG ở tầng MÃ.**
+Tách mã KHÔNG chữa được nó. Ta có thể tách mã sạch sẽ rồi vẫn phải khởi động lại y như cũ.
+📌 Và cái giá này ĐÃ ĐO nhiều lần trong ngày: mỗi lần restart là cắt lượt, mất đuôi tin, có ca
+Owner tưởng việc chưa chạy trong khi việc đã xong (luật hẹn-khởi-động-lại, sàn 2 phút).
+
+✅ Việc: **một bản chạy RIÊNG cho việc sửa giao diện** — `next dev` ở cổng khác, dùng CÙNG mã,
+nạp nóng. Người sửa UI xem tại cổng đó, KHÔNG đụng cổng 4319 đang phục vụ Owner.
+```
+giá : gần 0 — cùng kho, cùng mã, chỉ thêm một lệnh chạy
+được: sửa giao diện KHÔNG còn cắt lượt của ai
+⚠️ hai bản cùng đọc `.trang-thai/` và cùng gọi `claude` ⇒ PHẢI quyết trước: bản dev chạy CHẾ ĐỘ
+   CHỈ-XEM (KHÔNG sinh tiến trình), hay có thư mục trạng thái RIÊNG. Chưa quyết thì đừng bật.
+```
+
+### 📋 XẾP HẠNG — Owner nói «cần làm SỚM», tôi chia làm ba, và ② rẻ nhất mà đỡ đau nhất
+```
+② bản dev riêng cổng khác     giá ~0 · gỡ NGAY cái đau «sửa UI là cắt lượt»   ⇐ LÀM TRƯỚC
+① chia UngDung.tsx            giá VỪA · phải ĐO trục chia trước, đừng chia mò
+③ cắt 2 lời nhập còn lại      giá ~0 · nhưng LÀM CUỐI: nó gần như KHÔNG đổi gì cho Owner
+                              (chép `SO_O` sang máy khách, hoặc chuyển hai tệp sang thư mục dùng chung)
+```
+⚠️ **③ nghe giống yêu cầu Owner nhất, mà lại đỡ đau ít nhất.** Ghi ra để KHÔNG ai làm ③ trước rồi
+báo «đã tách xong» trong khi Owner vẫn đau y nguyên. **Làm đúng chữ mà trượt ý là cách hỏng tệ nhất
+ở đây, vì nó trông như đã xong.**
+
+📌 Điều kiện: ① và ② đều đụng `UngDung.tsx` hoặc cách chạy app ⇒ **CHỜ hướng «giữ tay cầm» hạ cánh**
+(`ai/DE-BAI-giu-tay-cam.md`). Chia tệp trong lúc có người đang sửa nó là tự tạo xung đột.
+
+---
+
+## 5c. 🔢 SỔ BẪY VA SỐ HAI LẦN — vì **cái máy cấp số đã chết từ mục ㊿ mà không ai vá**
+
+> 🕐 nêu 02/09 17:0x (`claude-aiboss-app-exe` bắt) · ⚖️ quan trọng CÓ · khẩn KHÔNG ⇒ **XẾP HÀNG**
+> 👤 giao `claude-aiboss-app-exe` · 📖 chi tiết + số đo: `~/Operations/SO-BAY-DO.md` mục **61**
+
+```
+· ~/Operations/scripts/so-bay-tiep-theo.sh chạy 02/09 ⇒ «HẾT BẢNG ở ㊿ — nới BANG trong script này»
+  ⇒ chết từ mục 50. Chết TRUNG THỰC (chịu không cấp) — nhưng vì nó không cấp,
+    mọi ghế quay về ĐẾM TAY, đúng việc đầu sổ CẤM.
+· hậu quả đo được: va số 59 (bắt được nhờ may) VÀ va số ㊽ (dòng 1107 + 1160, có từ trước, chưa ai gỡ)
+```
+
+**Việc phải làm (3 phần, làm được rời nhau):**
+```
+① nới script quá ㊿: mục ≥51 dùng CHỮ SỐ THƯỜNG. Đọc được CẢ hai dạng khi dò số lớn nhất.
+   ⚠️ `'①'.isdigit()` trả True mà `int('①')` nổ ⇒ phải dùng `isdecimal()`.
+   ⚠️ `\b` của grep không bám ký tự không-ASCII ⇒ `grep -E '^## (48|㊽)\b'` ra RỖNG dù có thật.
+② script TỰ IN RA DÒNG TIÊU ĐỀ đầy đủ để người ghi dán thẳng — đừng chỉ in con số rồi khuyên.
+   Chốt biết KHUYÊN thì bị bỏ qua đúng lúc người ta vội, mà vội là lúc va nhau.
+③ thêm phép tự dò va số + in ra khi phát hiện. Đối chứng dương bắt buộc: phải thấy ㊽ đang va.
+```
+⛳ **Nghiệm thu:** chạy script ⇒ in `62` + dòng tiêu đề dán được + báo đúng «va số: 48».
+Chạy trên sổ giả có mục trùng cố ý ⇒ phải báo va. Chạy trên sổ giả sạch ⇒ phải báo không va.
+
+🚫 **Đừng đi đánh số lại cả sổ.** 64 mục, con trỏ cũ nằm rải khắp kênh. Luật khi va:
+**đổi cái CHƯA AI TRÍCH**, giữ cái đã công bố. ㊽ thì cả hai đều dính trích dẫn nhập nhằng ⇒ để yên, chờ quyết riêng.
+
 
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
