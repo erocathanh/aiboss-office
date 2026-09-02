@@ -949,6 +949,12 @@ tự nhiên nào: **im lặng của người kia trông y hệt như họ đang 
 
 ## 4o. ✅ P0 «TAB NGỦ RỒI TỈNH» — **OWNER NGHIỆM THU TRÊN BẢN SỐNG, ĐẠT** (01/09 22:2x)
 
+> ⚠️ **MỤC NÀY CHỨA HAI CA, đừng đọc tiêu đề rồi gạch cả mục** (rà lại 02/09 17:5x):
+> · **P0 «tab ngủ rồi tỉnh»** — Owner nghiệm thu bản sống, **ĐẠT**, đóng.
+> · **ca Owner chụp ảnh** (khác ca) — **CÒN XẾP HÀNG ở P1b**, xem dòng «⇒ XẾP HÀNG, hạ xuống P1b» dưới.
+> 🔑 Tiêu đề chỉ khoe vế ĐẠT nên mục trông như đã đóng trọn. `claude-phong-ban-pm` nêu 17:46 rằng nó
+>    KHÔNG đủ cơ sở kết luận — đúng, vì cơ sở nằm trong thân mục chứ không nằm ở nhãn.
+
 > Owner nguyên văn: *«tôi mới tắt màn hình 1 phút quay lại thấy chữ ô này load hết lên, vậy là chạy
 > ĐÚNG Ý tôi rồi. TRƯỚC KIA nó sẽ báo fail tôi phải F5.»*
 
@@ -1263,6 +1269,20 @@ giả định môi trường đó hiện ra bằng một câu chữ, thay vì b�
 ---
 
 ## 4w. 🔔 MỘT TRƯỜNG LÝ DO CÓ SẴN, KHAI LÀ **BẮT BUỘC**, VÀ RỖNG 4/4
+
+> 🔗 **VẪN MỞ — nhưng KHÔNG còn là điểm khởi đầu.** `vi_sao_bo` của kho chuông chưa vá, giữ nguyên mục.
+> Nhưng **ba ca cùng họ đã được xử trong ngày 02/09**, ghi ra đây để người mở plan tuần sau khỏi
+> tưởng chưa ai học được gì từ nó:
+> ```
+> ① vi_sao nút Dừng        ĐÃ vá · có chốt vét `never` · ĐANG CHẠY trên máy chủ (đo 17:38)
+> ② KetGhiSo giá trị trả về không ai đọc   @exe vá
+> ③ pidDangChay biến chết                  @exe gỡ
+> ```
+> 🔑 `claude-phong-ban-pm` nêu 17:46: danh sách treo nói dối theo **HAI chiều ngược nhau** —
+>    mục ĐÃ XONG còn nằm đó (rủ làm lại), và mục CHƯA XONG nhưng đã có ba bản vá quanh nó
+>    (người đọc tưởng chưa ai chạm ⇒ làm lại từ đầu, **và mất luôn bài học**).
+> 📌 Cả hai chỉ lộ ra khi có người **đọc danh sách rồi đối chiếu với thực tế**. Đọc một mình
+>    thì danh sách lúc nào cũng nhất quán với chính nó.
 
 Nhặt được đúng lúc đi giao việc — chuông rơi, mở sổ chuông ra đọc thì thấy (02/09 10:27):
 ```
@@ -1605,8 +1625,16 @@ báo «đã tách xong» trong khi Owner vẫn đau y nguyên. **Làm đúng ch�
 
 ## 5c. 🔢 SỔ BẪY VA SỐ HAI LẦN — vì **cái máy cấp số đã chết từ mục ㊿ mà không ai vá**
 
-> 🕐 nêu 02/09 17:0x (`claude-aiboss-app-exe` bắt) · ⚖️ quan trọng CÓ · khẩn KHÔNG ⇒ **XẾP HÀNG**
-> 👤 giao `claude-aiboss-app-exe` · 📖 chi tiết + số đo: `~/Operations/SO-BAY-DO.md` mục **61**
+> ✅ **ĐÃ XONG 02/09 ~17:2x** (`claude-aiboss-app-exe` làm) — nêu 17:0x, xong trong ~20 phút.
+> 📏 đo lại 17:44: script in **«số kế tiếp 62 · lớn nhất 61 · không lỗ hổng»** + dòng tiêu đề dán được
+>    + báo đúng va số ㊽. Nghiệm thu **6/6**: sổ thật · sổ giả có trùng ⇒ báo · sổ giả sạch ⇒ im ·
+>    sổ rỗng ⇒ từ chối (mã thoát 1) · sổ chỉ có ㊿ ⇒ ra 51 · có 51-bis ⇒ vẫn ra 52.
+> 📖 chi tiết + số đo gốc: `~/Operations/SO-BAY-DO.md` mục **61**
+>
+> 🕳 **Mục này từng bị chính tôi để treo SAU KHI đã xong** — tin kênh 17:40 của tôi vẫn liệt nó vào
+>    «còn treo». `claude-aiboss-app-exe` bắt: *«một mục đã xong mà còn nằm trong danh sách treo thì
+>    nó rủ người khác đi làm lại»*. Tôi cập nhật hàng đợi bằng TRÍ NHỚ về việc đã GIAO, không đi đo
+>    việc đã VỀ. **Người giữ hàng đợi mà cập nhật bằng trí nhớ thì hàng đợi thành tin đồn.**
 
 ```
 · ~/Operations/scripts/so-bay-tiep-theo.sh chạy 02/09 ⇒ «HẾT BẢNG ở ㊿ — nới BANG trong script này»
