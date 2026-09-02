@@ -100,7 +100,7 @@ export interface ViecDangChay {
  * ⏱ Bấm Dừng xong bao lâu thì TỰ nâng lên `SIGKILL`.
  * 🔑 Có thời hạn vì Owner ĐÃ BẤM DỪNG — ý định đã rõ ràng, KHÔNG phải suy từ tín hiệu mơ hồ.
  *    Để `SIGTERM` treo vô hạn là dựng lại đúng cái ta vừa chữa, chỉ chậm hơn.
- * ⚖️ 90 GIÂY — SỐ TẠM, và đây là toàn bộ căn cứ (@app-pm chốt 02/09 sau verdict soi delta vòng hai).
+ * ⚖️ 60 GIÂY — **OWNER CHỐT** 02/09 21:28 London, round-6 phương án C «ép sau 60 giây».
  *
  * 🔴 Bản 10 giây tôi chọn ban đầu là **TRỤC DUY NHẤT mà bản mới TỆ HƠN bản đang chạy**:
  *    hôm nay app KHÔNG có phép ép tự động nào cả (đường giết đã gỡ 17/08) ⇒ mọi ngưỡng ép là một
@@ -115,10 +115,20 @@ export interface ViecDangChay {
  * 🔑 Tôi từng viết số đo «51 giây» NGAY CẠNH ngưỡng 10 giây rồi vẫn chọn 10 — @app-pm bắt đúng chỗ:
  *    **ghi lý do làm một quyết định MINH BẠCH, nó KHÔNG làm quyết định ấy ĐÚNG.** Số đo của chính
  *    tôi đang cãi lại lựa chọn của tôi, và tôi đọc lướt qua nó.
- * ⚠️ ĐÂY LÀ SỐ TẠM, chờ Owner chốt round về chính sách dữ liệu. Đổi thì đổi ĐÚNG DÒNG NÀY —
- *    `giayTuEp()` đã chở nó ra màn hình, nên câu chữ Owner đọc tự đổi theo. ĐỪNG gõ tay số ở đâu khác.
+ * 🕳 LỊCH SỬ CON SỐ NÀY — giữ vì nó cho thấy một quyết định đi qua mấy tay:
+ * ```
+ *    10 giây  tôi chọn 02/09 ~15:45   ⇒ người soi ngoài nhà bác: cắt ngang QUÁ NỬA số lượt
+ *    90 giây  @app-pm chọn 17:26      ⇒ SỐ TẠM, ghi rõ là tạm, chờ Owner
+ *    60 giây  OWNER chốt 21:28        ⇐ ĐANG DÙNG. Đây KHÔNG còn là số tạm.
+ * ```
+ * ⚖️ 60 giây nằm giữa trung vị 20s và phân vị 90 là 75s ⇒ **vẫn còn một trục tệ hơn bản cũ**:
+ *    khoảng 10-15% lượt dài hơn 60 giây sẽ bị cắt, và ca dài nhất đo được (384 giây) chắc chắn mất
+ *    phần xả cuối. Bản cũ KHÔNG ép nên mấy lượt đó xả trọn.
+ *    ⇒ Đây là ĐÁNH ĐỔI Owner đã cân và đã chọn, KHÔNG phải chỗ còn bỏ ngỏ. Đừng ai «sửa lại cho an toàn».
+ * 🔑 Đổi thì đổi ĐÚNG DÒNG NÀY — `giayTuEp()` chở nó ra màn hình, nên câu chữ Owner đọc tự đổi theo.
+ *    ĐỪNG gõ tay con số ở bất kỳ chỗ nào khác.
  */
-const HAN_NANG_EP_MS = 90_000;
+const HAN_NANG_EP_MS = 60_000;
 
 /**
  * 📤 CHỞ CON SỐ RA MÁY KHÁCH — để câu chữ Owner đọc KHÔNG phải một bản chép của hằng số này.
