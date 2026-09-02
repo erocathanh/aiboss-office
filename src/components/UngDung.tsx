@@ -285,6 +285,31 @@ const BO_QUAN_LY_CU: CapGheDungSan[] = [
 ];
 
 /**
+ * 🏭 BỘ «PHÒNG CÔNG NGHỆ» — Owner xin lưu lại ĐỘI ĐANG NGỒI (02/09/2026).
+ *
+ * Đây KHÔNG phải một đội dựng ra để thử: đúng sáu ghế đã làm bản vá tay cầm hôm nay. Owner muốn
+ * bấm một nút là gọi lại đủ đội, thay vì dán sáu mã phiên bằng tay.
+ *
+ * 🔒 GHIM SẴN MÃ PHIÊN (`phien`, KHÔNG phải `goiY`) — cùng kiểu `BO_QUAN_LY_CU`, và cố ý:
+ *    sáu ghế này đứng ở THƯ MỤC GỐC `/Users/erocathanh`, tức phiên đọc thẳng được. Nhét vào
+ *    `goiY` thì ô mở ra TRỐNG và Owner phải bấm «Nối phiên» sáu lần — hỏng đúng thứ nút này
+ *    sinh ra để bỏ.
+ *
+ * 📏 ĐO SỐNG NGAY TRƯỚC KHI GÕ (`/api/o`, 02/09 15:2x), KHÔNG chép từ ảnh chụp trong tin nhắn:
+ *    sáu ô · sáu mã phiên khớp từng ký tự với danh sách dưới đây.
+ * ⚠️ Mã phiên là ẢNH CHỤP MỘT LÚC. Ghế nào fork sang phiên mới thì mục tương ứng thành ôi, và
+ *    nó ôi trong IM LẶNG — ô sẽ mở ra một phiên cũ trông vẫn bình thường. Đo lại trước khi tin.
+ */
+const BO_CONG_NGHE: CapGheDungSan[] = [
+  { ten: 'claude-eroca-boss',       phien: '9050b662-3b7f-41f9-b55f-cbb124588ceb' },
+  { ten: 'claude-aiboss-app-pm',    phien: 'b195c209-d020-4720-83a7-8fe7c47140c8' },
+  { ten: 'claude-phong-ban-pm',     phien: '73d7ce9a-4be9-4833-8759-e18c96762d83' },
+  { ten: 'claude-aiboss-app-exe',   phien: '1b696a63-f02d-405d-918e-0a909d8d6ae4' },
+  { ten: 'claude-zalo-bot',         phien: '93cdee4b-c31e-4484-a2ee-8b2385bb480b' },
+  { ten: 'claude-tro-ly-dieu-hanh', phien: '1f08afd0-73d8-45e9-86b5-0a06417bf7e1' },
+];
+
+/**
  * 🔴 Bộ đang xếp có PHẢI một bộ dựng sẵn ⛔ không?
  *
  * 🕳 LỖI PHÉP ĐO BẮT ĐƯỢC (20/08, khi thêm bộ «Vận hành»): `napBoGhe` cất bộ cũ MỖI LẦN
@@ -299,8 +324,16 @@ const BO_QUAN_LY_CU: CapGheDungSan[] = [
 const LA_BO_DUNG_SAN = (ten: (string | null)[]): boolean =>
   // ⚠️ THÊM BỘ MỚI thì PHẢI thêm vào đây. Quên = lỗi 20/08 quay lại: Owner bấm hai bộ
   //    liên tiếp là đội THẬT của mình bị ghi đè, ⛔ có đường về.
-  [BO_MARKETING, BO_VAN_HANH, BO_QUAN_LY_CU.map((m) => m.ten), BO_QUAN_LY_TRUONG.map((m) => m.ten)]
-    .some((bo) => bo.every((x, i) => ten[i] === x));
+  [
+    BO_MARKETING,
+    BO_VAN_HANH,
+    BO_QUAN_LY_CU.map((m) => m.ten),
+    BO_QUAN_LY_TRUONG.map((m) => m.ten),
+    // 🏭 Thêm 02/09 cùng lúc với `BO_CONG_NGHE`. Khai Ở ĐÂY là NỬA SAU của việc thêm một bộ:
+    //    thiếu nó thì nút vẫn chạy, menu vẫn hiện, mọi thứ trông đúng — và đội THẬT của Owner
+    //    bị ghi đè lặng lẽ ở lần bấm bộ thứ hai. Hỏng KHÔNG kêu là hỏng đắt nhất.
+    BO_CONG_NGHE.map((m) => m.ten),
+  ].some((bo) => bo.every((x, i) => ten[i] === x));
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
 // Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
@@ -440,6 +473,10 @@ function boDau(s: string): string {
 function gioBayGio(): string {
   return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
+
+import type { ViSaoDung } from '@/lib/kho-tien-trinh';
+// ⏱ Hạn fork: NHẬP từ nguồn duy nhất, KHÔNG gõ lại con số. Xem chú thích dài trong tệp đó.
+import { moTaHanFork } from '@/lib/han-gio-fork';
 
 const MAU_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -971,13 +1008,175 @@ export default function UngDung({
   const dungViec = useCallback(async (i: number) => {
     huyLuong(i);                       // cắt đường xem trước cho khỏi chảy thêm chữ
     capNhat(i, { dangChay: false });
+    // Khai NGOÀI `try` vì `finally` phải đọc được nó. (tsc bắt đúng chỗ này khi tôi khai trong try.)
+    let xacNhanDaDung = false;
     try {
-      await fetch('/api/dung', {
+      const r = await fetch('/api/dung', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ma_o: maOCua(i) }),
       });
-    } catch { /* mạng chập ⇒ bấm lại; ⛔ đừng doạ người dùng bằng lỗi đỏ */ }
+      /**
+       * 🔴 BẢN TRƯỚC VỨT CÂU TRẢ LỜI ĐI — `await fetch(...)` rồi thôi, KHÔNG `.json()`,
+       *    KHÔNG đọc `da_giet`, KHÔNG đọc `pid`. @app-pm mở mã ra đọc và bắt được 02/09.
+       *
+       * 🕳 VÌ SAO NÓ NGUY: máy chủ nay có ca «sống, mà KHÔNG xác minh được có đúng người cũ»
+       *    ⇒ nó CỐ Ý KHÔNG bắn (thà mất một lần dừng còn hơn bắn nhầm tiến trình khác của Owner).
+       *    Nhưng nếu máy khách vứt câu trả lời thì Owner **thấy y hệt lúc dừng THÀNH CÔNG**:
+       *    nút bấm xong, đèn tắt, mọi thứ trông ngoan. Trong khi ghế VẪN CHẠY và VẪN TIÊU TIỀN.
+       *
+       * 🔑 Tôi từng biện hộ cho vế an toàn đó bằng câu «Owner còn dừng được từ cửa sổ dòng lệnh».
+       *    Câu ấy SAI, và @app-pm chỉ đúng chỗ sai: **Owner KHÔNG thể lùi khi KHÔNG ai nói cho
+       *    anh ấy biết là cần lùi.** Chọn «mất mát thay vì rủi ro» chỉ đúng khi cái mất được NÓI RA.
+       *    Mất trong im lặng thì nó KHÔNG phải mất mát — nó là một lời nói dối MỚI, đúng con bệnh
+       *    ta đang chữa, chỉ dời từ cuốn sổ sang cái nút.
+       *
+       * 📌 Và đây là lý do khối này đi CÙNG bản vá máy chủ, KHÔNG tách nhịp: vá lệch nhịp thì
+       *    suốt quãng giữa, nút Dừng câm mà mặt vẫn tươi.
+       */
+      /**
+       * 🔒 KIỂU DÙNG CHUNG VỚI MÁY CHỦ — `import type` nên nó BỊ XOÁ lúc dựng, KHÔNG kéo
+       *    một tệp máy chủ vào gói máy khách.
+       * 🕳 Bản trước tôi tự khai lại `vi_sao?: string` ở đây. `string` thì gõ sai một ký tự
+       *    cũng qua, và thêm lý do THỨ NĂM thì máy khách im mà `tsc` KHÔNG báo.
+       *    ⇒ Chặng ① có MÁY giữ (kiểu chặn 4/4), chặng ③ để NGƯỜI NHỚ.
+       *    Đúng bất đối xứng đẻ ra `vi_sao_bo` rỗng 4/4, và là lần thứ BA trong hai ngày
+       *    hai đầu một hợp đồng KHÔNG khớp nhau. @phong-ban-pm bắt được 02/09.
+       * 📌 Một hợp đồng chỉ chặt bằng ĐẦU LỎNG NHẤT của nó.
+       */
+      const j = (await r.json().catch(() => null)) as
+        | { da_giet?: boolean; vi_sao?: ViSaoDung; pid?: number | null; giay_tu_ep?: number }
+        | null;
+      const hienCau = (chu: string) => capNhat(i, (cu) => ({
+        tin: [...cu.tin, { ma: datMa(), ai: 'ho', gio: gioBayGio(), luc: Date.now(), loi: true, chu }],
+      }));
+      /**
+       * 🔒 MỘT CHỐT PHỦ MỌI ĐƯỜNG RA — @app-pm chốt 02/09 sau khi @phong-ban-pm bắt nhánh `default`.
+       *
+       * 🕳 Bản trước tôi vá TỪNG nhánh, và bỏ sót đúng nhánh dưới cùng. @app-pm đo tiếp và tìm ra
+       *    KHÔNG PHẢI MỘT mà BA đường để cờ nằm dưới mà KHÔNG có bằng chứng gì:
+       *      ① nhánh `default` (lý do lạ)
+       *      ② `j` là null — thân KHÔNG phải JSON: máy chủ 500 · khởi động lại giữa yêu cầu · thân bị cắt
+       *      ③ `catch` — mất mạng
+       *    Hai ca sau CÓ SẴN từ trước, và chúng mở đúng lúc app đang có chuyện.
+       *
+       * 🔑 LUẬT, viết ra để lần sau khỏi cãi: **cờ «đã dừng» chỉ được GIỮ khi có bằng chứng DƯƠNG
+       *    rằng tiến trình đã chết. Mọi trường hợp còn lại — kể cả KHÔNG BIẾT, kể cả MẤT MẠNG —
+       *    phải trả cờ về BẬT.**
+       * ⚖️ Cái giá TỰ DỌN: cờ bật thừa ⇒ Owner bấm lần nữa ⇒ `khong_co_viec` ⇒ cờ hạ.
+       *    Cái giá bên kia — mất nút khi việc CÒN CHẠY — KHÔNG tự dọn.
+       * 📌 Vá từng nhánh thì lần sau thêm nhánh lại quên. Một chốt ở cuối thì nhánh MỚI mặc định AN TOÀN.
+       */
+      const viSao = j?.vi_sao;
+      if (viSao === undefined) {
+        /* Cửa cũ chưa chở `vi_sao` ⇒ giữ nguyên nếp cũ, KHÔNG suy gì. */
+      } else if (viSao === 'so_tu_mau_thuan') {
+        /**
+         * Sổ tiến trình TỰ MÂU THUẪN: hai ô cùng khai một tiến trình. Ta KHÔNG biết dòng nào đúng,
+         * và tiến trình thì VẪN SỐNG ⇒ KHÔNG dám bắn, KHÔNG hạ cờ, và PHẢI nói ra.
+         * 🔑 @app-pm quyết cho nó mã RIÊNG: đây là lỗi của CHÍNH cuốn sổ. Nuốt nó vào một mã chung
+         *    thì ta KHÔNG BAO GIỜ biết nó có xảy ra hay KHÔNG.
+         */
+        const pid = typeof j?.pid === 'number' ? j.pid : null;
+        hienCau(
+          'KHÔNG dừng được, và lý do nằm ở chính app này, KHÔNG phải ở anh: sổ của máy chủ có HAI ô ' +
+          'cùng giữ một tiến trình. Đây là LỖI CỦA APP — nó KHÔNG được phép xảy ra, nên nếu anh ' +
+          'thấy câu này thì có một chỗ trong mã đang hỏng và cần báo lại.\n\n' +
+          (pid === null
+            ? 'Máy chủ KHÔNG trả về số hiệu tiến trình, nên chưa có gì để dừng tay.'
+            : 'Ghế VẪN ĐANG CHẠY. Dừng tay bằng lệnh:\n\n`kill ' + pid + '`'),
+        );
+      } else if (viSao === 'da_gui_dung' || viSao === 'da_ep_dung') {
+        /**
+         * 🛑 MÁY CHỦ MỚI CHỈ GỬI TÍN HIỆU — nó CHƯA biết con đã thoát hay chưa.
+         *
+         * 🕳 `hermes-aiboss-app-reviewer` bác 02/09 (loại A) và exe đo lại xác nhận: con nuốt
+         *    `SIGTERM` thì `kill()` vẫn trả `true` trong khi `ps` còn thấy nó sống sau 200 ms.
+         * ⇒ KHÔNG có bằng chứng dương ⇒ **cờ phải trở về BẬT**, đúng luật đã viết ở chốt cuối.
+         * ✅ Và nay lời khuyên có thật: dòng sổ CÒN, tay cầm CÒN ⇒ bấm lần nữa là ÉP được thật.
+         *    Bản trước nói «bấm lại đi» trong khi tay cầm đã bị vứt — một lời khuyên rỗng.
+         */
+        const pid = typeof j?.pid === 'number' ? j.pid : null;
+        hienCau(
+          viSao === 'da_gui_dung'
+            /**
+             * ⏱ SỐ GIÂY LẤY TỪ MÁY CHỦ, KHÔNG gõ cứng — tôi tự soi ra 02/09 khi @app-pm đang
+             *    trình Owner ĐỔI đúng ngưỡng này.
+             * 🕳 Bản trước tôi viết thẳng «sau 10 giây». Owner chọn 30 thì máy chủ ép ở giây 30
+             *    còn câu này vẫn hứa giây 10 — và **bản trôi là bản Owner ĐỌC**.
+             * 🔑 Vắng con số thì nói vắng, ĐỪNG đoán: `giay_tu_ep` thiếu nghĩa là máy chủ cũ hơn
+             *    trang đang mở ⇒ tôi bỏ hẳn vế «sau N giây» thay vì điền một số tôi tự nghĩ ra.
+             */
+            ? 'Đã gửi lệnh dừng, nhưng tôi **chưa** thấy ghế thoát. Tín hiệu đã đi — con có nhận ' +
+              'hay không thì tôi chỉ biết khi nó thực sự đóng.\n\n' +
+              'Bấm Dừng **lần nữa** để ép dừng ngay.' +
+              (typeof j?.giay_tu_ep === 'number'
+                ? ' Nếu anh không bấm, sau ' + j.giay_tu_ep + ' giây tôi tự ép.'
+                : '') +
+              (pid === null ? '' : '\n\nDừng tay: `kill -9 ' + pid + '`')
+            : 'Đã **ép** dừng. Ghế sẽ đóng ngay, nhưng tôi giữ nút Dừng cho tới khi thấy nó đóng ' +
+              'thật — tôi KHÔNG khai một điều tôi chưa nhìn thấy.' +
+              (pid === null ? '' : '\n\nKiểm tay: `ps -p ' + pid + '`'),
+        );
+      } else if (viSao === 'dong_rac' || viSao === 'khong_co_viec') {
+        /**
+         * ✅ HAI ca này — và CHỈ hai ca này — là bằng chứng DƯƠNG rằng tiến trình KHÔNG còn chạy.
+         *
+         * 🔻 Bản trước gộp bốn mã vào đây, trong đó có `da_giet` — mà `da_giet` khai một điều máy
+         *    chủ KHÔNG BAO GIỜ biết được tại lúc gọi. Nay `dong_rac` nghĩa là tay cầm đã báo
+         *    `exitCode`, tức Node ĐÃ THU XÁC con.
+         *
+         * 🕳 VÀ ĐÂY LÀ CHỖ TÔI ĐÃ LÀM HỎNG, ghi lại vì nó là bài học đắt nhất hôm nay:
+         *    tôi đổi một chú thích `//` thành khối `/**` và **quên dấu đóng**, nên dòng
+         *    `xacNhanDaDung = true;` bị NUỐT vào chú thích ⇒ biến KHÔNG BAO GIỜ true ⇒ dừng
+         *    thành công rồi nút Dừng vẫn hiện lại. `tsc` IM, vì một khối chú thích chưa đóng
+         *    là cú pháp HỢP LỆ — máy KHÔNG thấy phần mã bị nuốt.
+         * 🔑 Khối nuốt nó chính là khối đang KHOE rằng hợp đồng «được MÁY giữ, KHÔNG bằng trí nhớ».
+         *    **Một chú thích tả cái phanh KHÔNG phải là cái phanh** — và ở đây nó còn ĂN mất cái phanh.
+         * ⇒ Việc đã xếp hàng: cắm `eslint` + `prefer-const`. Một `let` KHÔNG bao giờ được gán lại
+         *   sẽ bị kêu ngay — đó là cái máy DUY NHẤT bắt được lớp lỗi này, và ta đang KHÔNG có nó.
+         */
+        xacNhanDaDung = true;
+        /**
+         * Cả ba đều nghĩa là tiến trình KHÔNG còn chạy nữa ⇒ cờ đã hạ lạc quan ở đầu hàm là ĐÚNG,
+         * và im lặng ở đây cũng ĐÚNG. Nhưng phải LIỆT KÊ RA, KHÔNG được để rơi vào `default` —
+         * nếu để rơi thì cái bẫy dưới kia sẽ kêu oan ba lần một ngày rồi bị người ta tắt đi.
+         * 📌 Một cái chuông kêu oan là một cái chuông sắp bị gỡ.
+         */
+      } else {
+        /**
+         * 🔒 CHỐT VÉT — `never` ở đây là MÁY GIỮ, KHÔNG phải lời nhắc.
+         *    Thêm một lý do THỨ NĂM ở máy chủ mà quên xử ở đây ⇒ dòng dưới KHÔNG biên dịch được.
+         * 🕳 Đây đúng thứ `vi_sao_bo` thiếu: nó khai «BẮT BUỘC» bằng chú thích, nên rỗng 4/4 mà
+         *    KHÔNG ai biết. Chú thích chỉ ràng buộc người ĐÃ ĐỌC nó.
+         * ⚠️ Và runtime vẫn phải NÓI RA: máy chủ có thể mới hơn máy khách (Owner chưa tải lại trang).
+         *    Im lặng ở đây là dựng lại đúng con bệnh — một cái nút trông ngoan mà KHÔNG làm gì.
+         */
+        const chuaXu: never = viSao;
+        /**
+         * 🔴 BẬT LẠI CỜ — @phong-ban-pm bắt 02/09 (verdict 13:03:40), và họ đúng.
+         *    Đầu hàm ta hạ cờ LẠC QUAN. Ở nhánh này ta vừa thừa nhận KHÔNG biết máy chủ trả lời gì
+         *    ⇒ ta cũng KHÔNG biết nó có giết được hay KHÔNG ⇒ để cờ nằm dưới là ĐANG KHẲNG ĐỊNH
+         *    một điều mình vừa nói là mình KHÔNG biết.
+         * 🔑 Cùng một luật với nhánh `so_tu_mau_thuan` ngay trên, và tôi đã áp đúng ở đó rồi bỏ sót ở đây:
+         *    **KHÔNG biết thì KHÔNG suy — và KHÔNG biết thì cũng KHÔNG được hạ cờ.**
+         *    Hạ cờ mà việc còn chạy là dựng lại đúng câu ⑥: sổ nói rảnh trong khi ghế đang tiêu tiền.
+         */
+        hienCau(
+          'Máy chủ trả lời bằng một lý do tôi CHƯA biết xử: «' + JSON.stringify(chuaXu) + '». ' +
+          'Tôi KHÔNG dám đoán nó nghĩa gì, nên tôi nói ra thay vì im. ' +
+          'Nhiều khả năng trang đang mở là bản CŨ hơn máy chủ — thử tải lại trang.',
+        );
+      }
+    } catch {
+      /* mạng chập ⇒ bấm lại; KHÔNG doạ người dùng bằng lỗi đỏ. Cờ do chốt dưới lo. */
+    } finally {
+      /**
+       * 🔒 CHỐT CUỐI — chạy KỂ CẢ sau `catch`. Đây là chỗ DUY NHẤT trả cờ về BẬT, nên thêm một
+       *    nhánh mới ở trên KHÔNG thể vô tình để cờ nằm dưới nữa.
+       */
+      if (!xacNhanDaDung) capNhat(i, { dangChay: true });
+    }
   }, [huyLuong, capNhat]);
 
   /* ---------- Khôi phục nguyên trạng: bố cục + tiêu điểm + phiên TỪNG Ô ---------- */
@@ -1311,7 +1510,7 @@ export default function UngDung({
     const o = dsORef.current[i];
     const ma = o?.phienChoFork;
     if (!o?.ns || !ma) return;
-    capNhat(i, { dangFork: true, loiDan: '🧬 Đang fork… Claude phải mở phiên gốc để tách — có thể tới 3 phút.' });
+    capNhat(i, { dangFork: true, loiDan: `🧬 Đang fork… Claude phải mở phiên gốc để tách — có thể ${moTaHanFork()}.` });
     try {
       const r = await fetch('/api/fork', {
         method: 'POST',
@@ -2475,6 +2674,16 @@ export default function UngDung({
                     <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
                     Quản Lý Trường — 6 ô
                   </button>
+                  {/* 🏭 «Phòng Công Nghệ» — Owner xin lưu đội đang ngồi, 02/09.
+                      Ghim sẵn mã phiên ⇒ truyền THẲNG `BO_CONG_NGHE`, KHÔNG map `phien: null`. */}
+                  <button
+                    className="muc-menu" type="button" role="menuitem"
+                    title={BO_CONG_NGHE.map((m) => m.ten).join(' · ')}
+                    onClick={() => { void napBoGhe(BO_CONG_NGHE, true); }}
+                  >
+                    <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
+                    Phòng Công Nghệ — 6 ô
+                  </button>
                 </div>
               )}
               {nhacGD && <span className="nhan-mau" title={nhacGD}>{nhacGD}</span>}
@@ -2816,7 +3025,7 @@ export default function UngDung({
                         {o.phienChoFork && (
                           <div className="khoi-fork">
                             <button className="nut-chu manh" type="button" disabled={o.dangFork} onClick={() => forkVeGhe(i)}>
-                              {o.dangFork ? '🧬 Đang fork… (tới 3 phút)' : '🧬 Fork về ghế này'}
+                              {o.dangFork ? `🧬 Đang fork… (${moTaHanFork()})` : '🧬 Fork về ghế này'}
                             </button>
                             <span className="ghi-chu-fork">
                               Tạo bản MỚI mang mã riêng cho ghế này. Bản gốc ⛔ KHÔNG bị đụng — app đo lại và báo số.

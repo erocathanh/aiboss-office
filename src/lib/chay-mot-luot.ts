@@ -45,6 +45,7 @@ import { loiDanHeThong } from '@/lib/cau-hinh';
 import { datO } from '@/lib/kho-phien';
 import { thuMucAgent } from '@/lib/doc-phien';
 import { dangKyViec, xoaViec } from '@/lib/kho-tien-trinh';
+import type { ChildProcess } from 'node:child_process';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
 
@@ -72,7 +73,16 @@ export interface DauVaoLuot {
 export interface KetQuaLuot {
   /** Mã phiên THỰC SỰ đã dùng — có thể khác `maPhienCu` khi mở phiên mới. */
   maPhien: string | null;
-  pid: number | null;
+  /**
+   * 🔢 Số hiệu CHỈ ĐỂ HIỆN — cùng luật với `ViecDangChay.pid_de_hien_thi`.
+   *
+   * 🔑 Đổi tên 02/09 dù trường này hiện có **0 người đọc** (`may-chay-nen.ts:270` gọi bằng `void`).
+   *    Đổi vì đúng lý do đề bài đưa ra: cái tên làm việc canh gác. Người đầu tiên đọc trường này
+   *    là người sẽ quyết định dùng nó làm gì — để nó tên `pid` là mời họ đem đi so sánh.
+   * 📌 Và đây là chỗ RẺ NHẤT để áp luật: 0 người đọc ⇒ đổi tên KHÔNG rủi ro. Nếp «vá xong một chỗ
+   *    thì đi tìm ngay hình đó ở khối lân cận» — chỗ lân cận rẻ nhất thì làm luôn, đừng đợi.
+   */
+  pid_de_hien_thi: number | null;
   /** `null` nếu chạy trót lọt. */
   loi: string | null;
   /**
@@ -102,9 +112,20 @@ export async function chayMotLuot(
   const { maO, maNhanSu, cauHoi, maPhienCu, tinHieuHuy } = vao;
 
   const ns = timNhanSu(maNhanSu);
-  if (!ns) return { maPhien: maPhienCu, pid: null, loi: `Không có nhân sự "${maNhanSu}".`, buocOThatBai: false };
+  if (!ns) return { maPhien: maPhienCu, pid_de_hien_thi: null, loi: `Không có nhân sự "${maNhanSu}".`, buocOThatBai: false };
 
-  let pid: number | null = null;
+  /**
+   * 🖐 TAY CẦM để XOÁ SỔ (danh tính) — và 🔢 SỐ HIỆU để HIỆN, chụp NGAY LÚC SINH.
+   *
+   * 🕳 Vì sao hai biến chứ KHÔNG một: bản đầu tôi viết `tienDangChay?.pid` ở hai lối `return`,
+   *    và `tsc` chặn — «Property 'pid' does not exist on type 'never'». TypeScript KHÔNG theo
+   *    được phép gán nằm trong hàm gọi lại `khiSinh`, nên nó vẫn tin biến này mãi là `null`.
+   * ⚠️ Chữa bằng ÉP KIỂU thì cổng im, nhưng cái nó im KHÔNG phải cái tôi sửa. Chụp số ngay lúc
+   *    sinh thì đúng nghĩa hơn THẬT: đó chính là khoảnh khắc con số chắc chắn là của con mình.
+   * 📌 Nếp: **cổng máy kêu thì đọc xem nó kêu ĐIỀU GÌ, đừng đi tìm cách làm nó im.**
+   */
+  let tienDangChay: ChildProcess | null = null;
+  let pidDeHienThi: number | null = null;
   let maPhien: string | null = maPhienCu;
   let buocOThatBai = false;
 
@@ -141,10 +162,14 @@ export async function chayMotLuot(
       // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT. Với bộ chạy nền thì
       //    KHÔNG có người xem nào ngay từ đầu — đúng thứ ta cần.
       chayNen: true,
-      khiSinh: (p) => {
-        pid = p;
-        dangKyViec(maO, p, maNhanSu); // ← MẮT XÍCH ①: nút Dừng phải thấy được lượt này
+      khiSinh: (t) => {
+        tienDangChay = t;
+        pidDeHienThi = t.pid ?? null;
+        dangKyViec(maO, t, maNhanSu); // ← MẮT XÍCH ①: nút Dừng phải thấy được lượt này
       },
+      // ⚰️ Đường này KHÔNG có người xem để rời đi, nên `finally` bên dưới vốn đã đúng.
+      //    Nối `khiChet` cho ĐỒNG NHẤT với đường SSE: một luật xoá sổ, KHÔNG phải hai.
+      khiChet: (t) => xoaViec(maO, t),
     })) {
       if (mau.loai === 'phien') {
         // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
@@ -176,13 +201,13 @@ export async function chayMotLuot(
         nhan({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token });
       }
     }
-    return { maPhien, pid, loi: null, buocOThatBai };
+    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: null, buocOThatBai };
   } catch (e) {
     const thongDiep = e instanceof Error ? e.message : 'Lỗi không rõ.';
     nhan({ loai: 'loi', thong_diep: thongDiep });
-    return { maPhien, pid, loi: thongDiep, buocOThatBai };
+    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai };
   } finally {
-    // Rút khỏi sổ tiến trình — CHỈ rút đúng pid của mình (xem `xoaViec`).
-    if (pid !== null) xoaViec(maO, pid);
+    // Rút khỏi sổ tiến trình — CHỈ rút đúng TAY CẦM của mình (xem `xoaViec`).
+    if (tienDangChay !== null) xoaViec(maO, tienDangChay);
   }
 }

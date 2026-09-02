@@ -4,7 +4,7 @@ import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT } from '@/lib/doc-phien';
-import { dangKyViec, xoaViec, dsViec } from '@/lib/kho-tien-trinh';
+import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
@@ -113,9 +113,93 @@ export async function POST(req: NextRequest) {
     return Response.json({ loi, trong_app: !!dangTrongApp }, { status: 409 });
   }
 
+  /**
+   * 🔴 CỔNG THỨ HAI — HỎI ĐÚNG NGUỒN. Thêm 02/09 sau khi @app-pm đuổi theo đầu mối người soi
+   *    ngoài nhà để lại («map overwrite»).
+   *
+   * 🕳 Cổng phía trên (`dangChay(...)`) quyết bằng **mốc thời gian tệp phiên** — đúng cái nguồn
+   *    cả ngày hôm nay ta chứng minh là nói dối. Còn SỔ TIẾN TRÌNH, nguồn đáng tin, thì chỉ được
+   *    dùng ở dòng dưới để **soạn câu báo**.
+   * 🔑 **Ta hỏi nguồn nói dối để QUYẾT, rồi hỏi nguồn đáng tin để CHỌN CHỮ.**
+   *
+   * 🔴 Hậu quả nếu thiếu cổng này: `maPhienCu` rỗng, hoặc `dangChay()` trả false vì mốc tệp cũ
+   *    ⇒ đi thẳng tới `spawn` ⇒ `dangKyViec` ĐÈ lên dòng của một tiến trình CÒN SỐNG
+   *    ⇒ pid đó biến khỏi sổ ⇒ nút Dừng KHÔNG với tới ⇒ chạy mãi, tiêu tiền.
+   * ⚠️ `dangKyViec` nay tự KÊU khi phải đè, nhưng kêu là để KHÔNG MẤT DẤU — nó KHÔNG ngăn được
+   *    việc đè. Chặn thì phải chặn ở ĐÂY, trước khi đẻ tiến trình thứ hai cho cùng một ô.
+   */
+  const dongO = xacMinhDong(maO);
+  /**
+   * 🔴 LIỆT KÊ CÁI ĐƯỢC QUA, KHÔNG liệt kê cái bị CHẶN — @phong-ban-pm bắt 02/09.
+   *
+   * 🕳 Bản trước tôi viết `if (song || so_mau_thuan) chặn`. Nghĩa là `khong_ro` **ĐƯỢC QUA** —
+   *    mà tới được `khong_ro` nghĩa là pid ĐÃ QUA phép hỏi «còn tồn tại KHÔNG», tức **tiến trình
+   *    CÒN SỐNG**, ta chỉ không đọc được danh tính của nó. Cho qua ⇒ `dangKyViec` đè lên dòng đó
+   *    ⇒ một tiến trình ĐANG SỐNG biến khỏi sổ ⇒ chạy mãi, tiêu tiền, Owner mất nút Dừng.
+   * 🔑 **Liệt kê điều-kiện-CHẶN thì trạng thái MỚI sinh ra sẽ MẶC ĐỊNH ĐƯỢC QUA.**
+   *    Liệt kê điều-kiện-QUA thì trạng thái mới MẶC ĐỊNH BỊ CHẶN.
+   *    Cùng một câu `if`, hai thái độ NGƯỢC NHAU với thứ chưa ai nghĩ tới.
+   *    Đây đúng bài học «một chốt ở cuối» của @app-pm, áp cho một cổng khác.
+   * ⚠️ Và «an toàn» ở hai cổng đi NGƯỢC CHIỀU nhau, đừng chép nhầm:
+   *      đường XOÁ  gặp khong_ro ⇒ an toàn = KHÔNG bắn, GIỮ dòng
+   *      cổng GHI   gặp khong_ro ⇒ an toàn = CHẶN, KHÔNG cho đè
+   */
+  if (dongO.trang_thai !== 'trong' && dongO.trang_thai !== 'chet') {
+    const v = dongO.v;
+    const giay = Math.round((Date.now() - v.bat_dau) / 1000);
+    /**
+     * 🔻 ĐƯỜNG THOÁT `xinBoQua` ĐÃ GỠ (02/09, cùng bản vá tay cầm) — và đây là chỗ tôi đi XA HƠN
+     *    chữ trong đề bài, nên tôi ghi lại để @app-pm bác được nếu tôi sai.
+     *
+     * 🕳 Đề bài dặn «`xinBoQua` là đường thoát có chủ ý ⇒ đổi sang so tay cầm». Nhưng nó chỉ được
+     *    gọi TRONG ĐÚNG MỘT điều kiện: `dongO.trang_thai === 'khong_ro'`. Mà `khong_ro` sinh ra từ
+     *    phép ĐỌC `ps` hụt — và bản tay cầm KHÔNG đọc gì cả, nên trạng thái ấy KHÔNG còn tồn tại.
+     *    Đổi kiểu so xong thì hàm vẫn đúng, chỉ là **KHÔNG BAO GIỜ được gọi**.
+     * 🔑 Đó đúng thứ tôi vừa bác ở `so_tu_mau_thuan` và @app-pm đã nhận: **một nhánh không thể
+     *    chạy thì không thể nghiệm thu, và nó không cứu được ai — vì điều kiện vào nó là sai.**
+     *    Giữ lại chỉ tạo cảm giác «vẫn còn đường lùi» cho người đọc sau.
+     * ⚖️ Đã kiểm KHÔNG mở ra khoá chết mới: hai trạng thái còn chặn đều TỰ THÁO —
+     *      'song'         ⇒ con thoát ⇒ `khiChet` hoặc `quetRac` xoá dòng ⇒ ô mở lại
+     *      'so_mau_thuan' ⇒ vốn CHƯA BAO GIỜ có đường thoát, nên đây KHÔNG phải bước lùi;
+     *                       và nó cũng tự tháo khi con thoát. @app-pm đã chốt: giữ, kêu, chặn.
+     */
+    {
+      const chung =
+        dongO.trang_thai === 'so_mau_thuan'
+          ? `Sổ tiến trình TỰ MÂU THUẪN ở ô ${maO}: có ô khác cũng giữ tay cầm này ` +
+            `(pid ${v.pid_de_hien_thi}). Đây là LỖI CỦA APP. Tôi KHÔNG mở lượt mới cho tới khi ` +
+            'biết dòng nào đúng.'
+          : `Ô ${maO} ĐANG CHẠY một lượt khác (${v.ma_nhan_su}, đã chạy ${giay} giây). ` +
+            'Chờ nó xong, hoặc bấm Dừng ở ô đó rồi gửi lại.';
+      traCho(maO);
+      return Response.json({ loi: chung, trong_app: true }, { status: 409 });
+    }
+  }
+
+  /**
+   * 🔒 GIỮ CHỖ NGAY — đồng bộ, KHÔNG `await` nào xen vào giữa kiểm và đặt.
+   *    Cổng `xacMinhDong` ở trên chặn được ca «đã có tiến trình chạy», nhưng nó KHÔNG chặn được
+   *    HAI yêu cầu tới CÙNG LÚC: cả hai cùng thấy sổ trống, cả hai cùng đi tiếp, cả hai cùng sinh.
+   */
+  if (!datCho(maO)) {
+    return Response.json({
+      loi: `Ô ${maO} đang mở một lượt khác ngay lúc này. Thử lại sau vài giây.`,
+      trong_app: true,
+    }, { status: 409 });
+  }
+  /**
+   * ⚠️ KHOÁ NHẢ Ở ĐÂU MỚI ĐÚNG: nó phải phủ đúng quãng «từ cổng tới lúc DÒNG SỔ ĐÃ CÓ».
+   *    Nhả lúc hàm trả về là SAI — hàm này trả `Response` luồng NGAY, còn `spawn` xảy ra SAU đó,
+   *    nên nhả ở đấy là mở lại đúng cuộc đua vừa đi đóng.
+   *    Nhả tới lúc luồng xem đóng cũng SAI — quá rộng, ô sẽ kẹt suốt lượt.
+   * ⇒ Nhả ở BA chỗ: lối thoát sớm · ngay sau `dangKyViec` · và `finally` của luồng (phòng ca chết
+   *   trước khi kịp sinh). `traCho` xoá khỏi `Set` nên gọi thừa là vô hại.
+   */
+
   // ⛔ Chặn mức dùng TRƯỚC khi đẻ tiến trình — agent chạy hoang = tiền thật.
   const chan = xinLuot(khach);
   if (!chan.cho_qua) {
+    traCho(maO);   // lối thoát sớm ⇒ NHẢ, KHÔNG thì ô kẹt vĩnh viễn
     return Response.json(
       { loi: chan.ly_do, cho_giay: chan.cho_giay },
       { status: 429, headers: { 'Retry-After': String(chan.cho_giay) } },
@@ -134,7 +218,13 @@ export async function POST(req: NextRequest) {
    *   "tôi muốn dừng" — cùng một họ với chốt `xoa_lien_ket` ở `/api/o`.
    */
   const huy = new AbortController();
-  let pidDangChay: number | null = null;
+  /**
+   * 🔻 ĐÃ BỎ `pidDangChay` (02/09) — nó được GHI ở `khiSinh` và **KHÔNG đầu nào đọc** (đo bằng
+   *    grep toàn tệp: đúng hai dòng, một khai một gán). Đây là lần thứ BA trong hai ngày cùng
+   *    một hình: `vi_sao_bo` rỗng 4/4 · `KetGhiSo` bị người gọi bỏ · và biến này.
+   * 📌 **Một giá trị KHÔNG ai đọc trông y hệt một giá trị đang canh gác điều gì đó** — nên nó
+   *    sống sót qua mọi vòng soi, kể cả sáu vòng hôm nay.
+   */
 
   moLuot();
   let daDong = false;
@@ -202,10 +292,54 @@ export async function POST(req: NextRequest) {
           tinHieuHuy: huy.signal,
           // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT.
           chayNen: true,
-          khiSinh: (pid) => {
-            pidDangChay = pid;
-            dangKyViec(maO, pid, maNhanSu); // để nút DỪNG còn giết được
+          khiSinh: (tien) => {
+            /**
+             * 🔴 ĐỌC GIÁ TRỊ TRẢ VỀ — người soi ngoài nhà bắt đúng chỗ này 02/09:
+             *    «chỉ còn PID trong console.warn / giá trị trả về, NHƯNG CALLER BỎ QUA».
+             * 🕳 Đây là `vi_sao_bo` LẦN THỨ HAI trong một ngày, và lần này do CHÍNH TÔI: tôi vừa
+             *    rút ra «thêm một trường mới chỉ là MỘT PHẦN BA việc» rồi làm lại đúng một phần
+             *    ba đó — sinh ra một giá trị mà KHÔNG đầu nào đọc.
+             * 📌 Và `console.warn` rơi vào SỔ MÁY CHỦ, chỗ Owner KHÔNG bao giờ mở. Giữ dấu ở nơi
+             *    KHÔNG ai nhìn thì **về phía Owner vẫn là MẤT DẤU** — khác duy nhất là người viết
+             *    yên tâm hơn. Nên tin này phải đi THẲNG vào ô của Owner.
+             */
+            const ghi = dangKyViec(maO, tien, maNhanSu); // để nút DỪNG còn giết được
+            traCho(maO);   // dòng sổ ĐÃ CÓ ⇒ cổng `xacMinhDong` tiếp quản ⇒ nhả khoá
+            if (ghi.ket === 'tu_choi_dong_cu_con_song') {
+              /**
+               * 🔴 FAIL-CLOSED ĐÃ NỔ — và lời báo phải đổi HẲN nghĩa, KHÔNG chỉ đổi chữ.
+               *
+               * 🕳 Bản trước (mã `de_len_dong_song`) báo: «đã ghi đè, tiến trình CŨ nay mồ côi,
+               *    anh tự `kill` lấy». Tức app tự tạo ra một tiến trình KHÔNG ai dừng được rồi
+               *    bảo Owner đi dọn. `hermes-aiboss-app-reviewer` bác đúng: **kêu KHÔNG phải là chặn.**
+               * ✅ Nay ngược lại: lượt MỚI bị từ chối và đã bị dừng; lượt CŨ giữ nguyên dòng sổ,
+               *    giữ nguyên nút Dừng. Owner KHÔNG phải đi dọn gì cả.
+               * 🔑 Tới được đây nghĩa là CỔNG PHÍA TRÊN đã bị lọt — nên câu báo phải nói ra điều
+               *    đó, chứ đừng để nó trông như một va chạm bình thường.
+               */
+              dieu.enqueue(goi({
+                loai: 'loi',
+                thong_diep:
+                  `Ô này ĐANG CHẠY một lượt khác (${ghi.ma_nhan_su_cu}, pid ${ghi.pid_cu}, ` +
+                  `đã chạy ${ghi.chay_duoc_giay} giây), nên tôi KHÔNG mở lượt mới đè lên nó.\n\n` +
+                  /**
+                   * 🔴 THÔI KHAI «đã được dừng lại» — người soi ngoài nhà bắt 02/09 (soi delta),
+                   *    và đây là ca NẶNG NHẤT trong ba việc, dù nó KHÔNG nằm ở mã.
+                   * 🕳 Tôi vá `gietViec` để nó thôi khai một điều nó chưa biết, rồi để lại một câu
+                   *    khai y hệt ở LỜI VĂN, cách đó vài chục dòng. Mã đã thành thật; chữ thì chưa.
+                   * 🔑 **Owner tin CHỮ, KHÔNG đọc mã.** Một lời khai dối trong câu thông báo có
+                   *    sức nặng ngang lời khai dối trong dòng lệnh — có khi hơn, vì nó tới thẳng
+                   *    người đọc mà KHÔNG qua một phép kiểm nào.
+                   */
+                  `Lượt anh vừa gửi: tôi ĐÃ GỬI lệnh dừng cho nó và đang chờ nó đóng — nếu nó chưa ` +
+                  `đóng trong ${giayTuEp()} giây thì tôi ép. Lượt ĐANG CHẠY thì **vẫn nguyên vẹn**, ` +
+                  'nút Dừng của nó vẫn dùng được — anh KHÔNG mất gì cả.\n\n' +
+                  'Chờ nó xong, hoặc bấm Dừng ở ô này rồi gửi lại.',
+              }));
+            }
           },
+          // ⚰️ Rút khỏi sổ ĐÚNG LÚC CON CHẾT — xem chú thích dài ở `finally` bên dưới.
+          khiChet: (tien) => xoaViec(maO, tien),
         })) {
           if (mau.loai === 'phien') {
             // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
@@ -226,6 +360,7 @@ export async function POST(req: NextRequest) {
           goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
         );
       } finally {
+        traCho(maO);   // phòng ca chết TRƯỚC khi kịp sinh ⇒ khoá vẫn được nhả
         clearInterval(nhip);
         /**
          * ⭐ Ghi mốc "lượt của TA vừa xong" để lượt SAU ⛔ không bị chính ta chặn nhầm.
@@ -237,7 +372,28 @@ export async function POST(req: NextRequest) {
          * ⇒ Lấy ngay MỘT lần (để có mốc nếu máy chủ tắt đột ngột), rồi **lấy lại**
          *    vài nhịp sau cho tới khi tệp thôi đổi. Luôn giữ mốc MỚI NHẤT.
          */
-        if (pidDangChay !== null) xoaViec(maO, pidDangChay); // việc xong ⇒ rút khỏi sổ
+        /**
+         * 🔴 ĐÃ BỎ HẲN `xoaViec` VÔ ĐIỀU KIỆN Ở ĐÂY (02/09/2026) — nó là gốc của câu ⑥.
+         *
+         * 🕳 Khối `finally` này chạy CẢ KHI người xem chỉ rời đi:
+         *      `cancel()` (:262-268) CỐ Ý KHÔNG giết con — đúng ý Owner, việc phải chạy tiếp
+         *      mà mấy lệnh `enqueue` ở :159 :162 :184 :214 :216 KHÔNG bọc `try`
+         *      ⇒ luồng đóng ⇒ enqueue NÉM ⇒ vòng thoát ⇒ rơi vào `finally` này
+         *      ⇒ xoá sổ trong khi CON VẪN ĐANG LÀM VIỆC.
+         *
+         * 📏 ĐO ĐƯỢC 02/09, KHÔNG phải suy: sổ khai 0 ô đang chạy trong khi tiến trình chở
+         *    chính lượt đang gõ (37895) và tiến trình của ghế soi (37591) đều SỐNG —
+         *    năm lượt hỏi liên tiếp đều ra 0. Nhân chứng mạnh nhất có thể có: thứ đi hỏi
+         *    câu hỏi CHÍNH LÀ công việc KHÔNG được ghi sổ.
+         *
+         * 💸 Hậu quả nặng nhất KHÔNG phải cái đèn sai, mà là **NÚT DỪNG BIẾN MẤT** cho một
+         *    ghế đang chạy và đang tiêu tiền — đúng thứ sổ này được dựng ra ngày 31/08 để cứu.
+         *
+         * 🔑 «Đường xem SSE kết thúc» KHÔNG phải «tiến trình đã xong». Hai câu khác nhau,
+         *    và chỗ này đang dùng câu thứ nhất để trả lời câu thứ hai.
+         * ⇒ Nay sổ do `khiChet` quyết (bắn từ `close` của chính tiến trình con).
+         *   Lượt xong bình thường thì `close` cũng đã bắn rồi — nên KHÔNG mất đường dọn nào.
+         */
         if (maPhienDaDung) {
           const maP = maPhienDaDung;
           const ghiLai = () => {

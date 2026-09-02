@@ -7,6 +7,8 @@ import { timNhanSu } from '@/lib/nhan-su';
 import { thuMucAgent, mocTepPhien } from '@/lib/doc-phien';
 import { themMatXich, khoCua, doTep } from '@/lib/goc-tich';
 import { datO, ghiMocKetThuc } from '@/lib/kho-phien';
+import { HAN_FORK_MS } from '@/lib/han-gio-fork';
+
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,7 +85,9 @@ export async function POST(req: NextRequest) {
     tien.stdout.on('data', (c: Buffer) => { ra += c.toString('utf8'); });
     tien.stdin.write('Trả lời đúng 1 chữ: ok');
     tien.stdin.end();
-    const gio = setTimeout(() => tien.kill('SIGTERM'), 180_000);
+    // ⏱ Hạn giờ lấy từ NGUỒN DUY NHẤT — xem `@/lib/han-gio-fork`. Trước đây là số trần ở đây,
+    //    và hai câu văn ở máy khách là hai bản chép của nó.
+    const gio = setTimeout(() => tien.kill('SIGTERM'), HAN_FORK_MS);
     tien.on('close', () => {
       clearTimeout(gio);
       try {

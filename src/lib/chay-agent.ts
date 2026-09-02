@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import { CAU_HINH } from './cau-hinh';
 
@@ -86,8 +86,31 @@ export interface ThamSoChay {
    * Chỉ nút DỪNG (qua `/api/dung`) mới được giết. Xem `kho-tien-trinh.ts`.
    */
   chayNen?: boolean;
-  /** Báo pid ra ngoài NGAY khi sinh, để ghi sổ tiến trình. */
-  khiSinh?: (pid: number) => void;
+  /**
+   * 🖐 Báo TAY CẦM ra ngoài NGAY khi sinh, để ghi sổ tiến trình.
+   *
+   * 🔴 ĐỔI 02/09/2026: trước đây chuyền `pid: number`. Đó là DÒNG SINH RA CẢ NGÀY HÔM ĐÓ —
+   *    ta có sẵn tay cầm và vứt nó đi để chuyền một con số, rồi xây bốn lớp dấu vân để đoán
+   *    lại thứ vừa vứt. Owner dừng lại và bắt quay đầu.
+   * 🔑 Chuyền tay cầm thì bên nhận KHÔNG phải hỏi «con số này còn là con của tôi KHÔNG» nữa —
+   *    câu đó biến mất, chứ KHÔNG phải được trả lời tốt hơn.
+   */
+  khiSinh?: (tien: ChildProcess) => void;
+  /**
+   * ⚰️ Báo ra ngoài LÚC TIẾN TRÌNH CON CHẾT THẬT — đối xứng với `khiSinh`.
+   *
+   * 🕳 VÌ SAO CÓ (02/09/2026, P0 «sổ phải nói đúng»): sổ tiến trình đang được xoá ở
+   *    `finally` của đường SSE, tức lúc NGƯỜI XEM rời đi — KHÔNG phải lúc việc xong.
+   *    Mà `chayNen: true` cố ý để con sống tiếp. Hai điều đó cộng lại ⇒ con CHẠY THẬT
+   *    mà sổ khai RẢNH ⇒ nút Dừng biến mất cho một ghế đang tiêu tiền.
+   * 🔑 `close` của tiến trình con là tín hiệu DUY NHẤT trả lời đúng câu «việc xong chưa».
+   *    Mọi tín hiệu khác (luồng xem đóng · vòng lặp thoát · người xem rời) chỉ trả lời
+   *    câu «ĐƯỜNG XEM còn KHÔNG» — một câu khác hẳn.
+   * 📌 Đo được cùng ngày: sổ khai 0 ô chạy trong khi hai tiến trình con đang sống,
+   *    và một dòng khác trỏ tới pid đã chết. Sổ lệch CẢ HAI CHIỀU, nên đây là lỗi
+   *    VÒNG ĐỜI, KHÔNG phải chuyện trễ một nhịp.
+   */
+  khiChet?: (tien: ChildProcess, ma: number | null) => void;
   /** Thư mục làm việc RIÊNG của nhân sự — quyết định phiên nằm ở kho nào. */
   thuMuc: string;
 }
@@ -248,7 +271,18 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
 
   const huy = () => tien.kill('SIGTERM');
   ts.tinHieuHuy?.addEventListener('abort', huy);
-  if (tien.pid) ts.khiSinh?.(tien.pid);
+  /**
+   * 🔴 CHỐT `if (tien.pid)` GIỮ NGUYÊN — @app-pm ghi thành dòng ĐỎ trong đề bài sau khi tôi đo.
+   *
+   * 🕳 Nó đang che một ca THẬT, và đề bài bản đầu KHÔNG nhắc tới nó nên người làm theo CHỮ sẽ
+   *    bỏ mất: spawn một lệnh KHÔNG tồn tại ⇒ `pid = undefined` · `exitCode = null` ·
+   *    `signalCode = null` (đo 02/09 14:35). Phép «còn sống» của sổ đọc bộ ba đó ra **TRUE**
+   *    ⇒ KHÔNG có chốt này thì ta ghi vào sổ một **DÒNG MA** khai «đang chạy» cho một tiến
+   *    trình chưa từng tồn tại. Phải tới sự kiện `error` thì `exitCode` mới thành `-2`.
+   * 📌 Cùng hình «xoá theo trí nhớ» mà đề bài tự cảnh báo — chỉ khác: thứ suýt bị xoá nhầm là
+   *    một CHỐT, KHÔNG phải một hàm. Và **chốt thì KHÔNG có tên, nên nó dễ mất hơn hàm.**
+   */
+  if (tien.pid) ts.khiSinh?.(tien);
 
   /**
    * Người xem đã rời đi hay chưa. Khi rời mà đang CHẠY NỀN thì vẫn phải TIÊU THỤ
@@ -345,6 +379,16 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
   }
 
   tien.on('error', (e) => {
+    /**
+     * ⚰️ GỠ DÒNG SỔ Ở CẢ ĐƯỜNG NÀY — @app-pm thêm vào đề bài 02/09 cùng lúc với chốt `if (tien.pid)`.
+     *
+     * 🔑 Hai chốt ấy là HAI VẾ của một việc, đừng làm một vế: chốt kia lo ca «chưa từng có dòng»,
+     *    vế này lo ca «đã có dòng rồi mới hỏng». `error` còn bắn cho lỗi KHÁC ngoài spawn hụt
+     *    (gửi tín hiệu thất bại chẳng hạn), và ở mấy ca đó dòng sổ ĐÃ tồn tại.
+     * 📌 Đúng nếp «một chốt ở cuối, đừng vá từng nhánh»: gọi ở đây thì nhánh lỗi MỚI nào sinh ra
+     *    sau này cũng mặc định sạch sổ, KHÔNG phải nhớ thêm.
+     */
+    ts.khiChet?.(tien, null);
     loiTienTrinh =
       `Không chạy được lệnh "${CAU_HINH.lenhClaude}": ${e.message}. ` +
       'Kiểm tra Claude Code đã cài và đã đăng nhập chưa.';
@@ -354,6 +398,11 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
   });
 
   tien.on('close', (ma) => {
+    // ⚰️ Báo NGAY, TRƯỚC mọi xử lý khác: dù nhánh nào chạy tiếp thì con cũng đã chết rồi.
+    // 🖐 KHÔNG cần chốt `if (tien.pid)` ở ĐƯỜNG XOÁ (khác đường ghi ở trên, đọc kỹ kẻo chép nhầm):
+    //    `xoaViec` so TAY CẦM, nên tay cầm KHÔNG có pid thì cũng KHÔNG khớp dòng nào ⇒ lời gọi
+    //    thành vô hại. Còn chốt lại thì ta lại đang dùng một con số để quyết một việc KHÔNG cần số.
+    ts.khiChet?.(tien, ma);
     // ⭐ Ghế bị CHÍNH TA chém thì phải nói thẳng là ta chém, kèm con số thật.
     //    ⛔ Đừng để nó rơi xuống nhánh dưới rồi hiện thành "lỗi công cụ" — đó là
     //    cách một phép đo tự nói dối: người dùng đi sửa câu hỏi trong khi thủ phạm

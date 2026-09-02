@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { gietViec, layViec, dsViec } from '@/lib/kho-tien-trinh';
+import { gietViec, layViec, dsViec, giayTuEp } from '@/lib/kho-tien-trinh';
 import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs';
@@ -22,7 +22,9 @@ export async function GET() {
     dang_chay: ds.map((v) => ({
       ma_o: v.ma_o,
       ma_nhan_su: v.ma_nhan_su,
-      pid: v.pid,
+      // 🔢 Số hiệu CHỈ ĐỂ HIỆN — đây là chỗ dùng hợp lệ duy nhất của nó: Owner cần một con số
+      //    để tự gõ `kill` khi app bó tay. Mọi QUYẾT ĐỊNH ở máy chủ đi bằng tay cầm.
+      pid: v.pid_de_hien_thi,
       bat_dau: v.bat_dau,
       chay_duoc_giay: Math.round((Date.now() - v.bat_dau) / 1000),
     })),
@@ -53,14 +55,29 @@ export async function POST(req: NextRequest) {
   const maO = typeof than.ma_o === 'string' ? than.ma_o.trim() : '';
   if (!/^o-\d+$/.test(maO)) return Response.json({ loi: 'Mã ô không hợp lệ.' }, { status: 400 });
 
-  const truoc = layViec(maO);
+  /**
+   * 🔴 ĐÃ BỎ `layViec(maO)` (@app-pm chốt 02/09). Nó từng ở đây CHỈ để lấy `ma_nhan_su` cho phản hồi,
+   *    và tình cờ kéo theo `quetRac` — chính «tác dụng phụ» @phong-ban-pm bắt lúc 10:12.
+   *    Nay `gietViec` tự trả `ma_nhan_su`, nên lời gọi này hết lý do tồn tại.
+   * 📌 Gỡ nốt sợi dây thay vì để nó lủng lẳng: một tác dụng phụ đã hết việc mà vẫn nằm đó thì
+   *    người sau sẽ tưởng nó CÓ việc, và sẽ giữ nó lại vì sợ.
+   */
   const ket = gietViec(maO);
 
   // ⛔ Không có việc để dừng ⇛ ⛔ KHÔNG phải lỗi: người bấm chỉ chậm hơn máy một nhịp.
   return Response.json({
     xong: true,
     da_giet: ket.da_giet,
-    pid: ket.pid ?? null,
-    ma_nhan_su: truoc?.ma_nhan_su ?? null,
+    // 🏷 Chở LÝ DO ra tới máy khách. Trường này VÔ NGHĨA nếu KHÔNG ai đọc — nên chỗ đọc nó
+    //    (`UngDung.tsx` · `dungViec`) đi CÙNG bản vá này, KHÔNG tách nhịp.
+    vi_sao: ket.vi_sao,
+    pid: ket.pid_de_hien_thi ?? null,   // 🔢 để HIỆN cho Owner gõ `kill`, KHÔNG để quyết định
+    /**
+     * ⏱ NGƯỠNG TỰ ÉP, lấy từ MÁY CHỦ — máy khách KHÔNG được gõ cứng con số này.
+     * 🔑 Máy chủ là nơi con số ấy có hiệu lực, nên nó cũng phải là nơi DUY NHẤT khai ra nó.
+     *    Chở nó theo phản hồi thì đổi hằng số ở một chỗ là câu chữ Owner đọc đổi theo.
+     */
+    giay_tu_ep: giayTuEp(),
+    ma_nhan_su: ket.ma_nhan_su ?? null,
   });
 }
