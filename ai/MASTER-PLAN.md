@@ -1122,6 +1122,44 @@ và ba ghế đã mất thời gian vì đúng loại này hai lần trong một
 
 ---
 
+## 4t. 🧨 BIẾN THỂ THỨ BA: **tiêu chí tự thoả mãn được bằng THẤT BẠI**
+
+> `claude-aiboss-app-exe` bắt được (02/09 08:26), **ngay trong cái cổng nghiệm thu cả đội vừa chốt**.
+
+```
+:2213 cũ   if (ket === 'bo-do') break;
+           oNoNapLai.current.delete(i);   ⇐ 'hong' CŨNG xoá nợ, mà ô đó CHƯA nạp được
+           daTra += 1;                    ⇐ và đếm một lần TRƯỢT thành một lần CỨU
+```
+🔑 `daTra` chính là con số ta chốt làm **cổng nghiệm thu** («daTra ≥ 1 ⇒ bản vá đang cứu thật»).
+Để nguyên thì **cổng đó xanh được bằng một lần nạp TRƯỢT** — nó đo đúng số lần CHẠM, KHÔNG đo số
+lần CỨU ĐƯỢC.
+
+### 📐 BA BIẾN THỂ CỦA CÙNG MỘT BỆNH — nay đủ bộ, ghi lại để nhận ra lần sau
+```
+① thoả bằng MẪU RỖNG      «dòng mới hỏng = 0»      ⇒ xanh khi KHÔNG có dòng mới nào
+② thoả bằng ĐỊNH NGHĨA     «đầu ra utf-8 hợp lệ»    ⇒ `iconv -c` bảo đảm điều đó, luôn luôn
+③ thoả bằng THẤT BẠI       «daTra ≥ 1»              ⇒ một lần nạp TRƯỢT cũng cộng vào
+```
+⚠️ **③ kín nhất trong ba.** ① và ② còn có thể nhận ra bằng cách đọc kỹ tiêu chí. ③ thì tiêu chí
+nghe **hoàn toàn đúng** — «đếm số lần trả nợ thành công» — và cái sai nằm ở **chỗ tăng biến đếm**,
+cách xa chỗ phát biểu tiêu chí. Người viết tiêu chí và người viết chỗ đếm có thể là hai lúc khác nhau
+của cùng một người.
+✅ **Cách chữa exe dùng:** gom luật xoá nợ về MỘT hàm ở tầng module, và khai rõ trạng thái nào mới
+tính là xong (`'hong'` và `'bo-do'` ⇒ **GIỮ nợ**). `daTra` nay chỉ đếm lần nạp THẬT SỰ xong.
+📌 Và nó tự đi thêm một bước ngoài chữ của người soi — nhưng **khai rõ là bước tự đi**, kèm cách lùi
+(«revert phần `:2213` là đủ, phần `:2139` đứng độc lập»). Đó là cách mở rộng phạm vi đúng: **làm thêm
+thì được, nhưng phải nói ra và phải để lại đường lùi riêng cho phần làm thêm.**
+
+🔑 **Luật rút cho mọi cổng nghiệm thu sau này:** hỏi ba câu, KHÔNG phải một —
+```
+· cổng này có xanh được khi KHÔNG có dữ liệu KHÔNG?        (mẫu rỗng)
+· có xanh được do chính công cụ bảo đảm KHÔNG?              (định nghĩa)
+· có xanh được khi việc THẤT BẠI KHÔNG?                     (thất bại)
+```
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
