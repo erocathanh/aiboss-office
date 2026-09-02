@@ -1160,6 +1160,63 @@ thì được, nhưng phải nói ra và phải để lại đường lùi riên
 
 ---
 
+## 4u. 🛑 NGƯỜI SOI NGOÀI NHÀ: FAIL 5/6 · NO-GO — và **bản vá KHUẾCH ĐẠI một lỗi có sẵn**
+
+> `hermes-aiboss-app-review` 02/09 09:4x, soi CÂY LÀM VIỆC (bản vá chưa commit).
+
+### 🎯 ĐIỂM MÙ CHUNG (câu ⑥) — nguy hơn tất cả những thứ ta đang vá
+> *cả ba coi «kết thúc đường xem SSE» là «tiến trình đã xong»*
+```
+api/chat/route.ts:260-268  cancel() CỐ Ý KHÔNG giết con — con chạy tiếp, đúng thiết kế
+api/chat/route.ts:240      finally gọi xoaViec(maO, pid) VÔ ĐIỀU KIỆN
+enqueue :214 :216 :218 :221 KHÔNG bọc try (chỉ nhịp tim :155 có bọc)
+⇒ trình duyệt rời ⇒ enqueue ném ⇒ vòng thoát ⇒ finally ⇒ SỔ BỊ XOÁ trong khi CON VẪN CHẠY
+```
+**Hậu quả:** tiến trình vẫn ghi `.jsonl` · sổ đã xoá · `/api/dung` báo RẢNH · nút Dừng biến mất ·
+bộ chạy nền tưởng ghế rảnh. Và **chốt ① của PM vô dụng ở đây**: `kill(pid,0)` KHÔNG có pid nào để
+kiểm, vì dòng đã bị xoá.
+```
+hôm qua : «PID tồn tại»           bị coi là «lượt đang bận»
+hôm nay : «consumer SSE kết thúc» bị coi là «child process kết thúc»
+⇒ cùng họ, cao hơn một tầng: tầng VÒNG ĐỜI
+```
+
+### 🔴 VÀ VẾ `claude-aiboss-app-exe` TỰ NÓI RA — bản vá KHUẾCH ĐẠI lỗi có sẵn
+```
+TRƯỚC bản vá : máy khách đọc sổ đó ĐÚNG MỘT LẦN mỗi lần tải trang
+SAU  bản vá  : đọc MỖI 5 GIÂY
+⇒ một dòng bị xoá oan nay được BƠM LẠI liên tục thay vì chỉ sai tới lần tải kế
+```
+🔑 **Lỗi có sẵn cộng bản vá đúng-ý-định = lỗi tệ hơn.** Bản vá KHÔNG tạo ra lỗi ⑥, nhưng nó biến
+một lỗi *thỉnh thoảng* thành một lỗi *liên tục*. Ai chỉ hỏi «bản vá có tạo lỗi mới KHÔNG» sẽ trả lời
+KHÔNG — và bỏ sót câu đúng: **«bản vá có làm lỗi CŨ nặng thêm KHÔNG?»**
+📌 Đây là câu thứ TƯ phải thêm vào bộ cổng nghiệm thu (ba câu cũ ở mục 4t).
+
+### ⚠️ BIÊN AN TOÀN — suýt hỏng, và ghi ra để biết mình may tới mức nào
+```
+bộ hẹn nạp ĐANG canh, và ô cuối cùng nó chờ CHÍNH LÀ ô của exe
+⇒ exe trả lời xong lượt đó là nó NẠP NGAY
+⇒ lệnh NO-GO tới trong ĐÚNG lượt đó. Chậm MỘT lượt là bản 5-FAIL đã lên app Owner.
+```
+🔑 Và bản đó **dựng từ mã CHƯA commit** ⇒ nếu nạp, app Owner sẽ chạy một thứ **KHÔNG ứng với commit
+nào**, KHÔNG dựng lại được, KHÔNG lùi được bằng `git`.
+📌 **Luật rút ra: KHÔNG hẹn nạp khi vòng soi ngoài nhà chưa trả lời.** Bộ hẹn tự canh là thứ tốt,
+nhưng nó KHÔNG biết có ai đang soi — nó chỉ biết sáu ô có im hay KHÔNG.
+
+### 📊 CHẤM ĐIỂM CÁC QUYẾT ĐỊNH CỦA PM
+```
+① GIỮ đường nâng lúc tải trang        → PASS  (quyết định duy nhất đứng vững)
+③ mở lại NÂNG ngay sau chốt ①          → FAIL  (phải chờ CẢ HAI chốt)
+② `kill(pid,0)` đóng lỗ dòng rác       → FAIL  (pid dùng lại · zombie · EPERM · sống mà KHÔNG thuộc ô)
+④ còn đua khi hạ cờ giữa lúc tab xả chữ → FAIL
+⑤ ba đường nạp có thể chồng nhau        → FAIL
+```
+⚠️ **Lỗi hợp đồng trong bản vá:** sổ CÓ `ma_nhan_su` (`kho-tien-trinh.ts:19-28`) nhưng
+`/api/danh-thuc/nhan` VỨT trường đó, chỉ trả `ma_o`; máy khách dựng Set chỉ từ mã ô.
+⇒ **danh tính LƯỢT mất trên đường truyền** — cùng một ô đổi ghế/phiên thì KHÔNG phân biệt được.
+
+---
+
 ## 5. Những thứ KHÔNG bắt chước LobeHub (đã cân, đã loại)
 
 ```
