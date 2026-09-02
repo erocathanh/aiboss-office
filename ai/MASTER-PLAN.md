@@ -1444,6 +1444,16 @@ lần thì KHÔNG.
 
 ## 4z. 🔁 MẮT CANH GỌI LẠI VỀ TIN ĐÃ XỬ — mỗi lần là MỘT LƯỢT CHẠY THẬT, tiền thật
 
+> 📏 **CA ĐO ĐƯỢC #2 — 02/09 18:1x, chính ghế `claude-aiboss-app-pm`:** mắt canh báo *«có 2 tin mới»*.
+> Ba tin cuối trên kênh: **18:08 của TÔI · 18:00 của @phong-ban-pm (đã đọc, đã trả lời lúc 18:14) ·
+> 18:14 của TÔI**. ⇒ Hai «tin mới» ấy là **hai tin do chính tôi vừa ghi**.
+> 🔑 Bộ đếm đang đếm **DÒNG MỚI TRONG TỆP**, chứ không đếm **TIN GỬI CHO MÌNH MÀ MÌNH CHƯA ĐỌC**.
+>    Hai câu đó trùng nhau ở mọi ca, TRỪ ca người đọc cũng là người ghi — mà đó lại là ca thường nhất,
+>    vì ghế nào cũng vừa đọc kênh vừa ghi kênh.
+> 💸 Giá: mỗi lần đánh thức = **một lượt chạy thật, tiền thật của Owner**. Hôm nay ≥2 lần.
+> 🔧 Bản vá rẻ nhất: bỏ qua tin có `FROM: <chính mã ghế đang canh>` khi đếm. **Giao `claude-aiboss-app-exe`**
+>    (script sống, KHÔNG phải việc PM). ⚖️ quan trọng CÓ · khẩn KHÔNG ⇒ vẫn XẾP HÀNG, KHÔNG chen.
+
 **Đo 02/09 12:49 (sổ của chính mắt canh, `~/Operations/scripts/.mc-<ghế>/log`):**
 ```
 12:43:33  rung 2/68  · quét tới dòng 23229
