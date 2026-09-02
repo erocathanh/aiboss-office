@@ -55,6 +55,23 @@ describe('số cửa và số chỗ trả JSON', () => {
   test('đúng 8 tệp route.ts — thêm/bớt cửa là đổi bề mặt của app', () => {
     assert.equal(Object.keys(CUA).length, 8, `nay có ${Object.keys(CUA).length} cửa: ${Object.keys(CUA).sort().join(', ')}`);
   });
+  test('🔴 Q1 — MỖI tệp route phải có ÍT NHẤT MỘT phản hồi bộ đo NHẬN DIỆN ĐƯỢC', () => {
+    /**
+     * 🕳 Reviewer NO-GO 22:35: bộ nhận diện chỉ bắt phản hồi khớp CẢ BA điều kiện cùng lúc
+     *    (đúng chữ `Response` · method `json` · đối số đầu là ObjectLiteral). Đổi cách viết
+     *    phản hồi ⇒ nó thành VÔ HÌNH, và bộ đo VẪN XANH vì tôi chỉ đếm số TỆP.
+     * 🔑 «Không nhận diện được» đang IM. Im là chỗ hỏng — một cửa viết kiểu khác sẽ lặng lẽ
+     *    rơi khỏi vùng đóng băng, và số 8 tệp vẫn đúng.
+     * ✅ Nay: tệp nào ra 0 phản hồi nhận diện được ⇒ ĐỎ, kèm tên tệp.
+     */
+    const cam = Object.entries(CUA).filter(([, ds]) => ds.length === 0).map(([t]) => t);
+    assert.deepEqual(cam, [],
+      'có tệp route KHÔNG có phản hồi nào bộ đo đọc được ⇒ cửa đó nằm NGOÀI vùng đóng băng mà không ai biết');
+  });
+  test('ĐỐI CHỨNG DƯƠNG — tổng số phản hồi nhận diện được đủ lớn', () => {
+    const tong = Object.values(CUA).reduce((a, d) => a + d.length, 0);
+    assert.ok(tong >= 30, `chỉ nhận diện được ${tong} phản hồi ⇒ bộ nhận diện có thể đang MÙ`);
+  });
 });
 
 describe('cửa DỪNG — nơi ba tuần vá dồn vào', () => {

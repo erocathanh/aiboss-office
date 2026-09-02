@@ -17,7 +17,7 @@ Chọn `node --test` (có sẵn từ Node 18, dự án ghim 24.19.0) thay vì `v
 · thêm một bộ chạy thử là thêm một thứ phải bảo trì, mà ta chưa có nhu cầu nào nó giải được
 ```
 
-## Phủ được gì — **56 phép thử, 4 tầng**
+## Phủ được gì — **64 phép thử, 4 tầng** (bản v2, vá theo NO-GO 22:35)
 ```
 ① dong-bang-ungdung.test.mts  26 phép · 21 khai báo CẤP MÔ-ĐUN của UngDung.tsx
      LA_BO_DUNG_SAN · 5 bộ ghế (nội dung + mã phiên) · chenRanh · boDau · maOCua · datMa
@@ -79,5 +79,18 @@ bỏ khoá `giay_tu_ep` khỏi /api/dung      ca 02/09: hai đầu trôi mỗi b
 ```
 
 ## Sau khi chia tệp thì làm gì
-Mấy khai báo trên sẽ nằm ở TỆP KHÁC. Lúc đó **sửa hằng `NGUON` trong bài thử** thành danh sách tệp
-mới — hoặc đặt biến `NGUON_THU`. **Bài thử phải chạy theo mã; đừng bao giờ sửa mã cho vừa bài thử.**
+### 🔴 KHÔNG PHẢI CHỤP LẠI — đây là chỗ bản v1 sai và v2 sửa
+Bản v1 buộc phải chụp lại bản hình dạng sau khi chia — mà chụp lại là **so mã đã chia với chính nó**.
+Bản v2 đóng băng **TẬP HỢP GỘP**, dựa trên một tính chất đo được:
+```
+một lần CHIA giữ nguyên TẬP HỢP, chỉ đổi cách chia tập hợp ấy ra các tệp
+⇒ dời một móc sang tệp khác: tổng KHÔNG đổi   ·   làm rơi một móc: tổng ĐỔI
+```
+Tính chất ấy **được chứng minh bằng vật thử**, không phải bằng lời hứa — xem `bai-thu/vat-thu/`:
+một component tách thành hai, ký hiệu gộp **giống hệt**; tách mà làm rơi, ký hiệu **khác**.
+
+⇒ Sau khi chia, chỉ cần **trỏ `NGUON_THU` sang danh sách tệp mới** (ngăn bằng dấu phẩy).
+   **KHÔNG chụp lại.** Nếu ký hiệu đổi thì đó là thứ CẦN đọc, không phải thứ cần chụp đè.
+
+⚠️ Ký hiệu gộp **KHÔNG canh thứ tự móc GIỮA các component** — thứ tự chỉ có nghĩa trong phạm vi
+một component, và trong từng component thì vẫn canh (`thuTuTrongTungHam`).

@@ -14,7 +14,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { bocThuan } from './boc-mo-dun.mjs';
+import { bocThuanNhieuTep } from './boc-mo-dun.mjs';
 
 /**
  * 🔀 CHO PHÉP TRỎ NGUỒN KHÁC — dùng cho ĐỐI CHỨNG ÂM và cho lúc SAU KHI CHIA TỆP.
@@ -23,7 +23,7 @@ import { bocThuan } from './boc-mo-dun.mjs';
  */
 const NGUON = process.env.NGUON_THU
   ?? new URL('../src/components/UngDung.tsx', import.meta.url).pathname;
-const { tep, ten, bo } = bocThuan(NGUON);
+const { tep, ten, bo } = bocThuanNhieuTep(NGUON.split(','));
 const M = await import(tep);
 
 describe('bóc được đúng thứ mong đợi', () => {

@@ -60,6 +60,10 @@ thu "④ BỎ SÓT móc gọi qua BÍ DANH (thêm phụ thuộc vào dungTruocKh
     "}, [toanMan]);|||}, [toanMan, dsO]);" \
     bai-thu/dong-bang-than.test.mts
 
+thu "⑤ ĐỔI CHỮ HIỂN THỊ trong JSX — phép phá do REVIEWER dựng, bản cũ XANH" \
+    '🧬 Fork về ghế này|||🧬 Fork sang ghế này' \
+    bai-thu/dong-bang-than.test.mts
+
 echo
 echo "═══ ĐỐI CHỨNG ÂM cho HỢP ĐỒNG CỔNG ═══"
 TONG=$((TONG+1))

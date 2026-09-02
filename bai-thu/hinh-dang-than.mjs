@@ -103,7 +103,36 @@ export function kyHieuThan(duongDan, tenHam = 'UngDung') {
           if (v && ts.isStringLiteral(v)) return `${t}="${v.text}"`;
           return t;
         }).sort().join(',');
-        ra.push(`${the}[${thuocTinh}]`);
+        /**
+         * 🔴 Q2 — GHI CẢ PHẦN CHỮ. Reviewer dựng một phép phá đổi CHỮ HIỂN THỊ trong JSX và ký hiệu
+         *    của tôi TRÙNG KHÍT ⇒ bộ đo XANH. Tức đổi một câu Owner ĐỌC mà thước im.
+         * 📌 Mười phép phá của tôi chỉ phá đúng những trường bộ đo ĐÃ TUYÊN BỐ NHÌN.
+         *    **Người viết thước tự dựng phép phá thì chỉ phá được chỗ mình đã nghĩ tới.**
+         */
+        /**
+         * ⚠️ VÁ LẦN HAI — bản vá Q2 đầu tiên của tôi MỚI BẮT ĐƯỢC MỘT NỬA.
+         * 🕳 Tôi chỉ lấy `JsxText` (chữ trần giữa hai thẻ). Nhưng phần lớn chữ trong tệp này nằm
+         *    trong BIỂU THỨC: `{o.dangFork ? '…' : '🧬 Fork về ghế này'}`. Chạy đúng phép phá
+         *    reviewer dựng ⇒ bộ đo VẪN XANH lần thứ hai.
+         * 🔑 Tôi vá theo ĐÚNG CHỮ trong lời bác («ghi cả phần chữ») thay vì đi đo xem chữ THẬT SỰ
+         *    nằm ở đâu trong cây. Sửa theo mô tả của lỗi, không theo hình dạng của vật.
+         * ✅ Nay lấy CẢ chuỗi ký tự nằm trong biểu thức con — đó mới là chỗ Owner thật sự đọc.
+         */
+        const layChu = (c) => {
+          if (ts.isJsxText(c)) return [c.getText(src).replace(/\s+/g, ' ').trim()];
+          const ra = [];
+          if (ts.isJsxExpression(c) && c.expression) {
+            (function di(e) {
+              if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ra.push(e.text.replace(/\s+/g, ' ').trim());
+              ts.forEachChild(e, di);
+            })(c.expression);
+          }
+          return ra;
+        };
+        const chu = ts.isJsxElement(x)
+          ? x.children.flatMap(layChu).filter(Boolean).join('|')
+          : '';
+        ra.push(`${the}[${thuocTinh}]${chu ? '«' + chu + '»' : ''}`);
       }
       ts.forEachChild(x, di);
     })(n);
@@ -142,4 +171,58 @@ export function tomTat(k) {
     soTheKhacNhau: new Set(k.jsx.map((x) => x.split('[')[0])).size,
     soHamCon: k.hamCon.length,
   };
+}
+
+/**
+ * 🧮 KÝ HIỆU GỘP CHO NHIỀU TỆP — vá Q4.2 ở tầng THÂN, và đây là chỗ tôi đổi MÔ HÌNH chứ không
+ *    chỉ đổi tham số.
+ *
+ * 🔑 Ý CHÍNH: **một lần CHIA giữ nguyên TẬP HỢP, chỉ đổi CÁCH CHIA TẬP HỢP ẤY RA CÁC TỆP.**
+ *    Dời một móc sang tệp khác thì tổng số móc KHÔNG đổi. Làm rơi một móc thì tổng ĐỔI.
+ *    ⇒ Đóng băng **tập hợp GỘP** thì nó SỐNG QUA một lần chia ĐÚNG, và ĐỎ khi có thứ rơi mất.
+ * ⚖️ Đây là câu trả lời cho đúng lỗ reviewer chỉ: bản cũ buộc phải chụp lại sau khi chia, mà chụp
+ *    lại là so mã đã chia với chính nó. Bản này **KHÔNG cần chụp lại** — nên cũng KHÔNG có chỗ
+ *    cho cái đường vòng ấy.
+ * ⚠️ Cái GIÁ phải khai: ký hiệu gộp KHÔNG canh THỨ TỰ móc GIỮA các tệp (thứ tự chỉ có nghĩa
+ *    trong phạm vi MỘT component). Trong phạm vi mỗi component thì thứ tự vẫn được canh.
+ */
+export function kyHieuGop(dsDuongDan, tenHam) {
+  const ds = Array.isArray(dsDuongDan) ? dsDuongDan : [dsDuongDan];
+  if (ds.length === 0) throw new Error('kyHieuGop: danh sách RỖNG ⇒ CHƯA ĐO, không phải ĐẠT');
+  const theoHam = {};
+  for (const d of ds) {
+    for (const ten of tenHam ? [tenHam] : timComponent(d)) {
+      const k = kyHieuThan(d, ten);
+      if (theoHam[ten]) throw new Error(`Hai tệp cùng khai component \`${ten}\` ⇒ LỖI THẬT, không bỏ qua`);
+      theoHam[ten] = k;
+    }
+  }
+  const tenHams = Object.keys(theoHam).sort();
+  if (tenHams.length === 0) throw new Error(`KHÔNG thấy component nào trong ${ds.length} tệp ⇒ bộ đo đang soi NHẦM CHỖ`);
+  const gop = (lay) => tenHams.flatMap((t) => lay(theoHam[t])).sort();
+  return {
+    soTep: ds.length,
+    component: tenHams,
+    // tập hợp GỘP — sống qua một lần chia đúng
+    mocTheoLoai: gop((k) => k.moc.map((m) => m.loai)),
+    phuThuoc: gop((k) => k.moc.filter((m) => m.phuThuoc).map((m) => m.phuThuoc.join('+'))),
+    trangThai: gop((k) => k.trangThai.map((t) => `${t.goi} ${t.ten} = ${t.khoiTao}`)),
+    jsx: gop((k) => k.jsx),
+    hamCon: gop((k) => k.hamCon.map((h) => h.ten)),
+    // thứ tự móc TRONG TỪNG component — vẫn canh, chỉ không canh giữa các component
+    thuTuTrongTungHam: Object.fromEntries(tenHams.map((t) => [t, theoHam[t].moc.map((m) => m.loai)])),
+  };
+}
+
+/** Tìm mọi hàm cấp mô-đun có TRẢ VỀ JSX ⇒ coi là component. Dùng khi chưa biết tên sau khi chia. */
+export function timComponent(duongDan) {
+  const src = ts.createSourceFile(duongDan, fs.readFileSync(duongDan, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const ra = [];
+  src.forEachChild((n) => {
+    if (!ts.isFunctionDeclaration(n) || !n.name || !n.body) return;
+    let coJsx = false;
+    (function di(x) { if (ts.isJsxElement(x) || ts.isJsxSelfClosingElement(x) || ts.isJsxFragment(x)) coJsx = true; ts.forEachChild(x, di); })(n.body);
+    if (coJsx) ra.push(n.name.text);
+  });
+  return ra;
 }

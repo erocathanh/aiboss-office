@@ -20,8 +20,42 @@ import path from 'node:path';
 const KHONG_THUAN =
   /\b(useState|useRef|useEffect|useCallback|useMemo|document|window|localStorage|fetch|Math\.random|Date\.now|new Date)\b/;
 
+/**
+ * 📂 GOM NHIỀU TỆP — vá Q4.2 (reviewer NO-GO 22:35).
+ *
+ * 🕳 Bản đầu nhận ĐÚNG MỘT đường nguồn. Mà đây là bộ đo dựng ra để nghiệm thu việc CHIA TỆP —
+ *    **nó KHÔNG đọc nổi một kho đã chia.** Sau khi chia, nó chỉ còn hai kết cục:
+ *      đỏ vì không tìm thấy · hoặc có người «sửa cho chạy» bằng cách trỏ sang tệp mới
+ *    ⇒ và trỏ sang tệp mới CHÍNH LÀ chụp lại mã đã chia rồi so với chính nó = xanh vô nghĩa.
+ * 📌 Tôi viết trong README rằng «sau khi chia thì sửa NGUON thành danh sách tệp» — một câu chữ
+ *    hứa một khả năng MÃ KHÔNG CÓ. Đúng bệnh «chú thích hứa nhiều hơn mã làm», mắc ngay trong
+ *    tài liệu của công cụ dựng ra để chống nó.
+ * ✅ Nay nhận MỘT đường HOẶC một MẢNG đường, và gom kết quả lại thành một bộ duy nhất.
+ */
+export function bocThuanNhieuTep(dsDuongDan) {
+  const ds = Array.isArray(dsDuongDan) ? dsDuongDan : [dsDuongDan];
+  if (ds.length === 0) throw new Error('bocThuanNhieuTep: danh sách RỖNG ⇒ CHƯA ĐO, không phải ĐẠT');
+  const manh = [], ten = [], bo = [], theoTep = {};
+  for (const d of ds) {
+    const r = bocThuan(d, true);
+    manh.push(`// ── ${d} ──`, r.manhVan);
+    ten.push(...r.ten); bo.push(...r.bo);
+    theoTep[d] = r.ten;
+  }
+  const trung = ten.filter((t, i) => ten.indexOf(t) !== i);
+  if (trung.length) {
+    throw new Error(
+      `TRÙNG TÊN giữa các tệp: ${[...new Set(trung)].join(', ')}\n` +
+      '⇒ sau khi chia, hai tệp cùng khai một tên là một LỖI THẬT, KHÔNG phải chuyện của bộ đo bỏ qua.',
+    );
+  }
+  const tep = path.join(os.tmpdir(), `boc-gom-${process.pid}-${Date.now()}.mts`);
+  fs.writeFileSync(tep, manh.join('\n\n'), 'utf8');
+  return { tep, ten, bo, theoTep, soTep: ds.length };
+}
+
 /** Bóc mọi khai báo cấp mô-đun THUẦN + mọi khai báo KIỂU, trả về đường dẫn tệp .mts tạm. */
-export function bocThuan(duongDanTsx) {
+export function bocThuan(duongDanTsx, chiTraVan = false) {
   const ma = fs.readFileSync(duongDanTsx, 'utf8');
   const src = ts.createSourceFile(duongDanTsx, ma, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   // 🔴 THU TÊN ĐÃ NHẬP TỪ NGOÀI — khai báo nào dùng tới chúng thì KHÔNG bóc được.
@@ -63,7 +97,9 @@ export function bocThuan(duongDanTsx) {
     manh.push('export ' + chu.replace(/^export\s+/, ''));
     ten.push(t);
   });
+  const manhVan = manh.join('\n\n');
+  if (chiTraVan) return { manhVan, ten, bo };
   const tep = path.join(os.tmpdir(), 'boc-' + path.basename(duongDanTsx, '.tsx') + '-' + process.pid + '.mts');
-  fs.writeFileSync(tep, manh.join('\n\n'), 'utf8');
+  fs.writeFileSync(tep, manhVan, 'utf8');
   return { tep, ten, bo };
 }

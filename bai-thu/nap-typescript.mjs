@@ -33,6 +33,18 @@ function timTypescript() {
 }
 
 const duong = timTypescript();
-export default (await import(duong)).default;
-/** In ra để người đọc biết bộ đo lấy công cụ từ ĐÂU — khỏi đoán. */
+const mod = (await import(duong)).default;
+
+/**
+ * 🔴 Q5 (reviewer NO-GO 22:35): «có thể nạp NHẦM kho hoặc KHÁC phiên bản TypeScript».
+ * 🔑 Đúng — và cái nguy KHÔNG phải nạp nhầm, mà là **nạp nhầm mà KHÔNG ai biết**.
+ *    Nên bộ này KHAI RA cả hai thứ, và bài thử ĐỌC lời khai đó rồi đối chiếu `package.json`.
+ * ⚠️ Lệch phiên bản KHÔNG tự động là hỏng — cây cú pháp giữa hai bản gần nhau thường như nhau.
+ *    Nhưng nó phải NÓI RA, để nếu ký hiệu đổi thì ta biết chỗ đầu tiên cần nghi.
+ */
 export const nguonTypescript = duong;
+export const phienBanTypescript = mod.version;
+/** `true` nếu typescript lấy từ chính kho đang đứng, `false` nếu mượn từ kho chính. */
+export const layTuKhoDangDung =
+  duong === new URL('../node_modules/typescript/lib/typescript.js', import.meta.url).pathname;
+export default mod;
