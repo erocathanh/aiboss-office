@@ -1442,6 +1442,46 @@ lần thì KHÔNG.
 
 ---
 
+## 4z-bis. 🔔 KHÔNG AI BÁO CHO PM KHI **HERMES** XONG VIỆC — 32 phút chết đo được (02/09 22:2x)
+
+> Owner bắt tại trận: *«sao ghế nào cũng ngồi im»* · và hỏi đúng gốc: *«em vẫn không dùng heartbeat gì
+> khi rung và chờ hả? nên cái chuông nó chết theo em»*
+
+### 📏 ĐO 02/09 22:4x — hạ tầng CÓ SẴN, chỗ hở nằm chỗ khác
+```
+launchd mat-canh-*        5 mục ĐANG NẠP, có cả ghế exe · StartInterval 90 giây   ⇒ hạ tầng CÓ
+phanh trong mat-canh-ghe.sh:  TRAN=68 lần / cửa sổ 3600s · CACH=300s giữa hai lần rung
+mắt canh `nohup` của PM   0 tiến trình còn sống — chỉ còn 7 tệp log rỗng
+                          ⇒ chúng CHẾT theo ranh giới phiên, nên GIỮA HAI LƯỢT của PM: KHÔNG có gì canh
+chuông tay PM rung 22:35  exe nhặt lúc 22:49 ⇒ TRỄ ~14 phút (90s dò + 300s giãn + kiểm ghế-đang-im)
+```
+
+### 🔑 BA VẾ KHÁC NHAU, TRƯỚC NAY BỊ GỘP LÀM MỘT
+```
+① chuông tay `/api/danh-thuc`   nhanh, nhưng HẾT HẠN 3 phút và KHÔNG có lần rung lại
+                                 tab không hiện đúng ô ⇒ rơi im lặng (đo 2 lần trong ngày)
+② mắt canh launchd               BỀN, sống ngoài lượt — nhưng nó canh **KÊNH**, không canh **CHUÔNG**,
+                                 và giãn 5 phút ⇒ nó là đường CHẬM MÀ CHẮC
+③ báo cho PM khi việc XONG       🔴 KHÔNG TỒN TẠI với **Hermes** — Hermes không có ghế, không có kênh
+                                 riêng, kết thúc phiên là hết. Quên ghi kênh ⇒ KHÔNG ai sửa được nữa.
+```
+🕳 **Ca thật:** 21:48 giao reviewer, xong 21:55 (6m49s, 58 lượt gọi, KHÔNG lỗi) — **không ghi kênh**.
+21:30 giao web-noibo, chạm trần 60/60 lượt — **không ghi kênh**. PM canh KÊNH ⇒ với PM cả hai vẫn
+«đang chạy». **32 phút mọi ghế ngồi im, và Owner là người phát hiện.**
+
+📌 **Ghế Claude còn LƯỢT SAU để sửa việc quên báo. Hermes thì KHÔNG.** Với Hermes, «quên báo» là
+lỗi vĩnh viễn — nên chỗ canh phải nằm NGOÀI Hermes, không thể trông vào kỷ luật của nó.
+
+### 🔧 VIỆC — chưa giao, xếp hàng
+```
+· một mắt canh launchd canh THƯ MỤC LOG Hermes (~/Operations/logs/hermes-*.log):
+  log ngừng lớn > N giây mà PM chưa ghi kênh về nó ⇒ rung PM
+· PM đổi nếp: rung tay xong PHẢI đo mtime ghế kia rồi mới được nói «đã giao»
+  (đã áp dụng từ 22:35, nhưng đó là kỷ luật, chưa phải cái chặn)
+```
+⚖️ quan trọng CÓ · khẩn KHÔNG ⇒ XẾP HÀNG. Nhưng nó là loại **tự trả tiền ngay**: hôm nay mất 32 phút,
+và cái mất KHÔNG phải 32 phút — mà là Owner phải làm người đi hỏi.
+
 ## 4z. 🔁 MẮT CANH GỌI LẠI VỀ TIN ĐÃ XỬ — mỗi lần là MỘT LƯỢT CHẠY THẬT, tiền thật
 
 > 📏 **CA ĐO ĐƯỢC #2 — 02/09 18:1x, chính ghế `claude-aiboss-app-pm`:** mắt canh báo *«có 2 tin mới»*.
