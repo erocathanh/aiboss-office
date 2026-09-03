@@ -46,6 +46,17 @@ ban=$(git -C "$goc" status --porcelain -- "${THU_MUC_CONG[@]}" 2>&1); ma_ban=$?
 [ "$ma_ban" -eq 0 ] || dung "lệnh đo trượt ở $goc (mã $ma_ban): ${ban:0:120} ⇒ CHƯA ĐO" 2
 if [ -z "$ban" ]; then so_ban=0; else so_ban=$(printf '%s\n' "$ban" | wc -l | tr -d ' '); fi
 
+# ── ②bis HOOK CÓ ĐƯỢC CÀI KHÔNG — nhắc, KHÔNG chặn ───────────────────────────────────
+# 📌 Cân xứng: hook chỉ là phụ (nó KHÔNG chặn được `worktree add`, đã đo). Cái chặn thật là
+#    chính tệp này. Nên thiếu hook thì NHẮC, chứ chặn người ta lấy số vì thiếu một thứ phụ
+#    là đổi một rủi ro nhỏ lấy một cản trở lớn.
+hook_dich="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/post-checkout"
+hook_nguon="$goc/bai-thu/hook-post-checkout"
+if [ -f "$hook_nguon" ] && ! cmp -s "$hook_nguon" "$hook_dich" 2>/dev/null; then
+  echo "ℹ hook post-checkout CHƯA cài (hoặc đã cũ) — .git/hooks KHÔNG đi theo kho." >&2
+  echo "   cài bằng:  bash bai-thu/cai-hook.sh" >&2
+fi
+
 # ── ③ phán quyết. Cây CHÍNH bẩn là chuyện thường; cây LIÊN KẾT thì KHÔNG ──────────────
 if [ "$so_ban" -eq 0 ]; then
   echo "🚦 CHỐT WORKTREE ĐẠT — ${THU_MUC_CONG[*]} sạch ở worktree chính ($goc)"
