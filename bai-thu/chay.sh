@@ -12,7 +12,12 @@ fnm exec --using=24.19.0 -- node --experimental-strip-types --test bai-thu/*.tes
 XANH=${PIPESTATUS[0]}
 if [ "${1:-}" = "--ca-hai" ]; then
   echo; bash bai-thu/doi-chung-am.sh; AM=$?
-  echo; echo "⇒ bộ đo XANH: $([ $XANH -eq 0 ] && echo CÓ || echo KHÔNG) · biết ĐỎ: $([ ${AM:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
-  [ $XANH -eq 0 ] && [ ${AM:-1} -eq 0 ]; exit $?
+  # 🔴 TÁCH TỆP CỐ Ý: `doi-chung-am.sh` là thước CHẤM của cổng nghiệm thu («phép phá CŨ chạy
+  #    trên bản MỚI») ⇒ đụng vào nó là tự đo mình bằng cây thước mình vừa uốn.
+  echo; bash bai-thu/doi-chung-am-thu-tu-moc.sh; AM2=$?
+  echo; echo "⇒ bộ đo XANH: $([ $XANH -eq 0 ] && echo CÓ || echo KHÔNG)"\
+"  · biết ĐỎ (phép phá CŨ): $([ ${AM:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"\
+"  · biết ĐỎ (thứ tự móc):  $([ ${AM2:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
+  [ $XANH -eq 0 ] && [ ${AM:-1} -eq 0 ] && [ ${AM2:-1} -eq 0 ]; exit $?
 fi
 exit $XANH
