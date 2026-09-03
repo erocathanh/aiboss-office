@@ -79,7 +79,7 @@
 lâu dài, không được chen lên trước. Ghi ra đây để không ai xếp nhầm thứ tự.
 
 📡 **Luật kênh mới (Owner chốt 30/08):** trao đổi nội bộ đội ghi ở
-`~/idea/inbox/phong-ban-ai-boss/doi-aiboss-app-chat.md`. Chỉ **PM của đội** mới ghi lên `BOSS-CHANNEL.md`,
+`~/idea/inbox/aiboss-app-noibo/doi-aiboss-app-chat.md`. Chỉ **PM của đội** mới ghi lên `BOSS-CHANNEL.md`,
 và chỉ khi việc chạm đội khác hoặc cần Tổng Giám Đốc quyết.
 Số đo lúc chốt: 138/252 tin trên kênh tổng công ty là trao đổi riêng của đội app (55%).
 
