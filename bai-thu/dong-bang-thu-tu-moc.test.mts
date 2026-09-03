@@ -20,7 +20,7 @@ const NAY = dayMocTheoComponent(NGUON);
 const chuoi = (d: any) => Object.fromEntries(Object.entries(d).map(([t, ds]: any) => [t, ds.map(danhTinh)]));
 
 describe('🪝 dãy móc trong tệp thật — so với bản đóng băng', () => {
-  test('đủ component, đúng tên', () => assert.deepEqual(Object.keys(NAY.day).sort(), BANG.component));
+  test('đủ component, đúng tên (dãy móc)', () => assert.deepEqual(Object.keys(NAY.day).sort(), BANG.component));
   test('mỗi component giữ NGUYÊN DÃY móc, đúng thứ tự', () => assert.deepEqual(chuoi(NAY.day), BANG.day));
   test('truy vết «móc này đi qua móc tự viết nào» cũng đóng băng', () => assert.deepEqual(NAY.qua, BANG.qua));
 });

@@ -58,7 +58,7 @@ if [ ! -f "$SO" ]; then
   echo "🔢 đã chứng minh BIẾT ĐỎ: CHƯA ĐO BAO GIỜ ⇒ chạy \`bash bai-thu/soi-phep-chua-no.sh\`"
   echo "   ⚠️ tới lúc đó, ĐỪNG dẫn con số xanh ở trên ra làm căn cứ cho bất kỳ quyết định nào."
 else
-  VT_NAY=$(cat bai-thu/*.test.mts bai-thu/*.mjs bai-thu/doi-chung-am.sh bai-thu/doi-chung-am-thu-tu-moc.sh | md5 -q)
+  VT_NAY=$(cat bai-thu/*.test.mts bai-thu/*.mjs bai-thu/doi-chung-am*.sh | md5 -q)
   VT_CU=$(sed 's/.*"van_tay":"//;s/".*//' "$SO")
   M=$(sed 's/.*"M"://;s/,.*//' "$SO"); N=$(sed 's/.*"N"://;s/,.*//' "$SO")
   LUC=$(sed 's/.*"luc":"//;s/".*//' "$SO")
@@ -75,9 +75,11 @@ if [ "${1:-}" = "--ca-hai" ]; then
   # 🔴 TÁCH TỆP CỐ Ý: `doi-chung-am.sh` là thước CHẤM của cổng nghiệm thu («phép phá CŨ chạy
   #    trên bản MỚI») ⇒ đụng vào nó là tự đo mình bằng cây thước mình vừa uốn.
   echo; bash bai-thu/doi-chung-am-thu-tu-moc.sh; AM2=$?
+  echo; bash bai-thu/doi-chung-am-mo-dun.sh; AM3=$?
   echo; echo "⇒ bộ đo XANH: $([ $XANH -eq 0 ] && echo CÓ || echo KHÔNG)"\
 "  · biết ĐỎ (phép phá CŨ): $([ ${AM:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"\
 "  · biết ĐỎ (thứ tự móc):  $([ ${AM2:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
-  [ $XANH -eq 0 ] && [ ${AM:-1} -eq 0 ] && [ ${AM2:-1} -eq 0 ]; exit $?
+  echo "  · biết ĐỎ (15 phép mô-đun): $([ ${AM3:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
+  [ $XANH -eq 0 ] && [ ${AM:-1} -eq 0 ] && [ ${AM2:-1} -eq 0 ] && [ ${AM3:-1} -eq 0 ]; exit $?
 fi
 exit $XANH
