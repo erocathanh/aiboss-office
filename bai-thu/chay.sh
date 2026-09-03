@@ -17,11 +17,29 @@ if [ "$MA_CONG" -ne 0 ]; then
   echo "⇒ DỪNG: chốt worktree trả mã $MA_CONG. Con số đo ra ở đây KHÔNG dùng được." >&2
   exit "$MA_CONG"
 fi
+# 🔎 SOI BẪY MÃ-THOÁT-SAU-ỐNG trong chính các tệp vỏ lệnh của bộ đo.
+# 📌 Vì sao nó đứng CÙNG CỬA với chốt worktree: cả hai trả lời cùng MỘT câu —
+#    «con số sắp in ra có tin được không». Một tệp vỏ đọc nhầm mã thoát thì nó CÓ THỂ
+#    in XANH cho một lượt ĐỎ, và lúc ấy mọi con số bên dưới đều vô nghĩa.
+python3 "$(dirname "$0")/soi-ma-thoat.py" "$(dirname "$0")" > /tmp/soi-ma-thoat.ra 2>&1
+MA_SOI=$?
+if [ "$MA_SOI" -ne 0 ]; then
+  cat /tmp/soi-ma-thoat.ra >&2
+  echo "⇒ DỪNG: tệp vỏ của bộ đo đang đọc mã thoát sai chỗ. Sửa xong hãy đo." >&2
+  rm -f /tmp/soi-ma-thoat.ra; exit "$MA_SOI"
+fi
+rm -f /tmp/soi-ma-thoat.ra
+
 echo
 echo "═══ BỘ ĐÓNG BĂNG — phải XANH ═══"
-fnm exec --using=24.19.0 -- node --experimental-strip-types --test bai-thu/*.test.mts 2>&1 \
-  | grep -viE 'ExperimentalWarning|trace-warnings|MODULE_TYPELESS|Reparsing|To eliminate'
-XANH=${PIPESTATUS[0]}
+# 🔴 KHÔNG lấy mã thoát sau đường ống. Dòng này TRƯỚC ĐÂY là `XANH=${PIPESTATUS[0]}` — đúng cái
+#    bẫy ba người cắn NĂM lần trong ngày 03/09, và chính `bai-thu/soi-ma-thoat.py` bắt được nó
+#    trong mã của tôi. Nếp thay thế: ghi ra tệp, lấy `$?` ngay sau lệnh TRẦN, rồi mới lọc để in.
+RA_THU=$(mktemp /tmp/bai-thu-XXXXXX)
+fnm exec --using=24.19.0 -- node --experimental-strip-types --test bai-thu/*.test.mts > "$RA_THU" 2>&1
+XANH=$?
+grep -viE 'ExperimentalWarning|trace-warnings|MODULE_TYPELESS|Reparsing|To eliminate' "$RA_THU"
+rm -f "$RA_THU"
 if [ "${1:-}" = "--ca-hai" ]; then
   echo; bash bai-thu/doi-chung-am.sh; AM=$?
   # 🔴 TÁCH TỆP CỐ Ý: `doi-chung-am.sh` là thước CHẤM của cổng nghiệm thu («phép phá CŨ chạy
