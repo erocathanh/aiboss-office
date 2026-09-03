@@ -40,6 +40,29 @@ fnm exec --using=24.19.0 -- node --experimental-strip-types --test bai-thu/*.tes
 XANH=$?
 grep -viE 'ExperimentalWarning|trace-warnings|MODULE_TYPELESS|Reparsing|To eliminate' "$RA_THU"
 rm -f "$RA_THU"
+# 🔢 IN HAI SỐ, LUÔN LUÔN — sổ bẫy mục 64 điều ①.
+# 🔑 «đang xanh N/N» nói bộ đo ĐANG XANH. Nó KHÔNG nói bao nhiêu phần trong đó BIẾT ĐỎ.
+#    Một phép thử CHƯA TỪNG đỏ thì KHÔNG phân biệt được với một phép thử KHÔNG THỂ đỏ —
+#    cả hai đều góp một dấu ✅ vào con số đem đi khoe.
+# ⚠️ Thiếu số thứ hai thì phải KÊU. Vắng mặt im lặng chính là cách con số đầu tiên đi một mình.
+SO=bai-thu/da-chung-minh-biet-do.json
+echo
+if [ ! -f "$SO" ]; then
+  echo "🔢 đã chứng minh BIẾT ĐỎ: CHƯA ĐO BAO GIỜ ⇒ chạy \`bash bai-thu/soi-phep-chua-no.sh\`"
+  echo "   ⚠️ tới lúc đó, ĐỪNG dẫn con số xanh ở trên ra làm căn cứ cho bất kỳ quyết định nào."
+else
+  VT_NAY=$(cat bai-thu/*.test.mts bai-thu/doi-chung-am.sh bai-thu/doi-chung-am-thu-tu-moc.sh | md5 -q)
+  VT_CU=$(sed 's/.*"van_tay":"//;s/".*//' "$SO")
+  M=$(sed 's/.*"M"://;s/,.*//' "$SO"); N=$(sed 's/.*"N"://;s/,.*//' "$SO")
+  LUC=$(sed 's/.*"luc":"//;s/".*//' "$SO")
+  if [ "$VT_NAY" = "$VT_CU" ]; then
+    echo "🔢 đã chứng minh BIẾT ĐỎ: $M/$N   (đo $LUC, bộ đo KHÔNG đổi từ đó)"
+  else
+    echo "🔢 đã chứng minh BIẾT ĐỎ: $M/$N — ⚠️ SỐ NÀY ĐÃ CŨ (đo $LUC, bộ đo ĐÃ ĐỔI từ đó)"
+    echo "   ⇒ thêm phép THỬ chỉ nâng N. Muốn nâng M thì thêm phép PHÁ. Chạy lại soi-phep-chua-no.sh."
+  fi
+fi
+
 if [ "${1:-}" = "--ca-hai" ]; then
   echo; bash bai-thu/doi-chung-am.sh; AM=$?
   # 🔴 TÁCH TỆP CỐ Ý: `doi-chung-am.sh` là thước CHẤM của cổng nghiệm thu («phép phá CŨ chạy
