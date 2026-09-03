@@ -59,6 +59,16 @@ fi
 
 # ── ③ phán quyết. Cây CHÍNH bẩn là chuyện thường; cây LIÊN KẾT thì KHÔNG ──────────────
 if [ "$so_ban" -eq 0 ]; then
+  # 🧹 DỌN TỆP DẤU ĐÃ CŨ — điều kiện sinh ra nó đã hết thì nó phải tự biến đi.
+  # 🕳 BA LẦN trong ngày 03/09 tệp dấu này chặn nhầm: ghi lúc cây chính đang commit dở (09:40),
+  #    rồi cây sạch lại ngay sau đó — nhưng TỆP DẤU KHÔNG TỰ BIẾT MÌNH ĐÃ CŨ.
+  #    Lần 2 nó chặn việc gỡ worktree của ghế KHÁC. Lần 3 nó chặn chính phép nghiệm thu của tôi.
+  # 📌 Một cảnh báo đúng lúc sinh ra, mà KHÔNG có đường chết, thì nó sống dai hơn cái nó cảnh báo —
+  #    và từ lúc ấy nó chỉ còn gây phiền, chứ không còn bảo vệ ai.
+  if [ "$LA_CHINH" -eq 0 ] && [ -f "$day/KHONG-DUOC-TIN-BO-DO.txt" ]; then
+    rm -f "$day/KHONG-DUOC-TIN-BO-DO.txt"
+    echo "🧹 đã gỡ tệp dấu CŨ ở $day — cây chính nay đã sạch, cảnh báo hết hiệu lực"
+  fi
   echo "🚦 CHỐT WORKTREE ĐẠT — ${THU_MUC_CONG[*]} sạch ở worktree chính ($goc)"
   exit 0
 fi
