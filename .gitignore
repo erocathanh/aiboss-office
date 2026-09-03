@@ -13,6 +13,7 @@
 .env.*
 .next/
 .trang-thai/
+ai/__pycache__/
 chon-mau/.vercel/
 chon-mau/node_modules/
 next-env.d.ts
