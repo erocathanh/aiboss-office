@@ -19,3 +19,6 @@ chon-mau/node_modules/
 next-env.d.ts
 node_modules/
 out/
+
+# nhật ký cổng .kiro tự ghi khi nó CHẶN — không commit
+.kiro/.gate-enforce.log
