@@ -22,3 +22,6 @@ out/
 
 # nhật ký cổng .kiro tự ghi khi nó CHẶN — không commit
 .kiro/.gate-enforce.log
+
+# thư mục dựng của BẢN DEV (NEXT_DIST_DIR) — không commit
+.next-dev/
