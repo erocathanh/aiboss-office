@@ -67,10 +67,28 @@ export function bocThuan(duongDanTsx, chiTraVan = false) {
   src.forEachChild((n) => {
     if (!ts.isImportDeclaration(n) || !n.importClause) return;
     const c = n.importClause;
+    /**
+     * 🔴 BỎ QUA NHẬP-KIỂU — `import type` bị TypeScript XOÁ lúc biên dịch, nó KHÔNG có mặt
+     *    lúc chạy, nên một khai báo chỉ tham chiếu tên nhập-kiểu VẪN THUẦN.
+     *
+     * 🕳 CA SINH RA BẢN VÁ (M1a, 03/09): dời 6 khai báo kiểu sang `ung-dung/kieu.ts` rồi nhập
+     *    lại bằng `import type`. Bộ bóc coi chúng như nhập THƯỜNG ⇒ từ chối 4 khai báo
+     *    (BO_QUAN_LY_TRUONG · BO_QUAN_LY_CU · BO_CONG_NGHE · O_TRONG) ⇒ bóc được rơi 21 → 17
+     *    ⇒ bộ đo 76/91.
+     * 🔑 Và MÃ KHÔNG ĐỔI MỘT BYTE — tôi đo từng khai báo cấp mô-đun: 22 cái, 0 cái khác nhau,
+     *    bốn cái bị bỏ băm GIỐNG HỆT. **Hồi quy nằm ở BỘ ĐO, không nằm ở mã.**
+     * ⚠️ Bản vá này CHỈ nới đúng nhập-KIỂU. Nhập THƯỜNG vẫn loại khai báo như cũ — có phép thử
+     *    hai chiều chốt điều đó, vì «nới cho hết đỏ» là cách dễ nhất để giết một bộ đo.
+     */
+    if (c.isTypeOnly) return;                     // import type { … } from '…'
     if (c.name) tenNhap.add(c.name.text);
     if (c.namedBindings) {
-      if (ts.isNamedImports(c.namedBindings)) for (const e of c.namedBindings.elements) tenNhap.add(e.name.text);
-      else if (ts.isNamespaceImport(c.namedBindings)) tenNhap.add(c.namedBindings.name.text);
+      if (ts.isNamedImports(c.namedBindings)) {
+        for (const e of c.namedBindings.elements) {
+          if (e.isTypeOnly) continue;             // import { type A, B } from '…'
+          tenNhap.add(e.name.text);
+        }
+      } else if (ts.isNamespaceImport(c.namedBindings)) tenNhap.add(c.namedBindings.name.text);
     }
   });
 

@@ -45,13 +45,20 @@ rm -f "$RA_THU"
 #    Một phép thử CHƯA TỪNG đỏ thì KHÔNG phân biệt được với một phép thử KHÔNG THỂ đỏ —
 #    cả hai đều góp một dấu ✅ vào con số đem đi khoe.
 # ⚠️ Thiếu số thứ hai thì phải KÊU. Vắng mặt im lặng chính là cách con số đầu tiên đi một mình.
+# 🔴 VÂN TAY ÔM CẢ TỆP THƯỚC (*.mjs) — sửa 03/09 sau khi có VẬT CHỨNG.
+#    Bản đầu chỉ ôm `.test.mts` + hai hộp phá. Tôi sửa `boc-mo-dun.mjs`, hành vi bộ đo ĐỔI THẬT
+#    (76/91 → 91/91), mà vân tay vẫn khai «bộ đo KHÔNG đổi từ đó». Một câu trả lời SAI, không
+#    phải một đánh đổi.
+# ⚖️ Cái giá: sửa một CHÚ THÍCH trong tệp thước cũng làm nó kêu «số đã cũ». Chấp nhận, vì
+#    giá của báo-cũ-oan = chạy lại 10 giây; giá của khai-còn-tươi-nhầm = một con số SAI đi vào
+#    một quyết định. Hai cái giá đó không cùng hạng.
 SO=bai-thu/da-chung-minh-biet-do.json
 echo
 if [ ! -f "$SO" ]; then
   echo "🔢 đã chứng minh BIẾT ĐỎ: CHƯA ĐO BAO GIỜ ⇒ chạy \`bash bai-thu/soi-phep-chua-no.sh\`"
   echo "   ⚠️ tới lúc đó, ĐỪNG dẫn con số xanh ở trên ra làm căn cứ cho bất kỳ quyết định nào."
 else
-  VT_NAY=$(cat bai-thu/*.test.mts bai-thu/doi-chung-am.sh bai-thu/doi-chung-am-thu-tu-moc.sh | md5 -q)
+  VT_NAY=$(cat bai-thu/*.test.mts bai-thu/*.mjs bai-thu/doi-chung-am.sh bai-thu/doi-chung-am-thu-tu-moc.sh | md5 -q)
   VT_CU=$(sed 's/.*"van_tay":"//;s/".*//' "$SO")
   M=$(sed 's/.*"M"://;s/,.*//' "$SO"); N=$(sed 's/.*"N"://;s/,.*//' "$SO")
   LUC=$(sed 's/.*"luc":"//;s/".*//' "$SO")

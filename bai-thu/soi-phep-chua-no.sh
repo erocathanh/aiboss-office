@@ -33,7 +33,7 @@ comm -23 "$DU" "$HONG" | sed 's/^/  · /'
 # 📌 GHI SỐ RA TỆP, kèm DẤU VÂN TAY của chính bộ đo — để `chay.sh` in kèm được, và để nó biết
 #    con số đã CŨ hay chưa. Sổ bẫy mục 64 điều ④: đo một lần rồi ghi vào báo cáo thì nó thành
 #    một giai thoại, không phải một cái cổng.
-VAN_TAY=$(cat bai-thu/*.test.mts bai-thu/doi-chung-am.sh bai-thu/doi-chung-am-thu-tu-moc.sh | md5 -q)
+VAN_TAY=$(cat bai-thu/*.test.mts bai-thu/*.mjs bai-thu/doi-chung-am.sh bai-thu/doi-chung-am-thu-tu-moc.sh | md5 -q)
 printf '{"N":%s,"M":%s,"van_tay":"%s","luc":"%s","commit":"%s"}\n' \
   "$TONG" "$NO" "$VAN_TAY" "$(date '+%F %H:%M:%S')" "$(git rev-parse --short HEAD)" \
   > bai-thu/da-chung-minh-biet-do.json
