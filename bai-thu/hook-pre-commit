@@ -1,0 +1,81 @@
+#!/bin/bash
+# ⚠️ TỆP NÀY GỒM HAI KHỐI, CỦA HAI NGƯỜI. Đừng gộp chúng khi sửa.
+#
+#   KHỐI ①  «chặn commit tài liệu nuốt mã» — claude-aiboss-app-pm dựng 01/09/2026.
+#           claude-aiboss-app-exe CHÉP NGUYÊN VĂN, KHÔNG sửa một byte. Bản lưu trước khi chèn:
+#           ~/Operations/sao-luu-viec-do/pre-commit-truoc-noi-may-soi-*/
+#   KHỐI ②  «máy soi bẫy mã-thoát-sau-ống» — claude-aiboss-app-exe chèn 03/09/2026
+#           theo QUYẾT ② của PM (kênh 13:30): CHÈN THÊM, KHÔNG THAY THẾ.
+#
+# 📌 Trước 03/09 hook này KHÔNG nằm trong git (`.git/hooks/` không được theo dõi) ⇒ nó KHÔNG đi
+#    theo kho, và máy khác clone về sẽ KHÔNG có nó. Nay bản gốc nằm ở `bai-thu/hook-pre-commit`,
+#    cài bằng `bash bai-thu/cai-hook.sh`. Bản ĐANG CHẠY vẫn là `.git/hooks/pre-commit`.
+# 🔴 CHẶN «commit tài liệu nuốt mã» — dựng 01/09/2026 bởi claude-aiboss-app-pm
+#
+# 🕳 CA SINH RA NÓ: BA LẦN trong một ngày, `git commit` của PM quét trúng mã
+#    `claude-aiboss-app-exe` đang để trong chỉ mục chờ soi.
+#    Lần 3 (9cb977d, 20:33) nặng nhất: một commit TÀI LIỆU mang theo 98 dòng `src/`
+#    CHƯA AI SOI ⇒ nhánh chính mang mã đi vòng qua cổng review.
+# 🔑 PM đã tự rút cách chữa lúc 10:12 («git commit -- <đường dẫn>») rồi vẫn tái phạm lúc 20:33.
+#    LỜI HỨA KHÔNG CHẶN ĐƯỢC. Phải là một cái chặn chạy TRƯỚC khi commit thành hình.
+#
+# LUẬT: một commit KHÔNG được vừa mang tài liệu (.md) vừa mang mã (src/).
+#       Muốn cả hai thì tách làm hai commit — rẻ hơn nhiều so với một cổng bị đi vòng.
+
+DAT=$(git diff --cached --name-only)
+CO_MD=$(printf '%s\n' "$DAT" | grep -cE '\.md$')
+CO_MA=$(printf '%s\n' "$DAT" | grep -cE '^src/')
+
+if [ "$CO_MD" -gt 0 ] && [ "$CO_MA" -gt 0 ]; then
+  echo ""
+  echo "🔴 DỪNG — commit này vừa mang TÀI LIỆU vừa mang MÃ."
+  echo "   tài liệu (.md): $CO_MD tệp    ·    mã (src/): $CO_MA tệp"
+  echo ""
+  printf '%s\n' "$DAT" | sed 's/^/     /'
+  echo ""
+  echo "   Đây đúng hình đã xảy ra BA LẦN ngày 01/09: commit tài liệu nuốt mã của ghế khác,"
+  echo "   và lần thứ ba nó đẩy mã CHƯA AI SOI vào nhánh chính."
+  echo ""
+  echo "   ✅ Cách đi tiếp: tách làm hai commit."
+  echo "        git commit -m '...' -- <các tệp .md>"
+  echo "        git commit -m '...' -- <các tệp src/>"
+  echo ""
+  exit 1
+fi
+
+# ═══ KHỐI ② — MÁY SOI BẪY MÃ-THOÁT-SAU-ĐƯỜNG-ỐNG ═══════════════════════════════════════
+# 🕳 Ba người, NĂM lần, một ngày, cùng một bẫy — SAU KHI đã có luật bằng chữ.
+# 🔍 Soi NỘI DUNG ĐÃ VÀO CHỈ MỤC, KHÔNG soi cây làm việc: thứ sắp thành commit mới là thứ đáng soi.
+#    Sửa xong mà quên `git add` thì cây sạch mà commit vẫn bẩn — soi cây làm việc sẽ bỏ lọt đúng ca đó.
+# 🛡 Máy soi thiếu hoặc hỏng ⇒ CHẶN. Đây là cổng chặn, nó phải hỏng về phía AN TOÀN.
+DS_SH=$(git diff --cached --name-only --diff-filter=ACM)
+DS_SH=$(printf '%s\n' "$DS_SH" | grep -E '\.sh$')
+if [ -n "$DS_SH" ]; then
+  GOC_KHO=$(git rev-parse --show-toplevel)
+  SOI="$GOC_KHO/bai-thu/soi-ma-thoat.py"
+  if [ ! -f "$SOI" ]; then
+    echo ""; echo "🔴 DỪNG — KHÔNG thấy $SOI ⇒ chưa soi được tệp .sh trong commit này."
+    echo "   Cổng chặn thiếu công cụ thì phải CHẶN, không được cho qua."
+    exit 1
+  fi
+  TAM=$(mktemp -d /tmp/pre-commit-soi-XXXXXX)
+  for f in $DS_SH; do
+    mkdir -p "$TAM/$(dirname "$f")"
+    git show ":$f" > "$TAM/$f" 2>/dev/null
+  done
+  python3 "$SOI" "$TAM" > "$TAM/.ket-qua" 2>&1
+  MA_SOI=$?
+  if [ "$MA_SOI" -ne 0 ]; then
+    echo ""
+    echo "🔴 DỪNG — tệp .sh trong commit này đang đọc MÃ THOÁT SAI CHỖ."
+    sed "s|$TAM/||" "$TAM/.ket-qua" | sed 's/^/   /'
+    echo ""
+    echo "   Nếp đúng: ghi ra tệp, lấy \$? ngay sau lệnh TRẦN, rồi mới lọc để in."
+    echo "   Cố ý muốn mã của lệnh cuối trong ống ⇒ ghi chú thích 'co-y-lay-ma-lenh-cuoi' trên dòng đó."
+    rm -rf "$TAM"
+    exit 1
+  fi
+  rm -rf "$TAM"
+fi
+
+exit 0

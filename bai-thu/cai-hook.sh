@@ -7,13 +7,18 @@
 set -u
 goc=$(git rev-parse --show-toplevel 2>/dev/null); ma=$?
 [ "$ma" -eq 0 ] && [ -n "$goc" ] || { echo "🔴 không ở trong kho git ⇒ DỪNG" >&2; exit 2; }
-nguon="$goc/bai-thu/hook-post-checkout"
-[ -f "$nguon" ] || { echo "🔴 thiếu $nguon ⇒ DỪNG, đừng cài một thứ không đọc được" >&2; exit 2; }
-dich="$(git rev-parse --git-common-dir)/hooks/post-checkout"
-if [ -f "$dich" ] && ! cmp -s "$nguon" "$dich"; then
-  luu="$dich.truoc-cai-$(date +%Y%m%d-%H%M%S)"
-  cp "$dich" "$luu"; echo "ℹ đã có hook KHÁC ở đó — giữ lại bản cũ: $luu"
-fi
-cp "$nguon" "$dich" && chmod +x "$dich"
-echo "✅ đã cài: $dich"
-echo "   pre-commit còn sống: $([ -x "$(git rev-parse --git-common-dir)/hooks/pre-commit" ] && echo CÓ || echo 'KHÔNG có sẵn từ trước')"
+cai_mot() {   # cai_mot <tên hook>
+  local ten="$1"
+  local nguon="$goc/bai-thu/hook-$ten"
+  [ -f "$nguon" ] || { echo "🔴 thiếu $nguon ⇒ DỪNG, đừng cài một thứ không đọc được" >&2; return 2; }
+  local dich="$(git rev-parse --git-common-dir)/hooks/$ten"
+  if [ -f "$dich" ] && ! cmp -s "$nguon" "$dich"; then
+    local luu="$dich.truoc-cai-$(date +%Y%m%d-%H%M%S)"
+    cp "$dich" "$luu"; echo "ℹ đã có hook KHÁC ở $ten — giữ lại bản cũ: $luu"
+  fi
+  cp "$nguon" "$dich" && chmod +x "$dich"
+  echo "✅ đã cài: $dich"
+}
+cai_mot post-checkout || exit 2
+cai_mot pre-commit    || exit 2
+echo "   cả hai hook chạy được: post-checkout $([ -x "$(git rev-parse --git-common-dir)/hooks/post-checkout" ] && echo CÓ || echo KHÔNG) · pre-commit $([ -x "$(git rev-parse --git-common-dir)/hooks/pre-commit" ] && echo CÓ || echo KHÔNG)"
