@@ -6,6 +6,18 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 export PATH="/opt/homebrew/bin:$PATH"
+# 🚦 CHỐT WORKTREE ĐI TRƯỚC MỌI PHÉP ĐO — đây là chỗ người ta BẮT BUỘC đi qua.
+# 🕳 Vì sao đặt Ở ĐÂY chứ không ở lúc `git worktree add`: đo 03/09 — git CÓ gọi hook
+#    `post-checkout` khi thêm worktree, nhưng mã thoát khác 0 KHÔNG chặn được, worktree vẫn sinh ra.
+#    Git KHÔNG có chỗ chặn lúc TẠO. Nên chốt phải nằm ở chỗ người ta ĐẾN ĐỂ LẤY SỐ.
+# ⚠️ Bắt mã thoát TRỰC TIẾP, KHÔNG qua đường ống — ba người cắn bẫy đó trong ngày 03/09.
+bash "$(dirname "$0")/cong-worktree.sh"
+MA_CONG=$?
+if [ "$MA_CONG" -ne 0 ]; then
+  echo "⇒ DỪNG: chốt worktree trả mã $MA_CONG. Con số đo ra ở đây KHÔNG dùng được." >&2
+  exit "$MA_CONG"
+fi
+echo
 echo "═══ BỘ ĐÓNG BĂNG — phải XANH ═══"
 fnm exec --using=24.19.0 -- node --experimental-strip-types --test bai-thu/*.test.mts 2>&1 \
   | grep -viE 'ExperimentalWarning|trace-warnings|MODULE_TYPELESS|Reparsing|To eliminate'

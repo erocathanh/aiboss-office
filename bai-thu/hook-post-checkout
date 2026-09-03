@@ -1,0 +1,27 @@
+#!/bin/bash
+# 🪝 Hook chép vào `.git/hooks/post-checkout`. Chạy khi `git checkout` và khi `git worktree add`.
+# 🔴 KHAI SỨC THẬT (đo 03/09): mã thoát khác 0 của hook này KHÔNG chặn được `git worktree add` —
+#    worktree vẫn sinh ra và lệnh vẫn trả 0. Nên hook này chỉ làm hai việc THẬT:
+#      ① in cảnh báo NGAY LÚC tạo, khi người ta còn đang nhìn màn hình
+#      ② để lại một TỆP DẤU trong worktree mới — vì lời cảnh báo bị cuộn qua, còn tệp thì nằm lại
+#    Cái CHẶN thật nằm ở `bai-thu/chay.sh`, chỗ người ta đến để lấy số.
+# ⚠️ KHÔNG dùng core.hooksPath để cài — kho này có `pre-commit` đang sống, đặt hooksPath là tắt nó.
+[ "${3:-0}" = "1" ] || exit 0
+CONG="$(git rev-parse --show-toplevel 2>/dev/null)/bai-thu/cong-worktree.sh"
+[ -x "$CONG" ] || exit 0
+bash "$CONG" >/tmp/hook-cong.$$ 2>&1
+MA=$?
+[ "$MA" -eq 0 ] && { rm -f /tmp/hook-cong.$$; exit 0; }
+DAU="$(git rev-parse --show-toplevel)/KHONG-DUOC-TIN-BO-DO.txt"
+{ echo "⚠️ CÂY NÀY KHÔNG DÙNG ĐỂ LẤY SỐ ĐƯỢC — sinh lúc $(date '+%F %H:%M:%S')"
+  echo "Worktree tạo khi cây chính còn tệp CHƯA COMMIT dưới thư mục cổng."
+  echo "Mã ở đây lấy từ HEAD ⇒ bộ đo là bản CŨ, và nó vẫn XANH. Xanh trông giống xanh."
+  echo; cat /tmp/hook-cong.$$
+  echo; echo "⇒ commit ở cây chính rồi TẠO LẠI worktree. Xoá tệp này KHÔNG làm số đúng lên."
+} > "$DAU"
+rm -f /tmp/hook-cong.$$
+echo "════════════════════════════════════════════════════════════════" >&2
+echo " 🚦 CẢNH BÁO: worktree vừa tạo KHÔNG dùng để lấy số được." >&2
+echo "    đã ghi dấu: $DAU" >&2
+echo "════════════════════════════════════════════════════════════════" >&2
+exit 0
