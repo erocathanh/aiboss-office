@@ -66,14 +66,16 @@ cham() {
   if [[ "$kl" != LỚP-ĐÚNG* ]]; then
     echo "  🏷 $ten"; echo "     ⇒ $kl"; LOP_SAI=$((LOP_SAI+1)); rm -f "$t"; return
   fi
-  if NGUON_THU="$t" $CHAY "$bo" >/dev/null 2>&1; then
+  local ra=/tmp/ra-pha-$$.txt
+  if NGUON_THU="$t" $CHAY "$bo" >"$ra" 2>&1; then
     echo "  🔴 $ten ⇒ lớp ĐÚNG nhưng bộ đo VẪN XANH — nó KHÔNG bắt được lỗi này"
   else
     local tr; tr=$(echo "$kl" | sed 's/.*trục đổi: //')
+    [ -n "${GHI_TEN_HONG:-}" ] && grep -E "^ +✖ " "$ra" | sed "s/^ *✖ //;s/ ([0-9.]*ms)$//" >> "$GHI_TEN_HONG"
     echo "  ✅ $ten"; echo "     lớp «${lop}» khớp · trục đổi: ${tr:-(không trục nào của THÂN component — đúng như lớp này khai)}"
     DAT=$((DAT+1))
   fi
-  rm -f "$t"
+  rm -f "$t" "$ra"
 }
 
 echo "═══ CẤP MÔ-ĐUN — hằng số và bảng dữ liệu ngoài thân component ═══"

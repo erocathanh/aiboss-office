@@ -56,9 +56,11 @@ if loai=='hoan-vi':
   if [[ "$kl" != LỚP-ĐÚNG* ]]; then
     echo "  🏷 $ten"; echo "     ⇒ $kl"; LOP_SAI=$((LOP_SAI+1)); rm -f "$t"; return
   fi
-  local m=1 h=1
-  NGUON_THU="$t" $CHAY "$BO_MOC"  >/dev/null 2>&1 || m=0
-  NGUON_THU="$t" $CHAY "$BO_THAN" >/dev/null 2>&1 || h=0
+  local m=1 h=1 ra=/tmp/ra-pha-$$.txt
+  NGUON_THU="$t" $CHAY "$BO_MOC"  >"$ra" 2>&1 || m=0
+  [ -n "${GHI_TEN_HONG:-}" ] && grep -E "^ +✖ " "$ra" | sed "s/^ *✖ //;s/ ([0-9.]*ms)$//" >> "$GHI_TEN_HONG"
+  NGUON_THU="$t" $CHAY "$BO_THAN" >"$ra" 2>&1 || h=0
+  [ -n "${GHI_TEN_HONG:-}" ] && grep -E "^ +✖ " "$ra" | sed "s/^ *✖ //;s/ ([0-9.]*ms)$//" >> "$GHI_TEN_HONG"
   if [ $m -eq 0 ] || [ $h -eq 0 ]; then
     echo "  ✅ $ten ⇒ ĐỎ  (lớp «${lop}» khớp · thứ-tự-móc: $([ $m -eq 0 ] && echo bắt || echo ' - ') · hình-dạng-thân: $([ $h -eq 0 ] && echo bắt || echo ' - '))"
     DAT=$((DAT+1))
