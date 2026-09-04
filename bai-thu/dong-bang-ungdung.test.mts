@@ -22,7 +22,15 @@ import { bocThuanNhieuTep } from './boc-mo-dun.mjs';
  *    KHÔNG phải sửa `src/` rồi nhớ khôi phục — mà «nhớ khôi phục» chính là chỗ hay quên.
  */
 const NGUON = process.env.NGUON_THU
-  ?? new URL('../src/components/UngDung.tsx', import.meta.url).pathname;
+  // TRỤC ② (04/09): 21 khai báo cấp mô-đun đã DỜI sang hai tệp mới. Bộ bóc vốn dựng ra để
+  // đón đúng lượt này — chú thích của nó viết sẵn «chúng chính là thứ sẽ BỊ DI CHUYỂN khi chia tệp».
+  // Nay bóc từ CẢ BA tệp: nếu chỉ trỏ tệp cũ thì 91 phép đóng băng sẽ đỏ vì mã KHÔNG còn ở đó,
+  // và người đọc dễ tưởng hành vi đã đổi — trong khi nó chỉ ĐỔI CHỖ.
+  ?? [
+    new URL('../src/components/UngDung.tsx', import.meta.url).pathname,
+    new URL('../src/components/ung-dung/hang-so.ts', import.meta.url).pathname,
+    new URL('../src/components/ung-dung/bong-bong.tsx', import.meta.url).pathname,
+  ].join(',');
 const { tep, ten, bo } = bocThuanNhieuTep(NGUON.split(','));
 const M = await import(tep);
 

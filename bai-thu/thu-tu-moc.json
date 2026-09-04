@@ -1,7 +1,9 @@
 {
  "_doc": "BẢN ĐÓNG BĂNG dãy móc theo từng component. Sinh bằng bai-thu/chup-thu-tu-moc.mjs. ĐỪNG chụp lại sau khi chia tệp.",
  "nguon": [
-  "src/components/UngDung.tsx"
+  "src/components/UngDung.tsx",
+  "src/components/ung-dung/hang-so.ts",
+  "src/components/ung-dung/bong-bong.tsx"
  ],
  "component": [
   "BongBong",
@@ -9,10 +11,6 @@
  ],
  "soMoc": 70,
  "day": {
-  "BongBong": [
-   "useMemo#thoTheoMau#hienMau,chu,ranh#2a8d3d2ead88#",
-   "useMemo#html#hienMau,chu#6b2fe4f74ef0#"
-  ],
   "UngDung": [
    "useMemo#ongTrum#nhanSu#c93158eb3ee9#",
    "useState#[phongMo, datPhongMo]#∅#324a47ec5ccb#",
@@ -84,13 +82,13 @@
    "useCallback#nhanCua#nhanSu#69a22ea5cc28#",
    "useMemo#demTheoPhong#nhanSu#229efb174090#",
    "useMemo#tenDangMo#dsO,boCuc#429ef910ca03#"
+  ],
+  "BongBong": [
+   "useMemo#thoTheoMau#hienMau,chu,ranh#2a8d3d2ead88#",
+   "useMemo#html#hienMau,chu#6b2fe4f74ef0#"
   ]
  },
  "qua": {
-  "BongBong": [
-   "",
-   ""
-  ],
   "UngDung": [
    "",
    "",
@@ -160,6 +158,10 @@
    "",
    "",
    "",
+   "",
+   ""
+  ],
+  "BongBong": [
    "",
    ""
   ]

@@ -13,7 +13,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { dayMocTheoComponent, soSanhDay, danhTinh } from './thu-tu-moc.mjs';
 
-const NGUON = (process.env.NGUON_THU ?? new URL('../src/components/UngDung.tsx', import.meta.url).pathname).split(',');
+// TRỤC ② (04/09): `BongBong` (2 × useMemo) đã dời sang `bong-bong.tsx`, và `dungTruocKhiVe`
+// sang `hang-so.ts`. Nếu chỉ đọc `UngDung.tsx` thì đếm ra 67 — ĐÚNG BẰNG con số của bộ dò
+// HỎNG ngày trước (`^use[A-Z]` hụt 67/70). Hai nguyên nhân khác hẳn nhau, CÙNG một con số.
+// 🔑 Nếu tôi hạ mong đợi xuống 67 cho «xanh», tôi đã tắt đúng cái chốt chặn bí danh tái diễn.
+// ⇒ Đọc CẢ BA tệp: vẫn phải ra 70 ⇒ chứng minh dời KHÔNG mất móc nào.
+const NGUON = (process.env.NGUON_THU ?? [
+  new URL('../src/components/UngDung.tsx', import.meta.url).pathname,
+  new URL('../src/components/ung-dung/hang-so.ts', import.meta.url).pathname,
+  new URL('../src/components/ung-dung/bong-bong.tsx', import.meta.url).pathname,
+].join(',')).split(',');
 const BANG = JSON.parse(fs.readFileSync(new URL('./thu-tu-moc.json', import.meta.url), 'utf8'));
 const VT = (t: string) => new URL(`./vat-thu/${t}`, import.meta.url).pathname;
 const NAY = dayMocTheoComponent(NGUON);

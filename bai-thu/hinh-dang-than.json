@@ -1,9 +1,11 @@
 {
  "_doc": "BẢN ĐÓNG BĂNG hình dạng thân, KHOÁ THEO COMPONENT. Sinh bằng bai-thu/chup-hinh-dang-than.mjs.",
  "nguon": [
-  "src/components/UngDung.tsx"
+  "src/components/UngDung.tsx",
+  "src/components/ung-dung/hang-so.ts",
+  "src/components/ung-dung/bong-bong.tsx"
  ],
- "soTep": 1,
+ "soTep": 3,
  "component": [
   "UngDung"
  ],
