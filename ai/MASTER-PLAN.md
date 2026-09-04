@@ -1809,7 +1809,8 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
 ── ba làn SONG SONG, KHÔNG đụng src/ nên chạy lúc nào cũng được ──
 ⑤ B1 vòng 3 (hermes-build-app)          nhánh riêng, không chạm main
 ⑥ mắt canh: phân biệt CHẠM TRẦN với CHẾT VÌ LỖI KHÁC   (xem MỤC 10.3)
-⑦ postbuild «|| true» nếu ① tách nó ra thành việc riêng
+⑦ cho DẤU VẾT BẢN DỰNG sinh TỰ ĐỘNG — cần PM/Owner chốt lệnh dựng của nhà
+   (phần «bỏ 2>/dev/null || true» exe ĐÃ vá lúc 12:20, nằm TRONG ①. Đính chính của exe 12:35.)
 
 ── CHƯA tới lúc, ghi để khỏi quên ──
 ⑧ đóng gói app ⇒ đặt DUONG_DAN_CLAUDE bằng đường TUYỆT ĐỐI, nghiệm thu bằng cách MỞ TỪ FINDER
