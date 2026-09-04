@@ -25,3 +25,5 @@ out/
 
 # thư mục dựng của BẢN DEV (NEXT_DIST_DIR) — không commit
 .next-dev/
+# khoá chống hai bản dev giẫm nhau (dev/chay-dev.sh sinh ra, xoá khi thoát)
+*.khoa/
