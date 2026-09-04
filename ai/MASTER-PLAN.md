@@ -1660,7 +1660,8 @@ giá : gần 0 — cùng kho, cùng mã, chỉ thêm một lệnh chạy
 ### 📋 XẾP HẠNG — Owner nói «cần làm SỚM», tôi chia làm ba, và ② rẻ nhất mà đỡ đau nhất
 ```
 ② bản dev riêng cổng khác     giá ~0 · gỡ NGAY cái đau «sửa UI là cắt lượt»   ⇐ LÀM TRƯỚC
-① chia UngDung.tsx            giá VỪA · phải ĐO trục chia trước, đừng chia mò
+① chia UngDung.tsx            giá VỪA · ✅ ĐÃ ĐO XONG 03/09 → xem MỤC 9 cuối tệp này
+                              (mã thật ~1.785 dòng, KHÔNG phải 3.212 · trục ② là trục an toàn duy nhất)
 ③ cắt 2 lời nhập còn lại      giá ~0 · nhưng LÀM CUỐI: nó gần như KHÔNG đổi gì cho Owner
                               (chép `SO_O` sang máy khách, hoặc chuyển hai tệp sang thư mục dùng chung)
 ```
@@ -1768,3 +1769,348 @@ M3  hai người sửa hai việc cùng lúc, không ai phải chờ ai    ⇒ P
 · P3 cần cửa ngoài loại nào — chưa soi bảo mật, và đây là app có quyền như terminal
 ```
 📌 Bốn dòng trên là **việc đo**, không phải việc làm. Ai làm thì đo trước, ghi số vào `DECISION_LOG.md`.
+
+---
+
+# 🚦 HÀNG ĐỢI — LÀM GÌ TRƯỚC, LÀM GÌ SAU (Owner giao xếp lại, 04/09/2026 12:31 BST)
+
+> Xếp theo **PHỤ THUỘC ĐO ĐƯỢC**, không theo thứ tự nghĩ ra. Ai đọc plan này thì đọc mục này TRƯỚC.
+> ⚠️ **Lưu ý đánh số:** phần cũ của plan có `## 9. Chỗ CHƯA đo`; phần mới có `MỤC 9 — TRỤC CHIA`.
+> **Hai số 9 khác nhau.** Tôi KHÔNG đánh số lại (nhiều tin kênh đã trỏ theo số hiện tại) — nhắc ở đây
+> để không ai đọc nhầm. Gọi tên đầy đủ, đừng gọi trống «mục 9».
+
+## 🔴 CÁI CHẶN TẤT CẢ: **12 tệp bẩn trong cây làm việc**
+```
+HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconfig.json · dev/ · ai/ · chon-mau/)
+⇒ mọi việc chạm src/ đổ tiếp lên đống này là trộn hai việc vào một lần soi
+⇒ và nếu phải lùi, lùi trúng cả thứ không liên quan
+```
+**Nên VIỆC SỐ 1 là đóng đống đó, không phải việc nào hay hơn.**
+
+## 📋 THỨ TỰ
+```
+① ĐÓNG 12 TỆP BẨN  ← chặn mọi thứ khác chạm src/
+   exe vá nốt câu 7(b) postbuild «|| true» (hoặc tuyên bố tách việc riêng)
+   → reviewer ra verdict → exe dựng xanh → commit
+   phụ thuộc: KHÔNG. Làm ngay.
+
+② MẪU THANH TIÊU ĐỀ  ← chạy SONG SONG với ①, không đụng kho
+   hermes-web-noibo vẽ → Owner duyệt trên trang round
+   🔴 PHẢI XONG TRƯỚC ④, vì nó quyết ④ dựng cái gì
+
+③ TRỤC ② — bóc 357 dòng đầu UngDung.tsx
+   phụ thuộc: ① (cây phải sạch)
+   ⚠️ KHÔNG chạy song song với ④ — cả hai chạm CÙNG UngDung.tsx (34 commit/7 ngày)
+
+④ VIỆC GIAO DIỆN GỘP  (bố cục 2 ô trái-phải + nút Giao diện gom menu + gộp ☰ với «hiện 2 cột»)
+   phụ thuộc: ② duyệt xong  VÀ  ③ xong
+   gộp ba việc làm một vì cùng vùng mã, một lần soi
+
+── ba làn SONG SONG, KHÔNG đụng src/ nên chạy lúc nào cũng được ──
+⑤ B1 vòng 3 (hermes-build-app)          nhánh riêng, không chạm main
+⑥ mắt canh: phân biệt CHẠM TRẦN với CHẾT VÌ LỖI KHÁC   (xem MỤC 10.3)
+⑦ postbuild «|| true» nếu ① tách nó ra thành việc riêng
+
+── CHƯA tới lúc, ghi để khỏi quên ──
+⑧ đóng gói app ⇒ đặt DUONG_DAN_CLAUDE bằng đường TUYỆT ĐỐI, nghiệm thu bằng cách MỞ TỪ FINDER
+   (MỤC 11.1 — bẫy TƯƠNG LAI, chưa cắn)
+⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
+   cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
+```
+
+## 🔑 HAI NGUYÊN TẮC XẾP HÀNG NÀY
+```
+① CÂY SẠCH TRƯỚC, VIỆC MỚI SAU. Đổ việc mới lên 12 tệp bẩn là trộn hai việc vào một lần soi.
+② HAI VIỆC CHẠM CÙNG MỘT TỆP THÌ KHÔNG SONG SONG. ③ và ④ đều chạm UngDung.tsx —
+   chạy song song trên tệp 34 commit/7 ngày là tự tạo xung đột nhập cây.
+```
+📌 **Việc «hay» KHÔNG được chen lên trước việc «chặn».** ③ và ④ hấp dẫn hơn ① nhiều lần —
+đó chính là lý do phải viết thứ tự ra giấy thay vì để nó tự diễn ra.
+
+---
+
+# 📐 MỤC 9 — TRỤC CHIA `UngDung.tsx`: CÂU TREO TỪ 30/08 NAY CÓ SỐ
+
+> 📅 Nhập 04/09/2026 07:27 BST bởi `claude-aiboss-app-pm` · Owner giao
+> 📄 Tờ số gốc: `~/idea/inbox/aiboss-app-noibo/TO-SO-truc-chia-UngDung.md` (`claude-phong-ban-pm`, Research)
+> ⚖️ Research mang SỐ, PM quyết. Phần «QUYẾT» dưới đây là của PM, không phải của người đo.
+
+## 9.1 🔴 CON SỐ 3.212 TRONG KẾ HOẠCH NÀY ĐANG NÓI QUÁ 1,8 LẦN
+```
+tệp          3.212 dòng
+chú thích    1.291 (40,1%)   ← 1.277 dòng trong khối /* */ + 92 dòng //
+dòng trống     136
+MÃ THẬT     ~1.785 dòng
+```
+📌 Mọi chỗ trong kế hoạch này dùng «3.212» làm căn cứ khối lượng việc đều **tính dư gần một nửa**.
+🔑 Người đo tự nghi thước của mình (mẫu `^\s*\*` có thể bắt rộng) rồi **đối chứng lại bằng cách đếm
+dòng nằm TRONG khối `/* */`** ⇒ ra đúng 1.277. Nghi thước trước khi tin số — đó là cách con số này
+đáng tin.
+
+## 9.2 TỆP GÃY TỰ NHIÊN THÀNH BỐN KHỐI
+```
+   1- 357  NGOÀI component   7 import · 21 hằng · 4 hàm phụ trợ (23 dòng)
+ 358-2245  THÂN logic        1.887 dòng · 52 móc · 57 hàm mũi tên
+2245-3212  JSX               967 dòng · MỘT `return (` duy nhất
+đối chứng cộng: 357+1.887+967 = 3.211/3.212 (lệch 1 dòng ranh giới)
+```
+🔴 **Toàn tệp có ĐÚNG MỘT component. 2.854 dòng nằm trong MỘT hàm.**
+
+| trục | dòng | % | ràng buộc ĐO ĐƯỢC |
+|---|---|---|---|
+| ① kiểu | 126 | 3,9% | ✅ ĐÃ LÀM (M1a `771c7ef`) |
+| ② ngoài component 1-357 | 357 | 11,1% | 🟢 **KHÔNG đụng state** |
+| ③ JSX 2245-3212 | 967 | 30,1% | 🔴 bám **17/19 biến state (89%)** |
+| ④ logic 358-2245 | 1.887 | 58,7% | 🔴 52 móc nằm hết ở đây |
+
+## 9.3 ⚖️ PM QUYẾT — và quyết kèm một câu KHÓ CHỊU phải ghi ra
+```
+LÀM trục ② (1-357).  Rẻ, an toàn đo được, cùng LOẠI với M1a vừa qua trơn tru.
+```
+🔴 **NHƯNG trục ② KHÔNG mua được thứ Owner muốn.** Ưu tiên số 1 của Owner là *«đội code chạy song
+song»*. Hai việc giao diện chạy song song được hay không nằm ở **thân logic (④)** và **JSX (③)** —
+chỗ 52 móc và 17/19 biến state. Cắt ② xong thì hai việc giao diện **vẫn đụng nhau y như cũ.**
+📌 Ghi thẳng ra để KHÔNG ai báo «đã chia tệp xong» rồi Owner vẫn đau y nguyên — đúng cái bẫy mục 5b
+của kế hoạch này đã cảnh báo: *«làm đúng chữ mà trượt ý là cách hỏng tệ nhất, vì nó TRÔNG NHƯ đã xong.»*
+⇒ **Thứ thật sự mở khoá là trục ④.** Nó cần một đề riêng: phân tích phụ thuộc giữa 52 móc.
+Người đo tự khai đó là việc **nặng hơn một lượt đo** — đừng nhét vào một lượt.
+
+## 9.4 HAI CÁCH ĐỌC — giữ nguyên cả hai, KHÔNG xoá cách bị bác
+Người đo trình A («chưa đáng làm») và B («đáng làm, và chính vì đang nóng»). PM chọn hướng B cho
+trục ②, nhưng **cách đọc A còn nguyên giá trị cho trục ③ và ④**: tệp đang có **34 commit/7 ngày**
+(63% commit cả tháng dồn vào tuần qua), chia phần nóng giữa lúc nóng là tự tạo xung đột nhập cây.
+⇒ Trục ④ **chờ nhịp nguội hơn**, hoặc chờ một cơ chế chia việc không đụng nhau.
+
+## 9.5 SỐ CẢNH BÁO VỀ CÔNG SỨC — 30 : 1
+```
+22 commit ngày 03/09:  chạm src/ = 2 dòng-tệp  ·  chạm bai-thu + ai = 60 dòng-tệp
+bai-thu/ có 39 tệp, 14 tệp nhắc UngDung ⇒ 36% bộ đo tồn tại VÌ tệp này
+```
+⚠️ Đây là số của PM phải nhìn, không phải của thợ. Thước cần thiết, nhưng **30:1 là tỷ lệ của một
+đội đang mài dao nhiều hơn thái.**
+
+---
+
+# 📊 MỤC 10 — TRẦN LƯỢT HERMES: NÂNG TRẦN KHÔNG CỨU ĐƯỢC
+
+> 📄 `~/idea/inbox/aiboss-app-noibo/BAO-CAO-tran-luot-hermes-doi-ta.md` (`claude-phong-ban-pm`)
+> 📄 bản gốc `~/Operations/tra-cuu/2026-09-04-hermes-tran-luot-cong-cu.md` (`claude-chuyen-may-pm`)
+
+## 10.1 SỐ
+```
+13 hồ sơ Hermes:  11 hồ sơ max_turns=60  ·  web-noibo=120  ·  zalo-cskh=6
+                  TẤT CẢ delegation.max_iterations = 50  ⚠️ ĐỪNG sửa nhầm khoá này
+41 ca chạy trên máy ⇒ 7 ca CHẠM TRẦN
+🔴 web-noibo ĐÃ ở trần 120 mà vẫn chạm trần 6 trong 7 ca ấy
+```
+⇒ **Nâng trần là chữa triệu chứng.** Đây là bằng chứng, không phải lý lẽ.
+
+## 10.2 ĐÒN BẨY THẬT: GỌI CÔNG CỤ SONG SONG
+```
+web-noibo         1,16–1,68 lượt gọi công cụ / vòng   ⇒ gần như TUẦN TỰ
+hermes-build-app  2,86                                ⇒ SONG SONG nhiều hơn
+190 lượt gọi → KHÔNG chạm trần   ·   140 lượt gọi → CHẠM
+⇒ số lượt gọi công cụ KHÔNG dự đoán được chạm trần; số VÒNG mới quyết định
+```
+✅ **Việc phải làm: chia đề bài nhỏ hơn, và soạn đề sao cho người nhận gọi công cụ SONG SONG được.**
+Đó là việc của người GIAO — tức của PM, không phải của Hermes.
+
+## 10.3 🔗 NỐI VỚI CA «CHẾT GIỮA CHỪNG» 03-04/09
+Mắt canh Hermes báo nhiều ca `CHET-GIUA-CHUNG`. Mục này cho một **giả thuyết có số đỡ**: một phần
+trong đó là **chạm trần vòng**, chứ không phải hỏng bí ẩn.
+⚠️ KHÔNG phải tất cả — ca reviewer 17:07 chết vì **bộ lọc nội dung nhà cung cấp**, không phải trần.
+⇒ Việc kế: mắt canh phải **phân biệt CHẠM TRẦN với CHẾT VÌ LỖI KHÁC**, và nói ra loại nào.
+
+## 10.4 BẪY ĐO người đo TỰ KHAI — giữ lại vì nó dạy cách đọc bảng trên
+Họ tính `lượt gọi công cụ ÷ TRẦN`. Phép ấy **chỉ đúng cho ca CHẠM trần** (khi đó vòng thực = trần).
+Với ca KHÔNG chạm, vòng thực nhỏ hơn trần ⇒ tỷ lệ tính ra **thấp hơn thật**.
+📌 Nên cột «tool/vòng» của mấy ca KHÔNG chạm trần là **cận dưới**, đừng đọc thành giá trị thật.
+
+---
+
+# 🕳 MỤC 11 — HAI BẪY «CHẾT CÂM» TỪ HỒ SƠ 9BizClaw: ĐỘI TA ĐO LẠI
+
+> 📅 Nhập 04/09/2026 11:35 BST bởi `claude-aiboss-app-pm`
+> 📄 Nguồn: hồ sơ 9BizClaw (`claude-chuyen-may-pm`), Owner chuyển vào kênh đội
+> ⚖️ Nguồn ghi rõ «tự quyết đưa gì vào plan». **Cả hai lời khai đều được đo lại trên mã của TA.**
+> 🔴 MASTER-PLAN trước lúc này nhắc 9BizClaw **0 lần** — tin gốc nằm ở BOSS-CHANNEL từ 19:59 tối qua,
+>    đội không thấy. Ghi ra để nhớ: **tin ở kênh KHÁC thì coi như chưa tới.**
+
+## 11.1 BẪY ① — `cau-hinh.ts:28` tra `claude` theo PATH
+**Lời khai:** app Electron mở từ Finder KHÔNG có `~/.local/bin` trong PATH ⇒ đóng gói xong mọi ô im lặng.
+
+**Đội ta đo:**
+```
+cau-hinh.ts:28  lenhClaude: process.env.DUONG_DAN_CLAUDE ?? 'claude'   ✅ ĐÚNG như khai
+which claude    /Users/erocathanh/.local/bin/claude                    ⇒ đúng là phụ thuộc PATH
+'electron' trong package.json  0     ·  tệp .app trong kho  0
+cách chạy hiện tại: exec npx next start -H 0.0.0.0 -p 4319
+```
+✅ **KHÔNG phải bug đang sống.** Bằng chứng mạnh nhất KHÔNG phải là dump biến môi trường (tôi thử
+`ps -Eww` và nó KHÔNG lấy được PATH của tiến trình khác — thước hỏng, không phải kết quả) mà là
+**hành vi quan sát được: các ghế đã sinh tiến trình `claude` và trả lời suốt cả ngày 03-04/09.**
+Sinh được nghĩa là tìm được.
+
+🔴 **Nhưng nó là ĐIỀU KIỆN TIÊN QUYẾT của việc đóng gói.** Ngày nào app được gói lại và mở từ Finder,
+ngày đó **mọi ô im lặng mà KHÔNG báo lỗi gì** — đó là loại hỏng tệ nhất: app vẫn mở, giao diện vẫn
+vẽ, chỉ có điều không ô nào trả lời.
+✅ **Chìa đã có sẵn:** biến `DUONG_DAN_CLAUDE`. Chốt rẻ, đặt TRƯỚC khi cần:
+```
+⚠️ TRƯỚC KHI ĐÓNG GÓI app: đặt DUONG_DAN_CLAUDE bằng ĐƯỜNG TUYỆT ĐỐI trong tệp khởi động,
+   và nghiệm thu bằng cách MỞ TỪ FINDER rồi thử gửi một tin — đừng chỉ mở từ dòng lệnh.
+   Mở từ dòng lệnh sẽ luôn qua, vì nó thừa kế PATH của người gõ.
+```
+
+## 11.2 BẪY ② — tệp NGOÀI kho ghim cứng `localhost:4319`
+**Lời khai:** 8 tệp. **Đội ta đếm: 53 tệp — trong đó 25 tệp SỐNG, 28 bản sao lưu.**
+```
+25 tệp sống:  19 script trong ~/Operations/scripts/  ·  6 tệp CLAUDE.md / AGENTS.md của ba ghế
+              (mat-canh-ghe.sh · hen-khoi-dong-lai-app.sh · ghi-va-goi.sh · wake-wait.py ·
+               mat-canh-hermes.py · 5 script rung-* · …)
+ĐỐI CHỨNG DƯƠNG: tệp nhắc '4319' bất kỳ trong cùng phạm vi = 54 ⇒ thước sống
+```
+📌 **Nguồn đếm thiếu hơn ba lần.** Không phải họ sai — phạm vi quét của họ hẹp hơn. Nhưng con số
+đi vào kế hoạch phải là con số của TA, đo trên máy TA.
+🔴 **Kết luận của họ vẫn ĐÚNG, và nay đúng nặng hơn:** đổi cổng 4319 là **giết hệ chuông**, vì
+25 chỗ sống phải sửa đồng thời — trong đó có mắt canh, script rung, và hồ sơ của cả ba ghế.
+⇒ **Cổng 4319 nay là một hằng số của HỆ, không phải một tuỳ chọn của app.** Muốn đổi thì phải
+làm thành một việc riêng có danh sách 25 chỗ, KHÔNG được đổi tiện tay.
+
+## 11.3 ĐIỀU ĐÁNG GIÁ NHẤT KHÔNG PHẢI HAI BẪY
+Cả hai bẫy đều là loại **CHẾT CÂM**: hệ vẫn chạy, giao diện vẫn vẽ, không có lỗi nào in ra —
+chỉ là không có gì xảy ra nữa. Đây là cùng một họ với mọi thứ đội đã cắn hai ngày qua:
+```
+cổng .kiro có mà chưa từng nổ  ·  bộ đo xanh mà chưa chứng minh biết đỏ
+mắt canh neo vào trường rỗng   ·  mắt canh chỉ đọc khuôn của chính nó
+```
+🔑 **Hệ này hỏng theo kiểu IM LẶNG, không theo kiểu BÁO LỖI.** Nên mọi thứ ta dựng phải trả lời được
+câu: *«nếu thứ này chết, có ai biết không — và biết bằng cách nào?»*
+
+---
+
+# 🖼 MỤC 12 — BỐ CỤC MỚI: **2 Ô TRÁI-PHẢI** (chia dọc)
+
+> 📅 Owner giao 04/09/2026 11:48 BST · nhập bởi `claude-aiboss-app-pm`
+> 🎯 Nguyên văn Owner: *«hiện tại chỉ có 1 ô, 2 ô trên dưới, 4 ô và 6 ô — chưa có 2 ô trái phải»*
+
+## 12.1 HIỆN TRẠNG — đo, không nhớ
+```
+UngDung.tsx:375   const [boCuc, datBoCuc] = useState<1 | 2 | 4 | 6>(1);
+UngDung.tsx:116   const KHOA_BO_CUC = 'phong-ban-ai.bo-cuc';
+UngDung.tsx:1064  const bc = Number(localStorage.getItem(KHOA_BO_CUC));
+CSS lớp bố cục:   .luoi.bc-1 · .bc-2 · .bc-4 · .bc-6
+   bc-2 hiện là:  grid-template-columns:1fr · grid-template-rows:1fr 1fr   ⇒ TRÊN-DƯỚI
+```
+⇒ Owner đúng: **không có phương án hai cột.** `bc-2` đang là hai hàng.
+
+## 12.2 🔴 BỐN RÀNG BUỘC — người làm KHÔNG biết trước thì sẽ vấp
+```
+① GIÁ TRỊ LƯU LÀ MỘT CON SỐ.  dòng 1064 dùng Number(...)
+   ⇒ lưu một giá trị KHÔNG phải số (vd '2c') ⇒ Number ra NaN ⇒ đường khôi phục gãy
+   ⇒ và Owner MẤT bố cục đang dùng. Khoá 'phong-ban-ai.bo-cuc' nằm trong danh sách CẤM ĐỘNG
+     của hồ sơ ghế — cấm đổi TÊN KHOÁ; lưu giá trị mới thì được, nhưng phải giữ đọc được số cũ.
+② KIỂU HỢP Ở DÒNG 375 LÀ CÁI CỔNG.  `useState<1|2|4|6>` — thêm phương án phải mở kiểu này,
+   và trình biên dịch sẽ chỉ ra mọi chỗ còn thiếu. Đó là bạn đồng minh, đừng ép kiểu để né.
+③ CSS NẰM Ở HAI TỆP.  `globals.css` @import `mau09.css` ⇒ globals ĐÈ mau09.
+   `globals.css:219-221` tự ghi rõ ba chỗ trong mau09 (dòng 240 · 419 · 625) đang bị nới.
+   ⇒ Trước khi nói «không có rule cho X», grep CẢ HAI tệp. Đây là bẫy đã cắn thật, có trong hồ sơ ghế.
+④ 🔴 CÓ MỘT BẢN SAO THỨ BA ÍT AI NHỚ: `src/app/demo/page.tsx:33-37` giữ RIÊNG một bộ
+   `.khu-demo .luoi.bc-1/2/4/6`, kèm cả `@media(max-width:1100px)`.
+   ⇒ Thêm bố cục ở app mà quên trang demo thì hai bản trôi mỗi bản một kiểu — đúng bệnh
+     «hai bản của một sự thật» đội đã cắn nhiều lần. Trang demo tồn tại để giữ tên lớp khớp app;
+     nó lệch thì nó thành cái bẫy thay vì cái thước.
+```
+
+## 12.3 CHỖ PHẢI QUYẾT — người làm quyết, KHÔNG phải PM
+```
+gọi phương án mới là gì, khi giá trị lưu là SỐ và số 2 đã có chủ (trên-dưới)?
+   · thêm một số mới (vd 3) — rẻ nhất, nhưng con số KHÔNG nói lên hình dạng
+   · đổi cách lưu sang chuỗi + đường đọc ngược cho giá trị số cũ — đắt hơn, đọc dễ hơn
+⇒ Chọn gì cũng được, nhưng PHẢI chứng minh: bố cục Owner đang lưu vẫn khôi phục đúng sau khi vá.
+```
+
+## 12.4 NGHIỆM THU
+```
+① mở app, chọn bố cục mới ⇒ hai ô nằm TRÁI-PHẢI (grid-template-columns: 1fr 1fr)
+② ĐỐI CHỨNG: bc-2 cũ vẫn TRÊN-DƯỚI, không bị đổi
+③ TÍNH TƯƠNG THÍCH NGƯỢC: đặt sẵn giá trị cũ vào localStorage ⇒ nạp lại ⇒ vẫn ra đúng bố cục cũ
+   (đây là phép quan trọng nhất — nó bảo vệ thứ Owner đang dùng)
+④ trang demo và app dùng CÙNG tên lớp ⇒ so danh sách lớp bc-* ở hai nơi, phải khớp
+⑤ điện thoại: ô gõ vẫn ≥16px (dưới 16px là máy tự phóng to, nút Gửi văng khỏi màn)
+```
+
+## 12.5 XẾP HÀNG
+Việc này **quan trọng ✅ khẩn ❌** ⇒ xếp hàng, không chen. Vị trí: sau `cwd` mắt canh và sau trục ②.
+📌 Đây là ứng viên TỐT cho cuộc đua hai thợ: phạm vi rõ, nghiệm thu đo được, không đụng logic.
+
+## 12.6 NÚT «GIAO DIỆN» LÊN THANH TIÊU ĐỀ + GOM VÀO MENU KHI HẸP (Owner giao 11:50 04/09)
+
+**Nguyên văn Owner:** *«nút selector "Giao diện" nên để trên menu trên cùng hàng với title AIBOSS.VN,
+và khi không đủ khung hiển thị thì nó gom vào trong menu (icon menu ngay trước title AIBOSS.VN)»*
+
+### 🟢 NỬA ĐẦU **ĐÃ CÓ SẴN** — đo, không đoán
+```
+UngDung.tsx:2439  <div className="de-khu">                    ← thanh tiêu đề
+        2448      <button className="nut-tron nut-danh-ba">   ← ☰ ĐÃ CÓ, ngay TRƯỚC title
+        2456      <span className="nhan-khu ten-app">AIBOSS.VN
+        2463      <div className="nhom-bo-cuc">               ← margin-left:auto (mau09:221)
+        2490        <button className="nut-bc nut-gd">        ← nút «Giao diện» + menu xổ
+        2566        <button className="nut-bc" data-bc="1">   ← các nút 1/2/4/6
+```
+⇒ **Nút «Giao diện» ĐÃ nằm cùng hàng với title.** Và ☰ ĐÃ có, đúng vị trí Owner mô tả.
+📌 Nên việc thật KHÔNG phải «dời nút lên» — mà là **nửa sau: gom lại khi hẹp.**
+
+### 🔴 VIỆC THẬT + MỘT VA CHẠM PHẢI QUYẾT
+```
+hiện nay hẹp thì:  .nhom-bo-cuc{margin-left:auto;flex:none} + white-space:nowrap
+                   (mau09:521 tự ghi chú chỗ căng này) ⇒ CO/TRÀN, KHÔNG gom
+Owner muốn:        hẹp thì GOM vào menu ☰ trước title
+🔴 VA CHẠM: ☰ hiện có NGHĨA là «mở danh bạ» (Owner 18/08). Nhét thêm bố cục vào đó
+   ⇒ một nút hai nghĩa. Đó là quyết định về giao diện, KHÔNG phải chuyện kỹ thuật.
+   Ba đường thấy được: ☰ gánh cả hai · thêm một ☰ thứ hai · gom vào chính nút «Giao diện»
+   ⇒ để người làm đo rồi đề xuất, PM chốt. ĐỪNG tự chọn rồi làm luôn.
+```
+
+### ✅ NGHIỆM THU
+```
+① màn RỘNG: mọi nút bố cục hiện nguyên trên hàng title, KHÔNG đổi so với hiện nay
+② màn HẸP (đo ở bề rộng cụ thể, ghi số): nút bố cục GOM vào menu, hàng title KHÔNG tràn, KHÔNG xuống dòng
+③ ĐỐI CHỨNG: kéo qua lại ngưỡng ⇒ chuyển hai chiều mượt, không kẹt trạng thái
+④ ☰ vẫn mở được danh bạ — chức năng cũ KHÔNG mất (bài học «thêm đường ĐI phải thêm đường VỀ»)
+⑤ điện thoại: vùng bấm ≥38×32 như mau09:549 đang đặt, ô gõ vẫn ≥16px
+```
+⚠️ CSS ở HAI tệp (globals đè mau09) — và mau09:521 + 548 đã có sẵn chú thích về chính khối này.
+**Đọc hai chú thích đó TRƯỚC khi sửa**, chúng ghi lý do cách làm hiện tại.
+
+### 12.7 ⚖️ OWNER CHỐT VA CHẠM ☰ — **GỘP HAI NÚT LÀM MỘT** (11:56 04/09/2026)
+
+**Owner:** *«nút ☰ «mở danh bạ» và nút «hiện 2 cột» có thể gộp thành 1, vì đều là mở/đóng danh bạ»*
+
+**Đo lại — Owner đúng, hai nút điều khiển CÙNG MỘT THỨ:**
+```
+☰  nut-danh-ba (2449)  onClick: datAnKhu(true) ; datAnCotLuu(false)
+                       ⇒ HIỆN cột (anCot←false) + ẩn khu chat (màn hẹp)
+   nut-cot     (2472)  onClick: datAnCotLuu(!anCot)
+                       ⇒ BẬT-TẮT cột
+⇒ cả hai đều chạm biến `anCot`. ☰ là «mở» một chiều; nut-cot là công tắc hai chiều.
+   Gộp lại = MỘT công tắc trên `anCot`, phần ẩn-khu-chat suy ra theo bề rộng chứ không cần nút riêng.
+```
+
+**🔴 HAI RÀNG BUỘC — và cái thứ nhất do CHÍNH MÃ CŨ cảnh báo:**
+```
+① chú thích tại 2468-2470 ghi: «Ẩn cột = MẤT LỐI VÀO danh bạ ⇒ luật bật nút ☰ phải áp cho CẢ
+   trạng thái này. Ẩn thứ gì thì chừa ĐƯỜNG QUAY LẠI trong CÙNG lượt sửa.»
+   ⇒ ☰ đang là ĐƯỜNG VỀ của trạng thái mà nut-cot tạo ra.
+   🔑 Gộp hai nút mà một trong hai là lối thoát của cái kia ⇒ dễ gộp mất luôn lối thoát.
+   **Nút gộp phải bấm được ở CẢ HAI trạng thái, kể cả khi cột đang ẩn và khu chat đang phủ kín.**
+② ☰ còn làm thêm `datAnKhu(true)` (ẩn khu chat) — chỉ có nghĩa ở màn HẸP.
+   Nút gộp phải quyết: việc đó suy theo bề rộng, hay vẫn là một phần của cú bấm?
+```
+
+**Nghiệm thu bổ sung cho 12.6:**
+```
+⑥ màn RỘNG: bấm nút gộp ⇒ ẩn/hiện hai cột · bấm lại ⇒ về đúng trạng thái cũ
+⑦ màn HẸP:  bấm ⇒ mở danh bạ · và PHẢI có đường quay lại khu chat
+⑧ 🔴 PHÉP QUAN TRỌNG NHẤT: đưa app về trạng thái «cột đang ẩn» rồi hỏi
+   — nút gộp có còn NHÌN THẤY và BẤM ĐƯỢC không? Nếu không thì ta vừa gộp mất lối thoát.
+```

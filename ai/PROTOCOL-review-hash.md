@@ -157,3 +157,37 @@ A comparison that never fails has never been shown to work.
 ## RELATED
 - `ai/MASTER-PLAN.md` §4v-4z — cases this rule was extracted from
 - `~/Operations/SO-BAY-DO.md` §51-bis, §52 — measurement traps from the same day
+
+---
+
+## R10 · NHẬP MỘT BẢN ĐÃ CHẤM: `--no-ff` ĐƯỢC, **`rebase` THÌ KHÔNG**
+> thêm 03/09/2026 · ca thật: M1a, `git merge --ff-only` từ chối (mã 128, «Not possible to fast-forward»)
+
+**Luật một câu: verdict neo vào MÃ BĂM. Cách nhập nào XOÁ mã băm đó thì cách ấy xoá luôn verdict.**
+
+```
+--no-ff   đẻ một commit gộp · ứng viên 771c7ef SỐNG NGUYÊN làm CHA
+          ⇒ verdict vẫn neo vào ĐÚNG VẬT đã được soi                       ✅ DÙNG
+rebase    viết lại thành commit MỚI, mã băm KHÁC
+          ⇒ 771c7ef KHÔNG còn nằm trên main ⇒ verdict neo vào một vật KHÔNG CÓ MẶT   🔴 CẤM
+```
+🔑 `rebase` **không sai về mã** — mã sau rebase có thể giống hệt. Nó sai về **BẰNG CHỨNG**:
+người soi đã chấm một vật có tên; rebase đổi tên vật đó; và từ giây ấy **không ai tra ngược được
+verdict về vật nào nữa.** Đúng bệnh «neo ôi» mà giao thức này sinh ra để chặn.
+
+### 🕳 CA SINH LUẬT — và nó là một vòng tròn đáng nhớ
+```
+14:35  bước 1 ĐỎ vì tệp ĐỀ BÀI chưa vào git  ⇒ PM commit đề bài ⇒ cổng THÔNG
+16:00  merge --ff-only TỪ CHỐI, vì chính commit đề bài ấy làm main RẼ ĐÔI khỏi nền đua
+```
+📌 **Cái nút mở cổng lúc 14:35 chính là cái nút làm rẽ đôi lúc 16:00.** Không ai làm sai:
+đề bài PHẢI vào git để bước 1 sạch, nhưng lúc commit thì nền đua ĐÃ ghim rồi.
+⚠️ Cách tránh cho lần sau: **commit đề bài TRƯỚC khi ghim COMMIT_NEN**, đừng ghim rồi mới commit.
+
+### ✅ TRƯỚC KHI `--no-ff`, ĐO HAI THỨ
+```
+① git merge-base main <ứng viên>  phải ĐÚNG bằng COMMIT_NEN đã công bố
+② comm -12 hai danh sách tệp đổi  ⇒ 0 tệp trùng thì KHÔNG THỂ xung đột
+   khác 0 ⇒ DỪNG, báo PM: có tệp chung thì «gộp sạch» KHÔNG còn là chuyện hiển nhiên
+```
+📌 Người LÀM BÀI KHÔNG tự chọn cách bài mình được nhập. Đó là quyết định của người giữ cổng.
