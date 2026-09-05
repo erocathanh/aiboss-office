@@ -18,6 +18,9 @@ import path from 'node:path';
 import { doHinh, kiemLop, BANG_LOP } from './lop-phep-pha.mjs';
 
 const GOC = new URL('../src/components/UngDung.tsx', import.meta.url).pathname;
+const HANG_SO = new URL('../src/components/ung-dung/hang-so.ts', import.meta.url).pathname;
+const BONG_BONG = new URL('../src/components/ung-dung/bong-bong.tsx', import.meta.url).pathname;
+const BO_NGUON = [GOC, HANG_SO, BONG_BONG];
 let thuMuc: string;
 const g = () => doHinh(GOC);
 
@@ -87,6 +90,35 @@ describe('🔴 cổng phải TỪ CHỐI hai ca im lặng nguy nhất', () => {
     const p = path.join(thuMuc, 'y-het.tsx');
     fs.copyFileSync(GOC, p);
     const kq = kiemLop(g(), doHinh(p), 'doi-thuoc-tinh-jsx');
+    assert.equal(kq.dat, false);
+    assert.match(kq.vi, /KHÔNG đổi được gì/);
+  });
+});
+
+describe('🔴 cổng phân-lớp phải soi được mã cấp mô-đun SAU KHI nguồn đã chia tệp', () => {
+  test('đổi hang-so.ts trong bộ ba nguồn ⇒ đúng lớp doi-mo-dun', () => {
+    const p = path.join(thuMuc, 'hang-so-pha.ts');
+    const s = fs.readFileSync(HANG_SO, 'utf8');
+    const cu = 'const NHIP_THAM_DO_MS = 5_000;';
+    assert.equal(s.split(cu).length - 1, 1, 'neo phải DUY NHẤT trong hang-so.ts');
+    fs.writeFileSync(p, s.replace(cu, 'const NHIP_THAM_DO_MS = 60_000;'));
+
+    const kq = kiemLop(
+      doHinh(BO_NGUON),
+      doHinh([GOC, p, BONG_BONG]),
+      'doi-mo-dun',
+    );
+    assert.equal(kq.dat, true, kq.vi);
+  });
+
+  test('bản chép y hệt ở đường dẫn khác ⇒ vẫn bị từ chối là KHÔNG đổi gì', () => {
+    const p = path.join(thuMuc, 'hang-so-y-het.ts');
+    fs.copyFileSync(HANG_SO, p);
+    const kq = kiemLop(
+      doHinh(BO_NGUON.join(',')),
+      doHinh([GOC, p, BONG_BONG].join(',')),
+      'doi-mo-dun',
+    );
     assert.equal(kq.dat, false);
     assert.match(kq.vi, /KHÔNG đổi được gì/);
   });

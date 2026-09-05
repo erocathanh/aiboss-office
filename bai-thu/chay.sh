@@ -79,7 +79,7 @@ if [ "${1:-}" = "--ca-hai" ]; then
   echo; echo "⇒ bộ đo XANH: $([ $XANH -eq 0 ] && echo CÓ || echo KHÔNG)"\
 "  · biết ĐỎ (phép phá CŨ): $([ ${AM:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"\
 "  · biết ĐỎ (thứ tự móc):  $([ ${AM2:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
-  echo "  · biết ĐỎ (15 phép mô-đun): $([ ${AM3:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
+  echo "  · biết ĐỎ (12 phép mô-đun): $([ ${AM3:-1} -eq 0 ] && echo CÓ || echo KHÔNG)"
   [ $XANH -eq 0 ] && [ ${AM:-1} -eq 0 ] && [ ${AM2:-1} -eq 0 ] && [ ${AM3:-1} -eq 0 ]; exit $?
 fi
 exit $XANH

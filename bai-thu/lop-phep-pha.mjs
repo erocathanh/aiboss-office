@@ -25,12 +25,18 @@ import { kyHieuGop } from './hinh-dang-than.mjs';
 
 const bam = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex').slice(0, 12);
 
-/** Rút mọi SỰ THẬT ĐO ĐƯỢC của một tệp, tách theo TRỤC để lát nữa biết trục nào đã đổi. */
+/**
+ * Rút mọi SỰ THẬT ĐO ĐƯỢC của MỘT TỆP hoặc MỘT BỘ TỆP, tách theo TRỤC.
+ * Chuỗi phân cách bằng dấu phẩy là đúng hình `NGUON_THU` mà các hộp phá truyền qua shell.
+ */
 export function doHinh(duongDan) {
-  const noiDung = fs.readFileSync(duongDan, 'utf8');
-  const k = kyHieuGop([duongDan]);
+  const ds = Array.isArray(duongDan) ? duongDan : String(duongDan).split(',');
+  if (ds.length === 0 || ds.some((d) => typeof d !== 'string' || d.length === 0))
+    throw new Error('doHinh: bộ nguồn RỖNG hoặc có đường dẫn RỖNG ⇒ CHƯA ĐO');
+  const noiDung = ds.map((d) => fs.readFileSync(d, 'utf8'));
+  const k = kyHieuGop(ds);
   const jsx = Object.values(k.theoComponent).flatMap((c) => c.jsx);
-  const m = dayMocTheoComponent([duongDan]).day;
+  const m = dayMocTheoComponent(ds).day;
   const moc = Object.entries(m).flatMap(([t, ds]) => ds.map((x) => ({ ...x, chu: t })));
   return {
     // trục JSX — tách THẺ · THUỘC TÍNH · CHỮ, vì ba thứ đó hỏng theo ba kiểu khác nhau
@@ -46,8 +52,9 @@ export function doHinh(duongDan) {
     phuThuoc: moc.map((x) => (x.pt ? x.pt.join(',') : '∅')),
     vanTay: moc.map((x) => x.vanTay),
     // trục VĂN BẢN — dùng cho lớp hoán vị: đa tập DÒNG phải bằng
-    daTapDong: bam([...noiDung.split('\n')].sort().join('\n')),
-    noiDung: bam(noiDung),
+    daTapDong: bam(noiDung.flatMap((s) => s.split('\n')).sort().join('\n')),
+    // Băm MẢNG nội dung, KHÔNG băm đường dẫn: bản chép y hệt ở /tmp vẫn phải được nhận là y hệt.
+    noiDung: bam(JSON.stringify(noiDung)),
   };
 }
 
@@ -94,7 +101,8 @@ export function kiemLop(goc, pha, lop) {
     : { dat: false, vi: `KHAI lớp «${lop}» (${l.ta}) nhưng delta THẬT là: ${truc.join(' · ') || 'không trục nào của bộ đo'}`, thay: truc };
 }
 
-// chạy trực tiếp:  node lop-phep-pha.mjs <tệp gốc> <tệp đã phá> <lớp>
+// chạy trực tiếp: node lop-phep-pha.mjs <bộ tệp gốc> <bộ tệp đã phá> <lớp>
+// Mỗi bộ là một đường dẫn hoặc danh sách đường dẫn phân cách bằng dấu phẩy.
 if (process.argv[1] && process.argv[1].endsWith('lop-phep-pha.mjs')) {
   const [g, p, lop] = process.argv.slice(2);
   const kq = kiemLop(doHinh(g), doHinh(p), lop);

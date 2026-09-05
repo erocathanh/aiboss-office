@@ -79,9 +79,37 @@ describe('🔴 Q2 — ký hiệu phải mang PHẦN CHỮ, vì đó là thứ Ow
    * ⇒ 83 là con số SAU KHI phép đo được sửa cho ĐÚNG. Vùng phủ KHÔNG hề giảm; cái giảm là
    *    phần bịa. Ngưỡng ở đây chỉ làm ĐỐI CHỨNG DƯƠNG «bộ bóc có THẤY chữ không».
    */
-  test('có ít nhất 80 nút JSX mang chữ hiển thị THẬT (đã trừ phần nhặt nhầm tên lớp CSS)', () => {
+  test('TỔNG chữ Owner ĐỌC = 82 — CẢ HAI VẾ tự đo, không vế nào gõ sẵn', () => {
+    // 🔴 VERDICT VÒNG 2 ②: bản trước tôi viết `assert.equal(77 + bo.length, 82)`.
+    //    Số 77 là tôi GÕ SẴN ⇒ phép đó KHÔNG hề đo phía JSX, nó chỉ cộng hằng số của tôi
+    //    với một con số khác. Một phép đo mà một vế là hằng số thì nó đo ĐÚNG MỘT VẾ.
+    // ✅ Nay CẢ HAI vế đọc từ hiện vật: JSX đếm từ cây cú pháp, nhãn đọc từ `hang-so.ts`.
+    //    Xoá chữ ở BẤT KỲ vế nào cũng làm tổng tụt.
+    const jsx = U().jsx.filter((x: string) => x.includes('«')).length;
+    const nguonSo = fs.readFileSync(
+      new URL('../src/components/ung-dung/hang-so.ts', import.meta.url), 'utf8');
+    const khoiSo = nguonSo.slice(nguonSo.indexOf('const SO_BO_GHE'), nguonSo.indexOf('const LA_BO_DUNG_SAN'));
+    const nhan = [...khoiSo.matchAll(/ten: '([^']+)'/g)].map((m) => m[1]);
+    assert.ok(nhan.length > 0, 'KHÔNG bóc được nhãn nào từ SO_BO_GHE ⇒ phép này đang mù');
+    assert.equal(jsx + nhan.length, 82,
+      `tổng chữ Owner ĐỌC đổi (${jsx} JSX + ${nhan.length} nhãn = ${jsx + nhan.length} ≠ 82)`);
+  });
+
+  test('ĐÚNG 77 nút JSX mang chữ hiển thị THẬT — số ĐÓNG BĂNG, không phải sàn', () => {
+    // 🔴 VERDICT vòng 1 bác cách vá cũ của tôi, và bác ĐÚNG.
+    //    Tôi hạ sàn 80 → 75 rồi thêm một «phép bù» canh nhãn trong `SO_BO_GHE`.
+    //    Người soi dựng ca hỏng: xoá HAI nút chữ KHÔNG thuộc sổ («Cơ cấu tổ chức», «Tỉ trọng
+    //    nhân sự») ⇒ sàn 75 CHO QUA · phép bù CHO QUA · sàn 80 cũ thì BẮT ĐƯỢC.
+    // 🔑 Phép bù canh chữ trong SỔ; phép này canh chữ trong JSX. **Hai thứ khác nhau — nó
+    //    KHÔNG thay được, nó chỉ đứng cạnh.** Câu hỏi đúng KHÔNG phải «sàn bao nhiêu» mà
+    //    «canh CÁI GÌ»: thứ phải canh là CHỮ OWNER ĐỌC, và nó KHÔNG được hụt đi.
+    // ✅ Nên đây là bộ ĐÓNG BĂNG: chốt con số CHÍNH XÁC. Mất một nút chữ là ĐỎ ngay.
+    //    Một cái sàn luôn chừa chỗ để rơi mà cổng vẫn xanh — 77 hơn sàn 75 đúng 2, tức
+    //    ĐÚNG HAI nút được phép biến mất trong im lặng. Đóng băng thì con số 0.
+    // 📌 Thêm chữ MỚI cũng đỏ — CỐ Ý: đổi số này phải là một hành động CÓ Ý THỨC, kèm lý do.
     const coChu = U().jsx.filter((x: string) => x.includes('«'));
-    assert.ok(coChu.length >= 80, `chỉ ${coChu.length} nút mang chữ ⇒ bộ bóc có thể đang bỏ phần chữ`);
+    assert.equal(coChu.length, 77,
+      `nút JSX mang chữ đổi (${coChu.length} ≠ 77) ⇒ có chữ vừa MẤT hoặc vừa THÊM, khai ra lý do`);
   });
 });
 

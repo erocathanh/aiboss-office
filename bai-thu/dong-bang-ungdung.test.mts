@@ -35,8 +35,29 @@ const { tep, ten, bo } = bocThuanNhieuTep(NGUON.split(','));
 const M = await import(tep);
 
 describe('bóc được đúng thứ mong đợi', () => {
-  test('21 khai báo thuần chạy được', () => {
-    assert.equal(ten.length, 21, 'số khai báo bóc được đổi ⇒ có thứ vừa THÊM hoặc vừa MẤT');
+  // 🔽 PHÉP BÙ cho việc hạ ngưỡng nút-JSX-mang-chữ ở `dong-bang-than.test.mts`.
+  // 5 nhãn phòng ban rời khỏi JSX để vào `SO_BO_GHE`. Lời bảo đảm «chữ Owner ĐỌC vẫn còn»
+  // KHÔNG được biến mất theo — nó DỜI sang đây, canh đúng chỗ chữ nay đang ở.
+  test('SO_BO_GHE giữ ĐÚNG BỘ nhãn — không phải chỉ «đủ dài»', () => {
+    // 🔴 VERDICT vòng 1: bản trước tôi chỉ đòi nhãn dài ≥4 ký tự ⇒ chuỗi "xxxx" cũng QUA.
+    //    Một phép canh mà vật vô nghĩa đi lọt thì nó KHÔNG canh gì cả.
+    const MONG = ['Phòng Marketing', 'Vận hành', 'Quản Lý Cũ', 'Quản Lý Trường', 'Phòng Công Nghệ'];
+    const bo = (M as Record<string, unknown>).SO_BO_GHE as { ma: string; ten: string; ghe: unknown[] }[];
+    assert.ok(Array.isArray(bo), 'SO_BO_GHE phải là mảng');
+    assert.deepEqual(bo.map((b) => b.ten), MONG,
+      'bộ nhãn phòng ban đổi ⇒ chữ Owner ĐỌC vừa đổi, khai ra lý do');
+    for (const b of bo) {
+      assert.ok(Array.isArray(b.ghe) && b.ghe.length > 0, `bộ ${b.ma} rỗng ghế`);
+      assert.ok(b.ghe.every((g) => typeof (g as { ten?: unknown }).ten === 'string'),
+        `bộ ${b.ma} có ghế chưa chuẩn hoá về {ten, phien}`);
+    }
+  });
+
+
+  test('23 khai báo thuần chạy được', () => {
+    // 21 → 23 (việc ④, 04/09): thêm `SO_BO_GHE` (sổ đăng ký bộ ghế) và `chuoiThanhGhe`
+    // (chuẩn hoá mảng chuỗi về {ten,phien}). KHÔNG có gì MẤT — đã đối chiếu từng tên.
+    assert.equal(ten.length, 23, 'số khai báo bóc được đổi ⇒ có thứ vừa THÊM hoặc vừa MẤT');
   });
   test('6 khai báo nằm NGOÀI tầm phủ, có lý do từng cái', () => {
     assert.equal(bo.length, 6);

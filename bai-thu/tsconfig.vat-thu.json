@@ -1,0 +1,7 @@
+{
+  "//": "🔬 Phạm vi RIÊNG cho vật thử. tsconfig.json chính đã TÁCH bai-thu/vat-thu ra (chúng là DỮ LIỆU đọc-bằng-đường-dẫn, khôngtệp nào import). Tệp này kéo chúng lại vào để cong-unused.sh hỏi đúng một câu: chúng CÒN bẩn cố ý không. Đừng dùng nó để dựng.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "noUnusedLocals": true, "noUnusedParameters": true },
+  "include": ["vat-thu/**/*.tsx"],
+  "exclude": []
+}
