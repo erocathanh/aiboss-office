@@ -7,21 +7,21 @@
  * ⚠️ CHỖ NÓ KHÔNG VỚI TỚI, nói ra để người sau khỏi tưởng đã kín:
  *    · hàm CÓ THỂ hỏng mà KHÔNG khai kiểu trả về thì nó khôngthấy (phép «≥4 hàm» chỉ chặn việc
  *      GỠ lời khai đã có, khôngchặn việc viết hàm mới mà khôngkhai từ đầu);
- *    · `duocDoc` hỏi «cái tên này có chỗ nào đọc không» trên TOÀN TỆP, khôngphân tích phạm vi —
- *      hai biến trùng tên ở hai hàm khác nhau sẽ được coi là một. Đổi lấy: khôngcần chương trình
- *      hoá kiểu (type-checker), chạy nhanh, và sai về phía DUNG (báo thiếu, khôngbáo oan).
+ *    · thước theo đích lưu bằng hình dạng cú pháp (`x`, `o.kq`, `o['kq']`) và lần truy cập kế tiếp;
+ *      nó chưa giải bí danh hay định danh ký hiệu qua type-checker;
+ *    · truyền kết quả làm tham số được tính là DÙNG vì nơi gọi đã chuyển giá trị đi. Muốn biết hàm
+ *      nhận có tự vứt hay không phải phân tích xuyên hàm, nằm ngoài sức của thước cú pháp này.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-/* 🔴🔴🔴 THƯỚC `soi-ket-qua.mjs` ĐANG HỎNG — bị bác ở verdict 20260905_173533_d01eab (05/09/2026).
-   Nó báo ĐỎ OAN mã đúng, VÀ báo XANH cho tệp vỡ cú pháp. KHÔNG được coi màu xanh của nó là bằng
-   chứng. Theo QUYẾT ĐỊNH 🅒 của Owner 18:30 cùng ngày, phần PHÂN LOẠI của nó đã HẠ xuống mức
-   BÁO-CÁO trong tệp này — xem phép đầu tiên bên dưới, nó IN ra chứ khônglàm bộ chạy đỏ.
-   Sửa tử tế ở việc ㉒: `ai/ban-giao/2026-09-05_thuoc-ast-ba-trang-thai.md`. 🔴🔴🔴 */
-import { docNguon, loiCuPhap, timHamCoKetQua, soiChoGoi } from './soi-ket-qua.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { docNguon, timHamCoKetQua, soiChoGoi } from './soi-ket-qua.mjs';
 
 const NGUON = new URL('../src/components/UngDung.tsx', import.meta.url).pathname;
+const THUOC = new URL('./soi-ket-qua.mjs', import.meta.url).pathname;
 
 /* ── MẪU BIẾT SẴN ĐÁP ÁN — chạy MỖI lượt, gồm đủ bốn ca người soi đòi ────────────────────────
    🔑 Thiếu phần này thì màu xanh bên dưới vô nghĩa: một thước gán «DÙNG» cho mọi thứ cũng cho ra
@@ -49,43 +49,82 @@ const MAU: { ma: string; mong: 'DUNG' | 'BO-QUA'; vi: string }[] = [
   // ④ TRANH CHẤP `_bo` — xử bằng HÀNH VI, khôngbằng TÊN. Cả hai chiều đều phải đúng.
   { ma: 'const _bo16 = await f(16); use(_bo16);', mong: 'DUNG', vi: '`_bo` CÓ được đọc ⇒ khôngđược báo đỏ' },
   { ma: 'const _bo17 = await f(17);', mong: 'BO-QUA', vi: '`_bo` KHÔNG ai đọc ⇒ phải bắt' },
+  // ⑤ BA PHẢN VÍ DỤ PHÂN LOẠI của verdict vòng 3 — việc ㉒ phải giữ chúng sống trong bộ mẫu
+  { ma: 'const hop20: { kq?: boolean } = {}; hop20.kq = await f(20); use(hop20.kq);',
+    mong: 'DUNG', vi: 'gán thuộc tính rồi đọc thuộc tính' },
+  { ma: 'if (!(Boolean(true), await f(21))) use(21);',
+    mong: 'DUNG', vi: 'vế phải dấu phẩy mang giá trị ra điều kiện' },
+  { ma: 'let biGhiDe22: boolean; biGhiDe22 = await f(22); biGhiDe22 = false; use(biGhiDe22);',
+    mong: 'BO-QUA', vi: 'giá trị bị ghi đè trước lần đọc đầu tiên' },
 ];
 
-/* ══════════════════════════════════════════════════════════════════════════════════════════
- * 📋 BÁO CÁO — KHÔNG PHẢI CỔNG (hạ cấp theo QUYẾT ĐỊNH 🅒 của Owner, 05/09/2026 18:30)
- *
- * 🕳 Phép này TRƯỚC ĐÂY là cổng: nó khẳng định thước phân loại ĐÚNG trên 18 mẫu. Nhưng người soi
- *    chứng minh thước sai ở BỐN ca mà 18 mẫu này khôngchạm tới. Giữ nó làm cổng nghĩa là **cấp
- *    giấy chứng nhận đúng cho một cái thước đã biết là sai** — tệ hơn khôngcó cổng, vì cả nhà tin
- *    rằng chỗ này đang được canh.
- * ⇒ Nay nó CHỈ IN RA. Nó KHÔNG bao giờ làm bộ chạy đỏ, kể cả khi thước trả lời sai hết.
- * 🔑 Đọc con số nó in như đọc một lời khai của bị can, khôngphải như đọc một biên bản giám định.
- * ══════════════════════════════════════════════════════════════════════════════════════════ */
-test('📋 BÁO CÁO (KHÔNG phải cổng) — thước phân loại tự khai, đúng sai đều KHÔNG chặn', () => {
+test('🔴 thước phân loại đúng toàn bộ mẫu đã biết đáp án — sai một ca phải ĐỎ', () => {
   const ma = ['const f = async (n: number): Promise<boolean> => n > 0;',
     'declare function use(...a: unknown[]): void;', ...MAU.map((x) => x.ma)].join('\n');
-  const src = docNguon(ma);
-  const noi = (t: string) => console.log(`      ${t}`);
-
-  const loiMau = loiCuPhap(src);
-  const nguonThat = docNguon(fs.readFileSync(NGUON, 'utf8'), 'UngDung.tsx');
-  const loiThat = loiCuPhap(nguonThat);
-  noi(`lỗi cú pháp — mẫu: ${loiMau.length} · nguồn thật: ${loiThat.length}`);
-  if (loiThat.length) {
-    noi('🔴 NGUỒN THẬT VỠ CÚ PHÁP — mọi bảng dưới đây dựng trên một CÂY THIẾU, đừng tin:');
-    for (const l of loiThat.slice(0, 5)) noi(`   ${l}`);
-  }
-
-  const ten = timHamCoKetQua(src);
+  const ten = timHamCoKetQua(docNguon(ma));
   const cho = soiChoGoi(ma, ten);
   const sai = cho.map((c, k) => ({ ...MAU[k], duoc: c.cach })).filter((x) => x.duoc !== x.mong);
-  noi(`mẫu ${MAU.length} ca · thước trả lời sai ${sai.length} ca`);
-  for (const x of sai) noi(`   🔴 «${x.ma}» mong ${x.mong} · được ${x.duoc}  (${x.vi})`);
-  if (sai.length === 0) {
-    noi('✔ đúng cả 18 ca MẪU — nhưng ĐÂY KHÔNG PHẢI BẰNG CHỨNG thước lành:');
-    noi('  người soi đã chỉ BỐN ca sai mà bộ mẫu này KHÔNG chạm tới (verdict 20260905_173533_d01eab).');
+  assert.equal(cho.length, MAU.length, `mong ${MAU.length} lời gọi, thước chỉ thấy ${cho.length}`);
+  assert.deepEqual(sai, [], `thước phân loại sai:\n${sai.map((x) =>
+    `  «${x.ma}» mong ${x.mong} · được ${x.duoc} (${x.vi})`).join('\n')}`);
+});
+
+test('🔴 HỒI QUY ㉒ — gán vào THUỘC TÍNH `.` / `[]` rồi đọc thuộc tính ⇒ DUNG', () => {
+  const ma = [
+    'const hopCham: { ketQua?: boolean } = {}; hopCham.ketQua = f(); use(hopCham.ketQua);',
+    "const hopNgoac: { ketQua?: boolean } = {}; hopNgoac['ketQua'] = f(); use(hopNgoac.ketQua);",
+  ].join('\n');
+  assert.deepEqual(soiChoGoi(ma, ['f']).map((x) => x.cach), ['DUNG', 'DUNG']);
+});
+
+test('🔴 HỒI QUY ㉒ — vế phải dấu phẩy mang giá trị ra ngoài, không đệ quy lại lời gọi', () => {
+  const ma = 'if (!(Boolean(true), f())) use();';
+  assert.deepEqual(soiChoGoi(ma, ['f']).map((x) => x.cach), ['DUNG']);
+});
+
+test('🔴 HỒI QUY ㉒ — ghi đè trước lần đọc đầu tiên ⇒ BO-QUA', () => {
+  const ma = 'let ketQua: boolean; ketQua = f(); ketQua = false; use(ketQua);';
+  assert.deepEqual(soiChoGoi(ma, ['f']).map((x) => x.cach), ['BO-QUA']);
+});
+
+function chayThuoc(noiDung: string | Buffer) {
+  const thuMuc = fs.mkdtempSync(path.join(os.tmpdir(), 'soi-ket-qua-'));
+  const tep = path.join(thuMuc, 'vat-thu.tsx');
+  try {
+    fs.writeFileSync(tep, noiDung);
+    const kq = spawnSync(process.execPath, [THUOC, tep, 'f'], { encoding: 'utf8' });
+    return { ma: kq.status, loiRa: `${kq.stdout}${kq.stderr}` };
+  } finally {
+    fs.rmSync(thuMuc, { recursive: true, force: true });
   }
-  noi('⇒ phép này KHÔNG chặn gì cả. Cổng cứng là ba phép bên dưới.');
+}
+
+test('🔴 BA TRẠNG THÁI — mã đo được và có người đọc ⇒ ĐẠT, mã đo được nhưng bỏ kết quả ⇒ KHÔNG ĐẠT', () => {
+  const dat = chayThuoc('declare function f(): boolean; use(f());');
+  assert.equal(dat.ma, 0, dat.loiRa);
+  assert.match(dat.loiRa, /^ĐẠT\b/m);
+
+  const khongDat = chayThuoc('declare function f(): boolean; f();');
+  assert.equal(khongDat.ma, 1, khongDat.loiRa);
+  assert.match(khongDat.loiRa, /^KHÔNG ĐẠT\b/m);
+});
+
+test('🔴 BA TRẠNG THÁI — tệp VỠ CÚ PHÁP ⇒ KHÔNG ĐO ĐƯỢC và cổng ĐỎ', () => {
+  const kq = chayThuoc('declare function f(): boolean; use(f()); const reviewerBroken = ;');
+  assert.equal(kq.ma, 2, kq.loiRa);
+  assert.match(kq.loiRa, /^KHÔNG ĐO ĐƯỢC\b/m);
+});
+
+test('🔴 BA TRẠNG THÁI — tệp RỖNG ⇒ KHÔNG ĐO ĐƯỢC và cổng ĐỎ', () => {
+  const kq = chayThuoc('');
+  assert.equal(kq.ma, 2, kq.loiRa);
+  assert.match(kq.loiRa, /^KHÔNG ĐO ĐƯỢC\b/m);
+});
+
+test('🔴 BA TRẠNG THÁI — tệp NHỊ PHÂN ⇒ KHÔNG ĐO ĐƯỢC và cổng ĐỎ', () => {
+  const kq = chayThuoc(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0x01]));
+  assert.equal(kq.ma, 2, kq.loiRa);
+  assert.match(kq.loiRa, /^KHÔNG ĐO ĐƯỢC\b/m);
 });
 
 test('🔴 tìm được ÍT NHẤT bốn hàm có kết quả — gỡ lời khai để né thước là ĐỎ', () => {
