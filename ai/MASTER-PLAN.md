@@ -1772,6 +1772,45 @@ M3  hai người sửa hai việc cùng lúc, không ai phải chờ ai    ⇒ P
 
 ---
 
+# 🧭 CHẠY SONG SONG NHIỀU ĐỘI — KẾ HOẠCH ĐÃ CÓ SẴN TỪ 02/09, ĐỌC TRƯỚC KHI HỎI LẠI
+
+```
+📄 ai/KE-HOACH-SONG-SONG.md   433 dòng · 32.318 byte · hermes-build-app soạn 19:19 ngày 02/09
+   mục 0 kết luận ngắn cho PM · 1 đường cắt · 2 điều kiện bắt đầu song song THẬT
+   · 3 luật đội + worktree + dựng + hai phiên soi · 4 phép nghiệm thu tách tệp
+   · 5 cách đo «nhanh gấp 2-3» · 6 chỗ CHƯA đo · 7 việc PM phải chốt · phụ lục lệnh đã chạy
+```
+
+🕳 **CA SINH RA DÒNG TRỎ NÀY (05/09):** Owner hỏi «làm sao cho 3-4 đội chạy song song». Tôi cử người
+đi nghiên cứu. Nó tìm ra rằng **câu trả lời đã nằm trong chính kho này ba ngày trước**, và đo giúp
+tôi lý do không ai dùng:
+```
+số chỗ TRỎ vào tệp đó:   MASTER-PLAN 0  ·  hồ sơ ghế PM 0  ·  kênh đội 3
+```
+🔑 **Kênh là DÒNG CHẢY, kế hoạch là MỤC LỤC.** Thứ chỉ được công bố trên kênh thì trôi mất trong
+một ngày; thứ muốn sống lâu hơn một ngày phải nằm ở MỤC LỤC. Ba lần nhắc trên kênh vẫn thua
+**không dòng nào** trong tệp mà người ta thật sự mở ra đọc.
+📌 Đây là cái **thứ NĂM** cùng một họ trong tuần: cổng `.kiro` · sổ tiến độ · lint · bộ phá · nay
+là một kế hoạch 32KB. Mỗi lần đều là **thứ đã tồn tại mà không ai biết để dùng**.
+
+## 🔴 BA SỐ TỪ BÁO CÁO 05/09 LÀM ĐỔI CÁCH NGHĨ — đọc trước khi lập đội
+
+```
+① CÁI CHẶN KHÔNG PHẢI hình dạng UngDung.tsx, mà là BỐN CÁI CHỐT chưa dựng — cả bốn đo được là trượt:
+   cây bẩn 22 mục (8 chạm src/) · chưa có bảng SỞ HỮU TỆP · bộ phá `--ca-hai` khi đó đang hỏng
+   · chưa có `.worktreeinclude`
+② `git log --format='%an'` ⇒ **154/154 commit CÙNG MỘT TÊN** («Eroca Thanh»)  [tôi tự đo lại: đúng]
+   ⇒ `git blame` MÙ · `git log --author=` vô dụng · mọi cột làn/thắng-thua phải ghi TAY
+   ⇒ và nó làm nặng thêm bẫy đã cắn thật ở SO-BAY-DO:1176
+③ nguồn ngoài, câu quan trọng nhất:
+   «Worktree isolation prevents write conflicts during execution.
+    It does NOT prevent merge conflicts at integration»  [video I9lT8m0NoiU ~09:55]
+   ⇒ worktree chỉ **DỜI** xung đột từ lúc VIẾT sang lúc GHÉP.
+     Dựng bốn worktree mà bốn đội cùng chạm UngDung.tsx là **đổi chỗ đau, không bớt đau**.
+```
+📄 Báo cáo đầy đủ 680 dòng + 7 transcript có mốc giờ:
+`~/idea/inbox/aiboss-app-noibo/tra-cuu/song-song/`
+
 # 🚦 HÀNG ĐỢI — LÀM GÌ TRƯỚC, LÀM GÌ SAU (Owner giao xếp lại, 04/09/2026 12:31 BST)
 
 > Xếp theo **PHỤ THUỘC ĐO ĐƯỢC**, không theo thứ tự nghĩ ra. Ai đọc plan này thì đọc mục này TRƯỚC.
@@ -1806,15 +1845,129 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    phụ thuộc: ② duyệt xong  VÀ  ③ xong
    gộp ba việc làm một vì cùng vùng mã, một lần soi
 
-── ba làn SONG SONG, KHÔNG đụng src/ nên chạy lúc nào cũng được ──
+── bốn làn SONG SONG, KHÔNG đụng src/ nên chạy lúc nào cũng được ──
 ⑤ B1 vòng 3 (hermes-build-app)          nhánh riêng, không chạm main
 ⑥ mắt canh: phân biệt CHẠM TRẦN với CHẾT VÌ LỖI KHÁC   (xem MỤC 10.3)
 ⑦ cho DẤU VẾT BẢN DỰNG sinh TỰ ĐỘNG — cần PM/Owner chốt lệnh dựng của nhà
    (phần «bỏ 2>/dev/null || true» exe ĐÃ vá lúc 12:20, nằm TRONG ①. Đính chính của exe 12:35.)
+⑩ MẮT CANH SỔ TIẾN ĐỘ — bắt `TIEN-DO-app.md` phải nổ khi nó CŨ QUÁ
+   nay: luật ghi sổ nằm trong hồ sơ ghế từ 03/09, VÀ NÓ ĐÃ IM 23 TIẾNG 27 PHÚT (03/09 16:31 → 04/09 15:58)
+   ⇒ cần một mắt canh launchd: mtime tệp cũ hơn 3 giờ mà kênh đội CÓ tin mới ⇒ rung ghế PM
+   ⚠️ điều kiện phải là «cũ VÀ có việc chạy», KHÔNG phải «cũ» trơn — đêm không ai làm thì đừng rung
+   phụ thuộc: KHÔNG chạm src/. Giao exe sau khi ③ xong. Khai vào `~/Operations/launchd/SO-DANG-KY.md`.
 
 ── CHƯA tới lúc, ghi để khỏi quên ──
 ⑧ đóng gói app ⇒ đặt DUONG_DAN_CLAUDE bằng đường TUYỆT ĐỐI, nghiệm thu bằng cách MỞ TỪ FINDER
    (MỤC 11.1 — bẫy TƯƠNG LAI, chưa cắn)
+⑪ 🅑 `bangBiDanh` dựng bảng bí danh XUYÊN TỆP — hạ tầng ĐO, lượt RIÊNG
+   vì sao tách: bảng bí danh nay dựng THEO TỪNG TỆP ⇒ dời khai báo `dungTruocKhiVe` sang tệp khác
+   là thước MÙ 4 móc (soMoc 70 → 67). exe bắt được và TỪ CHỐI hạ mong đợi xuống 67 cho xanh.
+   🔴 KHÔNG gộp vào lượt chia tệp nào — sửa thước trong chính lượt đang dùng thước để nghiệm thu
+      là tự chấm bài mình. Đây là lý do exe đưa ra, tôi nhận nguyên.
+   ⚠️ 67 lần này KHÁC 67 của bộ dò hỏng `^use[A-Z]` hôm trước. CÙNG số, HAI nguyên nhân —
+      ai tra sổ gặp lại số 67 thì đọc cả hai ca, đừng khớp số rồi kết luận.
+⑫ VÁ `build_site.py` trang nội bộ — người soi BÁC bản vá 2 dòng của tôi, đường đúng là HAI phần
+   (A) thu hẹp theo PHẠM VI: bỏ `validate_source` khỏi `validate_round_content`, gọi riêng cho
+       `target_content` sau dòng 684. Chữa đúng bệnh «một nguồn lệch đóng băng CẢ bộ sinh»
+       (vòng lặp 681-682 soi mọi round mỗi lần dựng). ⚠️ KHÔNG thông round-8.
+   (B) `content/source-drift.json` NGOÀI khoá sổ, ghi fromSha256 → toSha256 + observedAt + byAgent
+       + note; `validate_source` với round decided chỉ qua khi khớp bản ghi đó. ~15 dòng.
+       + nạp vào `render_stamp` (228-231) để trang in «nguồn đã đổi sau khi hỏi: A… → B…»
+         thay vì khẳng định TRẦN một băm không khớp byte nào trên đĩa.
+   🔴 CẤM đường «hạ thành cảnh báo in màn hình»: dòng 774 vẫn in BUILD_SITE_OK và `deploy.sh` grep
+      chuỗi khác ⇒ cảnh báo trôi qua. Đúng bệnh `tsc | head && echo "sạch"`.
+   🔴 CẤM `git checkout HEAD -- src/components/UngDung.tsx` để «làm lời khai đúng trở lại» —
+      nó xoá bản chia tệp exe đã `git add` chưa commit. Loại CÓ Ý THỨC, không phải bỏ sót.
+   người làm: `claude-aiboss-app-exe` (script chạy thật) · verdict đầy đủ:
+   `~/idea/inbox/aiboss-app-noibo/soi/2026-09-04_verdict-validate-source.md`
+
+⑬ 🔴 LỖ ĐANG SỐNG: dấu niêm OUTPUT KHÔNG được thi hành với round đã quyết
+   `build_site.py:142-148` — `decision_overlay_matches` đúng ⇒ bỏ qua TRỌN VẸN phép kiểm output,
+   kể cả `output_path.is_file()`. Đo 04/09:
+       round-6  đĩa 608e6878… seal fec4a248…  LỆCH — vẫn PASS
+       round-7  đĩa e445d1d0… seal c195241e…  LỆCH — vẫn PASS
+   ⇒ trang HTML ĐÃ ĐĂNG của round đã quyết hiện KHÔNG còn được ghim. Bốn thứ khoá sổ đáng ra giữ
+     (nội dung · output · nguồn · quyết định) với round decided chỉ còn giữ MỘT: nội dung.
+   ⚠️ Có TRƯỚC ca 04/09, không ai gây ra hôm nay. Đừng gộp vào ⑫ — hai bệnh khác nhau.
+
+⑭ 🚨 `next build` KHÔNG HỀ CHẠY LINT — chốt cả nhà tin là đang canh, thực ra CHƯA TỪNG NỔ
+   đo 04/09 (người soi 9bd9812):
+       ls -a | grep eslint  ⇒ RỖNG   ·   devDependencies eslint ⇒ []   ·   0 tệp cấu hình
+       package.json vẫn khai  "lint": "next lint"   ← một lệnh KHÔNG CHẠY ĐƯỢC
+       tsconfig.json KHÔNG bật noUnusedLocals
+   hệ quả đo được: 8 lệnh nhập THỪA trong UngDung.tsx mà CẢ HAI cổng đều mù —
+       memo(3) · dungMarkdown(14) · CapGheDungSan(16,type) · NumberTwo/Three/Four/Five/Six(10)
+   🔑 «dựng XANH» YẾU HƠN vẻ ngoài. Cùng họ với cổng `.kiro` (điều kiện không bao giờ đúng) và sổ
+      tiến độ (luật không có gì làm nó nổ): **cả nhà tin chỗ đó đã được canh.**
+   ⚠️ Quyết TRƯỚC khi cắm: bật lint bây giờ sẽ đỏ bao nhiêu chỗ? Đo TRƯỚC, đừng bật rồi mới biết.
+      Và một lệnh khai trong package.json mà không chạy được thì phải XOÁ hoặc LÀM CHO CHẠY —
+      để nguyên là dạy người sau rằng nhà này có lint.
+
+⑮ bộ sinh bản chụp LỆCH bài thử — mặc định 1 TỆP vs 3 TỆP
+   chup-thu-tu-moc.mjs:15 · chup-hinh-dang-than.mjs:10   ↔   hai test dòng 21-25 / 24-28
+   ⇒ chạy ĐÚNG lệnh mà chính bản chụp tự ghi (`_doc`) mà không kèm tham số ⇒ đẻ bản chụp 1 tệp
+   thu-tu-moc.json có câu dặn bằng chữ · **hinh-dang-than.json KHÔNG có câu nào**
+   và KHÔNG bài thử nào so `BANG.nguon`/`soTep` với danh sách nguồn nó THẬT SỰ đọc ⇒ hai trường
+   đó là trang trí. Hỏng kiểu này KÊU TO (lệch `day`) nên là bẫy vấp, chưa phải lỗ câm.
+   ✅ chữa: hoặc sửa mặc định bộ sinh thành 3 tệp, hoặc bắt bài thử khẳng định `nguon` khớp nguồn đọc.
+
+⑯ `so-diff` MÙ THỨ TỰ — thước chính của mọi lượt chia tệp
+   `ai/so-diff.py:120-143` ghép dòng xoá với dòng thêm CHỈ theo NỘI DUNG, lấy cái chưa dùng đầu tiên
+   ⇒ `DÒNG_KHÔNG_QUAY_LẠI=0` chứng minh dòng CÒN SỐNG, **KHÔNG** chứng minh THỨ TỰ còn nguyên
+   📌 đúng ca hoán vị hai `useState` mà `thu-tu-moc.mjs` nói nó sinh ra để bắt
+   ✅ người soi bịt tạm bằng **bản đồ khối liền mạch** (cũ 20-37→hang-so 24-41 v.v., tổng 323).
+      Cần đưa phép đó VÀO `so-diff` để lần chia tệp sau không phải làm tay.
+   ⚠️ Còn ⑨ (chia thân logic 1.887 dòng) phía trước — thước này phải chắc TRƯỚC khi tới đó.
+
+⑰ MẮT CANH ĐẾM NHẦM TIN «GHI THAY MẶT» LÀ TIN ĐẾN — mỗi lần chuyển verdict tốn MỘT lượt chạy thật
+   `mat-canh-ghe.sh` lọc tin của chính mình bằng:  grep -vE "FROM: $TOI|$TOI →"
+   nhưng khuôn nhà cho verdict Hermes (skill giao-viec-hermes §5) là:
+       FROM: hermes-<slug>-review (qua CLI, claude-aiboss-app-pm ghi thay mặt)
+   ⇒ chuỗi «FROM: claude-aiboss-app-pm» KHÔNG có trong dòng ⇒ LỌT qua bộ lọc ⇒ đếm là tin ĐẾN
+   đo 04/09 17:5x: mắt canh rung tôi dậy để đọc verdict do CHÍNH TÔI vừa dán vào kênh 5 phút trước
+   💸 mỗi lần rung = một lượt chạy thật. Và verdict là thứ ta chuyển THƯỜNG XUYÊN.
+   ✅ chữa ở SCRIPT, đừng đổi khuôn nhà: thêm nhánh loại trừ `$TOI ghi thay mặt` / `$TOI append thay mặt`
+   ⚠️ ĐỪNG chữa bằng cách đổi khuôn tin thành «FROM: claude-aiboss-app-pm (ghi thay mặt …)» —
+      khuôn hiện tại ĐÚNG: verdict là của người soi, không phải của người dán. Sửa khuôn để vừa bộ
+      lọc là **bẻ sự thật cho vừa công cụ**.
+   người làm: `claude-aiboss-app-exe` (script chạy thật). Nhỏ, không gấp — xếp sau ④ và ⑫.
+
+⑱ 🔴 BỘ PHÁ `--ca-hai` HỎNG TỪ COMMIT `9bd9812` — CHẶN COMMIT của việc ④
+   `bai-thu/doi-chung-am-mo-dun.sh:17` có `GOC=src/components/UngDung.tsx`, mà 23 khai báo đã dời
+   sang `hang-so.ts` TRONG CHÍNH commit đó ⇒ nó phá một tệp KHÔNG còn chứa thứ cần phá
+   ⇒ `bash bai-thu/chay.sh --ca-hai` EXIT=1 ⇒ **chứng cứ «thước biết đỏ» KHÔNG dùng được**
+   👤 giao `hermes-build-app` (worktree riêng) — 🔴 KHÔNG giao `claude-aiboss-app-exe`:
+      nó là người ĐANG BỊ chính thước đó đo. Người sửa thước ≠ người bị đo.
+   📦 bàn giao sẵn: `ai/ban-giao/2026-09-04_bo-pha-ca-hai.md` (3.560 byte) — triệu chứng · gốc đã đo ·
+      4 bước đã thử + kết quả · 4 neo cũ + mã thay thế · **mục «chỗ tôi KHÔNG biết»** (12 phép
+      KHAI SAI LỚP là ĐOÁN, người viết CHƯA đọc `lop-phep-pha.mjs` — tự đọc rồi hãy tin)
+   🕳 **Vì sao không ai thấy suốt từ ③:** hai bài thử ĐỎ ngay trước mặt nên được vá; bộ phá thì IM.
+      Người soi ③ khai rõ «không chạy `doi-chung-am.sh` vì nó `sed` vào kho thật» — lý do CHÍNH ĐÁNG.
+      exe không chạy — lý do chính đáng. PM không chạy — lý do chính đáng.
+   🔑 **Thứ hỏng mà KÊU thì được sửa; thứ hỏng mà IM thì được commit.**
+      Và chỗ nào ai cũng có lý do chính đáng để không chạm thì chỗ đó mục ruỗng.
+   ⚠️ Cùng họ với ⑭ (lint chưa từng chạy) · cổng `.kiro` · sổ tiến độ. Cái thứ TƯ trong một ngày.
+
+㉒ 🔴 THƯỚC AST `soi-ket-qua.mjs` SAI CẢ HAI CHIỀU — bị bác VÒNG 3/3, PM đã DỪNG
+   verdict `20260905_173533_d01eab` (05/09 17:42). Năm phản ví dụ đã đủ cụ thể để làm ĐỀ BÀI,
+   KHÔNG cần đo lại:
+     :87-88        gán vào thuộc tính mà CÓ người đọc  ⇒ phân loại SAI
+     :80-82        gặp dấu phẩy KHÔNG đệ quy nguyên nút ⇒ sập
+     :25-26,93-106 parseDiagnostics CÓ lỗi vẫn trả BẢNG XANH ⇒ tệp vỡ cú pháp = ĐẠT  ← nguy nhất
+     :54-70,84-88  kết quả bị GHI ĐÈ trước khi đọc vẫn tính là «đã dùng»
+     test :24-47   bộ mẫu chưa canh được bốn ca trên ⇒ sửa xong KHÔNG có gì giữ
+   ✅ ĐÃ GIỮ ĐƯỢC, đừng làm lại: bảng đầy đủ «từng hàm × từng cách xử lý» và NĂM phép phá cũ —
+      người soi xác nhận còn nguyên. Việc này chỉ đụng phần PHÂN LOẠI.
+   🔑 Luật rút ra (SO-BAY-DO 91): thước phải có BA trạng thái — ĐẠT · KHÔNG ĐẠT ·
+      **KHÔNG ĐO ĐƯỢC**. Trạng thái thứ ba phải làm cổng ĐỎ. Nghiệm thu bắt buộc có phép
+      «đưa tệp vỡ cú pháp cho thước» — nó nói «sạch» là thước hỏng.
+   👤 giao `hermes-build-app` worktree riêng, 🔴 KHÔNG giao `claude-aiboss-app-exe`:
+      cùng lý do ⑱ — nó là người ĐANG BỊ chính thước này đo, và nó đã viết bốn đời thước liền.
+      Người sửa thước ≠ người bị đo.
+   📦 đề bài soạn sẵn: `ai/ban-giao/2026-09-05_thuoc-ast-ba-trang-thai.md`
+   ⚠️ Thước nằm ở `bai-thu/`, KHÔNG vào bản dựng ⇒ việc này KHÔNG chặn giao diện ⑲⑳ về mặt kỹ
+      thuật. Nó chặn về mặt LUẬT (cổng dựng ② đòi verdict ĐẠT). Owner đang chọn ba đường.
+
 ⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
    cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
 ```
@@ -2115,3 +2268,141 @@ Owner muốn:        hẹp thì GOM vào menu ☰ trước title
 ⑧ 🔴 PHÉP QUAN TRỌNG NHẤT: đưa app về trạng thái «cột đang ẩn» rồi hỏi
    — nút gộp có còn NHÌN THẤY và BẤM ĐƯỢC không? Nếu không thì ta vừa gộp mất lối thoát.
 ```
+
+## 12.75 📏 ĐÍNH CHÍNH BA SỐ SAI TRONG HỒ SƠ VĨNH VIỄN (người soi bắt, 04/09 17:3x)
+
+> Commit `9bd9812` đã đẩy ⇒ **KHÔNG sửa commit.** Đính chính ở đây là hồ sơ đúng.
+
+```
+① tiêu đề commit «3212 -> 2898» + «bóc 314 dòng»
+   THẬT: wc -l = 2897 · awk END{NR} = 2897 · byte cuối = 0a  ⇒  3212 − 2897 = 315
+   🔑 người làm TỰ ghi 2897 trong lời khai, nhưng DÒNG TIÊU ĐỀ — phần được đọc nhiều nhất và
+      KHÔNG sửa được — mang 2898/314. Số tính ra đứng ở chỗ bền nhất, số đo được nằm ở chỗ dễ quên.
+② `hang-so.ts:12` «MÙ 4 lời gọi bí danh»
+   THẬT: 3 (UngDung.tsx:233 · 1549 · 1573)
+   ⚠️ CÙNG MỘT CÂU còn ghi «70 → 67», tức lệch 3. **Chữ và số trong một câu đá nhau** —
+      và không ai thấy vì mắt đọc chữ, còn cổng thì đọc số.
+③ «khoá DUY NHẤT đổi giá trị là `nguon`»
+   ĐÚNG với `thu-tu-moc.json` · SAI với `hinh-dang-than.json` (`soTep` 1 → 3 cũng đổi)
+   📌 câu đúng với MỘT bản chụp được phát biểu như đúng với CẢ HAI.
++ `soMoc` chỉ so với `NAY.day.UngDung.length` (test dòng 86), KHÔNG phải tổng — tổng là 72.
+```
+
+## 12.9 🧾 BẢNG «YÊU CẦU → PHÉP KIỂM» CHO VIỆC ④ — đo 05/09 13:21, và đây là thứ tôi ĐÁNG LẼ phải làm từ vòng 1
+
+```
+YÊU CẦU CỦA OWNER              PHÉP KIỂM (chạy được, dán thẳng)                          ĐO 13:21
+─────────────────────────────────────────────────────────────────────────────────────────────────
+① bỏ `.thanh-de`               grep -c 'className="thanh-de"' UngDung.tsx        = 0     ✅ 0
+   ...và MỘT HÀNG DUY NHẤT     grep -o 'flex-wrap:[a-z]*' mau09.css              = nowrap ❌ wrap
+② bố cục 2 ô TRÁI-PHẢI         grep -o '\.luoi\.bc-2{[^}]*}' mau09.css
+                                 phải có grid-template-COLUMNS: 1fr 1fr                   ❌ rows:1fr 1fr
+                               grep -o 'title="2 ô[^"]*"' UngDung.tsx                     ❌ «chia trên / dưới»
+③ gộp ☰ với «hiện 2 cột»       grep -c 'nut-danh-ba nut-cot' UngDung.tsx         ≥ 1     ✅ 1
+④ «Vào phòng ban» ở cột 1      grep -c 'Vào phòng ban' UngDung.tsx               ≥ 1     ✅ 1
+   nút «Giao diện» đã xoá      grep -c 'nut-gd' + 'menu-gd' UngDung.tsx          = 0/0   ✅ 0/0
+⑤ tính CẢ `--cao-bang`         grep -o '\-\-cao-de:[^;]*' mau09.css             = 0px   ✅ 0px
+                               grep -c 'cao-bang' globals.css                    ≥ 1     ✅ 9 chỗ
+ĐỐI CHỨNG DƯƠNG (thước có sống): grep -c 'grid-template' mau09.css                       ✅ 18
+```
+
+## 📊 ĐỌC RA: **3/5 XONG và chứng minh được · 1 chưa xây · 1 làm nửa**
+```
+XONG chắc  ③ nút gộp · ④ «Vào phòng ban» + xoá nút Giao diện · ⑤ --cao-bang
+CHƯA XÂY   ② bố cục 2 ô trái-phải           ← Owner đặt 04/09, chưa ai chạm
+LÀM NỬA    ① thanh trên đã bỏ, nhưng `.de-khu{flex-wrap:wrap}` nên chưa BẢO ĐẢM một hàng
+```
+
+🕳 **VÌ SAO BẢNG NÀY QUAN TRỌNG HƠN CẢ NỘI DUNG NÓ:** ba vòng soi đều đi từ **danh sách chỗ bị bác**
+của vòng trước. Không vòng nào đi từ **danh sách yêu cầu**. Nên yêu cầu ② — thứ chưa ai chạm nên
+chưa ai bác — **nằm ngoài tầm nhìn suốt cả ba vòng**, kể cả lượt tôi tự mở trình duyệt đo.
+🔑 **Kiểm rằng lỗi đã vá KHÁC với kiểm rằng việc đã làm.** Cái thứ nhất đi từ danh sách BÁO CÁO;
+cái thứ hai đi từ danh sách ĐẶT HÀNG. Chỉ cái thứ hai bắt được thứ VẮNG MẶT.
+📌 Một thứ chưa xây thì **không sinh ra lỗi nào** — nên mọi quy trình săn-lỗi đều mù với nó.
+
+## ✅ NẾP MỚI, ÁP TỪ ĐÂY — PM làm, trước MỌI lần giao soi
+```
+① viết bảng «yêu cầu → phép kiểm» NGAY LÚC GIAO VIỆC, không phải lúc nghiệm thu
+② mỗi dòng phải có một lệnh CHẠY ĐƯỢC và một giá trị MONG ĐỢI — không viết «xong chưa»
+③ PM tự chạy bảng đó TRƯỚC khi gọi người soi ⇒ người soi khỏi tốn lượt vào thứ còn thiếu hẳn
+④ kèm ĐỐI CHỨNG DƯƠNG: một phép tìm thứ CHẮC CHẮN CÓ, để biết thước còn sống
+```
+
+## 12.8 BA QUYẾT ĐỊNH CỦA OWNER CHIỀU 04/09 — nhập vào việc ④, ĐỪNG tách
+
+> 📅 Nhập 2026-09-04T15:41:37Z · 16:41 London bởi `claude-aiboss-app-pm`. Owner nói thẳng trong ô chat, KHÔNG qua round —
+> vì đây là tinh chỉnh của round-8 ĐÃ QUYẾT, không phải câu hỏi mới.
+
+### ① HƯỚNG A — một hàng duy nhất (round-8, Owner quyết 16:07)
+```
+bỏ `.thanh-de` · dồn mọi công cụ vào `.de-khu`
+🔴 nút gộp `.nut-danh-ba.nut-cot` PHẢI CÒN NHÌN THẤY ở trạng thái hai cột ĐANG ẨN
+   (Owner dặn riêng — đây là «thêm đường ĐI thì phải thêm đường VỀ», tiêu chí nghiệm thu CỨNG)
+```
+🔴 **VÀ MỘT BIẾN NỮA MÀ CẢ TÔI LẪN TRANG round-8 ĐỀU BỎ SÓT:** bỏ `.thanh-de` thì phải tính **cả
+`--cao-bang`**, không chỉ `--cao-de`. `globals.css:347-349` ĐÈ `mau09.css:54` ở màn ≥1041px:
+`calc(100vh - var(--cao-de) - var(--cao-bang))`. Hôm nay `--cao-bang` = `0px` nên hai công thức ra
+cùng một số — **đó là lý do không ai thấy.** → sổ bẫy đo mục 82.
+
+### ② «VÀO PHÒNG BAN» — CHUYỂN 5 bộ ghế từ menu «Giao diện» sang CỘT 1, ngay dưới «Toàn bộ nhân sự»
+```
+CHUYỂN, KHÔNG nhân đôi (Owner nói rõ: «là chuyển từ menu Giao diện qua menu cột 1»)
+5 bộ đang có: BO_MARKETING(137) · BO_VAN_HANH(156) · BO_QUAN_LY_TRUONG(213)
+              · BO_QUAN_LY_CU(222) · BO_CONG_NGHE(247)   — hang-so.ts
+Owner ghi «… (tương lai)» ⇒ SẼ CÒN THÊM. Thiết kế phải chịu được việc thêm.
+```
+🔴 **BẮT BUỘC: MỘT SỔ ĐĂNG KÝ DUY NHẤT.** Mảng `{mã, tên, ghế[], icon}`; cột danh bạ vẽ ra từ đó,
+và `LA_BO_DUNG_SAN` cũng đọc từ đó.
+🕳 Vì sao đây là ràng buộc chứ không phải gợi ý — mã đã có sẵn lời cảnh báo, nguyên văn `hang-so.ts`:
+> *«THÊM BỘ MỚI thì PHẢI thêm vào đây. Quên = lỗi 20/08 quay lại: Owner bấm hai bộ liên tiếp là đội
+> THẬT của mình bị ghi đè, không có đường về.»*
+
+Tức **thêm một bộ HIỆN ĐÃ phải sửa hai chỗ**. Chép danh sách sang cột nữa là **ba chỗ**, và người
+thêm bộ thứ sáu sẽ quên một trong ba. 🔑 **Hỏng kiểu này KHÔNG KÊU** — menu vẫn hiện, nút vẫn chạy,
+chỉ đội thật của Owner bị ghi đè lặng lẽ. Gom về một sổ là **dọn luôn cái bẫy đang có**, không phải
+việc phụ.
+
+### ③ 🔴 OWNER CHỐT THÊM: **BỎ HẲN nút «Giao diện»**, chuyển HẾT sang «Vào Phòng Ban»
+
+> Owner nói nguyên văn: *«"Giao diện" bỏ nhé, ở "Giao diện" có gì chuyển hết về "Vào Phòng Ban" hết
+> nhé. kể cả "Ghế hiện tại (bộ đã lưu)"»*
+
+⇒ Câu Owner hỏi trước đó («nút Đổi giao diện nằm trong menu hai cột được không») nay **VÔ HIỆU** —
+không còn nút nào để gom. Ai đọc lịch sử hội thoại thì đừng dựng nút tách đôi cho một nút đã bị xoá.
+
+**Dọn SẠCH, đừng để lại mảnh — neo đo được:**
+```
+XOÁ  UngDung.tsx:68     const [moMenuGD, datMoMenuGD] = useState(false)
+XOÁ  UngDung.tsx:970    datMoMenuGD(false)
+XOÁ  UngDung.tsx:2164-2171  nút .nut-bc.nut-gd + khối {moMenuGD && (...)}
+XOÁ  globals.css:273    .nut-gd { }        ← 🔴 CSS ở globals.css, KHÔNG ở mau09.css
+XOÁ  globals.css:277    .menu-gd { min-width: 226px }
+```
+🔴 **`nhacGD` (UngDung.tsx:90 và :2238) KHÔNG ĐƯỢC XOÁ** — nó là câu báo sau khi nạp một bộ ghế,
+tức phản hồi cho người bấm. Chuyển nó theo, hiện gần chỗ bấm mới. **Xoá nó là bấm xong không biết
+đã ăn hay chưa.**
+⚠️ Và nhớ bài học mục 82: CSS nằm ở HAI tệp, `globals.css` ĐÈ `mau09.css`. Grep CẢ HAI kể cả khi
+tệp đầu đã cho câu trả lời.
+
+**Bố cục 1/2/4/6 (+2 trái-phải) GIỮ NGUYÊN chỗ cũ** — chúng là `nut-bc` riêng, không thuộc menu
+«Giao diện». Owner đã ra luật cho chúng từ 11:50 04/09: phẳng trên thanh khi đủ chỗ, **gom vào menu
+☰ khi khung hẹp**. Không cần hỏi lại.
+
+### ③b ĐƯỜNG VỀ CỦA BỘ GHẾ — tôi quyết Mức 2, và Owner XÁC NHẬN, còn đi xa hơn
+```
+sau khi chuyển 5 bộ đi, menu «Giao diện» còn ĐÚNG MỘT mục: «Ghế hiện tại (bộ đã lưu)»
+  (UngDung.tsx:2173-2184 · đọc localStorage `phong-ban-ai.bo-ghe-cu` · napBoGhe(boGheCu, false))
+⇒ QUYẾT: mục đó đi THEO, làm mục ĐẦU TIÊN của «Vào phòng ban», nằm TRÊN danh sách phòng ban
+```
+🔑 Lý do: nó là **đường về của đúng cái việc liệt kê ngay bên dưới nó**. Đặt lối thoát cạnh cái cửa.
+Để nó ở lại một menu sắp rỗng thì Owner bấm nhầm bộ xong phải đi tìm đường về ở chỗ khác — mà đó
+chính là phút Owner đang hoảng.
+⚠️ Cách lật lại: đưa mục ấy về `menu-gd` như cũ, một chỗ, không ràng buộc gì khác.
+
+### 🔴 CÁI GIÁ OWNER ĐÃ CHỌN, GHI RA ĐỂ KHÔNG AI «SỬA GIÚP» SAU NÀY
+```
+cột danh bạ ẨN ĐƯỢC ⇒ ẩn cột thì KHÔNG đổi phòng ban được, phải mở cột ra trước
+Owner được hỏi thẳng (🅐 để cả hai nơi / 🅑 chỉ trong cột) và CHỌN 🅑.
+```
+📌 Đây là **đánh đổi có chủ ý**, không phải sót. Ai thấy rồi định thêm lại lối tắt trên thanh cho
+tiện thì DỪNG và hỏi Owner.
