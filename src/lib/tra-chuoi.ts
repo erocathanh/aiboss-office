@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { docGocTich, kiemChuoi, khoCua, doTep } from './goc-tich';
+import { docGocTich, kiemChuoi, khoCua } from './goc-tich';
 
 /**
  * 🔎 TRA CHUỖI ĐỜI CỦA GHẾ — dành riêng cho câu hỏi loại thứ BA.

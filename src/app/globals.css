@@ -270,11 +270,27 @@
 
 /* 🎛 Menu «Giao diện» — bộ ghế dựng sẵn (20/08/2026, việc gấp cho lớp).
    Dùng lại `.menu-xo` + `.muc-menu` sẵn có ⇒ ⛔ không đẻ bộ kiểu thứ hai cho cùng một thứ. */
-.nut-gd {
-  width: auto; padding: 0 10px; gap: 5px;
-  font-size: 12px; font-weight: 600; white-space: nowrap;
+/* `.nut-gd` + `.menu-gd` XOÁ 04/09 — Owner bỏ hẳn nút «Giao diện», chuyển hết sang
+   «Vào phòng ban» trong cột 1. Luật CSS của một nút đã xoá là mảnh vỡ: người sau grep thấy
+   nó rồi đi tìm nút không tồn tại. */
+
+/* 🏢 «Vào phòng ban» — mục xổ trong cột 1, ngay dưới «Toàn bộ nhân sự». */
+.nut-vao-pb { justify-content: flex-start; gap: 8px; }
+.nut-vao-pb .nhan-ten { flex: 1; }
+/* ⑲ 05/09 — «Vào phòng ban» nay LUÔN MỞ ⇒ nó là NHÃN MỤC, khôngphải nút.
+   `.goc` cho sẵn cursor:pointer + nền hover (mau09.css:77,80). Bỏ vỏ nút trong mã mà
+   để nguyên hai thứ này thì nó vẫn TRÔNG bấm được ⇒ người ta vẫn bấm, vẫn chờ, vẫn tưởng hỏng.
+   🔑 Đó đúng là lời nói dối vừa gỡ khỏi mã, chỉ là nói bằng CSS thay vì bằng thuộc tính. */
+.nut-vao-pb.de-muc { cursor: default; }
+.nut-vao-pb.de-muc:hover { background: rgba(250, 247, 240, .03); }
+.menu-vao-pb { display: flex; flex-direction: column; margin: 2px 0 6px 18px; }
+.menu-vao-pb .muc-menu {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border: 0; border-radius: 8px; background: transparent;
+  color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
 }
-.menu-gd { min-width: 226px; }
+.menu-vao-pb .muc-menu:hover:not(:disabled) { background: rgba(200, 148, 37, .14); }
+.menu-vao-pb .muc-menu:disabled { opacity: .45; cursor: default; }
 
 /* ═══ 📕 ẨN/HIỆN HAI CỘT TRÁI (Owner chốt 20/08 · hướng Ⓑ) ═══
    Chỉ áp MÀN RỘNG: dưới 1041px hai cột vốn xếp dọc và đã có nút ☰ + `.cot-3.mo-khu` lo
@@ -290,6 +306,58 @@
 }
 .nut-cot { display: none; width: auto; padding: 0 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 @media (min-width: 1041px) { .nut-cot { display: inline-flex; } }
+/* 🔴 TIÊU CHÍ CỨNG của Owner (round-8, 04/09): nút GỘP `.nut-danh-ba.nut-cot` PHẢI CÒN THẤY
+   khi hai cột ĐANG ẨN — nó là đường DUY NHẤT mở lại danh bạ.
+   Viết TƯỜNG MINH thay vì trông chờ vào luật `.khung.an-cot .nut-danh-ba` ở trên: nút nay mang
+   CẢ HAI lớp, mà `.nut-cot{display:none}` đứng SAU trong tệp. Dựa vào độ đặc hiệu để thắng là
+   dựa vào một thứ người sửa sau KHÔNG nhìn thấy. Neo rõ ràng thì gỡ nhầm sẽ thấy ngay.
+   ⚠️ ĐỪNG gỡ luật này: gỡ nó = ẩn cột xong KHÔNG có đường quay lại. */
+.nut-danh-ba.nut-cot { display: inline-flex; }
+
+/* 🔴 HAI THỨ Ở TẦNG NGOÀI CÙNG — verdict vòng 1, lỗi ④ và ⑤.
+   Chúng PHẢI thấy được ở MỌI bố cục và MỌI bề rộng, nên KHÔNG được nằm trong cột nào:
+   `.cot-1` ẩn khi bố cục 6 · `.cot-3` ẩn trên mobile lúc đang xem danh bạ.
+   `position: fixed` là cách duy nhất KHÔNG phụ thuộc cha tự ẩn. */
+.nut-ve-chat {
+  position: fixed; left: 12px; bottom: 14px; z-index: 80; pointer-events: auto;
+  width: 40px; height: 40px; display: inline-flex;
+  align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid rgba(200, 148, 37, .45);
+  background: #102a43; color: #f3e9d2; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .38);
+}
+@media (min-width: 1041px) { .nut-ve-chat { display: none; } }
+
+/* 🔴 VERDICT VÒNG 2 ⑤ và ⑥ — hai chỗ bản trước sai:
+   ① `bottom:18px` ⇒ nằm ĐÈ vùng gõ (ô soạn ở đáy màn) ⇒ che đúng chỗ người đang làm việc
+      ⇒ chuyển lên ĐỈNH.
+   🔄 SỬA VÒNG 2 ⑤ 05/09 — câu cũ ở đây viết «Đỉnh là chỗ trống ở MỌI bố cục». KHÔNG còn đúng:
+      việc ⑳③ vừa đưa thanh trên về MỘT HÀNG, đo được cao 47px (≥1041) và 51px (≤1040).
+      Đỉnh nay CÓ thanh. Và đỉnh còn có băng cảnh báo (`top:0;z-index:70`, cao `--cao-bang`).
+      🔑 Câu cũ KHÔNG sai lúc viết — nó sai vì thứ nó tả đã đổi, mà nó thì không.
+         Đó là kiểu sai nguy nhất: nó từng đúng, nên người đọc KHÔNG có lý do gì để nghi.
+   ② thiếu `pointer-events:none` ⇒ một lớp phủ cố định CHẶN được cú bấm đi xuyên qua nó.
+      Nó chỉ để ĐỌC, KHÔNG có gì để bấm ⇒ phải cho chuột đi xuyên.
+   🔑 «Không nhìn thấy nó chặn» KHÁC «nó không chặn». Lớp trong suốt vẫn ăn cú bấm. */
+.nhac-bo-ghe {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  /* 📏 SỐ ĐO 05/09: băng cảnh báo cao `--cao-bang` (0px khi KHÔNG có băng) · thanh trên cao
+     47px desktop / 51px mobile ⇒ 56px là chừa đủ ở CẢ HAI, còn dư 5px.
+     ⚠️ KHÔNG cộng `--cao-bang` là lỗi THẬT, khôngphải chuyện đẹp xấu: câu nhắc z-index 90 nằm
+        TRÊN băng (z-index 70) ⇒ nó che đúng cái băng đang báo app hỏng. Che một lời cảnh báo
+        thì tệ hơn hẳn che một dòng chữ trang trí.
+     🔬 `bai-thu/thu-nhac-khong-de.mjs` canh dòng này. NÓI ĐÚNG PHẠM VI: nó ĐỌC CSS, khôngmở
+        trình duyệt (dự án khôngcó playwright). Nó bắt được «quên cộng --cao-bang» và «chừa hụt so
+        với chiều cao thanh đã ghi»; hai số 47/51 là do người đo bằng trình duyệt rồi ghi vào đó
+        kèm ngày. Thanh đổi cao thì phải ĐO LẠI VÀ SỬA SỐ trong tệp ấy — nó khôngtự biết.
+     📌 Ghi rõ chỗ nó KHÔNG với tới, để người sau khỏi tưởng dòng này đã có người canh hộ. */
+  top: calc(var(--cao-bang) + 56px); z-index: 90; pointer-events: none; max-width: min(92vw, 520px);
+  padding: 9px 14px; border-radius: 10px;
+  border: 1px solid rgba(200, 148, 37, .45);
+  background: #102a43; color: #f3e9d2;
+  font-size: 13px; line-height: 1.45; text-align: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .42);
+}
 
 /* ⚠️ Báo Owner khi app đọc hụt một khúc — im lặng khuyết tệ hơn báo lỗi. */
 .moc-ngay.canh-hut{

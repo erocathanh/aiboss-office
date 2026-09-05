@@ -253,19 +253,38 @@ const BO_CONG_NGHE: CapGheDungSan[] = [
  * ⇒ CHỈ cất khi bộ đang xếp **⛔ KHÔNG phải** bộ dựng sẵn. Nhờ vậy «Ghế hiện tại» luôn
  *   là đội THẬT của Owner, bấm qua lại bao nhiêu bộ cũng ⛔ mất.
  */
+// ── SỔ ĐĂNG KÝ BỘ GHẾ — MỘT NGUỒN DUY NHẤT (việc ④, PM giao 04/09) ─────────────────
+// 🕳 VÌ SAO GOM: trước đây thêm một bộ phải sửa HAI chỗ — khai mảng, rồi khai lại tên bộ đó
+//    trong `LA_BO_DUNG_SAN`. Chú thích cũ ngay dưới đây đã cảnh báo, nguyên văn:
+//    «THÊM BỘ MỚI thì PHẢI thêm vào đây. Quên = lỗi 20/08 quay lại: Owner bấm hai bộ liên tiếp
+//     là đội THẬT của mình bị ghi đè, KHÔNG có đường về.»
+//    Việc ④ còn vẽ 5 bộ ra menu cột danh bạ ⇒ nếu chép danh sách sang đó nữa thì thành BA chỗ,
+//    và người thêm bộ thứ sáu sẽ quên một trong ba.
+// 🔑 Hỏng kiểu này KHÔNG KÊU: menu vẫn hiện, nút vẫn chạy, chỉ đội thật của Owner bị ghi đè
+//    lặng lẽ. Nên gom về một sổ là DỌN CÁI BẪY ĐANG CÓ, không phải việc phụ.
+// ⚖️ Sổ chuẩn hoá luôn hình dạng: 5 bộ vốn KHÔNG cùng kiểu (2 bộ là mảng chuỗi, 3 bộ là mảng
+//    `{ten, phien}`) nên chỗ gọi phải nhớ bộ nào cần `.map(phien: null)`. Nay sổ trả về MỘT kiểu.
+// 🎨 `icon` để dạng KHOÁ chữ, KHÔNG để component: tệp này là `.ts`, KHÔNG chứa JSX.
+type BoGheDungSan = {
+  ma: string;
+  ten: string;
+  ghe: CapGheDungSan[];
+  icon: 'vuong-mien' | 'danh-sach' | 'bang-ghi';
+};
+
+const chuoiThanhGhe = (ds: string[]): CapGheDungSan[] => ds.map((t) => ({ ten: t, phien: null }));
+
+const SO_BO_GHE: BoGheDungSan[] = [
+  { ma: 'marketing',      ten: 'Phòng Marketing',  ghe: chuoiThanhGhe(BO_MARKETING),  icon: 'vuong-mien' },
+  { ma: 'van-hanh',       ten: 'Vận hành',         ghe: chuoiThanhGhe(BO_VAN_HANH),   icon: 'danh-sach' },
+  { ma: 'quan-ly-cu',     ten: 'Quản Lý Cũ',       ghe: BO_QUAN_LY_CU,                icon: 'bang-ghi' },
+  { ma: 'quan-ly-truong', ten: 'Quản Lý Trường',   ghe: BO_QUAN_LY_TRUONG,            icon: 'bang-ghi' },
+  { ma: 'cong-nghe',      ten: 'Phòng Công Nghệ',  ghe: BO_CONG_NGHE,                 icon: 'bang-ghi' },
+];
+
+// Đọc TỪ SỔ. Thêm một bộ vào `SO_BO_GHE` là hàm này biết ngay — KHÔNG còn nửa sau phải nhớ.
 const LA_BO_DUNG_SAN = (ten: (string | null)[]): boolean =>
-  // ⚠️ THÊM BỘ MỚI thì PHẢI thêm vào đây. Quên = lỗi 20/08 quay lại: Owner bấm hai bộ
-  //    liên tiếp là đội THẬT của mình bị ghi đè, ⛔ có đường về.
-  [
-    BO_MARKETING,
-    BO_VAN_HANH,
-    BO_QUAN_LY_CU.map((m) => m.ten),
-    BO_QUAN_LY_TRUONG.map((m) => m.ten),
-    // 🏭 Thêm 02/09 cùng lúc với `BO_CONG_NGHE`. Khai Ở ĐÂY là NỬA SAU của việc thêm một bộ:
-    //    thiếu nó thì nút vẫn chạy, menu vẫn hiện, mọi thứ trông đúng — và đội THẬT của Owner
-    //    bị ghi đè lặng lẽ ở lần bấm bộ thứ hai. Hỏng KHÔNG kêu là hỏng đắt nhất.
-    BO_CONG_NGHE.map((m) => m.ten),
-  ].some((bo) => bo.every((x, i) => ten[i] === x));
+  SO_BO_GHE.some((bo) => bo.ghe.map((g) => g.ten).every((x, i) => ten[i] === x));
 
 /** Icon số ô — thay cho chữ «Ô 1/2/3/4» (Owner 17/08: nhãn chữ trông xấu). */
 // Owner 17/08: bỏ KHUNG VUÔNG quanh số (NumberSquare*) để chữ số to hẳn ⇒ dùng số TRẦN.
@@ -319,6 +338,7 @@ export {
   BO_QUAN_LY_CU,
   BO_CONG_NGHE,
   LA_BO_DUNG_SAN,
+  SO_BO_GHE,
   ICON_SO_O,
   DAM_ICON,
   MAU_PHONG,

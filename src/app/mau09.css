@@ -10,7 +10,10 @@
     --kem:#faf7f0;
     --kem-mo:rgba(250,247,240,.60);
     --kem-mo-2:rgba(250,247,240,.38);
-    --cao-de:56px;
+    --cao-de:0px /* hướng A 04/09: `.thanh-de` ĐÃ BỎ ⇒ chiều cao của nó là 0.
+       🔑 Đặt biến về 0 thay vì đi sửa từng `calc`: `globals.css` ĐÈ dòng 54 dưới đây bằng
+          `calc(100vh - var(--cao-de) - var(--cao-bang))`. Sửa MỘT chỗ thì CẢ HAI công thức
+          cùng đúng; sửa từng chỗ thì chỗ bị ĐÈ mới là chỗ có hiệu lực, và dễ sót đúng nó. */;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{
@@ -26,22 +29,28 @@
   ::-webkit-scrollbar-thumb:hover{background:rgba(200,148,37,.45);background-clip:padding-box}
 
   /* ============ Thanh tiêu đề ============ */
-  .thanh-de{
-    height:var(--cao-de);display:flex;align-items:center;gap:14px;padding:0 18px;
-    background:linear-gradient(90deg,#0a1929,#102a43 60%,#0a1929);
-    border-bottom:1px solid rgba(200,148,37,.28);
-    position:relative;z-index:5;
+  /* `.thanh-de` XOÁ 04/09 — hướng A gộp một hàng. Công cụ thật trong nó (số liệu + nút
+   «về khu chat») đã DỒN sang `.de-khu`; nhãn hiệu (ET + khẩu hiệu) bỏ vì `.de-khu`
+   đã mang tên app. KHÔNG để lại luật chết: luật chết làm người sau tưởng khối còn sống. */
+
+  /* huy hiệu ET + khối tên app XOÁ 04/09 — hướng A bỏ `.thanh-de`, `.de-khu` đã mang tên app.
+     ⚠️ Đây là chữ MẤT HẲN, KHÔNG dời đi đâu — nhưng CÓ CƠ SỞ, không phải suy diễn:
+        Owner gọi ĐÍCH DANH chuỗi này là «TRỐNG và CHIẾM CHỖ» (04/09), và quyết định A là bỏ
+        `.thanh-de`. PM chốt GIỮ quyết định bỏ. Muốn lật thì phục hồi khối này. */
+  /* ⑳② 05/09 — `.so-lieu` đã DỜI từ thanh trên về `.cot-1` (trên «Tỉ trọng nhân sự»).
+     📏 Số đo bắt phải đổi cách xếp, khôngphải sở thích: xếp một hàng ngang nó rộng 290px, mà
+        cột trái chỉ 264px ⇒ tràn. Lưới 3 cột đều nhau ⇒ mỗi ô ~74px, đủ cho số + nhãn.
+     ⚠️ `margin-left:auto` CŨ phải bỏ: ở thanh trên nó dùng để đẩy sang phải, ở cột trái nó chỉ
+        làm lệch. Thuộc tính sống sót sau khi DỜI CHỖ là thứ hay bị bỏ quên nhất, vì nó không
+        gây lỗi — nó chỉ âm thầm làm sai chỗ đứng, và bản dựng vẫn xanh. */
+  .so-lieu{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+    padding:9px 12px 11px;border-bottom:1px solid var(--vien);
   }
-  .dau-an{
-    width:28px;height:28px;flex:none;border-radius:7px;
-    background:linear-gradient(140deg,var(--vang-sang),var(--vang));
-    color:#0a1929;font-weight:800;font-size:13px;
-    display:flex;align-items:center;justify-content:center;
-  }
-  .khoi-de{display:flex;flex-direction:column;line-height:1.15}
-  .khoi-de b{font-size:14.5px;font-weight:650;letter-spacing:.2px}
-  .khoi-de span{font-size:11px;color:var(--kem-mo-2);letter-spacing:.5px;text-transform:uppercase}
-  .so-lieu{margin-left:auto;display:flex;align-items:center;gap:18px}
+  .so-lieu .vach{display:none}               /* vạch ngăn chỉ có nghĩa khi xếp NGANG */
+  .so-lieu .o-so{align-items:flex-start}     /* cột trái căn TRÁI, khôngphải căn phải như trên thanh */
+  .so-lieu .o-so b{font-size:15px}
+  .so-lieu .o-so span{font-size:9px;letter-spacing:.3px;line-height:1.25}
   .o-so{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
   .o-so b{font-size:16px;color:var(--vang-sang);font-weight:700;letter-spacing:.5px}
   .o-so span{font-size:10.5px;color:var(--kem-mo-2);text-transform:uppercase;letter-spacing:.6px}
@@ -238,7 +247,8 @@
   /* ---------- Lưới ô trao đổi ---------- */
   .luoi{flex:1;min-height:0;display:grid;gap:1px;background:var(--vien)}
   .luoi.bc-1{grid-template-columns:1fr;grid-template-rows:1fr}
-  .luoi.bc-2{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+  .luoi.bc-2{grid-template-columns:1fr;grid-template-rows:1fr 1fr}          /* TRÊN-DƯỚI */
+  .luoi.bc-2.hai-ngang{grid-template-columns:1fr 1fr;grid-template-rows:1fr}  /* ⑲③ TRÁI-PHẢI */
   .luoi.bc-4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
   .luoi.bc-1 .o-chat:nth-child(n+2),
   .luoi.bc-2 .o-chat:nth-child(n+3){display:none}
@@ -392,12 +402,11 @@
   .bc-4 .hang-chi-so{grid-template-columns:1fr}
   .bc-2 .ho-so,.bc-4 .ho-so{max-width:none}
 
-  @media (max-width:640px){
-    .khoi-de span{display:none}
-    .so-lieu{gap:12px}
-    .so-lieu .o-so:nth-of-type(3),.so-lieu .vach:nth-of-type(2){display:none}
-    .thanh-de{gap:10px;padding:0 12px}
-  }
+  /* ⑲ 05/09 — khối `@media (max-width:640px)` ở đây ĐÃ GỠ: nó chỉ thu gọn `.so-lieu`
+     (bỏ chỉ số thứ 3, hẹp khoảng cách), mà từ nay `.so-lieu` bị ẨN HẲN dưới 1041px — xem
+     khối ≤1040 ở dưới. Khối 640 lại đứng TRƯỚC khối 1040 nên bị đè sạch.
+     🔑 Mã chết mà ĐỌC ĐƯỢC thì nguy hơn mã chết đã xoá: nó trả lời câu «ở đây có gì»
+        bằng một câu KHÔNG còn đúng, và người đọc KHÔNG có cách nào biết là nó im lặng thua. */
   @media (max-width:1040px){
     body{overflow:auto;height:auto}
     .khung{grid-template-columns:1fr;height:auto}
@@ -419,7 +428,15 @@
     .nut-lui{display:flex}
     .goi-y-phim{display:none}          /* màn hẹp không có bàn phím rời → bỏ chú thích phím tắt */
     /* 2 và 4 ô đều xếp DỌC, mỗi ô cao tối thiểu đọc được */
-    .luoi.bc-2,.luoi.bc-4{
+    /* ⑲③ 05/09 — PHẢI kể cả `.luoi.bc-2.hai-ngang` ở đây. Rule trái-phải ở trên có độ chọn
+       0,3,0, CAO HƠN `.luoi.bc-2` (0,2,0) ⇒ độ chọn thắng thứ tự nguồn ⇒ nếu bỏ tên nó ra, nó ĐÈ
+       luôn luật xếp-dọc này và ép hai ô chat còn ~195px trên máy 390px.
+       🔑 Thêm một lựa chọn cho người dùng mà KHÔNG rà lại độ chọn thì cái mới lặng lẽ đè cái cũ —
+          và nó đè đúng ở màn hẹp, tức chỗ ÍT ai mở ra xem nhất.
+       📌 Hệ quả phải NÓI RA: dưới 1041px, chọn trái-phải vẫn xếp DỌC như trên-dưới. Đó là luật
+          17/08 («mỗi ô cao tối thiểu đọc được»), KHÔNG phải bản vá này hụt. Muốn khác thì Owner
+          quyết, ĐỪNG tự nới. */
+    .luoi.bc-2,.luoi.bc-2.hai-ngang,.luoi.bc-4{
       grid-template-columns:1fr;grid-template-rows:none;
       grid-auto-rows:minmax(320px,1fr);overflow-y:auto;
     }
@@ -519,6 +536,17 @@
      ⛔ KHÔNG có MỘT dòng style nào trong CSS (đo: 0 lần khớp `.nhan-that`), nên nó
      ⛔ không co, ⛔ không cắt bằng dấu …, cứ chiếm chỗ theo độ dài chữ. `.nhan-khu`
      cũng `white-space:nowrap`. ⇒ `.nhom-bo-cuc` (margin-left:auto, flex:none) bị đẩy
+   🔄 CẬP NHẬT ⑳③ 05/09 — đoạn trên tả CĂN BỆNH của bản 17/08. Trạng thái ĐANG CHẠY:
+      `.de-khu` nay là `flex-wrap:nowrap` (Owner đòi MỘT HÀNG — dải trống ở hàng 2 chính là
+      chỗ Owner khoanh đỏ). Vậy vì sao bệnh 17/08 khôngtái phát khi bỏ tấm lưới `wrap`:
+        ① `.nhan-that` nay CO ĐƯỢC (min-width:0 + ellipsis, rule ngay dưới) — đây mới là
+           thuốc thật; `wrap` chỉ là tấm lưới hứng bên dưới.
+        ② dưới 1041px `.nhan-that` bị ẩn hẳn, và `.ten-app` có max-width:38vw.
+        ③ ⑳② vừa DỜI `.so-lieu` (290px) ra khỏi thanh ⇒ thanh nhẹ đi gần một nửa.
+      ⚠️ Bỏ tấm lưới thì phải ĐO, khôngđược suy: đã quét 11 bề ngang 360→1920 bằng trình duyệt
+         thật, `.nhom-bo-cuc` khôngbị cắt ở bề nào. Ai sửa một trong ba điều trên thì ĐO LẠI.
+   🔑 Và nhớ: bản trước của chính chú thích này (tôi viết sáng nay) khai `flex-wrap:wrap`.
+      Chú thích khôngtự già đi theo mã — nó chỉ sai đi, và sai một cách rất tự tin.
      khỏi khung, mà `.cot-3.mo-khu` có `overflow:hidden` ⇒ nút bị CẮT MẤT và
      ⛔ KHÔNG cuộn tới được. Trên màn rộng ⛔ không thấy vì còn thừa chỗ.
 
@@ -534,7 +562,7 @@
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font-size:11px;color:var(--kem-mo-2);
 }
-.de-khu{flex-wrap:wrap;row-gap:6px}   /* hết chỗ thì XUỐNG DÒNG, ⛔ đừng đẩy nút ra ngoài */
+.de-khu{flex-wrap:nowrap}   /* ⑳③ — MỘT HÀNG. Vì sao nay an toàn: xem khối chú thích trên. */
 .bang-tin{overflow-x:hidden}          /* ⛔ không cho cuộn ngang ⇒ mép trái ⛔ không mất được */
 .bong{overflow-wrap:anywhere}         /* đường dẫn/chuỗi dài tự ngắt, ⛔ không nở khung */
 
@@ -545,6 +573,13 @@
        nên nó ⛔ không bao giờ đẩy nút ra ngoài khung nữa. */
   .de-khu .nhan-that{display:none}
   .de-khu .ten-app{max-width:38vw}
+  /* ⑲ 05/09 — Owner: điện thoại thì ẩn dòng 225/9/67, nhường chỗ cho 4 nút đổi số ô.
+     `.so-lieu` và `.nhom-bo-cuc` là HAI THẺ ANH EM KỀ NHAU (UngDung.tsx:2262 và 2269), cùng
+     mang `margin-left:auto` ⇒ ẩn cái trước là cái sau TỰ nhận đúng chỗ đó, KHÔNG phải dời
+     thẻ trong mã. Desktop ≥1041px KHÔNG đụng: ba chỉ số giữ nguyên.
+     📌 Đúng nguyên tắc ghi ở đầu khối vá màn hẹp: màn hẹp thì NHÃN nhường chỗ cho CÔNG CỤ —
+        ba con số là thứ để ĐỌC, bốn nút kia là thứ Owner BẤM. */
+  .so-lieu{display:none}
   .nhom-bo-cuc{margin-left:auto;flex:none}
   .nut-bc{width:38px;height:32px}     /* ngón tay bấm, ⛔ không phải con trỏ chuột */
   .nut-bc svg{width:21px;height:16px}
@@ -812,7 +847,20 @@
 
 /* Giấu hai cột trái CHỈ ở bố cục 6 — lấy chỗ cho 2 ô thêm vào. */
 .khung.bc-6{grid-template-columns:1fr}
-.khung.bc-6 .cot-1,.khung.bc-6 .cot-2{display:none}
+/* 🔴 VÒNG 2 ⑳② 05/09 — DÒNG NÀY TRƯỚC ĐÂY Ở TẦNG GỐC, tức áp CẢ ĐIỆN THOẠI. Đó là lỗi.
+   🕳 Tái hiện được ở 390×844: chọn 6 ô ⇒ `.cot-1` và `.cot-2` tắt; bấm nút danh bạ ⇒ `anKhu`
+      bật ⇒ `.cot-3` mất lớp `mo-khu` ⇒ nó cũng `display:none` (mau09 ~421).
+      ⇒ BA cột cùng tắt: màn TRẮNG. Nút danh bạ đáng lẽ MỞ danh bạ thì lại XOÁ hết.
+   🔑 Vì sao lọt: đè nó là `.khung.hien-cot .cot-1{display:block}`, mà rule đó nằm trong
+      `@media (min-width:1041px)` (globals ~304). Luật CẤM ở tầng gốc, luật CHO PHÉP ở tầng
+      desktop ⇒ điện thoại chỉ nhận được vế CẤM. Chú thích globals:296 khai «chỉ áp màn rộng» —
+      đúng với cái nó tả, nhưng thứ nó tả KHÔNG phải thứ đang chạy.
+   📌 Một cặp cấm/cho-phép mà hai vế nằm ở HAI PHẠM VI KHÁC NHAU thì phạm vi hẹp hơn quyết định
+      hành vi, và nó quyết định ở đúng chỗ ít người mở ra xem nhất.
+   ⇒ Nay đưa vế CẤM về đúng phạm vi của vế CHO PHÉP. Điện thoại: 6 ô xếp dọc, hai cột vẫn vào được. */
+@media (min-width:1041px){
+  .khung.bc-6 .cot-1,.khung.bc-6 .cot-2{display:none}
+}
 
 /* 🔴 GIẤU CỘT = MẤT LỐI VÀO DANH BẠ. Nút ☰ xưa nay chỉ hiện ở màn hẹp
    (`.nut-danh-ba{display:none}` + bật lại trong media). Ở bố cục 6 phải bật nó

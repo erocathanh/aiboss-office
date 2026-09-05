@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { gietViec, layViec, dsViec, giayTuEp } from '@/lib/kho-tien-trinh';
+import { gietViec, dsViec, giayTuEp } from '@/lib/kho-tien-trinh';
 import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs';

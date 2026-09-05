@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import readline from 'node:readline';
 import { CAU_HINH } from './cau-hinh';
 import { timNhanSu } from './nhan-su';
 

@@ -1,19 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 /**
  * 🎨 Bộ icon: `@phosphor-icons/react` — bộ ƯU TIÊN SỐ 1 trong skill `taste` (§3.C),
  * và `lucide-react` thì skill KHUYÊN TRÁNH. MỘT họ icon cho cả dự án, ⛔ không trộn.
  * Dùng bản `ssr` cho hợp Next. Độ đậm thống nhất `bold` — ⛔ đừng trộn nhiều độ đậm.
  */
 import {
-  NumberOne, NumberTwo, NumberThree, NumberFour, NumberFive, NumberSix, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
+  NumberOne, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
   Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
   CaretUp, CaretDown, ArrowsClockwise,
 } from '@phosphor-icons/react/dist/ssr';
-import { dungMarkdown } from '@/lib/dung-markdown';
 import { SO_O } from '@/lib/so-o';
-import type { PhongBan, NhanSu, TomTatPhien, Tin, CapGheDungSan, OChat } from '@/components/ung-dung/kieu';
+import type { PhongBan, NhanSu, TomTatPhien, Tin, OChat } from '@/components/ung-dung/kieu';
 
 /* Bố cục + tên lớp CSS bê nguyên bản mẫu 09 Owner đã duyệt. ⛔ Không thiết kế lại. */
 
@@ -28,10 +27,13 @@ const dungTruocKhiVe = typeof window !== 'undefined' ? useLayoutEffect : useEffe
 
 import { BongBong } from '@/components/ung-dung/bong-bong';
 import {
+  CAU_LOI_O, cauNhacNapBoGhe, chayNapBoGhe, ghiSoO, soMotO,
+  type KetQuaDatNguoi, type LyDoHong,
+} from '@/components/ung-dung/nap-bo-ghe';
+import {
   LECH_COI_LA_DAY, mocDayDu, datMa, maOCua, NHIP_THAM_DO_MS,
   KHOA_BO_CUC, KHOA_TIEU_DIEM, KHOA_BO_GHE_CU, KHOA_AN_COT,
-  BO_MARKETING, BO_VAN_HANH, BO_QUAN_LY_TRUONG, BO_QUAN_LY_CU, BO_CONG_NGHE,
-  LA_BO_DUNG_SAN, ICON_SO_O, DAM_ICON, MAU_PHONG, O_TRONG,
+  LA_BO_DUNG_SAN, SO_BO_GHE, ICON_SO_O, DAM_ICON, MAU_PHONG, O_TRONG,
   boDau, gioBayGio, MAU_UUID,
 } from '@/components/ung-dung/hang-so';
 
@@ -59,6 +61,14 @@ export default function UngDung({
   );
   const [boCuc, datBoCuc] = useState<1 | 2 | 4 | 6>(1);
 
+  /* ⑲③ 05/09 — Owner: «vừa có trên dưới, vừa có TRÁI-PHẢI, KHÔNG phải bỏ trên-dưới đi».
+     🔑 Vì sao KHÔNG nhét trái-phải thành một giá trị mới của `boCuc`: `boCuc` đang được đọc như
+        SỐ Ô ở 15 chỗ (`k < boCuc`, `dsO.slice(0, boCuc)`, `tieuDiem >= bc`…). Thêm một giá trị
+        khôngphải-số vào đó là bắt mọi phép so kia gánh thêm nghĩa thứ hai — đúng cái bệnh «một
+        thứ gánh hai nghĩa» đã ăn ba vòng soi hôm 01/09.
+     ⇒ Tách hẳn: `boCuc` = MẤY Ô · `kieuHai` = CHIA CHIỀU NÀO. Hai trục vuông góc, khôngphải một. */
+  const [kieuHai, datKieuHai] = useState<'tren-duoi' | 'trai-phai'>('tren-duoi');
+
   /**
    * 📱 MÁY CẢM ỨNG hay máy có BÀN PHÍM RỜI? (Owner 18/08: «cần biến nó thành xuống hàng
    * vì có nút gửi rồi»).
@@ -76,7 +86,6 @@ export default function UngDung({
    * 🔁 Có nghe `change`: máy gập / máy có cả chuột lẫn cảm ứng đổi kiểu giữa chừng được.
    */
   /* 🎛 Menu «Giao diện» — bộ ghế dựng sẵn (Owner 20/08) */
-  const [moMenuGD, datMoMenuGD] = useState(false);
   /**
    * 🔴 LƯU CẶP (ghế, phiên) — ⛔ KHÔNG chỉ lưu mã ghế.
    * `claude-aiboss-app-pm` lần theo `/api/o` và bắt đúng chỗ tôi làm hụt:
@@ -98,7 +107,16 @@ export default function UngDung({
    */
   type CapGhe = { ten: string | null; phien: string | null; goiY?: string };
   const [boGheCu, datBoGheCu] = useState<CapGhe[] | null>(null);
-  const [nhacGD, datNhacGD] = useState('');
+  const [nhacBoGhe, datNhacBoGhe] = useState('');
+  // 🔴 VERDICT VÒNG 2 ⑤: câu nhắc dạng `fixed` KHÔNG tự tắt ⇒ nó nằm lại vĩnh viễn trên màn.
+  //    Một câu báo không biết biến mất thì nó thôi là câu BÁO, nó thành một vết bẩn cố định.
+  // ⏱ Tự tắt sau 6 giây. Dọn bộ hẹn khi chữ đổi hoặc khi rời trang — KHÔNG để bộ hẹn cũ
+  //    tắt mất câu nhắc MỚI vừa hiện (đó là lỗi hay gặp khi quên hàm dọn).
+  useEffect(() => {
+    if (!nhacBoGhe) return undefined;
+    const h = setTimeout(() => datNhacBoGhe(''), 6000);
+    return () => clearTimeout(h);
+  }, [nhacBoGhe]);
   useEffect(() => {
     try {
       const s = localStorage.getItem(KHOA_BO_GHE_CU);
@@ -191,6 +209,26 @@ export default function UngDung({
   const capNhat = useCallback((i: number, vá: Partial<OChat> | ((o: OChat) => Partial<OChat>)) => {
     datDsO((truoc) => truoc.map((o, k) => (k === i ? { ...o, ...(typeof vá === 'function' ? vá(o) : vá) } : o)));
   }, []);
+
+  /**
+   * 💬 MỘT CỬA vừa NÓI cho ô đó, vừa TRẢ kết quả lên trên. VIỆC ㉑ 05/09.
+   *
+   * 🕳 Ba vòng trước tôi vá theo TẦNG: vòng 3 bắt caller của `ghiO`, rồi lỗi lộ ra ở caller của
+   *    `datNguoi` — cao hơn một tầng. Vá tầng nào thì tầng TRÊN nó lại lọt, và luôn còn một tầng.
+   * 🔑 Nên lớp vá thật sự nằm Ở ĐÂY, khôngphải ở chỗ gọi: **hàm tự nói cho ô của nó.** Chỗ gọi
+   *    nào bỏ qua kết quả — hôm nay, hay do người khác thêm vào tháng sau, ở tầng nào cũng vậy —
+   *    thì người dùng VẪN thấy một câu. Kết quả trả lên trên là để GỘP, khôngphải là đường duy nhất.
+   * 📌 Đây là lý do tôi làm khác gợi ý «bắt mọi chỗ gọi phải đọc kết quả»: cách đó đúng nhưng nó
+   *    phụ thuộc vào việc mình rà HẾT chỗ gọi — mà ba vòng vừa rồi đã chứng minh là rà khônghết.
+   *    Tôi vẫn làm cả phần đó (lớp 2, dưới đây), nhưng khôngdựa vào nó làm phanh duy nhất.
+   */
+  const noiHong = useCallback((i: number, ly: LyDoHong) => {
+    capNhat(i, { loiDan: CAU_LOI_O[ly] });
+  }, [capNhat]);
+  const baoHong = useCallback((i: number, ly: LyDoHong): KetQuaDatNguoi => {
+    noiHong(i, ly);
+    return { xong: false, hong: ly };
+  }, [noiHong]);
 
   /** ⛔ Cắt luồng SSE của một ô — gọi khi đóng ô / đổi agent / mở phiên khác. */
   const huyLuong = useCallback((i: number) => {
@@ -540,8 +578,11 @@ export default function UngDung({
     // ⚠️ FAIL 7: thêm `dangNap` — bấm «Nạp lại» lúc còn lần gọi đang bay thì đẻ hai lần gọi
     //    chồng nhau, lần về trước hạ cờ của lần kia.
     if (!o?.ns || !o.phienHienTai || o.dangChay || o.dangNap) return;
-    await napLichSu(i, o.ns.ten, o.phienHienTai);
-  }, [napLichSu]);
+    /* 🔴 VIỆC ㉑ — chỗ này NGOÀI hai điểm đề bài nêu; thước mới TỰ TÌM RA. `napLichSu` trả
+       'hong' HOÀN TOÀN IM LẶNG (nhánh catch chỉ `return 'hong'`), mà đây là lúc Owner vừa BẤM
+       «Nạp lại» ⇒ bấm xong khôngthấy gì, khôngbiết đang tải hay đã hỏng. */
+    if (await napLichSu(i, o.ns.ten, o.phienHienTai) === 'hong') noiHong(i, 'doc-lich-su');
+  }, [napLichSu, noiHong]);
 
   /**
    * Ghi sổ ô. `xoaLienKet` = KHAI Ý ĐỊNH xoá mã phiên đang có.
@@ -549,13 +590,17 @@ export default function UngDung({
    * vì ca 17/08: đọc sổ thất bại ⇒ client tưởng sổ trắng ⇒ xoá liên kết THẬT của Owner.
    * ⇒ Chỉ truyền true ở nơi Owner THẬT SỰ muốn bỏ phiên (đóng ô · phiên mới · ghế chưa có phiên).
    */
-  const ghiO = useCallback(async (i: number, ten: string | null, maPhien: string | null, xoaLienKet = false) => {
-    await fetch('/api/o', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ma_o: maOCua(i), ma_nhan_su: ten, ma_phien: maPhien, xoa_lien_ket: xoaLienKet }),
-    });
-  }, []);
+  /* 🔴 VÒNG 2 ③ 05/09 — bản cũ ở đây là `await fetch(...)` TRẦN: khôngxem `res.ok`, khôngbắt
+     lỗi mạng, khôngtrả về gì. Mọi nơi gọi nó chỉ biết «đã chờ xong», khôngbiết «đã ghi được».
+     ⇒ nay trả `boolean`. Nơi nào khôngcần thì bỏ qua như cũ; nơi nào CẦN thì đọc được.
+     📌 Đổi kiểu trả về từ `void` sang `boolean` khônglàm vỡ chỗ gọi cũ — nhưng nó làm chỗ gọi cũ
+        HIỆN RA: từ nay bỏ qua kết quả là một LỰA CHỌN nhìn thấy được, khôngphải mặc định vô hình. */
+  const ghiO = useCallback(
+    (i: number, ten: string | null, maPhien: string | null, xoaLienKet = false): Promise<boolean> => ghiSoO({
+      ma_o: maOCua(i), ma_nhan_su: ten, ma_phien: maPhien, xoa_lien_ket: xoaLienKet,
+    }),
+    [],
+  );
 
   /**
    * 🛑 DỪNG THẬT việc đang chạy của một ô.
@@ -746,8 +791,15 @@ export default function UngDung({
 
     // Bố cục + tiêu điểm chỉ là chuyện giao diện ⇒ để ở localStorage.
     try {
-      const bc = Number(localStorage.getItem(KHOA_BO_CUC));
+      /* ⑲③ — MỘT khoá gánh cả hai kiểu 2 ô: '2' = trên-dưới · '2-tp' = trái-phải.
+         Bản cũ đã ghi '2' ⇒ đọc ra trên-dưới, đúng thứ Owner đang thấy: KHÔNG đổi dưới chân người
+         đang dùng. Dùng khoá thứ hai cũng chạy, nhưng hai khoá thì có ngày lệch nhau, và lúc đó
+         KHÔNG bên nào tự biết mình là bên sai. */
+      const thoBC = localStorage.getItem(KHOA_BO_CUC) ?? '';
+      const laTraiPhai = thoBC.endsWith('-tp');
+      const bc = Number(laTraiPhai ? thoBC.slice(0, -3) : thoBC);
       if (bc === 1 || bc === 2 || bc === 4 || bc === 6) datBoCuc(bc);
+      if (bc === 2 && laTraiPhai) datKieuHai('trai-phai');
       const td = Number(localStorage.getItem(KHOA_TIEU_DIEM));
       if (Number.isInteger(td) && td >= 0 && td < SO_O && td < (bc === 2 || bc === 4 || bc === 6 ? bc : 1)) {
         datTieuDiemThuan(td);
@@ -836,6 +888,9 @@ export default function UngDung({
         if (!ten) continue;
         const ns = nhanSu.find((x) => x.ten === ten);
         // ⛔ Không nhân bản một agent ra nhiều ô — ô sau trùng thì bỏ trống + xoá sổ.
+        /* `void` CÓ CHỦ Ý: đây là vòng KHÔI PHỤC lúc mở app, chạy cho cả 6 ô. Ghi hỏng một ô
+           khôngđược chặn 5 ô còn lại, và Owner chưa bấm gì nên chưa có gì để báo. Bảng đóng
+           băng `dong-bang-goi-ghi-o` giữ đúng hai chỗ này, thêm chỗ thứ ba là ĐỎ. */
         if (!ns || daDung.has(ten)) { if (i > 0) void ghiO(i, null, null); continue; }
         daDung.add(ten);
         // 🏃 Đặt cờ theo SỰ THẬT ở máy chủ, ⛔ mặc định false nữa.
@@ -856,9 +911,12 @@ export default function UngDung({
   }, [nhanSu, ongTrum, capNhat, napDsPhien, napLichSu, ghiO]);
 
   /* ---------- Đổi bố cục ---------- */
-  function doiBoCuc(bc: 1 | 2 | 4 | 6) {
+  function doiBoCuc(bc: 1 | 2 | 4 | 6, kieu: 'tren-duoi' | 'trai-phai' = 'tren-duoi') {
     datBoCuc(bc);
-    try { localStorage.setItem(KHOA_BO_CUC, String(bc)); } catch { /* bỏ qua */ }
+    datKieuHai(kieu);
+    try {
+      localStorage.setItem(KHOA_BO_CUC, bc === 2 && kieu === 'trai-phai' ? '2-tp' : String(bc));
+    } catch { /* bỏ qua */ }
     if (tieuDiem >= bc) datTieuDiem(0);
     datNhacO1('');
   }
@@ -880,57 +938,70 @@ export default function UngDung({
   }, [boCuc, datTieuDiem]);
 
   /* ---------- Nạp một nhân sự vào MỘT ô ---------- */
-  const datNguoi = useCallback(async (i: number, n: NhanSu) => {
-    if (i === 0) return; // 👑 LUẬT CỨNG: ⛔ không đổi được agent của ô 1.
+  /**
+   * 📣 LỚP 2 — chỗ gọi ĐỌC kết quả và đưa lên câu nhắc giữa màn.
+   * 🔑 Dùng lại `cauNhacNapBoGhe`, khôngtự chế câu riêng: luật bất biến «có ô HỎNG thì câu nhắc
+   *    KHÔNG được chứa chữ xong» đã được bộ đo canh ở đó. Chế câu riêng ở đây là mở một đường
+   *    thứ hai ra màn hình mà khôngai canh.
+   */
+  const nhacNeuHong = useCallback((o: number, k: KetQuaDatNguoi) => {
+    const kq = soMotO(o, k);
+    if (kq.hong.length || kq.boQua.length) datNhacBoGhe(cauNhacNapBoGhe(kq));
+  }, []);
+
+
+  /**
+   * 🔴 VÒNG 3 ① 05/09 — hàm này có NĂM lối ra, và ba vòng liền tôi vá THEO LỐI rồi vẫn hụt.
+   * ⇒ Nay khai kiểu trả về là `KetQuaDatNguoi`: **rơi khỏi cuối hàm là LỖI BIÊN DỊCH.**
+   *   Thành công phải VIẾT RA `{ xong: true }`; quên viết thì dựng KHÔNG QUA.
+   * 📌 Trước đây quên thì nó im lặng thành công — im lặng theo đúng hướng dối người dùng.
+   *    Đổi mặc định từ «thành công» sang «phải chứng minh» là thứ vá được CẢ LỐI CHƯA AI KỂ TÊN.
+   */
+  const datNguoi = useCallback(async (i: number, n: NhanSu): Promise<KetQuaDatNguoi> => {
+    if (i === 0) return { xong: false, boQua: 'o-mot' };   // 👑 LUẬT CỨNG: khôngđổi được agent ô 1
 
     datAnKhu(false); // màn hẹp: chọn người xong thì mở khu trao đổi ra
 
-    // Đã mở ở ô khác đang hiện → chuyển tiêu điểm, ⛔ không mở trùng.
+    // Đã mở ở ô khác đang hiện → chuyển tiêu điểm, khôngmở trùng.
     const trung = dsORef.current.findIndex((o, k) => k < boCuc && k !== i && o.ns?.ten === n.ten);
-    if (trung !== -1) { datTieuDiem(trung); return; }
+    if (trung !== -1) { datTieuDiem(trung); return { xong: false, boQua: 'trung-o' }; }
 
-    huyLuong(i); // ⛔ cắt luồng cũ trước khi đổi người
-    capNhat(i, {
-      ...O_TRONG, ns: n,
-    });
+    huyLuong(i); // cắt luồng cũ trước khi đổi người
+    capNhat(i, { ...O_TRONG, ns: n });
     datTieuDiem(i);
 
     const ds = await napDsPhien(i, n.ten);
     /**
-     * 🔴 `null` = ⛔ ĐỌC ĐƯỢC, **⛔ phải «⛔ có phiên»**. Hai thứ đó khác nhau một trời:
+     * 🔴 `null` = KHÔNG đọc được, KHÔNG phải «khôngcó phiên». Hai thứ khác nhau một trời:
      *    đoán nhầm hướng này là ghi một phép XOÁ THẬT xuống sổ ô.
-     * ⇒ ⛔ đọc được thì DỪNG, giữ nguyên mọi thứ, để Owner thử lại.
      */
     if (ds === null) {
       /**
-       * 🐛 LỜI NHẮN CŨ NÓI DỐI — và chính tôi viết ra nó (Hermes vòng 5 bắt).
-       *    Tôi ghi «⛔ đổi gì cả», nhưng ngay phía TRÊN (huyLuong + O_TRONG + datTieuDiem)
-       *    ô đã bị **xoá trắng và đổi sang ghế mới rồi**. Owner nhìn màn hình thấy ĐÃ ĐỔI
-       *    mà app bảo chưa — tệ hơn im lặng, vì nó dạy Owner ⛔ tin lời app.
-       * ⚠️ Sửa ĐÚNG phải là **đọc danh sách TRƯỚC, đổi ô SAU** — nhưng đó là đảo thứ tự,
-       *    thuộc nhịp B mà `claude-aiboss-app-pm` CHƯA gật. Lượt này chỉ cho lời nhắn
-       *    NÓI THẬT, ⛔ đụng hành vi. Ghi rõ ở đây để nhịp B ⛔ quên chỗ này.
+       * 🐛 Lời nhắn cũ ở đây từng NÓI DỐI (Hermes vòng 5 bắt): nó ghi «khôngđổi gì cả» trong khi
+       *    ngay phía trên ô đã bị xoá trắng và đổi sang ghế mới. Nay nói thật.
+       * ⚠️ Sửa ĐÚNG phải là đọc danh sách TRƯỚC, đổi ô SAU — thuộc nhịp B, PM chưa gật.
        */
-      capNhat(i, {
-        loiDan:
-          '⚠️ Đã chuyển ô sang ghế này, nhưng ⛔ đọc được danh sách phiên (mạng hoặc máy chủ). ' +
-          'Lịch sử CHƯA nạp — bấm «Nạp lại» khi mạng ổn, hoặc chọn phiên bằng tay.',
-      });
-      return;
+      return baoHong(i, 'doc-ds-phien');   // câu chữ nay ở CAU_LOI_O, một chỗ duy nhất
     }
-    // Mặc định NỐI LẠI phiên gần nhất còn nối được — ⛔ không mặc định đẻ phiên mới.
+
+    // Mặc định NỐI LẠI phiên gần nhất còn nối được — khôngmặc định đẻ phiên mới.
     const ganNhat = ds.find((p) => !p.dang_chay);
     if (ganNhat) {
-      // ⚠️ ⛔ đặt phienHienTai ở đây — napLichSu tự đặt CÙNG NHỊP với tin
-      await ghiO(i, n.ten, ganNhat.ma);
-      await napLichSu(i, n.ten, ganNhat.ma);
-      return;
+      if (!(await ghiO(i, n.ten, ganNhat.ma))) return baoHong(i, 'ghi-so');
+      const trangThai = await napLichSu(i, n.ten, ganNhat.ma);
+      if (trangThai === 'hong') return baoHong(i, 'doc-lich-su');
+      if (trangThai === 'loi-thoi') return { xong: false, boQua: 'loi-thoi' };
+      return { xong: true };
     }
-    await ghiO(i, n.ten, null, true); // ý định THẬT: ghế này chưa có phiên nào nối được
-  }, [boCuc, capNhat, datTieuDiem, ghiO, huyLuong, napDsPhien, napLichSu]);
+    // ý định THẬT: ghế này chưa có phiên nào nối được
+    if (!(await ghiO(i, n.ten, null, true))) return baoHong(i, 'ghi-so');
+    return { xong: true };
+  }, [baoHong, boCuc, capNhat, datTieuDiem, ghiO, huyLuong, napDsPhien, napLichSu]);
 
   /* ---------- Bấm một tên ở cột giữa → nạp vào Ô ĐANG TIÊU ĐIỂM ---------- */
-  function chonNhanSu(n: NhanSu) {
+  /* 🔴 VIỆC ㉑ ① — hai lối dưới đây TRƯỚC LÀ `void datNguoi(...)`: ghi sổ hỏng thì ô đã đổi,
+     nhân sự mới đã gán, lịch sử KHÔNG nạp, mà khôngmột chữ giải thích. Nay đọc kết quả. */
+  async function chonNhanSu(n: NhanSu) {
     datAnKhu(false);
     if (tieuDiem === 0) {
       // 👑 Ô 1 là TỔNG GIÁM ĐỐC. Có ô trống khác đang hiện thì dùng ô đó, không thì nói thẳng.
@@ -941,18 +1012,27 @@ export default function UngDung({
           : 'Ô 1 là TỔNG GIÁM ĐỐC — bấm vào ô 2/3/4 rồi chọn lại');
         return;
       }
-      void datNguoi(trong, n);
+      nhacNeuHong(trong + 1, await datNguoi(trong, n));
       return;
     }
-    void datNguoi(tieuDiem, n);
+    nhacNeuHong(tieuDiem + 1, await datNguoi(tieuDiem, n));
+  }
+
+  /** 🔴 VIỆC ㉑ ② — chỗ gọi ĐỌC kết quả. Trước là `void dongO(i)` ngay trong `onClick`. */
+  async function dongOTuMenu(i: number) {
+    capNhat(i, { moMenu: false });
+    if (!(await dongO(i))) nhacNeuHong(i + 1, { xong: false, hong: 'ghi-so' });
   }
 
   /* ---------- Bỏ trống một ô (⛔ ô 1 không có nút này) ---------- */
-  async function dongO(i: number) {
-    if (i === 0) return;
+  async function dongO(i: number): Promise<boolean> {
+    if (i === 0) return true;
     huyLuong(i);
     capNhat(i, { ...O_TRONG });
-    await ghiO(i, null, null);
+    // ③ đóng ô mà khôngghi được sổ thì cũng là HỎNG — và ô đó phải tự nói ra
+    if (await ghiO(i, null, null)) return true;
+    noiHong(i, 'ghi-so');
+    return false;
   }
 
   /* ---------- 🎛 NẠP MỘT BỘ GHẾ vào 6 ô (menu «Giao diện») ----------
@@ -978,8 +1058,6 @@ export default function UngDung({
    *      ⇒ phải DỌN mấy ô giữ ghế-đích-sai-chỗ TRƯỚC, rồi mới nạp.
    */
   const napBoGhe = useCallback(async (muc: CapGhe[], luuBoCu: boolean) => {
-    datMoMenuGD(false);
-    const ten = muc.map((m) => m.ten);
 
     // ① B1 — CẤT bộ hiện tại (CẶP ghế+phiên) TRƯỚC KHI đụng vào bất cứ ô nào
     if (luuBoCu) {
@@ -996,50 +1074,33 @@ export default function UngDung({
     doiBoCuc(6);
     await new Promise((r) => setTimeout(r, 80));   // để React vẽ xong 6 ô rồi mới nạp
 
-    const dangChay = new Set(
-      dsORef.current.map((o, k) => (o.dangChay ? k : -1)).filter((k) => k >= 0),
-    );
-
-    // ⑤ dọn ô đang giữ ghế thuộc bộ ĐÍCH nhưng SAI CHỖ — gỡ chốt `trung`
-    for (let k = 1; k < SO_O; k++) {
-      const dang = dsORef.current[k]?.ns?.ten;
-      if (!dang || dangChay.has(k)) continue;
-      if (dang !== ten[k] && ten.includes(dang)) await dongO(k);
-    }
-
-    const boQua: number[] = [];
-    for (let i = 1; i < SO_O; i++) {
-      if (dangChay.has(i)) { boQua.push(i + 1); continue; }   // ② ⛔ không đè ô đang chạy
-      const dich = ten[i] ?? null;
-      const dang = dsORef.current[i]?.ns?.ten ?? null;
-      if (dang === dich) continue;                            // đã đúng chỗ ⇒ ⛔ đừng đụng
-      if (!dich) { await dongO(i); continue; }
-      const n = nhanSu.find((x) => x.ten === dich);
-      if (!n) { boQua.push(i + 1); continue; }                // ghế ⛔ không có trong danh bạ
-      await datNguoi(i, n);
-
-      /* 🔴 NỐI ĐÚNG PHIÊN ĐÃ LƯU. `datNguoi` nối phiên GẦN NHẤT của ghế — đúng cho bộ
-         dựng sẵn, nhưng SAI cho «quay về»: ghế có nhiều phiên thì gần-nhất ⛔ chưa chắc
-         là phiên ô đó đang mở. ⇒ khôi phục phải chỉ ĐÍCH DANH.
-         An toàn: `/api/o` chỉ nhận phiên CÒN THẬT trong kho của ĐÚNG ghế đó (o/route.ts:37)
-         ⇒ phiên đã bị xoá thì máy chủ chặn, ⛔ không ghi bậy. */
-      /* 🏫 MỒI Ô DÁN — mở sẵn khối dán và điền mã phiên gợi ý.
-         KHÔNG nối thẳng: phiên đó nằm ở kho THƯ MỤC KHÁC, `/api/o` sẽ chặn.
-         Owner bấm «Nối phiên» ⇒ app chìa nút Fork ⇒ clone .jsonl sang thư mục ghế này. */
-      const goiY = muc[i]?.goiY;
-      if (goiY) capNhat(i, { moDan: true, chuoiDan: goiY, loiDan: '' });
-
-      const phienLuu = muc[i]?.phien ?? null;
-      if (phienLuu && dsORef.current[i]?.phienHienTai !== phienLuu) {
-        capNhat(i, { chiPhi: null, token: null }); // ⚠️ ⛔ đặt phienHienTai — hàm đọc lo
-        await ghiO(i, dich, phienLuu);
-        await napLichSu(i, dich, phienLuu);
-      }
-    }
-
-    datNhacGD(boQua.length
-      ? `Ô ${boQua.join(', ')} đang chạy — ⛔ chưa đổi. Xong việc rồi bấm lại.`
-      : '');
+    /* 🔴 VÒNG 3 — thân vòng lặp ĐÃ BÓC sang `chayNapBoGhe` (nap-bo-ghe.ts).
+       Vì sao: người soi bác vòng 2 đúng chỗ — tôi thử `cauNhacNapBoGhe` bằng bảng 16 tổ hợp và
+       nó xanh, nhưng cái hỏng nằm ở ĐƯỜNG ĐI khôngchuyển kết quả tới hàm ấy.
+       🔑 Một phép thử đúng trên SAI VẬT thì nó chỉ bảo vệ đúng cái vật đó.
+       ⇒ nay đường đi nhận phụ thuộc qua tham số, nên bộ đo chạy được CHÍNH nó bằng mạng giả. */
+    const kq = await chayNapBoGhe(muc, {
+      soO: SO_O,
+      docO: (k) => ({
+        ten: dsORef.current[k]?.ns?.ten ?? null,
+        phien: dsORef.current[k]?.phienHienTai ?? null,
+        dangChay: !!dsORef.current[k]?.dangChay,
+      }),
+      coTrongDanhBa: (t) => nhanSu.some((x) => x.ten === t),
+      datNguoi: async (k, t) => {
+        const n = nhanSu.find((x) => x.ten === t);
+        if (!n) return { xong: false, boQua: 'thieu-ghe' };
+        return datNguoi(k, n);
+      },
+      dongO,
+      ghiO: (k, t, ph) => ghiO(k, t, ph),
+      napLichSu,
+      /* 🏫 MỒI Ô DÁN — mở sẵn khối dán và điền mã phiên gợi ý. KHÔNG nối thẳng: phiên đó nằm ở
+         kho THƯ MỤC KHÁC, `/api/o` sẽ chặn. Owner bấm «Nối phiên» ⇒ app chìa nút Fork. */
+      moDan: (k, goiY) => capNhat(k, { moDan: true, chuoiDan: goiY, loiDan: '' }),
+      donTruocKhiGhi: (k) => capNhat(k, { chiPhi: null, token: null }),
+    });
+    datNhacBoGhe(cauNhacNapBoGhe(kq));
   }, [nhanSu, datNguoi, doiBoCuc, capNhat, ghiO, napLichSu]);
 
   /* ---------- Bấm chọn một phiên trong danh sách của một ô ---------- */
@@ -1048,8 +1109,17 @@ export default function UngDung({
     if (!ns || p.dang_chay) return; // ⛔ không nối vào phiên đang chạy nơi khác
     huyLuong(i);
     capNhat(i, { moChonPhien: false, chiPhi: null, token: null }); // ⚠️ ⛔ đặt phienHienTai — napLichSu lo
-    await ghiO(i, ns.ten, p.ma);
-    await napLichSu(i, ns.ten, p.ma);
+    /* 🔴 VÒNG 3 ② — trước đây là `await ghiO(...)` trần. Sau khi vòng 2 đổi hợp đồng của `ghiO`
+       (ném ⇒ trả false), chỗ này NUỐT LỖI MẠNG: Owner bấm chọn phiên, app im, sổ ô khôngđược ghi,
+       tải lại trang là mất. */
+    if (!(await ghiO(i, ns.ten, p.ma))) {
+      capNhat(i, {
+        loiDan: '🔴 KHÔNG ghi được vào sổ ô — tải lại trang là mất phiên vừa chọn. '
+          + 'Kiểm mạng rồi bấm lại.',
+      });
+      return;
+    }
+    if (await napLichSu(i, ns.ten, p.ma) === 'hong') noiHong(i, 'doc-lich-su');
   }
 
   /* ---------- Dán lệnh resume chép từ sổ phiên (resume.erocathanh.com) ----------
@@ -1170,7 +1240,21 @@ export default function UngDung({
         catDongDai: kq.catDai,
         loiDan: `✅ Đã nối phiên ${ma.slice(0, 8)}… — đọc được ${lichSu.length} lượt.`, chuoiDan: '',
       });
-      await ghiO(i, o.ns.ten, ma);
+      /* 🔴 VÒNG 3 ② — ĐÂY LÀ LỖ CHÍNH bản vá vòng 2 của tôi mở ra, và nó tệ hơn «nuốt lỗi»:
+         · TRƯỚC vòng 2: `ghiO` là `await fetch(...)` trần ⇒ rớt mạng thì NÉM ⇒ rơi vào `catch`
+           bên dưới ⇒ Owner thấy «Không gọi được máy chủ để kiểm phiên».
+         · SAU vòng 2: `ghiSoO` bắt lỗi BÊN TRONG và trả `false` ⇒ `catch` KHÔNG bao giờ chạy,
+           mà dòng `capNhat` ngay trên đã kịp hiện «✅ Đã nối phiên … đọc được N lượt».
+         ⇒ Owner đọc được chữ XANH trong khi sổ ô chưa hề được ghi.
+         🔑 Đổi hợp đồng của một hàm là đổi cả cách MỌI chỗ gọi nó xử lý thất bại — kể cả những
+            chỗ xử lý bằng cách KHÔNG viết gì (dựa vào cú ném). Chỗ khôngviết gì là chỗ khó thấy
+            nhất khi rà, vì nó khôngcó dòng nào để rà. */
+      if (!(await ghiO(i, o.ns.ten, ma))) {
+        capNhat(i, {
+          loiDan: `⚠️ Đã đọc được ${lichSu.length} lượt, nhưng KHÔNG ghi được vào sổ ô — `
+            + 'tải lại trang là mất. Kiểm mạng rồi bấm «Nối phiên» lại.',
+        });
+      }
       void napDsPhien(i, o.ns.ten);
     } catch {
       capNhat(i, { loiDan: '⛔ Không gọi được máy chủ để kiểm phiên.' });
@@ -1196,7 +1280,12 @@ export default function UngDung({
       moChonPhien: false, phienHienTai: null, tin: [], noiTiep: false, chiPhi: null, token: null,
       conNua: false, viTri: 0, catDongDai: false,
     });
-    await ghiO(i, ns.ten, null, true); // ý định THẬT: Owner bấm mở PHIÊN MỚI
+    // ý định THẬT: Owner bấm mở PHIÊN MỚI (xoá liên kết phiên cũ trong sổ)
+    if (!(await ghiO(i, ns.ten, null, true))) {
+      capNhat(i, {
+        loiDan: '🔴 KHÔNG ghi được vào sổ ô — phiên mới chưa được ghi nhận. Kiểm mạng rồi bấm lại.',
+      });
+    }
   }
 
   /* ---------- Gửi câu hỏi ở MỘT ô, đọc luồng SSE của riêng ô đó ----------
@@ -1929,20 +2018,20 @@ export default function UngDung({
 
   return (
     <>
-      <header className="thanh-de">
-        <div className="dau-an">ET</div>
-        <div className="khoi-de">
-          <b>AIBOSS.VN</b>
-          <span>Phòng ban AI · nói chuyện thật với trợ lý AI · Eroca Thanh</span>
-        </div>
-        <div className="so-lieu">
-          <div className="o-so"><b>{tong.nhan_su}</b><span>Nhân sự</span></div>
-          <div className="vach" />
-          <div className="o-so"><b>{tong.phong_ban}</b><span>Phòng ban</span></div>
-          <div className="vach" />
-          <div className="o-so"><b>{tong.truong_phong}</b><span>Trưởng phòng</span></div>
-        </div>
-        {/**
+      {/**
+        * 🔴 HAI THỨ NÀY PHẢI Ở TẦNG NGOÀI CÙNG — verdict vòng 1, lỗi ④ và ⑤ của tôi.
+        *
+        * Tôi từng đặt chúng bên trong `.de-khu` (nằm trong `.cot-3`) và `.cot-1`. Cả hai cái cha
+        * đó TỰ ẨN trong đúng lúc cần con của nó:
+        *   · mobile + anKhu=true ⇒ `.cot-3` KHÔNG có lớp `mo-khu` ⇒ `display:none`
+        *     ⇒ nút «về khu chat» CÒN TRONG DOM mà Owner KHÔNG bấm được. Trên điện thoại đó là
+        *       đường về DUY NHẤT — đúng lỗi Owner phàn nàn 18/08, tôi vừa dựng lại.
+        *   · nạp bộ ghế LUÔN đổi sang bố cục 6 ⇒ `.khung` nhận `an-cot` ⇒ `.cot-1` ẩn
+        *     ⇒ câu nhắc vừa sinh ra đã bị giấu.
+        * 🔑 **Thứ phải thấy trong MỌI trạng thái thì KHÔNG được nằm trong một cái cha tự ẩn.**
+        *    Tôi viết trong báo cáo là «giữ bằng mọi giá» rồi chôn nó — CÒN TRONG DOM khác BẤM ĐƯỢC.
+        */}
+{/**
           * 💬 QUAY LẠI KHU CHAT (Owner 18/08: «về danh bạ xong ⛔ không có nút quay lại ô chat»).
           * Tôi thêm đường ĐI mà quên đường VỀ ⇒ Owner kẹt ở danh bạ, chỉ thoát được bằng
           * cách chọn lại một ghế — mà đôi khi Owner chỉ muốn xem danh bạ rồi quay lại chỗ cũ.
@@ -1958,7 +2047,11 @@ export default function UngDung({
             <ChatCircleDots size={17} weight={DAM_ICON} aria-hidden="true" />
           </button>
         )}
-      </header>
+      {nhacBoGhe && (
+        <div className="nhac-bo-ghe" role="status" aria-live="polite" title={nhacBoGhe}>
+          {nhacBoGhe}
+        </div>
+      )}
 
       {/**
         * 🔖 BĂNG «TRANG NÀY ĐANG CHẠY MÃ CŨ» (P1-8 · 31/08/2026)
@@ -2022,6 +2115,72 @@ export default function UngDung({
         <aside className="cot cot-1">
           <div className="de-cot">Cơ cấu tổ chức</div>
           <div className="cay">
+            {/**
+              * 🏢 «VÀO PHÒNG BAN» — Owner quyết 04/09 (round-8 hướng A + ba chốt chiều 04/09).
+              *
+              * CHUYỂN, KHÔNG nhân đôi: 5 bộ ghế trước ở menu «Giao diện» trên thanh, nay về ĐÂY.
+              * Nút «Giao diện» đã BỎ HẲN — Owner: «ở Giao diện có gì chuyển hết về Vào Phòng Ban».
+              *
+              * 🔑 Danh sách vẽ từ `SO_BO_GHE` — MỘT sổ duy nhất, dùng chung với `LA_BO_DUNG_SAN`.
+              *    Chép danh sách ra đây là đẻ chỗ thứ ba phải nhớ, và người thêm bộ thứ sáu sẽ
+              *    quên một trong ba. Hỏng kiểu đó KHÔNG kêu: menu vẫn hiện, chỉ đội THẬT của
+              *    Owner bị ghi đè lặng lẽ ở lần bấm bộ thứ hai.
+              *
+              * ⬅️ «Ghế hiện tại» đứng ĐẦU, TRÊN danh sách phòng ban: nó là ĐƯỜNG VỀ của đúng
+              *    cái việc liệt kê ngay dưới nó. Đặt lối thoát cạnh cái cửa — vì phút Owner cần
+              *    nó là phút Owner vừa bấm nhầm bộ.
+              *
+              * ⚖️ CÁI GIÁ OWNER ĐÃ CHỌN, ghi ra để KHÔNG ai «sửa giúp»: ẩn cột thì KHÔNG đổi
+              *    phòng ban được, phải mở cột ra trước. Owner được hỏi thẳng và chọn thế.
+              *    Ai định thêm lại lối tắt trên thanh cho tiện thì DỪNG và hỏi Owner.
+              */}
+            {/* ⑲ 05/09 — Owner xem bản cách ly 4320 rồi đặt: «Vào phòng ban» phải LUÔN MỞ.
+                ⇒ Bỏ HẲN trạng thái gập, KHÔNG giữ lại vỏ nút bấm-không-làm-gì.
+                🔑 Giữ vỏ mà bỏ tác dụng thì tệ hơn bỏ hẳn: người ta bấm, chờ, rồi tưởng app hỏng.
+                Nay đây là NHÃN MỤC ⇒ bỏ luôn role="button" · tabIndex · aria-expanded · mũi tên xổ.
+                Khai một thứ là nút trong khi nó KHÔNG bấm được là nói dối với cả người dùng lẫn
+                trình đọc màn hình — và trình đọc màn hình KHÔNG tự phát hiện ra được điều đó. */}
+            <div className="goc nut-vao-pb de-muc">
+              <span className="ic">🏢</span>
+              <span className="nhan-ten">Vào phòng ban</span>
+            </div>
+
+            <div className="menu-vao-pb" role="menu">
+              {/* ⬅️ ĐƯỜNG VỀ đứng đầu. Chỉ bật khi ĐÃ có bộ lưu — một nút KHÔNG làm gì thì
+                  tệ hơn KHÔNG có nút, vì người bấm tưởng mình làm sai. */}
+              <button
+                className="muc-menu" type="button" role="menuitem"
+                disabled={!boGheCu}
+                title={boGheCu
+                  ? boGheCu.map((m) => m.ten).filter(Boolean).join(' · ')
+                  : 'Chưa lưu bộ nào — bấm một phòng ban thì bộ đang xếp sẽ được cất lại'}
+                onClick={() => { void napBoGhe(boGheCu ?? [], false); }}
+              >
+                <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
+                {boGheCu ? 'Ghế hiện tại (bộ đã lưu)' : 'Chưa có bộ nào để quay về'}
+              </button>
+
+              {SO_BO_GHE.map((bo) => {
+                const Icon = bo.icon === 'vuong-mien' ? Crown : bo.icon === 'danh-sach' ? List : ClipboardText;
+                return (
+                  <button
+                    key={bo.ma}
+                    className="muc-menu" type="button" role="menuitem"
+                    title={bo.ghe.map((g) => g.ten).join(' · ')}
+                    onClick={() => { void napBoGhe(bo.ghe, true); }}
+                  >
+                    <Icon size={15} weight={DAM_ICON} aria-hidden="true" />
+                    {bo.ten} — {bo.ghe.length} ô
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ⑳④ 05/09 — Owner: «cái tên category "Toàn bộ nhân sự" em để bên dưới section của
+                "Vào phòng ban" nhé». Trước nó đứng ĐẦU cột (y=53), trên cả «Vào phòng ban» (y=87).
+                🔑 Chỗ mới cũng ĐÚNG NGHĨA hơn: nó là bộ lọc «tất cả» của DANH SÁCH PHÒNG BAN ngay dưới
+                   nó, khôngphải một mục ngang hàng với «Vào phòng ban». Một cái nút đứng tách khỏi thứ
+                   nó điều khiển thì người dùng khôngcó cách nào đoán ra nó điều khiển cái gì. */}
             <div
               className={`goc${phongChon === null ? ' chon' : ''}`}
               onClick={() => { datPhongChon(null); datPhongMo(null); }}
@@ -2050,7 +2209,7 @@ export default function UngDung({
                     <div
                       key={n.ten}
                       className={`la${tenTieuDiem === n.ten ? ' chon' : ''}`}
-                      onClick={() => chonNhanSu(n)}
+                      onClick={() => void chonNhanSu(n)}
                       title={n.ten}
                     >
                       <span className="cham" />
@@ -2060,6 +2219,20 @@ export default function UngDung({
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* ⑳② 05/09 — Owner: «dòng sumary 225/9/67 thì hiển thị ở menu trái bên trên khu
+              "tỷ trọng nhân sự"». Dời TỪ `.de-khu` (thanh trên, trong `.cot-3`) về ĐÂY.
+              🔑 Dời nó đi cũng chính là thứ TRẢ CHỖ cho ⑳①: `.nhom-bo-cuc` nay là con duy nhất còn
+                 `margin-left:auto` trong `.de-khu` ⇒ nó lên hàng 1 mà khôngcần đụng gì tới nó.
+              📏 Cột trái rộng 264px, mà `.so-lieu` xếp một hàng ngang rộng 290px ⇒ KHÔNG vừa.
+                 ⇒ đổi sang LƯỚI 3 CỘT — xem `.cot-1 .so-lieu` trong mau09.css. */}
+          <div className="so-lieu">
+            <div className="o-so"><b>{tong.nhan_su}</b><span>Nhân sự</span></div>
+            <div className="vach" />
+            <div className="o-so"><b>{tong.phong_ban}</b><span>Phòng ban</span></div>
+            <div className="vach" />
+            <div className="o-so"><b>{tong.truong_phong}</b><span>Trưởng phòng</span></div>
           </div>
 
           <div className="thanh-mau">
@@ -2105,7 +2278,7 @@ export default function UngDung({
                   tenDangMo.has(n.ten) && tenTieuDiem !== n.ten ? ' mo' : ''
                 }`}
                 data-vai={n.vai}
-                onClick={() => chonNhanSu(n)}
+                onClick={() => void chonNhanSu(n)}
                 title={`${n.nhan}\n${n.ten}`}
               >
                 <div className="vuong">{n.viet_tat}</div>
@@ -2130,11 +2303,49 @@ export default function UngDung({
               * ⛔ không tìm ra, mà đó lại là đường DUY NHẤT để đổi ghế trên điện thoại.
               * ⇒ Đặt ngay cạnh tên app: chỗ mắt nhìn đầu tiên. Màn rộng thì ẩn (danh bạ luôn hiện).
               */}
+            {/**
+              * ☰ NÚT GỘP — hướng A, Owner quyết round-8 04/09.
+              * Trước đây là HAI nút: ☰ (mở danh bạ) trên `.thanh-de`, và «Ẩn/Hiện 2 cột» trong
+              * `.nhom-bo-cuc`. Hướng A bỏ `.thanh-de` ⇒ gộp làm MỘT, mang CẢ HAI lớp.
+              *
+              * 🔴 TIÊU CHÍ CỨNG của Owner: nút này PHẢI CÒN NHÌN THẤY khi hai cột ĐANG ẨN.
+              *    Ẩn cột = mất lối vào danh bạ; nút này là đường DUY NHẤT quay lại.
+              *    «Thêm đường ĐI thì phải thêm đường VỀ trong CÙNG một lượt sửa.»
+              *    Neo CSS: `.khung.an-cot .nut-danh-ba{display:inline-flex}` (globals) — ĐỪNG gỡ.
+              */}
             <button
-              className="nut-tron nut-danh-ba" type="button"
-              onClick={() => { datAnKhu(true); datAnCotLuu(false); }}
-              title="Mở danh bạ — tìm phòng ban, đổi ghế"
-              aria-label="Mở danh bạ"
+              className={`nut-tron nut-danh-ba nut-cot${(anCot === null ? boCuc === 6 : anCot) ? '' : ' chon'}`}
+              type="button"
+              onClick={() => {
+                // 🔴 VERDICT ⑧ (vòng 1): bản trước quyết định CHỈ theo trạng thái ẩn cột DESKTOP.
+                //    Ở bố cục 1/2/4 thì `anCot=null` ⇒ dangAn=false ⇒ bấm lần 1 chỉ ẩn cột,
+                //    phải bấm LẦN HAI mới mở danh bạ. Nút CŨ chỉ cần MỘT lần ⇒ đây là ĐỔI HÀNH VI,
+                //    không phải gộp hình thức.
+                // ✅ Nay: việc chính của nút là ĐƯA NGƯỜI TỚI DANH BẠ. Chỉ khi danh bạ ĐANG mở
+                //    và cột ĐANG hiện thì bấm mới là «ẩn đi».
+                // 🔴 VERDICT VÒNG 2 ④: bản trước còn BẢY ô «bấm lần đầu không đổi gì» trên desktop.
+                //    Gốc, đo được ở CSS: hai biến RỜI NHAU THEO BỀ RỘNG —
+                //      `.khung.an-cot …`  nằm trong @media (min-width:1041px) ⇒ `anCot` chỉ thấy ở DESKTOP
+                //      `.cot-3.mo-khu …`  nằm trong @media (max-width:1040px) ⇒ `anKhu` chỉ thấy ở MOBILE
+                //    Handler cũ ở desktop chỉ đặt `anKhu` ⇒ đặt một thứ desktop KHÔNG hề nhìn thấy.
+                // 🔑 Nên đây KHÔNG phải bảy lỗi lẻ — là MỘT lỗi: nút đặt biến của màn hình BÊN KIA.
+                //    Vá từng ô sẽ sót, đúng như PM cảnh báo.
+                // ✅ Cách chữa: MỘT lần bấm LẬT CẢ HAI biến, ngược chiều nhau.
+                //    Nhờ vậy mọi ô trong bảng {bố cục}×{anCot}×{anKhu} đều đổi ÍT NHẤT một biến
+                //    NHÌN THẤY ĐƯỢC ở bề rộng đang đứng. Bảng chứng minh: bai-thu/thu-nut-gop.mjs
+                const dangAn = anCot === null ? boCuc === 6 : anCot;
+                // ⚠️ Bản vá ĐẦU của tôi buộc `anKhu` theo trạng thái DESKTOP (`datAnKhu(dangAn)`)
+                //    ⇒ bảng vẫn còn 12 ô no-op trên mobile. Buộc hai biến vào nhau là lại đem
+                //    trạng thái của màn này quyết định cho màn kia — đúng cái bệnh vừa chữa.
+                // ✅ MỖI MÀN LẬT BIẾN CỦA CHÍNH NÓ ⇒ 0 ô no-op, đúng theo cấu tạo chứ không do may.
+                datAnCotLuu(!dangAn);   // desktop THẤY: hai cột hiện/ẩn
+                datAnKhu(!anKhu);       // mobile  THẤY: vào/rời danh bạ
+              }}
+              title={(anCot === null ? boCuc === 6 : anCot)
+                ? 'Hiện lại hai cột danh bạ + phòng ban'
+                : 'Ẩn hai cột trái để khung trò chuyện rộng thêm 584px'}
+              aria-label="Danh bạ và hai cột trái"
+              aria-pressed={(anCot === null ? boCuc === 6 : anCot)}
             >
               <List size={17} weight={DAM_ICON} aria-hidden="true" />
             </button>
@@ -2146,107 +2357,6 @@ export default function UngDung({
               </span>
             )}
             <div className="nhom-bo-cuc">
-              {/**
-                * 📕 NÚT ẨN/HIỆN HAI CỘT TRÁI (Owner chốt 20/08 — hướng Ⓑ).
-                * Nhãn NÓI RÕ việc sẽ xảy ra khi bấm, ⛔ không phải nói trạng thái hiện tại —
-                * nút mà đọc xong còn phải đoán thì Owner bấm thử mới biết.
-                * ⚠️ Ẩn cột = mất lối vào danh bạ ⇒ luật bật nút ☰ phải áp cho CẢ trạng thái này,
-                *    ⛔ không chỉ bc-6. «Ẩn thứ gì thì chừa đường quay lại TRONG CÙNG lượt sửa.»
-                */}
-              <button
-                className={`nut-bc nut-cot${(anCot === null ? boCuc === 6 : anCot) ? '' : ' chon'}`}
-                type="button"
-                onClick={() => datAnCotLuu(!(anCot === null ? boCuc === 6 : anCot))}
-                title={(anCot === null ? boCuc === 6 : anCot)
-                  ? 'Hiện lại hai cột danh bạ + phòng ban'
-                  : 'Ẩn hai cột trái để khung trò chuyện rộng thêm 584px'}
-                aria-pressed={(anCot === null ? boCuc === 6 : anCot)}
-              >
-                {(anCot === null ? boCuc === 6 : anCot) ? 'Hiện 2 cột' : 'Ẩn 2 cột'}
-              </button>
-              {/**
-                * 🎛 MENU «GIAO DIỆN» — bộ ghế dựng sẵn (Owner 20/08, cho lớp).
-                * Đặt trong `.nhom-bo-cuc` vì khối đó đã có `position:relative` (mau09:221)
-                * ⇒ menu xổ bám đúng chỗ, ⛔ không phải thêm vỏ bọc mới.
-                * ⛔ Mục «Ghế hiện tại» CHỈ hiện khi ĐÃ có bộ lưu — hiện một nút ⛔ không làm gì
-                *   thì tệ hơn ⛔ không có nút (đúng bài học nút ☰ chết sáng nay).
-                */}
-              <button
-                className={`nut-bc nut-gd${moMenuGD ? ' chon' : ''}`} type="button"
-                onClick={() => datMoMenuGD((v) => !v)}
-                title="Chọn bộ ghế dựng sẵn cho 6 ô"
-                aria-label="Menu giao diện" aria-expanded={moMenuGD}
-              >
-                Giao diện <CaretDown size={12} weight={DAM_ICON} aria-hidden="true" />
-              </button>
-              {moMenuGD && (
-                <div className="menu-xo menu-gd" role="menu">
-                  <button
-                    className="muc-menu" type="button" role="menuitem"
-                    disabled={!boGheCu}
-                    title={boGheCu
-                      ? boGheCu.map((m) => m.ten).filter(Boolean).join(' · ')
-                      : 'Chưa lưu bộ nào — bấm «Phòng Marketing» thì bộ đang xếp sẽ được cất lại'}
-                    onClick={() => { void napBoGhe(boGheCu ?? [], false); }}
-                  >
-                    <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
-                    {boGheCu ? 'Ghế hiện tại (bộ đã lưu)' : 'Chưa có bộ nào để quay về'}
-                  </button>
-                  <button
-                    className="muc-menu" type="button" role="menuitem"
-                    title={BO_MARKETING.join(' · ')}
-                    onClick={() => { void napBoGhe(BO_MARKETING.map((t) => ({ ten: t, phien: null })), true); }}
-                  >
-                    <Crown size={15} weight={DAM_ICON} aria-hidden="true" />
-                    Phòng Marketing — 6 ô
-                  </button>
-                  {/* 🎛 «Vận hành» — ẢNH CHỤP bộ ghế 10:49 20/08, ⛔ KHÔNG lấy động
-                      (lấy động thì trùng y hệt mục «Ghế hiện tại» ở trên).
-                      ♻️ Dùng ĐÚNG `napBoGhe` của bộ Marketing — cùng bốn chốt, cùng đường ghi sổ.
-                      ⛔ Đẻ đường song song thì lần sau sửa một chỗ, chỗ kia âm thầm lệch. */}
-                  <button
-                    className="muc-menu" type="button" role="menuitem"
-                    title={BO_VAN_HANH.join(' · ')}
-                    onClick={() => { void napBoGhe(BO_VAN_HANH.map((t) => ({ ten: t, phien: null })), true); }}
-                  >
-                    <List size={15} weight={DAM_ICON} aria-hidden="true" />
-                    Vận hành — 6 ô
-                  </button>
-                  {/* 🗄 «Quản Lý Cũ» — Owner 30/08, đổi tên + tên ghế THẬT 31/08.
-                      Bộ DUY NHẤT ghim sẵn mã phiên ⇒ truyền THẲNG `BO_QUAN_LY_CU`,
-                      ⛔ map `phien: null` như hai bộ trên. */}
-                  <button
-                    className="muc-menu" type="button" role="menuitem"
-                    title={BO_QUAN_LY_CU.map((m) => m.ten).join(' · ')}
-                    onClick={() => { void napBoGhe(BO_QUAN_LY_CU, true); }}
-                  >
-                    <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
-                    Quản Lý Cũ — 6 ô
-                  </button>
-                  {/* 🏫 «Quản Lý Trường» — dựng lại 31/08. Bộ này KHÔNG ghim phiên:
-                      5 ghế đứng ở THƯ MỤC RIÊNG, mã phiên cũ chỉ được MỒI vào ô dán (`goiY`)
-                      để Owner bấm «Nối phiên» → app chìa nút Fork → clone .jsonl sang đây. */}
-                  <button
-                    className="muc-menu" type="button" role="menuitem"
-                    title={BO_QUAN_LY_TRUONG.map((m) => m.ten).join(' · ')}
-                    onClick={() => { void napBoGhe(BO_QUAN_LY_TRUONG, true); }}
-                  >
-                    <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
-                    Quản Lý Trường — 6 ô
-                  </button>
-                  {/* 🏭 «Phòng Công Nghệ» — Owner xin lưu đội đang ngồi, 02/09.
-                      Ghim sẵn mã phiên ⇒ truyền THẲNG `BO_CONG_NGHE`, KHÔNG map `phien: null`. */}
-                  <button
-                    className="muc-menu" type="button" role="menuitem"
-                    title={BO_CONG_NGHE.map((m) => m.ten).join(' · ')}
-                    onClick={() => { void napBoGhe(BO_CONG_NGHE, true); }}
-                  >
-                    <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
-                    Phòng Công Nghệ — 6 ô
-                  </button>
-                </div>
-              )}
-              {nhacGD && <span className="nhan-mau" title={nhacGD}>{nhacGD}</span>}
               <button
                 className={`nut-bc${boCuc === 1 ? ' chon' : ''}`} type="button" data-bc="1"
                 onClick={() => doiBoCuc(1)}
@@ -2257,13 +2367,29 @@ export default function UngDung({
                 </svg>
               </button>
               <button
-                className={`nut-bc${boCuc === 2 ? ' chon' : ''}`} type="button" data-bc="2"
-                onClick={() => doiBoCuc(2)}
+                className={`nut-bc${boCuc === 2 && kieuHai === 'tren-duoi' ? ' chon' : ''}`}
+                type="button" data-bc="2"
+                onClick={() => doiBoCuc(2, 'tren-duoi')}
                 title="2 ô — chia trên / dưới" aria-label="Bố cục 2 ô trên dưới"
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
                   <line x1=".8" y1="7" x2="17.2" y2="7" />
+                </svg>
+              </button>
+              {/* 🆕 ⑲③ 05/09 — «2 ô TRÁI-PHẢI». Owner mở bản cách ly 4320 rồi báo thiếu.
+                  Đây là nút THỨ NĂM, KHÔNG thay nút «2 ô» cũ và KHÔNG dùng kiểu bấm-lần-hai-đổi-kiểu:
+                  bấm-lần-hai giấu trạng thái vào LỊCH SỬ BẤM, mà lịch sử bấm là thứ KHÔNG nhìn thấy được
+                  — người dùng phải thử mới biết mình đang ở đâu. */}
+              <button
+                className={`nut-bc${boCuc === 2 && kieuHai === 'trai-phai' ? ' chon' : ''}`}
+                type="button" data-bc="2-tp"
+                onClick={() => doiBoCuc(2, 'trai-phai')}
+                title="2 ô — chia trái / phải" aria-label="Bố cục 2 ô trái phải"
+              >
+                <svg viewBox="0 0 18 14" aria-hidden="true">
+                  <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
+                  <line x1="9" y1=".8" x2="9" y2="13.2" />
                 </svg>
               </button>
               <button
@@ -2295,7 +2421,7 @@ export default function UngDung({
             </div>
           </div>
 
-          <div className={`luoi bc-${boCuc}${toanMan !== null ? ' toan-man' : ''}`}>
+          <div className={`luoi bc-${boCuc}${boCuc === 2 && kieuHai === 'trai-phai' ? ' hai-ngang' : ''}${toanMan !== null ? ' toan-man' : ''}`}>
             {dsO.map((o, i) => (
               <div
                 key={i}
@@ -2530,7 +2656,7 @@ export default function UngDung({
                                   <div className="vach-menu" />
                                   <button
                                     className="muc-menu nguy" type="button" role="menuitem"
-                                    onClick={() => { capNhat(i, { moMenu: false }); void dongO(i); }}
+                                    onClick={() => { void dongOTuMenu(i); }}
                                   >
                                     <X size={15} weight={DAM_ICON} aria-hidden="true" />
                                     Đóng ô — bỏ trống
