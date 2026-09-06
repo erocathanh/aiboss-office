@@ -204,7 +204,14 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
      * ✅ Luật rút ra: **ĐỪNG NHẬN thứ mình chưa chắc sẽ làm.** Kiểm đủ điều kiện rồi mới lấy mẩu.
      */
     const o = layO(y.ma_o);
-    let maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
+    /* 🔴 ⑭ 06/09 — `let` → `const`. Người soi bắt: pha lint THẬT của `next build` trả
+       `isError: true` ở đúng dòng này ⇒ từ khi kho có cấu hình eslint, MỌI bản dựng đều ĐỎ.
+       🔑 Việc ⑭ khôngphải là thêm một lệnh chạy tay — nó ĐỔI VẬT LÝ CỦA BẢN DỰNG.
+       📏 Đo trước khi sửa: 5 chỗ dùng `maPhienCu` (216 · 218 · 245 · 254 · 271) đều chỉ ĐỌC.
+          Phép gán duy nhất khác nằm ở dòng ~228 — nhưng nó ở TRONG CHÚ THÍCH, tả một hành vi
+          ĐÃ BỊ GỠ CÓ CHỦ Ý ở vòng 4. Cái `let` là hoá thạch của hành vi đã chết.
+       ⚠️ Đổi sang `const` KHÔNG đụng hành vi — chỉ khai đúng thứ đang thật. */
+    const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
 
     /**
      * (a) `coPhien` — **HAI MẪU CÁCH NHAU**, đúng như đường HTTP (`api/chat/route.ts:69-80`).
