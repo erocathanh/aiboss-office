@@ -1968,6 +1968,27 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    ⚠️ Thước nằm ở `bai-thu/`, KHÔNG vào bản dựng ⇒ việc này KHÔNG chặn giao diện ⑲⑳ về mặt kỹ
       thuật. Nó chặn về mặt LUẬT (cổng dựng ② đòi verdict ĐẠT). Owner đang chọn ba đường.
 
+㉓ 🔴 `UngDung.tsx:1104` — `useCallback` THIẾU PHỤ THUỘC `dongO` (cổng lint mới bắt được 06/09 08:00)
+   Mã chưa đầy MỘT NGÀY TUỔI: hàm `napBoGhe` lên bản thật tối 05/09 trong commit `0b30719`.
+   ⚠️ KHÔNG vá được bằng cách thêm dep: `dongO` là hàm thường, sinh lại mỗi lần vẽ
+      ⇒ thêm vào là `napBoGhe` đổi danh tính liên tục. Phải bọc `dongO` thành `useCallback` TRƯỚC.
+   🔑 Đây là bằng chứng sống cho việc ⑭: một cổng vừa bật đã chỉ vào mã mới nhất, chỗ mà bốn
+      vòng soi thủ công của hai ngày qua KHÔNG ai thấy.
+   👤 giao `claude-aiboss-app-exe` — nhưng CHƯA giao: cây đang có việc ⑭ chưa soi nằm đó,
+      chồng thêm là trộn hai thay đổi vào một lần soi. Đợi ⑭ soi xong và commit.
+   ⚠️ chạm `src/` ⇒ cổng dựng ④ áp ĐẦY ĐỦ.
+
+㉔ BỘ CANH CHẨN «ĐỤNG TRẦN» THÀNH «CHẾT» — sai HAI LẦN trong 13 tiếng
+   05/09 20:36  hermes-build-app trần 86/86   → báo động: «phải mở phiên xem nó CHẾT ở đâu»
+   06/09 09:00  hermes-web-noibo trần 120/120 → báo động: IM-LAU-KHONG-CAU-KET
+   Cả hai lần việc CÒN NGUYÊN và nối lại được. Lần đầu suýt mất 208 dòng đã sửa.
+   🔑 Câu phân biệt «Iteration budget reached (N/N)» do CLI in ra LÚC THOÁT ⇒ nó vào luồng
+      NGƯỜI GỌI, KHÔNG vào bản ghi phiên. Ai chỉ soi bản ghi phiên thì luôn kết luận «chết».
+   ✅ Vá: soi ĐUÔI nhật ký người gọi trước; không tìm được thì hạ giọng thành
+      «KHÔNG RÕ chết hay đụng trần», đừng nói «chết».
+   📖 SO-BAY-DO mục 97. ⚠️ Chẩn sai theo hướng bi quan cũng tốn thật, không phải an toàn miễn phí.
+   👤 chưa giao — chờ hàng đợi hiện tại nhẹ bớt.
+
 ⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
    cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
 ```
