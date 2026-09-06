@@ -1960,7 +1960,24 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
       Và chỗ nào ai cũng có lý do chính đáng để không chạm thì chỗ đó mục ruỗng.
    ⚠️ Cùng họ với ⑭ (lint chưa từng chạy) · cổng `.kiro` · sổ tiến độ. Cái thứ TƯ trong một ngày.
 
-㉒ 🔴 THƯỚC AST `soi-ket-qua.mjs` SAI CẢ HAI CHIỀU — bị bác VÒNG 3/3, PM đã DỪNG
+㉒ ✅ ĐÓNG 06/09 11:57 — thước AST vào main với HỢP ĐỒNG HẸP (Owner quyết B, round-10)
+   ```
+   ba đời thước trước  bác 3 lần   (soi TÊN HÀM → soi KÝ TỰ → soi TÊN BIẾN)
+   ㉒ vòng 1-3         bác 3 lần   (phân loại → nhị phân+ngoặc → generic+dấu phẩy)
+   Owner đổi CÂU HỎI   «bắt được mọi thứ?» → «NÓI THẬT về những gì làm được?»
+   hợp đồng hẹp        PASS ngay vòng đầu
+   ```
+   🔑 **Thứ gỡ được bế tắc KHÔNG phải thêm một vòng sửa — mà là ĐỔI CÂU HỎI.** Cùng cái thước,
+      cùng những giới hạn ấy. Sáu vòng đuổi một lời hứa rộng; một vòng cho một lời hứa hẹp mà đúng.
+   ba khoá cùng phạm vi: TÊN `soi-ket-qua-loi-goi-ten-truc-tiep-da-khoa.mjs` · TÀI LIỆU
+      `HOP-DONG-…md` · TEST `hop-dong-hep-loi-goi-ten-truc-tiep.test.mts`
+   CLI khi ĐẠT tự in đủ SÁU giới hạn nó KHÔNG bắt được (generic trong callee · dấu phẩy trong
+      callee · bí danh · scope · xuyên mô-đun · mọi nhánh runtime)
+   commit gộp `502af8e3` (--no-ff, 0 xung đột) · PM tự đo lại trên main: exit 0, 133/133,
+      md5 thước `204eaa05…` KHỚP đúng bản người soi PASS · cây bẩn của việc ⑭ được bảo toàn
+   👤 thợ: hermes-build-app (3 vòng) → gemini-aiboss-app-exe (nhập main) · soi: hermes-reviewer
+
+㉒-cũ 🔴 (giữ làm ghi-sử) THƯỚC AST SAI CẢ HAI CHIỀU — bị bác VÒNG 3/3, PM đã DỪNG
    verdict `20260905_173533_d01eab` (05/09 17:42). Năm phản ví dụ đã đủ cụ thể để làm ĐỀ BÀI,
    KHÔNG cần đo lại:
      :87-88        gán vào thuộc tính mà CÓ người đọc  ⇒ phân loại SAI
