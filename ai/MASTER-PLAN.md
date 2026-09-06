@@ -1989,6 +1989,23 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    📖 SO-BAY-DO mục 97. ⚠️ Chẩn sai theo hướng bi quan cũng tốn thật, không phải an toàn miễn phí.
    👤 chưa giao — chờ hàng đợi hiện tại nhẹ bớt.
 
+㉕ 🔴 SỔ Ô LƯU «NHÃN GHẾ» VÀ «MÃ PHIÊN» TÁCH RỜI, KHÔNG CÓ GÌ KIỂM CHÉO
+   Ca thật 06/09 (claude-phong-ban-pm đo, Owner gửi ảnh 09:34):
+     ô 5 khai ghế   claude-web-funnel
+     mã phiên ô 5   2f5f0c37-… nằm ở kho ~/.claude/projects/-Users-erocathanh/
+     phiên đó tự xưng  claude-marketing-pm 2.497 lần · claude-web-funnel 140 lần
+     ⇒ NHÃN nói một đằng, PHIÊN là một ghế khác. App KHÔNG báo gì.
+   ⚠️ KHÁC ca fork 20/08: fork cấp mã MỚI ⇒ hai bên ghi hai tệp ⇒ an toàn.
+      Ca này KHÔNG fork ⇒ ô 5 và terminal Owner dùng CÙNG một mã phiên
+      ⇒ hai tiến trình có thể ghi CHUNG một tệp 16 MB.
+   🔑 Câu trong hồ sơ ghế «đừng khuyên Owner exit terminal vì fork tạo tệp mới» CHỈ ĐÚNG CHO FORK.
+      Ai dẫn lại câu đó ở ca này sẽ kết luận NGƯỢC.
+   ✅ VÁ BỆNH, ĐỪNG VÁ CA: thêm phép kiểm chéo — đọc ghế mà bản ghi phiên TỰ XƯNG, so với nhãn ô;
+      lệch thì HIỆN CẢNH BÁO trong ô. Đổi nhãn ô 5 chỉ là vá một ca; lần sau lệch chỗ khác
+      vẫn KHÔNG ai biết.
+   📌 PM cố ý KHÔNG tự đổi nhãn hay trỏ lại ô 5: đó là chỗ làm việc SỐNG của Owner.
+   👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ.
+
 ⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
    cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
 ```
