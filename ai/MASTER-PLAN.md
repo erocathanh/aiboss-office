@@ -1534,7 +1534,9 @@ loại lỗi khó thấy hơn hẳn «một cái hỏng», và nó là hệ qu�
 
 **Đề xuất của exe (nó KHÔNG tự sửa vì `mat-canh-ghe.sh` là hạ tầng CHUNG mọi ghế):**
 ```
-trước khi rung, bộ canh TRA mốc đọc của ghế:  ~/Operations/.moc-doc-cua-toi-<ghế>/<kênh>.moc
+trước khi rung, bộ canh TRA mốc đọc của ghế:  ~/Operations/.moc-doc-cua-toi-<tên-ghế-ĐÃ-BỎ-tiền-tố-«claude-»>/<kênh>.moc
+   ĐÚNG: .moc-doc-cua-toi-aiboss-app-exe   SAI: .moc-doc-cua-toi-claude-aiboss-app-exe
+   neo mã: mat-canh-ghe.sh:221  ${TOI#claude-}
    mốc ghế >= dải định rung  ⇒ BỎ rung, nhưng VẪN đẩy mốc của bộ canh lên
    mốc ghế thấp hơn          ⇒ RUNG như cũ
    tệp mốc thiếu / đọc hỏng  ⇒ RUNG như cũ   ⇐ KHÔNG đọc được thì KHÔNG suy
@@ -1890,14 +1892,82 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
      (nội dung · output · nguồn · quyết định) với round decided chỉ còn giữ MỘT: nội dung.
    ⚠️ Có TRƯỚC ca 04/09, không ai gây ra hôm nay. Đừng gộp vào ⑫ — hai bệnh khác nhau.
 
-⑭ ✅ XONG 06/09 08:00 — cổng lint ĐÃ CHẠY THẬT lần đầu trong đời dự án
+⑭ ✅ PASS VÒNG 3/3 lúc 13:32 — chờ exe commit 4 tệp. Bộ đếm vòng ĐÓNG bằng PASS.
+   Verdict `hermes-aiboss-app-reviewer` phiên `20260906_133009_cb43ba` (3m13s · 19 lượt gọi):
+   *«PASS — Hai điều kiện vòng 2 đã đóng bằng cấp quyền đúng băm và chứng cứ thực thi được đối
+   chứng trực tiếp với JSONL nguồn; đủ điều kiện commit riêng bốn tệp đã neo.»*
+   🔑 NGƯỜI SOI KHÔNG TIN BẢN TRÍCH — nó mở nguồn ra đối chứng:
+      `.../-Users-erocathanh-claude-aiboss-app-exe/1b696a63-….jsonl`
+      đúng HAI block mang ID `toolu_01JUzqxjWQm3xkkPZGWUtrjo` · `command` khớp NGUYÊN VĂN ⇒ True
+      `tool_result.content` khớp NGUYÊN VĂN ⇒ True · `MA = 0` · `is_error: false`
+      số 0 lấy TRƯỚC các lệnh in lại log ⇒ KHÔNG phải mã thoát của `iconv | sed`
+      + tìm thêm dòng 24572 `13:10:10.293` = lệnh vá THÀNH CÔNG, chứa đúng khối chú thích và
+        `let`→`const` đang thấy trong diff ⇒ nguồn phiên tự chứng minh bản DỰNG = bản trong CÂY
+   📌 Nó giữ đúng chỗ CHƯA ĐO: *«CHƯA ĐO được manifest băm bốn đầu vào do chính tiến trình build
+      ghi lúc chạy. Mtime riêng lẻ không chứng minh tuyệt đối lịch sử byte.»* — nhận là đủ cho
+      MỨC VẬN HÀNH của cổng này, KHÔNG tự nâng thành chứng thực chống giả mạo.
+   ⏳ CÒN LẠI: exe commit ĐÚNG 4 tệp (`package.json` `eslint.config.mjs` `src/lib/may-chay-nen.ts`
+      `pnpm-lock.yaml`), so băm trước khi stage + `--cached` phải ra đúng 4 dòng.
+      Cổng dựng ④ ĐÃ THOẢ — KHÔNG dựng lại. 📄 `ai/ban-giao/2026-09-06_14-PASS-lenh-commit.md`
+   🔓 MỞ DÂY CHUYỀN: exe nói «chờ cây sạch mới đụng» ⇒ commit xong là ② (ô 5) và ㉓ chạy được.
+      ⚠️ ㉓ và ㉖ đụng cùng `UngDung.tsx` ⇒ KHÔNG song song, PM xếp thứ tự.
+   📖 BA VÒNG, KHÔNG VÒNG NÀO BÁC VÌ MÃ EXE VIẾT SAI:
+      vòng 1 — cả đội tin sai một điều về `next build` (cấu hình eslint CÓ chặn bản dựng)
+      vòng 2 — PM cấp phạm vi quá hẹp + mã thoát mới có lời khai
+      vòng 3 — PASS
+   Verdict `hermes-aiboss-app-reviewer` phiên `20260906_131915_43db06` (3m12s · 31 lượt gọi):
+   *«FAIL — Chưa đủ quyền commit nguyên trạng vì bảy dòng chú thích vượt phạm vi được cấp và
+   mã thoát build cuối mới có lời khai, chưa có chứng cứ thực thi gốc được kiểm chứng.»*
+   🟢 BẢN VÁ ĐẠT — người soi tự dựng BA phép đo, mạnh hơn mọi lời khai:
+      AST: khai báo 214 · 7 tham chiếu ĐỌC trên 5 dòng · KHÔNG có phép gán lại · KHÔNG có eval
+      đối chứng BYTE: bỏ 7 dòng chú thích + đảo const→let trong RAM ⇒ KHỚP CHÍNH XÁC HEAD
+      đối chứng DỊCH: transpile hai bản ⇒ đầu ra giống nhau
+      hiện vật Git cho lời khai «đã gỡ có chủ ý»: commit `8f4e1ac` 01/09 xoá `maPhienCu = null`
+   ✅ CHỐT PM 13:2x: **CẤP BỔ SUNG 7 dòng chú thích 207–213** của bản băm `369eaf91…`.
+      Cấp dựa trên phép đo byte của người soi, KHÔNG dựa trên «trông vô hại».
+      🔴 Lỗi ở PM: viết phạm vi «chỉ dòng 207» trong khi nếp nhà là sửa dòng lạ PHẢI kèm chú thích
+         — hai luật đá nhau, thợ kẹt ở giữa. Lần sau viết «dòng 207 + chú thích nếu cần».
+   🔴 CÒN THIẾU ĐÚNG MỘT THỨ: bản ghi CÔNG CỤ GỐC của lần dựng 13:10:59–13:11:09
+      (dòng lệnh thật + kết quả kết thúc + phép lấy mã thoát ngay sau lệnh).
+      `/tmp/build14.txt` KHÔNG chứa lệnh gọi và KHÔNG chứa mã thoát ⇒ số 0 mới là LỜI KHAI.
+   ⚠️ KHÔNG được sửa byte nào của bốn tệp — sửa là băm đổi, verdict hết hiệu lực, phải soi delta,
+      mà chỉ còn MỘT vòng. 📄 `ai/ban-giao/2026-09-06_14-vong2-cap-chu-thich-va-xin-transcript.md`
+   ✅ VÒNG 2 — exe vá xong, PM đo lại độc lập lúc 13:2x, BA lời khai đều KHỚP:
+      `next build` đầy đủ ⇒ mã thoát cuối 0 (lấy `$?` ngay sau lệnh trần, không qua ống/vỏ bọc)
+      pha lint CÓ chạy trong build, nay chỉ còn 1 CẢNH BÁO (㉓ dongO), KHÔNG làm đỏ
+      lint: 75 tệp soi · 58 sạch · **0 LỖI trong `src/`** (18 lỗi còn lại đều ở `bai-thu/`)
+      bản đang phục vụ 4319 còn sống: 5/5 tệp tĩnh 200 · đối chứng âm đường bịa ⇒ 404
+      chênh 74 vs 75 đã giải thích được: ㉒ thêm 1 tệp + đổi tên `soi-ket-qua.mjs` ⇒ cây SỐNG
+   🔴 MỘT CHỖ LỜI KHAI LỆCH SỐ ĐO — PM nêu vào đề soi, KHÔNG tự phán:
+      exe nói «sửa đúng MỘT dòng», `git diff --stat` ra **8 thêm / 1 bớt** — một dòng MÃ
+      (`let`→`const`) cộng khối chú thích 7 dòng. PM cấp phạm vi là «chỉ dòng 207».
+      Người soi quyết: chấp nhận được, hay là nới phạm vi.
+   👏 exe TỰ KHAI bản vá đầu của nó TRƯỢT và phép đo bắt được ngay — đưa thành câu hỏi ⑥
+      cho người soi (bản vá trượt rồi vá lại hay để lại rác mà chính người vá không thấy).
+   📄 đề soi vòng 2: `ai/de-soi/2026-09-06_14-cong-lint-vong2.md` (6.332 byte, 7 câu đánh số)
    (cũ: `next build` KHÔNG hề chạy lint — chốt cả nhà tin là đang canh, thực ra CHƯA TỪNG NỔ)
    `next lint` sắp bị Next 16 gỡ ⇒ exe dựng bằng ESLint CLI + cấu hình phẳng, bộ luật Strict.
    ĐO: `npx eslint .` mã thoát 1 · **34 vấn đề (19 lỗi · 15 cảnh báo)** · đối chứng dương làm TRƯỚC.
-   🔑 NỢ NẰM NGƯỢC CHỖ DỰ ĐOÁN: `bai-thu/` 21 · vật thử 11 · **`src/` chỉ 2** (74 tệp soi, 56 sạch).
+   🔑 NỢ NẰM NGƯỢC CHỖ DỰ ĐOÁN: `bai-thu/` 21 · vật thử 11 · **`src/` chỉ 2** (75 tệp soi, 57 sạch — reviewer đếm lại; bản khai của exe ghi 74/56).
    Cổng vừa bật đã chỉ vào mã chưa đầy MỘT NGÀY TUỔI ⇒ đẻ ra việc ㉓.
-   ⏳ CÒN LẠI: cây còn 4 tệp chưa commit (`package.json` `pnpm-lock` `eslint.config.mjs` `GEMINI.md`)
-      — CỐ Ý để nguyên CHỜ SOI, đúng luật dựng ②. Soi xong mới commit.
+   🔢 VERDICT VÒNG 1/3 — `hermes-aiboss-app-reviewer` phiên `20260906_125128_d3b060` (4m19s):
+      PASS 6/7 câu. **BÁC câu ⑥.** Nguyên văn:
+      *«VERDICT: FAIL — Chưa có next build xanh bắt buộc trước commit, và pha lint thật của Next
+      đã xác nhận lỗi chặn tại src/lib/may-chay-nen.ts:207.»*
+      Reviewer gọi thẳng `runLintCheck(lintDuringBuild: true)` ⇒ `lintedFilesCount: 39` ·
+      `isError: TRUE` · `may-chay-nen.ts:207:9 prefer-const`. `UngDung.tsx:1104` chỉ là CẢNH BÁO.
+   🔑 **PHÁT HIỆN LỚN NHẤT CỦA VÒNG SOI — nó đổi bản chất việc ⑭.** Nguyên văn reviewer:
+      *«khẳng định "cấu hình lint không ảnh hưởng build" là SAI: Next 15.5.4 tự tìm và dùng cấu
+      hình này khi dựng, không phụ thuộc script lint có được gọi hay không.»*
+      ⇒ ⑭ KHÔNG phải «thêm một lệnh chạy tay». Nó đổi VẬT LÝ BẢN DỰNG: từ nay mọi `next build`
+      phải sạch lint trong `app pages components lib src`. Nợ ở `bai-thu/` (32/34) KHÔNG chặn.
+   🧭 QUYẾT ĐỊNH PM 06/09 13:0x: reviewer đá xung đột phạm vi về phía tôi ⇒ **cấp thêm ĐÚNG MỘT TỆP**.
+      Phạm vi lượt này thành BỐN: `package.json` `pnpm-lock.yaml` `eslint.config.mjs`
+      **`src/lib/may-chay-nen.ts` (chỉ dòng 207)**. KHÔNG dọn cả 34 · KHÔNG `ignoreDuringBuilds`.
+   ⏳ CÒN LẠI: exe sửa dòng 207 → `next build` XANH (cổng ④ đếm ra 1 vì chạm `package.json`)
+      → tôi trình reviewer VÒNG 2. Đề: `ai/ban-giao/2026-09-06_14-cap-pham-vi-sua-toi-thieu.md`
+   🔴 CHẶN DÂY CHUYỀN: exe nói *«Hai việc ② ③ tôi đã đọc, chờ cây sạch mới đụng»*
+      ⇒ ⑭ chưa commit thì **ô 5 và ㉓ đứng im**. Đây là nút cổ chai của cả hàng đợi.
    đo 04/09 (người soi 9bd9812):
        ls -a | grep eslint  ⇒ RỖNG   ·   devDependencies eslint ⇒ []   ·   0 tệp cấu hình
        package.json vẫn khai  "lint": "next lint"   ← một lệnh KHÔNG CHẠY ĐƯỢC
@@ -2090,14 +2160,35 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
       lát này Owner khoanh vùng sẵn nên đo được ngay, khôngphải chờ.
    👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ ⇒ phải qua exe.
 
-㉗ 🔴 BỘ CANH TỰ KHOÁ MÌNH — mốc đọc chỉ ghi SAU KHI rung xong ⇒ tồn đọng lớn là ĐIẾC VĨNH VIỄN
-   Đo 06/09 12:4x, Owner hỏi «tại sao nó điếc» mới có người đi tìm:
+㉗ 🟠 PHANH CẠN TRẦN LÀM GHẾ CÂM — TỐI ĐA MỘT GIỜ, rồi tự nhả (viết lại 06/09 13:1x)
+   🔴 **BẢN ĐẦU CỦA MỤC NÀY SAI — tôi viết, `claude-aiboss-app-exe` bác 06/09 13:00, tôi nhận.**
+   Giữ nguyên câu sai ở đây làm ghi-sử, vì nó đã kịp đi vào sổ trước khi bị bác:
+   > *«BỘ CANH TỰ KHOÁ MÌNH — mốc đọc chỉ ghi SAU KHI rung xong ⇒ tồn đọng lớn là ĐIẾC VĨNH VIỄN»*
+
+   **Ba điểm sai, mỗi điểm một số dòng — exe đọc mã trước khi nói:**
    ```
-   mat-canh-ghe.sh: TRAN=68 lần/giờ · và «HOÃN ghi mốc tới khi rung xong»
-   tồn đọng lớn → rung cạn trần → phanh chặn → KHÔNG rung xong → KHÔNG ghi mốc
-                → lượt sau đếm LẠI đống cũ → lại cạn trần …  VÒNG KHOÁ, tự nó không thoát
+   ① SAI TÊN MỐC. Cái bị hoãn-ghi là mốc CANH ($KHO/*.moc), KHÔNG phải mốc ĐỌC.
+      dòng 343 : «CHỈ ghi mốc khi đã VÀO HÀNG ĐỢI (200)»
+      dòng 332·336 : hai lối thoát khi gọi hỏng, cả hai ghi rõ «không ghi mốc»
+      ⇒ mốc ĐỌC ở nhánh khác hẳn (221-253) và nó KHÔNG gây điếc (xem SO-BAY-DO 104-c)
+   ② KHÔNG CÓ VÒNG KHOÁ. Một lần gọi THÀNH CÔNG đẩy mốc qua TOÀN BỘ tồn đọng, không phải từng tin.
+      dòng 274 : tính `$cu -> $moi`, với $moi = SỐ DÒNG HIỆN TẠI của kênh
+      dòng 347 : `echo "$v" > "$m"` ghi thẳng giá trị đó
+      ca thật  : mốc của exe nhảy 36.824 → 48.086 trong MỘT nhịp, xoá 11.153 dòng tồn
+   ③ KHÔNG «VĨNH VIỄN». Phanh là cửa sổ TRƯỢT, tự nhả.
+      dòng 31 : CUA_SO=3600 (1 giờ)   ·   dòng 90 : log in «còn ~N phút nữa mới tự nhả»
    ```
-   🔴 SOÁT CẢ NHÀ — 4/5 mốc KẸT:
+   ⚖️ **PHẦN CÒN THẬT — đừng vứt cả mục.** Phanh cạn thì mốc không được ghi, nên trong cửa sổ đó
+      ghế câm và tồn đọng dồn lại. Rủi ro CÓ THẬT, chỉ khác về ĐỘ:
+      **«câm tối đa một giờ» chứ không phải «điếc vĩnh viễn».**
+   🔑 **Vì sao một câu sai về CÁI GÌ ĐANG CHẶN lại nguy hơn một câu sai thường:** nó gỡ phanh cho
+      MỌI người đọc nó. Ai tin «vĩnh viễn» sẽ đi vá tay mốc của người khác — đúng việc tôi suýt làm.
+   📌 **Và câu đắt nhất của cả ca này, exe nói, tôi chép vào nếp làm việc:**
+      *«Đính chính một tin thì cứu được người đang đọc kênh. Nó KHÔNG cứu được người sẽ đọc sổ.»*
+      ⇒ Nếp mới: rút một chẩn đoán thì **rà luôn xem nó đã kịp đẻ ra việc nào trong sổ chưa.**
+      Mục ㉗ này chính là cái nó đẻ ra, và nó sống thêm 20 phút sau khi tin đính chính đã phát.
+
+   🕳 BẢNG DƯỚI ĐÂY ĐO NHẦM LOẠI MỐC — giữ làm ghi-sử, ĐỪNG dùng làm cơ sở vá:
    ```
    claude-aiboss-app-exe  doi-aiboss-app-chat  33.622 · kẹt từ 02/09 · tồn 14.383 dòng ⇒ ĐIẾC 4 NGÀY
    claude-aiboss-app-exe  BOSS-CHANNEL         12.212 · kẹt 5 ngày
@@ -2105,7 +2196,10 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    claude-phong-ban-pm    doi-aiboss-app-chat  23.229 · kẹt 4 ngày
    claude-aiboss-app-pm   ĐÃ VÁ TAY 06/09 10:14 (mốc cũ 30.580, cũng kẹt từ 02/09)
    ```
-   🔑 **Hai thành phần đều làm ĐÚNG việc của nó** — trần rung chống dội, hoãn ghi mốc chống bỏ sót.
+   ⇒ Năm con số trên là mốc ĐỌC (`.moc-doc-cua-toi-*`), thứ chỉ NARROW chứ không DRIVE.
+     Chúng có thể cũ mà ghế vẫn nghe bình thường. Muốn biết ghế có câm thì đo mốc CANH
+     (`~/Operations/scripts/.mc-<ghế>/<kênh>.moc`) và log «PHANH CAN 68/68».
+   🔑 **Hai thành phần đều làm ĐÚNG việc của nó** — trần chống dội, hoãn ghi mốc chống bỏ sót.
       **Cái hỏng nằm ở CHỖ NỐI.** Soi từng phần thì phần nào cũng đạt.
    📌 Và cái điếc ấy CÓ TIẾNG KÊU: 18 dòng «PHANH CAN 68/68 · GHE NAY DANG DIEC» đã nằm sẵn
       trên kênh. Không ai đọc. Tiếng kêu có, chỗ đứng nghe thì không.
@@ -2116,7 +2210,11 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    ⚠️ PM đã vá TAY mốc của exe (nhích tới ngay trước tin gộp ba việc, có sao lưu) — đó là vá
       TRIỆU CHỨNG cho một ghế. Ba mốc còn lại PM CỐ Ý chưa động: nhích mốc của ghế khác là
       bắt họ bỏ qua tin họ chưa đọc, và PM không biết trong đó có gì với họ.
-   📖 SO-BAY-DO mục 104. 👤 chưa giao — script ở ~/Operations/, không thuộc kho app.
+   ✅ VÁ CÒN GIÁ TRỊ (đã lọc theo bản đo đúng): ② bỏ đống cũ, chỉ gọi cho tin MỚI NHẤT —
+      68 lần cho 14.000 dòng là vô nghĩa, một lần cho tin cuối là đủ · ③ phép tự kiểm: mốc CANH
+      cũ hơn 24 giờ mà kênh vẫn tăng ⇒ báo đỏ. **Vá ① BỎ** — nó chữa một bệnh không tồn tại.
+   📖 SO-BAY-DO 104 (bản sai, giữ ghi-sử) + **104-c (đính chính)**. Đọc 104-c TRƯỚC.
+   👤 chưa giao — script ở ~/Operations/, không thuộc kho app. Mức: câm tối đa 1 giờ ⇒ KHÔNG gấp.
 
 ⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
    cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
