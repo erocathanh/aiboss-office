@@ -2010,7 +2010,16 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
       📌 Không đọc nội dung, không đếm gì — chỉ so đường dẫn. Với tệp 16 MB thì khác biệt này lớn.
       ⚠️ ĐỪNG dùng cách đếm chuỗi tên ghế trong tệp: đó là thước YẾU, một phiên hay nhắc tên ghế
          khác cũng ra số cao. Research dùng được ở ca ô 5 chỉ vì tỉ lệ 2.497/140 quá chênh.
-      ✅ Research đã chạy thử trên cả 6 ô, bắt đúng một ô.
+      ✅ Research chạy thử trên cả 6 ô: bắt đúng ô 5, và IM ĐÚNG 5 ô còn lại.
+         🔑 Một thước chỉ bắt được ca xấu thì chưa đủ — nó phải im đúng chỗ nên im.
+   ⚠️ BA GIỚI HẠN người làm phải biết TRƯỚC (Research tự nêu, không đợi ai moi):
+      ① thước dựa vào QUY ƯỚC «ghế X sống ở ~/X». Đo hôm nay 5/6 ô theo quy ước.
+         Ghế cố ý mở ở thư mục khác sẽ bị BÁO NHẦM ⇒ cần danh sách miễn trừ, hoặc lấy cwd
+         mong đợi từ SỔ GHẾ thay vì suy từ tên.
+      ② nó nói được «phiên khởi động ở ĐÂU», KHÔNG nói được «phiên TỰ XƯNG là ai».
+         Hai câu KHÁC nhau. Ca ô 5 trùng nhau nên một thước đủ; ca khác có thể cần cả hai.
+      ③ muốn thước thứ hai làm đối chứng: đọc trường cwd ở dòng đầu bản ghi
+         (grep -o '"cwd":"[^"]*"' <tệp> | head -1) — vẫn rẻ, chỉ đọc tới dòng ~3.
    📌 PM cố ý KHÔNG tự đổi nhãn hay trỏ lại ô 5: đó là chỗ làm việc SỐNG của Owner.
    👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ.
 
