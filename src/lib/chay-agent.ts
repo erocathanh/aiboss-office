@@ -130,7 +130,7 @@ export interface ThamSoChay {
  */
 function dichLoi(tho: string): string {
   const t = (tho || '').trim();
-  if (!t) return 'Lượt chạy thất bại mà ⛔ không có mô tả. Thử gửi lại câu hỏi.';
+  if (!t) return 'Lượt chạy thất bại mà không có mô tả. Thử gửi lại câu hỏi.';
 
   // Model kết thúc lượt bằng ý định GỌI CÔNG CỤ mà vòng lặp ⛔ không đi tiếp được.
   if (/stop_reason=tool_use|ede_diagnostic/i.test(t)) {
@@ -144,14 +144,13 @@ function dichLoi(tho: string): string {
        *   Owner đọc ba đoạn kỹ thuật rồi mới biết «à, chỉ là khởi động lại».
        */
       '🔄 **Nếu vừa có ai khởi động lại máy chủ (dựng bản mới) thì đây là chuyện BÌNH THƯỜNG** — ' +
-      'máy chủ tắt vài giây nên lượt đang chạy bị cắt. **Chờ ~5 giây rồi gửi lại câu vừa rồi là xong**, ' +
-      '⛔ không mất gì cả.\n\n' +
+      'máy chủ tắt vài giây nên lượt đang chạy bị cắt. **Gửi lại câu vừa rồi.**\n\n' +
       '**Nguyên nhân hay gặp NHẤT là bị cắt ngang** — máy chủ chém tiến trình, ' +
       'hoặc bạn bấm dừng. Ghế nặng (opus + nỗ lực cao nhất) đọc lâu là chuyện thường; ' +
       'nếu vừa thấy dòng ⏱️ báo im lặng ở trên thì **thủ phạm là ngưỡng im-lặng, ' +
-      '⛔ không phải câu hỏi của bạn** → nới bằng `HAN_GIO_MS=600000 pnpm dev`.\n\n' +
+      'KHÔNG phải câu hỏi của bạn** — dòng ⏱️ đó nói rõ cách xử.\n\n' +
       'Ít gặp hơn: câu lệnh kéo theo **kỹ năng cần sống lâu** (canh kênh, hẹn giờ) — ' +
-      'mấy thứ đó ⛔ chưa chạy được ở đây vì mỗi lượt là một tiến trình rồi tắt; ' +
+      'mấy thứ đó chưa chạy được ở đây vì mỗi lượt là một tiến trình rồi tắt; ' +
       'khi đó hãy bảo nó *ghi vào kênh* thay vì *canh kênh*.\n\n' +
       '**Gửi lại câu hỏi trước đã** — phần lớn ca chỉ cần vậy.\n\n' +
       '`' + t.slice(0, 120) + '`'
@@ -410,10 +409,13 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     if (biCatVIImLang) {
       const giay = Math.round(CAU_HINH.hanGio / 1000);
       loiTienTrinh =
-        `⏱️ Ghế bị dừng vì **⛔ không nhả chữ nào suốt ${giay} giây** — coi như treo.\n\n` +
-        'Nó ⛔ KHÔNG phải lỗi câu hỏi của bạn: chừng nào ghế còn tuôn chữ thì đồng hồ ' +
-        'còn được đặt lại, chạy bao lâu cũng được.\n\n' +
-        `**Nới ngưỡng:** dừng máy chủ rồi mở lại bằng \`HAN_GIO_MS=600000 pnpm dev\` (10 phút im lặng).`;
+        `⏱️ Ghế bị dừng vì **KHÔNG nhả chữ nào ra luồng chính suốt ${giay} giây**.\n\n` +
+        'Đồng hồ đặt lại mỗi lần có chữ ra **luồng chính** (stdout). Chữ ra **luồng lỗi** ' +
+        '(stderr) KHÔNG đặt lại nó — ghế chỉ ghi ra luồng lỗi thì vẫn bị dừng dù đang chạy.\n\n' +
+        '**Việc dừng ở đây KHÔNG cho biết bài đã xong hay bị treo** — nó chỉ nói khoảng lặng ' +
+        'đã quá ngưỡng. Muốn biết thì kiểm KẾT QUẢ: thứ bạn cần đã có chưa.\n\n' +
+        `**Muốn nới ngưỡng:** dừng máy chủ rồi mở lại bằng \`HAN_GIO_MS=${CAU_HINH.hanGio * 3} pnpm dev\` ` +
+        `— gấp ba mức đang chạy (${giay} giây).`;
     } else if (ma !== 0 && ma !== null && hangDoi.length === 0 && !maPhien) {
       loiTienTrinh = `Tiến trình claude thoát với mã ${ma}.${loiChuan ? ' ' + loiChuan.trim() : ''}`;
     }
