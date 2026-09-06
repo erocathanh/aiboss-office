@@ -2049,6 +2049,17 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
          Hai câu KHÁC nhau. Ca ô 5 trùng nhau nên một thước đủ; ca khác có thể cần cả hai.
       ③ muốn thước thứ hai làm đối chứng: đọc trường cwd ở dòng đầu bản ghi
          (grep -o '"cwd":"[^"]*"' <tệp> | head -1) — vẫn rẻ, chỉ đọc tới dòng ~3.
+   🔴 CHỐT HIỆN CÓ KHÔNG BẮT ĐƯỢC CA NÀY — `claude-phong-ban-pm` đo 06/09 12:14:
+      `hang-so.ts:163` khai «`/api/o` chỉ nhận phiên CÓ THẬT trong kho của ĐÚNG ghế đó
+      (`o/route.ts:37`)» — nghe như đã có chốt. Nhưng ca ô 5 LỌT QUA:
+      ```
+      chốt hiện có   phiên phải NẰM TRONG kho của ghế        ⇒ ô 5 THOẢ (hợp lệ!)
+      chốt còn thiếu phiên phải LÀ PHIÊN CỦA ghế đó,
+                     không chỉ nằm cùng kho với nó            ⇒ ô 5 KHÔNG thoả
+      ```
+      🔑 Vì `thu_muc` làm 5 ghế dùng CHUNG kho `-Users-erocathanh`, câu «nằm trong kho của ghế»
+      **không còn phân biệt được ai với ai**. Chốt đúng luật mà vẫn cho lọt.
+      ⇒ ㉕ phải kiểm CHÉO danh tính (ghế mà phiên TỰ XƯNG), KHÔNG chỉ kiểm vị trí tệp.
    📌 PM cố ý KHÔNG tự đổi nhãn hay trỏ lại ô 5: đó là chỗ làm việc SỐNG của Owner.
    👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ.
 
