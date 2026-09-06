@@ -1,8 +1,8 @@
 /**
  * 🧊 KẾT QUẢ CÓ THỂ HỎNG THÌ KHÔNG ĐƯỢC RƠI — thay `dong-bang-goi-ghi-o.test.mts` (đã xoá).
  *
- * 🔬 THƯỚC nằm ở `bai-thu/soi-ket-qua.mjs`: nó đọc CÂY CÚ PHÁP, khôngđọc chuỗi, khôngđọc TÊN.
- *    Ba đời thước trước đều XANH mà đều sai — lịch sử ghi trong tệp đó, đọc trước khi sửa.
+ * 🔬 THƯỚC nằm ở `bai-thu/soi-ket-qua-loi-goi-ten-truc-tiep-da-khoa.mjs`: nó đọc CÂY CÚ PHÁP
+ *    cho danh sách tên trực tiếp được giao. Hợp đồng hẹp và giới hạn nằm trong tệp tài liệu cùng tên.
  *
  * ⚠️ CHỖ NÓ KHÔNG VỚI TỚI, nói ra để người sau khỏi tưởng đã kín:
  *    · hàm CÓ THỂ hỏng mà KHÔNG khai kiểu trả về thì nó khôngthấy (phép «≥4 hàm» chỉ chặn việc
@@ -18,10 +18,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { chamNguon, docNguon, timHamCoKetQua, soiChoGoi } from './soi-ket-qua.mjs';
+import { chamNguon, docNguon, timHamCoKetQua, soiChoGoi } from './soi-ket-qua-loi-goi-ten-truc-tiep-da-khoa.mjs';
 
 const NGUON = new URL('../src/components/UngDung.tsx', import.meta.url).pathname;
-const THUOC = new URL('./soi-ket-qua.mjs', import.meta.url).pathname;
+const THUOC = new URL('./soi-ket-qua-loi-goi-ten-truc-tiep-da-khoa.mjs', import.meta.url).pathname;
 
 /* ── MẪU BIẾT SẴN ĐÁP ÁN — chạy MỖI lượt, gồm đủ bốn ca người soi đòi ────────────────────────
    🔑 Thiếu phần này thì màu xanh bên dưới vô nghĩa: một thước gán «DÙNG» cho mọi thứ cũng cho ra
@@ -88,7 +88,7 @@ test('🔴 HỒI QUY ㉒ — ghi đè trước lần đọc đầu tiên ⇒ BO-
 });
 
 function chayThuoc(noiDung: string | Buffer, tenTep = 'vat-thu.tsx') {
-  const thuMuc = fs.mkdtempSync(path.join(os.tmpdir(), 'soi-ket-qua-'));
+  const thuMuc = fs.mkdtempSync(path.join(os.tmpdir(), 'soi-loi-goi-ten-truc-tiep-'));
   const tep = path.join(thuMuc, tenTep);
   try {
     fs.writeFileSync(tep, noiDung);

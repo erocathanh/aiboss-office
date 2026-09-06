@@ -1,12 +1,13 @@
 /**
- * 🔬 THƯỚC BA TRẠNG THÁI — ĐẠT · KHÔNG ĐẠT · KHÔNG ĐO ĐƯỢC
+ * 🔬 THƯỚC BA TRẠNG THÁI CHO LỜI GỌI TÊN TRỰC TIẾP ĐÃ KHÓA BẰNG TEST
  *
  * CLI ở cuối tệp là cổng ba trạng thái. `KHÔNG ĐO ĐƯỢC` trả mã 2 khi chưa có lỗi chắc chắn;
  * một lời gọi chắc chắn `BO-QUA` vẫn làm toàn nguồn `KHÔNG ĐẠT`, kể cả khi lời gọi khác chưa đo được.
  * ══════════════════════════════════════════════════════════════════════════════════════════ */
 
 /**
- * 🔬 THƯỚC «KẾT QUẢ CÓ AI ĐỌC KHÔNG» — đọc CÂY CÚ PHÁP, khôngđọc chuỗi, khôngđọc TÊN.
+ * 🔬 THƯỚC «KẾT QUẢ CÓ AI ĐỌC KHÔNG» — đọc cây cú pháp cho danh sách tên trực tiếp được giao.
+ * Hợp đồng chỉ bao phủ các dạng cụ thể đã khóa bằng test; KHÔNG phủ mọi JavaScript/TypeScript.
  *
  * 🕳 BA ĐỜI THƯỚC, BA KIỂU SAI — ghi lại vì cả ba đều từng XANH:
  *    đời 1: soi dòng có chữ `ghiO`     ⇒ mù với `void datNguoi(...)` ở tầng trên
@@ -20,6 +21,18 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import ts from './nap-typescript.mjs';
+
+export const TEN_THUOC = 'soi-ket-qua-loi-goi-ten-truc-tiep-da-khoa.mjs';
+
+/** Hợp đồng Owner B: giữ nguyên chữ của các giới hạn đã biết, không làm nhẹ đi. */
+export const KHONG_BAO_DAM = Object.freeze([
+  'generic trong callee — `take(f<number>()); (f<number>)();`',
+  'dấu phẩy trong callee — `take(f()); ((touch(),(touch(),f)))();`',
+  'bí danh (alias)',
+  'scope',
+  'xuyên mô-đun',
+  'mọi nhánh runtime',
+]);
 
 /** những lớp vỏ KHÔNG làm ai đọc giá trị — bóc hết rồi mới xét chỗ đứng */
 const VO = new Set([
@@ -284,7 +297,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let kq;
   if (!tep || !chuoiTen) {
     kq = { trangThai: TRANG_THAI.KHONG_DO_DUOC, cho: [],
-      loi: ['cách dùng: node bai-thu/soi-ket-qua.mjs <tệp.tsx> <tên-hàm[,tên-hàm]>'] };
+      loi: [`cách dùng: node bai-thu/${TEN_THUOC} <tệp.tsx> <tên-hàm[,tên-hàm]>`] };
   } else {
     try {
       kq = chamNguon(fs.readFileSync(tep), chuoiTen.split(',').filter(Boolean), tep);
@@ -295,6 +308,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   console.log(`${kq.trangThai} · ${kq.cho.length} lời gọi`);
   for (const x of kq.cho) console.log(`  dòng ${x.dong} [${x.ten}] ${x.cach} · ${x.van}`);
+  if (kq.trangThai === TRANG_THAI.DAT) {
+    console.warn('CẢNH BÁO PHẠM VI HẸP: ĐẠT chỉ bảo đảm các dạng lời gọi ĐÃ KHÓA BẰNG TEST; ' +
+      'không phải bằng chứng cho mọi JavaScript/TypeScript.');
+    console.warn(`  TÊN THƯỚC: ${TEN_THUOC}`);
+    for (const gioiHan of KHONG_BAO_DAM) console.warn(`  KHÔNG BẢO ĐẢM: ${gioiHan}`);
+  }
   for (const l of kq.loi) console.error(`  ${l}`);
   process.exitCode = kq.trangThai === TRANG_THAI.DAT ? 0
     : kq.trangThai === TRANG_THAI.KHONG_DAT ? 1 : 2;
