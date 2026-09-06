@@ -184,6 +184,40 @@ test('🔴 VÒNG 2 CA 6 — form feed là khoảng trắng hợp lệ, không ph
   assert.doesNotMatch(kq.loiRa, /NHỊ PHÂN|KHÔNG ĐO ĐƯỢC/);
 });
 
+test('🔴 VÒNG 3 CA 1 — ký tự lạ hợp lệ trong chú thích, chuỗi và template không được che BO-QUA', () => {
+  const mau = [
+    { vi: 'chú thích', dau: `/*${String.fromCharCode(1)}*/ ` },
+    { vi: 'chuỗi', dau: `const chuoi = "${String.fromCharCode(2)}"; ` },
+    { vi: 'template', dau: `const mau = \`${String.fromCharCode(3)}\`; ` },
+  ];
+  for (const { vi, dau } of mau) {
+    const lanh = chayThuoc(`${dau}consume(f());`, 'vat-thu.ts');
+    const hong = chayThuoc(`${dau}f();`, 'vat-thu.ts');
+
+    assert.equal(lanh.ma, 0, `đối chứng LÀNH có ký tự lạ trong ${vi} không ĐẠT:\n${lanh.loiRa}`);
+    assert.match(lanh.loiRa, /^ĐẠT · 1 lời gọi$/m);
+    assert.equal(hong.ma, 1, `nguồn hợp lệ bỏ kết quả sau ${vi} không ĐỎ đúng tên:\n${hong.loiRa}`);
+    assert.match(hong.loiRa, /^KHÔNG ĐẠT · 1 lời gọi$/m);
+    assert.match(hong.loiRa, /\[f\] BO-QUA\b/);
+    assert.doesNotMatch(`${lanh.loiRa}${hong.loiRa}`, /NHỊ PHÂN|KHÔNG ĐO ĐƯỢC/);
+    assert.notEqual(lanh.ma, hong.ma, `bàn đo trả cùng kết quả cho nguồn lành và nguồn hỏng sau ${vi}`);
+  }
+});
+
+test('🔴 VÒNG 3 CA 2 — ngoặc quanh callee không được làm mất lời gọi BO-QUA trong ca hỗn hợp', () => {
+  const lanh = chayThuoc('consume(f()); consume((f)());', 'vat-thu.ts');
+  const hong = chayThuoc('consume(f()); (f)();', 'vat-thu.ts');
+
+  assert.equal(lanh.ma, 0, `đối chứng LÀNH có cùng callee bọc ngoặc không ĐẠT:\n${lanh.loiRa}`);
+  assert.match(lanh.loiRa, /^ĐẠT · 2 lời gọi$/m);
+  assert.equal(lanh.loiRa.match(/\[f\] DUNG\b/g)?.length, 2, lanh.loiRa);
+  assert.equal(hong.ma, 1, `ca hỗn hợp có lời gọi bỏ kết quả không ĐỎ đúng tên:\n${hong.loiRa}`);
+  assert.match(hong.loiRa, /^KHÔNG ĐẠT · 2 lời gọi$/m);
+  assert.equal(hong.loiRa.match(/\[f\] DUNG\b/g)?.length, 1, hong.loiRa);
+  assert.equal(hong.loiRa.match(/\[f\] BO-QUA\b/g)?.length, 1, hong.loiRa);
+  assert.notEqual(lanh.ma, hong.ma, 'bàn đo trả cùng kết quả cho nguồn lành và nguồn hỗn hợp hỏng');
+});
+
 test('🔴 BA TRẠNG THÁI — mã đo được và có người đọc ⇒ ĐẠT, mã đo được nhưng bỏ kết quả ⇒ KHÔNG ĐẠT', () => {
   const dat = chayThuoc('declare function f(): boolean; use(f());');
   assert.equal(dat.ma, 0, dat.loiRa);

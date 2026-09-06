@@ -31,6 +31,12 @@ const VO = new Set([
   ts.SyntaxKind.SatisfiesExpression,
 ]);
 
+function boVoTrong(n) {
+  let ra = n;
+  while (ra && VO.has(ra.kind)) ra = ra.expression;
+  return ra;
+}
+
 export const TRANG_THAI = Object.freeze({
   DAT: 'ĐẠT',
   KHONG_DAT: 'KHÔNG ĐẠT',
@@ -54,13 +60,8 @@ function docVanBan(ma, ten) {
   } else throw new LoiKhongDoDuoc(`${ten}: đầu vào không phải chữ hoặc mảng byte`);
 
   if (vanBan.trim().length === 0) throw new LoiKhongDoDuoc(`${ten}: tệp RỖNG`);
-  const coKyTuDieuKhien = [...vanBan].some((kyTu) => {
-    const ma = kyTu.codePointAt(0);
-    // ECMAScript nhận TAB, LF, VT, FF và CR làm khoảng trắng / dấu xuống dòng hợp lệ.
-    return (ma >= 0 && ma <= 8) || (ma >= 14 && ma <= 31);
-  });
-  if (coKyTuDieuKhien)
-    throw new LoiKhongDoDuoc(`${ten}: có byte/ký tự điều khiển của dữ liệu NHỊ PHÂN`);
+  // UTF-8 hợp lệ có thể chứa ký tự điều khiển hợp lệ trong chú thích và literal.
+  // Chỉ parser mới được quyết định văn bản có phải mã nguồn đo được hay KHÔNG.
   return vanBan;
 }
 
@@ -105,7 +106,7 @@ export function timHamCoKetQua(src) {
 
 /** Chuẩn hoá nơi lưu thành từng đoạn để nhận ra cả lần ghi đè một đối tượng cha. */
 function khoaNoiLuu(n, src) {
-  while (n && VO.has(n.kind)) n = n.expression;
+  n = boVoTrong(n);
   if (!n) return null;
   if (ts.isIdentifier(n)) return [`id:${n.text}`];
   if (n.kind === ts.SyntaxKind.ThisKeyword) return ['this'];
@@ -179,8 +180,7 @@ function gopKetQua(...ds) {
 function duocDocTruocKhiGhiDe(noiLuu, src, sauViTri) {
   const khoa = khoaNoiLuu(noiLuu, src);
   if (!khoa) {
-    let dich = noiLuu;
-    while (dich && VO.has(dich.kind)) dich = dich.expression;
+    const dich = boVoTrong(noiLuu);
     // Binding pattern (`{ x }`, `[x]`) đọc giá trị ngay trong chính phép tách.
     if (dich && (ts.isObjectBindingPattern(dich) || ts.isArrayBindingPattern(dich)
       || ts.isObjectLiteralExpression(dich) || ts.isArrayLiteralExpression(dich))) return ketQua(CACH.DUNG);
@@ -243,10 +243,11 @@ export function soiChoGoi(ma, dsTen, ten = 'x.tsx') {
   const dong = src.text.split('\n');
   const ra = [];
   const di = (n) => {
-    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && bo.has(n.expression.text)) {
+    const callee = ts.isCallExpression(n) ? boVoTrong(n.expression) : null;
+    if (callee && ts.isIdentifier(callee) && bo.has(callee.text)) {
       const { line } = src.getLineAndCharacterOfPosition(n.getStart(src));
       const kq = phanLoai(n, src);
-      ra.push({ ten: n.expression.text, dong: line + 1, cach: kq.cach,
+      ra.push({ ten: callee.text, dong: line + 1, cach: kq.cach,
         van: (dong[line] ?? '').trim().slice(0, 88), ...(kq.loi.length > 0 ? { loi: kq.loi } : {}) });
     }
     ts.forEachChild(n, di);
