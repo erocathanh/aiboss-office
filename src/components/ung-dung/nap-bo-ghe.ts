@@ -17,7 +17,7 @@
 /** Ô bị BỎ QUA — có lý do chính đáng, KHÔNG phải hỏng. */
 export type LyDoBoQua = 'dang-chay' | 'thieu-ghe' | 'trung-o' | 'o-mot' | 'loi-thoi';
 /** Ô HỎNG THẬT — người bấm phải biết, vì thứ họ vừa yêu cầu đã KHÔNG xảy ra. */
-export type LyDoHong = 'ghi-so' | 'doc-lich-su' | 'doc-ds-phien';
+export type LyDoHong = 'ghi-so' | 'doc-lich-su' | 'doc-ds-phien' | 'ghim-mat';
 
 /**
  * 🔑 KẾT QUẢ CỦA MỘT LẦN `datNguoi` — và đây là chỗ đổi CÁCH NGHĨ, khôngphải đổi thêm một nhánh.
@@ -56,6 +56,9 @@ export const CAU_LOI_O: Record<LyDoHong, string> = {
     + 'Bấm «Nạp lại» khi mạng ổn.',
   'doc-ds-phien': '⚠️ Đã chuyển ô sang ghế này, nhưng KHÔNG đọc được danh sách phiên '
     + '(mạng hoặc máy chủ). Lịch sử CHƯA nạp — bấm «Nạp lại» khi mạng ổn, hoặc chọn phiên bằng tay.',
+  'ghim-mat': '🔴 Ghế này khai MỘT PHIÊN GHIM, mà phiên đó KHÔNG có trong kho của ghế. '
+    + 'KHÔNG tự chọn phiên khác — chọn bừa là nối vào việc của ghế khác. '
+    + 'Kiểm `phien_ghim` trong du-lieu/nhan-su.json.',
 };
 
 /** sổ kết quả cho ĐÚNG MỘT ô — để chỗ gọi lẻ dùng chung `cauNhacNapBoGhe`, khôngtự chế câu khác */
@@ -101,6 +104,7 @@ const LOI_HONG: Record<LyDoHong, string> = {
   'ghi-so': 'KHÔNG ghi được vào sổ ô',
   'doc-lich-su': 'nạp được ghế nhưng KHÔNG đọc được lịch sử',
   'doc-ds-phien': 'KHÔNG đọc được danh sách phiên (ghế đã đổi nhưng lịch sử chưa nạp)',
+  'ghim-mat': 'phiên ghim KHÔNG có trong kho của ghế — KHÔNG tự chọn phiên khác',
 };
 const LOI_BO_QUA: Record<Exclude<LyDoBoQua, 'loi-thoi'>, string> = {
   'dang-chay': 'đang chạy — chưa đổi. Xong việc rồi bấm lại',

@@ -27,6 +27,18 @@ export interface NhanSu {
    *    trong `-Users-erocathanh-claude-hieu-truong` và ⛔ BAO GIỜ thấy — ghế mở ra TRỐNG.
    */
   thu_muc?: string;
+  /**
+   * 📌 PHIÊN GHIM cho ghế này — tên chính thức «ghim ở đường bấm tên và bấm thẻ»
+   *    (Owner chốt 16:26 06/09/2026; tên cũ «ghim cứng» là NÓI QUÁ, đã bỏ).
+   * 🔴 PHẠM VI, đo được: trường này CHỈ có hiệu lực ở `UngDung.tsx` trong `datNguoi`
+   *    (nhánh `if (n.phien_ghim)`), tức các đường bấm TÊN · bấm THẺ · bấm BỘ GHẾ.
+   *    Đường bộ ghế còn bị `nap-bo-ghe.ts:195-199` ghi đè NGAY SAU ⇒ chỉ NỬA VỜI.
+   *    Các đường khôi phục (`UngDung.tsx:901-904` · `chonPhien` · `api/o`) CHƯA đọc nó.
+   * Ở nhánh có hiệu lực: ghế nối vào ĐÚNG phiên đó; KHÔNG rơi về phép tự chọn
+   * `ds.find(p => !p.dang_chay)` — phép đó lấy phiên rảnh ĐẦU TIÊN trong kho, mà kho
+   * `-Users-erocathanh` đang có hàng trăm phiên của nhiều ghế dùng chung.
+   */
+  phien_ghim?: string;
   phong: string;
   ten_phong: string;
   vai: string;
@@ -58,6 +70,18 @@ type NhanSuTho = {
   soul?: string;
   /** Chỗ đứng riêng — xem chú thích ở `NhanSu.thu_muc`. */
   thu_muc?: string;
+  /**
+   * 📌 PHIÊN GHIM cho ghế này — tên chính thức «ghim ở đường bấm tên và bấm thẻ»
+   *    (Owner chốt 16:26 06/09/2026; tên cũ «ghim cứng» là NÓI QUÁ, đã bỏ).
+   * 🔴 PHẠM VI, đo được: trường này CHỈ có hiệu lực ở `UngDung.tsx` trong `datNguoi`
+   *    (nhánh `if (n.phien_ghim)`), tức các đường bấm TÊN · bấm THẺ · bấm BỘ GHẾ.
+   *    Đường bộ ghế còn bị `nap-bo-ghe.ts:195-199` ghi đè NGAY SAU ⇒ chỉ NỬA VỜI.
+   *    Các đường khôi phục (`UngDung.tsx:901-904` · `chonPhien` · `api/o`) CHƯA đọc nó.
+   * Ở nhánh có hiệu lực: ghế nối vào ĐÚNG phiên đó; KHÔNG rơi về phép tự chọn
+   * `ds.find(p => !p.dang_chay)` — phép đó lấy phiên rảnh ĐẦU TIÊN trong kho, mà kho
+   * `-Users-erocathanh` đang có hàng trăm phiên của nhiều ghế dùng chung.
+   */
+  phien_ghim?: string;
 };
 
 const THO = (duLieu as { nhan_su: NhanSuTho[] }).nhan_su;
@@ -72,6 +96,7 @@ const DS: NhanSu[] = coNhan.map((n) => ({
   ghim: thoTheoTen.get(n.ten)?.ghim === true,
   soul: thoTheoTen.get(n.ten)?.soul,
   thu_muc: thoTheoTen.get(n.ten)?.thu_muc,
+  phien_ghim: thoTheoTen.get(n.ten)?.phien_ghim,
   phong: n.phong,
   ten_phong: tenPhongTheoMa.get(n.phong) ?? n.phong,
   vai: n.vai,

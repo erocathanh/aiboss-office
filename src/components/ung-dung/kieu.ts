@@ -11,6 +11,13 @@ interface NhanSu {
    * 📌 Hai bản khai cùng một thứ thì sớm muộn cũng lệch; đáng gộp về một nguồn.
    */
   soul?: string;
+  /**
+   * 📌 Phiên ghim — tên chính thức «ghim ở đường bấm tên và bấm thẻ» (Owner chốt 16:26 06/09/2026).
+   *    Xem chú thích đầy đủ, kèm PHẠM VI đo được, ở `src/lib/nhan-su.ts`.
+   * ⚠️ Thêm ở CẢ HAI nơi vì kiểu này là BẢN CHÉP; chính chú thích trên đã cảnh báo
+   *    bản chép sẽ lệch, và `thu_muc` đã lệch thật. Đây là lần thứ hai.
+   */
+  phien_ghim?: string;
 }
 interface TomTatPhien {
   ma: string; moc: number; moc_doc: string;

@@ -985,6 +985,48 @@ export default function UngDung({
     }
 
     // Mặc định NỐI LẠI phiên gần nhất còn nối được — khôngmặc định đẻ phiên mới.
+    /**
+     * 📌 GHẾ CÓ PHIÊN GHIM ⇒ CHỈ nối vào ĐÚNG phiên đó. Owner quyết 🅐 lúc 15:10 06/09/2026.
+     *
+     * 🕳 VÌ SAO PHẢI ĐẶT Ở ĐÂY, KHÔNG đặt ở bộ ghế dựng sẵn hay ở sổ ô:
+     *    · bộ ghế (`hang-so.ts`) chỉ che đường BẤM MỘT BỘ, và `nap-bo-ghe.ts:184` vẫn gọi
+     *      `datNguoi` TRƯỚC rồi mới ghi đè phiên ghim ⇒ phiên sai đã kịp vào sổ một nhịp.
+     *    · sổ ô ghim cho MỘT Ô, không ghim cho GHẾ ⇒ mở ghế ở ô khác là hết bảo hiểm.
+     *    · dòng ngay dưới đây (`ds.find`) là chỗ RỦI RO THẬT: nó lấy phiên rảnh ĐẦU TIÊN
+     *      trong kho `-Users-erocathanh` — kho DÙNG CHUNG của 6 ghế, hàng trăm phiên.
+     *    ⇒ Ghim tại ĐÂY phủ MỌI đường đi qua `datNguoi`: bấm tên ở cột giữa · bấm một
+     *      bộ ghế · chọn từ menu. Đó là đường Owner mua bảo hiểm.
+     *
+     * 🔴 NHƯNG NÓ KHÔNG PHỦ HẾT APP — câu «phủ MỌI đường» tôi viết ở bản trước là SAI,
+     *    người soi bác 06/09/2026. Bốn đường dưới đây VẪN chưa tôn trọng phiên ghim:
+     *      · nap-bo-ghe.ts  khôi phục bộ ghế GHI ĐÈ mã khác rồi báo «đã nạp xong»
+     *      · UngDung.tsx:901-904   khôi phục lúc mở trang, dùng thẳng mã trong sổ ô
+     *      · UngDung.tsx:1137-1152 `chonPhien` KHÔNG kiểm ghim
+     *      · api/o/route.ts:35-38  chỉ kiểm phiên TỒN TẠI, KHÔNG kiểm trùng phien_ghim
+     *    ⇒ đã tách thành việc ㉘. TÊN CHÍNH THỨC của thứ này, Owner chốt 16:26 06/09/2026:
+     *      «ghim ở đường bấm tên và bấm thẻ». Tên cũ «ghim cứng» và «đường menu» đều đã BỎ:
+     *      cái trước NÓI QUÁ phạm vi, cái sau NÓI THIẾU (bỏ sót đường bấm tên).
+     *    Đừng đọc khối này rộng hơn thế.
+     *
+     * ⚠️ CỐ Ý nối kể cả khi phiên đang chạy (`dang_chay`): phiên ghim của ô 5 là phiên
+     *    Owner đang gõ ở cửa sổ dòng lệnh, nên nó gần như LUÔN «đang chạy». Bỏ qua khi bận
+     *    thì cái ghim gần như KHÔNG BAO GIỜ áp, và ta lại rơi xuống `ds.find` — tức là
+     *    xoá đúng thứ Owner vừa mua. Nối ở đây là việc ĐỌC; chốt chặn GHI nằm ở
+     *    `api/chat/route.ts:110` (trả 409 khi phiên đang sống nơi khác).
+     *
+     * 🔴 KHÔNG rơi về `ds.find` khi không tìm thấy phiên ghim — im lặng chọn phiên khác là
+     *    nối ô vào việc của ghế khác. Thà HỎNG TO còn hơn nối nhầm.
+     */
+    if (n.phien_ghim) {
+      const ghim = ds.find((p) => p.ma === n.phien_ghim);
+      if (!ghim) return baoHong(i, 'ghim-mat');
+      if (!(await ghiO(i, n.ten, ghim.ma))) return baoHong(i, 'ghi-so');
+      const tt = await napLichSu(i, n.ten, ghim.ma);
+      if (tt === 'hong') return baoHong(i, 'doc-lich-su');
+      if (tt === 'loi-thoi') return { xong: false, boQua: 'loi-thoi' };
+      return { xong: true };
+    }
+
     const ganNhat = ds.find((p) => !p.dang_chay);
     if (ganNhat) {
       if (!(await ghiO(i, n.ten, ganNhat.ma))) return baoHong(i, 'ghi-so');

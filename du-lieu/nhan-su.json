@@ -990,7 +990,9 @@
       "ten": "claude-marketing-pm",
       "phong": "marketing",
       "vai": "Trưởng phòng",
-      "viet_tat": "MP"
+      "viet_tat": "MP",
+      "thu_muc": "/Users/erocathanh",
+      "phien_ghim": "2f5f0c37-cfb3-42ef-b239-0684c23b08e7"
     },
     {
       "ten": "claude-marketing-review",
