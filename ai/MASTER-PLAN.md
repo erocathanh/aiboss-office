@@ -1890,7 +1890,14 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
      (nội dung · output · nguồn · quyết định) với round decided chỉ còn giữ MỘT: nội dung.
    ⚠️ Có TRƯỚC ca 04/09, không ai gây ra hôm nay. Đừng gộp vào ⑫ — hai bệnh khác nhau.
 
-⑭ 🚨 `next build` KHÔNG HỀ CHẠY LINT — chốt cả nhà tin là đang canh, thực ra CHƯA TỪNG NỔ
+⑭ ✅ XONG 06/09 08:00 — cổng lint ĐÃ CHẠY THẬT lần đầu trong đời dự án
+   (cũ: `next build` KHÔNG hề chạy lint — chốt cả nhà tin là đang canh, thực ra CHƯA TỪNG NỔ)
+   `next lint` sắp bị Next 16 gỡ ⇒ exe dựng bằng ESLint CLI + cấu hình phẳng, bộ luật Strict.
+   ĐO: `npx eslint .` mã thoát 1 · **34 vấn đề (19 lỗi · 15 cảnh báo)** · đối chứng dương làm TRƯỚC.
+   🔑 NỢ NẰM NGƯỢC CHỖ DỰ ĐOÁN: `bai-thu/` 21 · vật thử 11 · **`src/` chỉ 2** (74 tệp soi, 56 sạch).
+   Cổng vừa bật đã chỉ vào mã chưa đầy MỘT NGÀY TUỔI ⇒ đẻ ra việc ㉓.
+   ⏳ CÒN LẠI: cây còn 4 tệp chưa commit (`package.json` `pnpm-lock` `eslint.config.mjs` `GEMINI.md`)
+      — CỐ Ý để nguyên CHỜ SOI, đúng luật dựng ②. Soi xong mới commit.
    đo 04/09 (người soi 9bd9812):
        ls -a | grep eslint  ⇒ RỖNG   ·   devDependencies eslint ⇒ []   ·   0 tệp cấu hình
        package.json vẫn khai  "lint": "next lint"   ← một lệnh KHÔNG CHẠY ĐƯỢC
@@ -1919,7 +1926,12 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
       Cần đưa phép đó VÀO `so-diff` để lần chia tệp sau không phải làm tay.
    ⚠️ Còn ⑨ (chia thân logic 1.887 dòng) phía trước — thước này phải chắc TRƯỚC khi tới đó.
 
-⑰ MẮT CANH ĐẾM NHẦM TIN «GHI THAY MẶT» LÀ TIN ĐẾN — mỗi lần chuyển verdict tốn MỘT lượt chạy thật
+⑰ ✅ BỘ LỌC ĐÃ VÁ (đo lại 06/09 09:36: lọc ĐÚNG, có đối chứng dương)
+   🔴 NHƯNG LỘ RA LỖI KHÁC, NẶNG HƠN: **MỐC ĐỌC không nhích** — nằm ở dòng 30.580 trong khi
+   kênh đã 47.107 dòng, tụt lại từ 02/09. Hậu quả thật: PM đọc muộn 50 phút một tin của Công Nghệ.
+   ✅ PM đã soát hết khoảng lệch (không sót việc) rồi nhích mốc 30.580 → 47.107, có sao lưu.
+   ⚠️ Đó là vá MỘT LẦN. Vì sao mốc không tự nhích thì CHƯA ai truy — xếp chung với ㉔.
+   (cũ: đếm nhầm tin «ghi thay mặt» là tin đến — mỗi lần chuyển verdict tốn MỘT lượt chạy thật
    `mat-canh-ghe.sh` lọc tin của chính mình bằng:  grep -vE "FROM: $TOI|$TOI →"
    nhưng khuôn nhà cho verdict Hermes (skill giao-viec-hermes §5) là:
        FROM: hermes-<slug>-review (qua CLI, claude-aiboss-app-pm ghi thay mặt)
