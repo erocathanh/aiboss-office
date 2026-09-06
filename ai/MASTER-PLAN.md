@@ -2035,6 +2035,33 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    📌 PM cố ý KHÔNG tự đổi nhãn hay trỏ lại ô 5: đó là chỗ làm việc SỐNG của Owner.
    👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ.
 
+㉖ TÁCH HAI MENU «CƠ CẤU TỔ CHỨC» + «TOÀN BỘ NHÂN SỰ» RA TỆP RIÊNG (Owner đề xuất 06/09 12:1x)
+   Owner nói: «tách thành file giao diện riêng để khi sửa khu đó không ảnh hưởng sửa bộ ghế».
+   🔬 PM ĐO 06/09 12:1x — và số nói Owner ĐÚNG, cắt chỗ này là cắt SẠCH:
+   ```
+   UngDung.tsx            3.023 dòng
+   .cot-1 «Cơ cấu tổ chức»  dòng 2115-2257  = 143 dòng
+   .cot-2 «Toàn bộ nhân sự» dòng 2260 →
+   HAI KHU ĐÓ GỌI HÀM BỘ GHẾ MẤY LẦN:
+       datNguoi   0      ← hàm gây ra SÁU VÒNG soi
+       ghiO       0
+       dongO      0
+       luuBoGhe   0
+       napBoGhe   2      ← nút bộ ghế trong «Vào phòng ban»
+       boGheCu    5      ← chỉ ĐỌC để hiện bộ đã lưu
+   ```
+   🔑 **Bốn hàm nguy hiểm nhất của dự án KHÔNG hề xuất hiện trong hai khu đó.** Chỗ đã tốn sáu
+      vòng soi nằm hoàn toàn ngoài phần Owner muốn tách ⇒ đúng là hai việc khác nhau, đang
+      dính nhau chỉ vì ở chung một tệp.
+   💰 CÁI GIÁ THẬT: 9 trong 18 state phải truyền xuống làm tham số
+      (phongMo · phongChon · tuKhoa · boCuc · kieuHai · boGheCu · nhacO1 · anKhu · anCot).
+      Đó là công việc chính của lượt tách, khôngphải phần JSX.
+   ⚠️ ĐỤNG CÙNG TỆP với ㉓ (UngDung.tsx:1104) ⇒ KHÔNG chạy song song. Làm ㉓ trước hoặc sau,
+      đừng cùng lúc — luật hàng đợi của nhà.
+   📌 Đây là LÁT CẮT CỤ THỂ ĐẦU TIÊN của việc ⑨ (chia thân logic). ⑨ chờ «tệp nguội»;
+      lát này Owner khoanh vùng sẵn nên đo được ngay, khôngphải chờ.
+   👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ ⇒ phải qua exe.
+
 ⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
    cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
 ```
