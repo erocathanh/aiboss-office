@@ -2000,9 +2000,17 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
       ⇒ hai tiến trình có thể ghi CHUNG một tệp 16 MB.
    🔑 Câu trong hồ sơ ghế «đừng khuyên Owner exit terminal vì fork tạo tệp mới» CHỈ ĐÚNG CHO FORK.
       Ai dẫn lại câu đó ở ca này sẽ kết luận NGƯỢC.
-   ✅ VÁ BỆNH, ĐỪNG VÁ CA: thêm phép kiểm chéo — đọc ghế mà bản ghi phiên TỰ XƯNG, so với nhãn ô;
-      lệch thì HIỆN CẢNH BÁO trong ô. Đổi nhãn ô 5 chỉ là vá một ca; lần sau lệch chỗ khác
-      vẫn KHÔNG ai biết.
+   ✅ VÁ BỆNH, ĐỪNG VÁ CA: thêm phép kiểm chéo. Đổi nhãn ô 5 chỉ là vá một ca.
+   🔧 THƯỚC ĐÃ CÓ, RẺ HƠN NHIỀU (claude-phong-ban-pm tìm 06/09 10:07 — KHÔNG cần mở tệp):
+      Claude Code đặt bản ghi phiên vào thư mục suy ra từ `cwd` LÚC KHỞI ĐỘNG, thay `/` bằng `-`.
+      `cwd` khởi động KHÔNG đổi dù agent `cd` đi đâu (đo: phiên ô 5 chạy qua 5 thư mục,
+      nhiều nhất 4.152 lần ở chỗ khác, mà kho vẫn nguyên `-Users-erocathanh`).
+      ⇒ phép kiểm CHỈ LÀ:  kho mong đợi = "-Users-erocathanh-" + ma_nhan_su
+                            tệp <ma_phien>.jsonl nằm kho khác ⇒ CẢNH BÁO trong ô
+      📌 Không đọc nội dung, không đếm gì — chỉ so đường dẫn. Với tệp 16 MB thì khác biệt này lớn.
+      ⚠️ ĐỪNG dùng cách đếm chuỗi tên ghế trong tệp: đó là thước YẾU, một phiên hay nhắc tên ghế
+         khác cũng ra số cao. Research dùng được ở ca ô 5 chỉ vì tỉ lệ 2.497/140 quá chênh.
+      ✅ Research đã chạy thử trên cả 6 ô, bắt đúng một ô.
    📌 PM cố ý KHÔNG tự đổi nhãn hay trỏ lại ô 5: đó là chỗ làm việc SỐNG của Owner.
    👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ.
 
