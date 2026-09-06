@@ -2090,6 +2090,34 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
       lát này Owner khoanh vùng sẵn nên đo được ngay, khôngphải chờ.
    👤 chưa giao. Chạm src/ ⇒ cổng dựng ④ áp đầy đủ ⇒ phải qua exe.
 
+㉗ 🔴 BỘ CANH TỰ KHOÁ MÌNH — mốc đọc chỉ ghi SAU KHI rung xong ⇒ tồn đọng lớn là ĐIẾC VĨNH VIỄN
+   Đo 06/09 12:4x, Owner hỏi «tại sao nó điếc» mới có người đi tìm:
+   ```
+   mat-canh-ghe.sh: TRAN=68 lần/giờ · và «HOÃN ghi mốc tới khi rung xong»
+   tồn đọng lớn → rung cạn trần → phanh chặn → KHÔNG rung xong → KHÔNG ghi mốc
+                → lượt sau đếm LẠI đống cũ → lại cạn trần …  VÒNG KHOÁ, tự nó không thoát
+   ```
+   🔴 SOÁT CẢ NHÀ — 4/5 mốc KẸT:
+   ```
+   claude-aiboss-app-exe  doi-aiboss-app-chat  33.622 · kẹt từ 02/09 · tồn 14.383 dòng ⇒ ĐIẾC 4 NGÀY
+   claude-aiboss-app-exe  BOSS-CHANNEL         12.212 · kẹt 5 ngày
+   hermes-build-app       doi-aiboss-app-chat  34.574 · kẹt 3 ngày
+   claude-phong-ban-pm    doi-aiboss-app-chat  23.229 · kẹt 4 ngày
+   claude-aiboss-app-pm   ĐÃ VÁ TAY 06/09 10:14 (mốc cũ 30.580, cũng kẹt từ 02/09)
+   ```
+   🔑 **Hai thành phần đều làm ĐÚNG việc của nó** — trần rung chống dội, hoãn ghi mốc chống bỏ sót.
+      **Cái hỏng nằm ở CHỖ NỐI.** Soi từng phần thì phần nào cũng đạt.
+   📌 Và cái điếc ấy CÓ TIẾNG KÊU: 18 dòng «PHANH CAN 68/68 · GHE NAY DANG DIEC» đã nằm sẵn
+      trên kênh. Không ai đọc. Tiếng kêu có, chỗ đứng nghe thì không.
+   ✅ VÁ: ① ghi mốc theo số tin ĐÃ ĐẾM, đừng theo số tin ĐÃ RUNG THÀNH CÔNG
+         ② tồn đọng vượt trần ⇒ nhánh «bỏ đống cũ, chỉ rung tin MỚI NHẤT»
+            (rung 68 lần cho 14.000 dòng là vô nghĩa; một lần cho tin cuối là đủ)
+         ③ phép tự kiểm: mốc nào cũ hơn 24 giờ mà kênh vẫn tăng ⇒ báo đỏ
+   ⚠️ PM đã vá TAY mốc của exe (nhích tới ngay trước tin gộp ba việc, có sao lưu) — đó là vá
+      TRIỆU CHỨNG cho một ghế. Ba mốc còn lại PM CỐ Ý chưa động: nhích mốc của ghế khác là
+      bắt họ bỏ qua tin họ chưa đọc, và PM không biết trong đó có gì với họ.
+   📖 SO-BAY-DO mục 104. 👤 chưa giao — script ở ~/Operations/, không thuộc kho app.
+
 ⑨ trục ④ chia thân logic 1.887 dòng — thứ THẬT SỰ mở khoá «đội chạy song song»
    cần đề riêng: phân tích phụ thuộc giữa 52 móc. CHỜ tệp nguội (nay 34 commit/7 ngày)
 ```
