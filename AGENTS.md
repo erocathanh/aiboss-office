@@ -84,7 +84,12 @@ Toàn bộ AI agent giao tiếp qua hàng đợi tin nhắn chuẩn hóa Local M
   ```
 
 ### ⑥ Cổng kiểm soát Build & Git Commit
-- **Commit chạm `src/`, `next.config.*`, `package.json`, `tsconfig.json`**: BẮT BUỘC phải build thành công trước khi commit:
+- **Commit chạm `src/`, `du-lieu/`, `next.config.*`, `package.json`, `tsconfig.json`**: BẮT BUỘC phải build thành công trước khi commit:
+  > 🔴 **`du-lieu/` thêm 06/09/2026.** `src/lib/nhan-su.ts:1` nhập TĨNH `du-lieu/nhan-su.json` ⇒ tệp đó
+  > BỊ BIÊN DỊCH VÀO BẢN DỰNG. Sửa nó mà không dựng thì dữ liệu mới KHÔNG xuất hiện, và người sửa
+  > tưởng mình sửa hỏng. Nó không phải `src/`, cũng không phải markdown — nên rơi vào khe giữa hai
+  > dòng của mục này. **Câu hỏi đúng KHÔNG phải «tệp nằm ở thư mục nào» mà là «`next build` có
+  > biên dịch nó không».**
   ```bash
   if npx next build 2>&1 | iconv -f utf-8 -t utf-8 -c | grep -q 'Compiled successfully'; then
     git commit -m "..." -- <pathspec>;
@@ -92,7 +97,7 @@ Toàn bộ AI agent giao tiếp qua hàng đợi tin nhắn chuẩn hóa Local M
     echo "BUILD THẤT BẠI - DỪNG COMMIT"; exit 1;
   fi
   ```
-- **Commit chỉ chạm tài liệu / markdown**: Không bắt buộc build.
+- **Commit chỉ chạm tài liệu / markdown** (và KHÔNG chạm tệp nào bị `next build` biên dịch): Không bắt buộc build.
 - **Kiểm tra TypeScript:** Luôn kèm `iconv` để tránh mất byte lỗi:
   ```bash
   npx tsc --noEmit 2>&1 | iconv -f utf-8 -t utf-8 -c | grep -c 'error TS'
