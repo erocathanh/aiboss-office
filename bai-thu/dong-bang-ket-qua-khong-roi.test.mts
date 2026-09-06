@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { docNguon, timHamCoKetQua, soiChoGoi } from './soi-ket-qua.mjs';
+import { chamNguon, docNguon, timHamCoKetQua, soiChoGoi } from './soi-ket-qua.mjs';
 
 const NGUON = new URL('../src/components/UngDung.tsx', import.meta.url).pathname;
 const THUOC = new URL('./soi-ket-qua.mjs', import.meta.url).pathname;
@@ -87,9 +87,9 @@ test('🔴 HỒI QUY ㉒ — ghi đè trước lần đọc đầu tiên ⇒ BO-
   assert.deepEqual(soiChoGoi(ma, ['f']).map((x) => x.cach), ['BO-QUA']);
 });
 
-function chayThuoc(noiDung: string | Buffer) {
+function chayThuoc(noiDung: string | Buffer, tenTep = 'vat-thu.tsx') {
   const thuMuc = fs.mkdtempSync(path.join(os.tmpdir(), 'soi-ket-qua-'));
-  const tep = path.join(thuMuc, 'vat-thu.tsx');
+  const tep = path.join(thuMuc, tenTep);
   try {
     fs.writeFileSync(tep, noiDung);
     const kq = spawnSync(process.execPath, [THUOC, tep, 'f'], { encoding: 'utf8' });
@@ -98,6 +98,91 @@ function chayThuoc(noiDung: string | Buffer) {
     fs.rmSync(thuMuc, { recursive: true, force: true });
   }
 }
+
+/** Mỗi hồi quy phải tự chứng minh bàn đo phân biệt được một tệp lành với một tệp bỏ kết quả. */
+function doiChungLanhVaHong(tenTep = 'vat-thu.tsx', dau = '', duoi = '') {
+  const lanh = chayThuoc(`${dau}consume(f());${duoi}`, tenTep);
+  const hong = chayThuoc(`${dau}f();${duoi}`, tenTep);
+  assert.equal(lanh.ma, 0, `đối chứng LÀNH không ĐẠT:\n${lanh.loiRa}`);
+  assert.match(lanh.loiRa, /^ĐẠT\b/m);
+  assert.equal(hong.ma, 1, `đối chứng bỏ kết quả không ĐỎ đúng tên:\n${hong.loiRa}`);
+  assert.match(hong.loiRa, /^KHÔNG ĐẠT\b/m);
+  assert.notEqual(lanh.ma, hong.ma, 'bàn đo trả cùng kết quả cho tệp lành và tệp hỏng');
+  return { lanh, hong };
+}
+
+test('🔴 VÒNG 2 CA 1 — consume nhận giá trị của phép gán thuộc tính ⇒ ĐẠT', () => {
+  const { lanh, hong } = doiChungLanhVaHong();
+  const kq = chayThuoc('const box = { value: false }; consume(box.value = f());');
+  assert.equal(kq.ma, 0, kq.loiRa);
+  assert.equal(kq.ma, lanh.ma);
+  assert.notEqual(kq.ma, hong.ma);
+  assert.match(kq.loiRa, /^ĐẠT · 1 lời gọi$/m);
+  assert.match(kq.loiRa, /\[f\] DUNG\b/);
+});
+
+test('🔴 VÒNG 2 CA 2 — vế phải đọc giá trị cũ trước khi vế trái ghi lại ⇒ ĐẠT', () => {
+  const { lanh, hong } = doiChungLanhVaHong();
+  const kq = chayThuoc('let answer = f(); answer = answer + 1; consume(answer);');
+  assert.equal(kq.ma, 0, kq.loiRa);
+  assert.equal(kq.ma, lanh.ma);
+  assert.notEqual(kq.ma, hong.ma);
+  assert.match(kq.loiRa, /^ĐẠT · 1 lời gọi$/m);
+  assert.match(kq.loiRa, /\[f\] DUNG\b/);
+});
+
+test('🔴 VÒNG 2 CA 3 — ghi đè đối tượng cha làm rơi giá trị thuộc tính ⇒ KHÔNG ĐẠT', () => {
+  const { lanh, hong } = doiChungLanhVaHong();
+  const kq = chayThuoc('let box = { value: 0 }; box.value = f(); box = { value: 9 }; consume(box.value);');
+  assert.equal(kq.ma, 1, kq.loiRa);
+  assert.equal(kq.ma, hong.ma);
+  assert.notEqual(kq.ma, lanh.ma);
+  assert.match(kq.loiRa, /^KHÔNG ĐẠT · 1 lời gọi$/m);
+  assert.match(kq.loiRa, /\[f\] BO-QUA\b/);
+});
+
+test('🔴 VÒNG 2 CA 4 — đích chưa theo dõi được không được xoá lỗi BO-QUA đã biết', () => {
+  const { lanh, hong } = doiChungLanhVaHong();
+  const ma = 'f(); getBox().value = f();';
+  const api = chamNguon(ma, ['f'], 'vat-thu.tsx');
+  assert.equal(api.trangThai, 'KHÔNG ĐẠT');
+  assert.equal(api.cho.length, 2, JSON.stringify(api));
+  assert.equal(api.cho[0]?.cach, 'BO-QUA');
+  assert.equal(api.cho[1]?.cach, 'KHONG-DO-DUOC');
+  assert.ok(api.loi.length >= 1, 'phải giữ cả lý do của phần chưa đo được');
+
+  const kq = chayThuoc(ma);
+  assert.equal(kq.ma, 1, kq.loiRa);
+  assert.equal(kq.ma, hong.ma);
+  assert.notEqual(kq.ma, lanh.ma);
+  assert.match(kq.loiRa, /^KHÔNG ĐẠT · 2 lời gọi$/m);
+  assert.match(kq.loiRa, /\[f\] BO-QUA\b/);
+  assert.match(kq.loiRa, /\[f\] KHONG-DO-DUOC\b/);
+});
+
+test('🔴 VÒNG 2 CA 5 — nguồn .ts giữ ScriptKind.TS qua soiChoGoi và generic arrow vẫn đo được', () => {
+  const dau = 'const identity = <T>(x: T) => x; ';
+  const { lanh, hong } = doiChungLanhVaHong('vat-thu.ts', dau);
+  const ma = `${dau}f();`;
+  assert.deepEqual(soiChoGoi(ma, ['f'], 'vat-thu.ts').map((x) => x.cach), ['BO-QUA']);
+
+  const kq = chayThuoc(ma, 'vat-thu.ts');
+  assert.equal(kq.ma, 1, kq.loiRa);
+  assert.equal(kq.ma, hong.ma);
+  assert.notEqual(kq.ma, lanh.ma);
+  assert.match(kq.loiRa, /^KHÔNG ĐẠT · 1 lời gọi$/m);
+  assert.doesNotMatch(kq.loiRa, /KHÔNG ĐO ĐƯỢC/);
+});
+
+test('🔴 VÒNG 2 CA 6 — form feed là khoảng trắng hợp lệ, không phải dữ liệu nhị phân', () => {
+  const { lanh, hong } = doiChungLanhVaHong('vat-thu.ts', '', '\f');
+  const kq = chayThuoc('f();\f', 'vat-thu.ts');
+  assert.equal(kq.ma, 1, kq.loiRa);
+  assert.equal(kq.ma, hong.ma);
+  assert.notEqual(kq.ma, lanh.ma);
+  assert.match(kq.loiRa, /^KHÔNG ĐẠT · 1 lời gọi$/m);
+  assert.doesNotMatch(kq.loiRa, /NHỊ PHÂN|KHÔNG ĐO ĐƯỢC/);
+});
 
 test('🔴 BA TRẠNG THÁI — mã đo được và có người đọc ⇒ ĐẠT, mã đo được nhưng bỏ kết quả ⇒ KHÔNG ĐẠT', () => {
   const dat = chayThuoc('declare function f(): boolean; use(f());');
