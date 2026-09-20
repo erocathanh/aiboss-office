@@ -92,6 +92,15 @@ P3-1  một cửa ngoài internet để Owner ra lệnh khi không ở trước 
 ```
 📌 Làm P0 trước thì P3 nhẹ hẳn: lúc đó dịch vụ ngoài chỉ còn mỗi việc chuyển tin.
 
+### Đợt M — học từ Mandeck (thêm 14/09/2026 · chi tiết + nhãn kiểm thử ở mục «ĐỢT M» cuối tệp)
+```
+M1  tái hiện «đèn kẹt» rồi mới vá                → phép nghiệm thu còn thiếu của P0-7 · P1-7
+M2  sổ lượt bền + kết cục đúng + khoá chung B0    → cách làm của P1-6 · P1a · B0 · P1-1
+M3  làn «Việc cần anh»                             → dùng P1-2
+M4  nối «đã kiểm chứng» (verdict + md5) vào sổ    → PROTOCOL-review-hash
+M5  một thư viện · HTTP · CLI · MCP, chỉ trong máy → mới; ra ngoài máy vẫn là P3-1
+```
+
 ### P2b — hai việc Owner nêu 30/08, CHƯA làm
 
 ```
@@ -165,6 +174,7 @@ Sửa theo lối đó = **bắn SIGTERM vào cả nhóm = giết MÁY CHỦ và 
 📌 Bước ① rẻ nhất và ngăn được tai nạn nặng nhất. Làm trước.
 
 ### P0-7 · F5 LÚC GHẾ ĐANG NHẢ CHỮ — giao diện NÓI DỐI, và nó lấy mất cái phanh
+> 🔄 **14/09/2026:** bước ① dưới đây ĐÃ CÓ MÃ (`api/dung/route.ts:18` · `UngDung.tsx:912 · 946`), **CHƯA nghiệm thu**. Số đo 30/08 bên dưới đã lỗi thời — xem «ĐỢT M» mục ③ cuối tệp.
 
 **Đo lại 30/08 — VẪN ĐÚNG:**
 ```
@@ -256,6 +266,7 @@ vì «wake» của họ là **tín hiệu GỘP ĐƯỢC**. Của ta là **câu 
 KHÔNG phải tuổi thọ một mẩu. Bê mù là lỗi đội này suýt lặp lần hai.
 
 ### P1-7 · 🔴 ĐÈN KHÔNG NHÁY SAU KHI MỞ LẠI TRÌNH DUYỆT (Owner báo 31/08, có ảnh)
+> 🔄 **14/09/2026:** bước ① ② dưới đây ĐÃ CÓ MÃ, **CHƯA nghiệm thu**. Chiều NGƯỢC mới lộ: đèn bật lúc khôi phục mà KHÔNG ai tắt khi lượt xong — xem «ĐỢT M» mục ② và M1 cuối tệp.
 
 > Owner: *«khi tắt trình duyệt và mở lại lúc ai agent đang trả lời thì nó KHÔNG nháy đèn báo
 > đang chạy ở tên ai agent, và tôi bấm nhắn tin mới biết»*
@@ -1708,7 +1719,7 @@ báo «đã tách xong» trong khi Owner vẫn đau y nguyên. **Làm đúng ch�
 ⛳ **Nghiệm thu:** chạy script ⇒ in `62` + dòng tiêu đề dán được + báo đúng «va số: 48».
 Chạy trên sổ giả có mục trùng cố ý ⇒ phải báo va. Chạy trên sổ giả sạch ⇒ phải báo không va.
 
-🚫 **Đừng đi đánh số lại cả sổ.** 64 mục, con trỏ cũ nằm rải khắp kênh. Luật khi va:
+KHÔNG **Đừng đi đánh số lại cả sổ.** 64 mục, con trỏ cũ nằm rải khắp kênh. Luật khi va:
 **đổi cái CHƯA AI TRÍCH**, giữ cái đã công bố. ㊽ thì cả hai đều dính trích dẫn nhập nhằng ⇒ để yên, chờ quyết riêng.
 
 
@@ -1892,7 +1903,11 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
      (nội dung · output · nguồn · quyết định) với round decided chỉ còn giữ MỘT: nội dung.
    ⚠️ Có TRƯỚC ca 04/09, không ai gây ra hôm nay. Đừng gộp vào ⑫ — hai bệnh khác nhau.
 
-⑭ ✅ PASS VÒNG 3/3 lúc 13:32 — chờ exe commit 4 tệp. Bộ đếm vòng ĐÓNG bằng PASS.
+⑭ ✅ XONG 06/09 13:39 — commit `741b0f7`. Cổng lint SỐNG THẬT, PASS vòng 3/3, bộ đếm đóng bằng PASS.
+   PM đo ĐỘC LẬP sau commit, không nhận lời khai:
+      commit chạm ĐÚNG 4 tệp · băm cả 4 KHỚP bản người soi neo (`git show HEAD:<tệp> | md5`)
+      `GEMINI.md` và `ai/MASTER-PLAN.md` KHÔNG bị nuốt vào ⇒ 0 · đối chứng dương: thước bác
+      được một băm bịa ⇒ phép so sống
    Verdict `hermes-aiboss-app-reviewer` phiên `20260906_133009_cb43ba` (3m13s · 19 lượt gọi):
    *«PASS — Hai điều kiện vòng 2 đã đóng bằng cấp quyền đúng băm và chứng cứ thực thi được đối
    chứng trực tiếp với JSONL nguồn; đủ điều kiện commit riêng bốn tệp đã neo.»*
@@ -2067,7 +2082,13 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    ⚠️ Thước nằm ở `bai-thu/`, KHÔNG vào bản dựng ⇒ việc này KHÔNG chặn giao diện ⑲⑳ về mặt kỹ
       thuật. Nó chặn về mặt LUẬT (cổng dựng ② đòi verdict ĐẠT). Owner đang chọn ba đường.
 
-㉓ 🔴 `UngDung.tsx:1104` — `useCallback` THIẾU PHỤ THUỘC `dongO` (cổng lint mới bắt được 06/09 08:00)
+㉓ 🔴 `UngDung.tsx:**1134**` — `useCallback` THIẾU PHỤ THUỘC `dongO` (cổng lint bắt 06/09 08:00)
+   🔴 **ĐÍCH ĐÃ DỊCH 06/09 15:3x: 1104 → 1134.** `claude-aiboss-app-exe` báo khi làm ô 5.
+   Đo lại: `eslint` nay chỉ vào **1134:6**; dòng 1104 giờ là `doiBoCuc(6);` — mã khác hẳn.
+   📌 Đây đúng thứ tôi dự đoán khi xếp ㉓ trước ㉖ («đích của ㉓ dịch đi») — và nó dịch vì việc
+      ô 5, KHÔNG phải vì ㉖. **Đích dịch không cần ai tách tệp; chỉ cần ai đó chèn dòng phía trên.**
+   ⚠️ Trước khi giao ㉓, chạy `npx eslint src/components/UngDung.tsx` lấy số dòng TƯƠI —
+      đừng chép số trong sổ. Số dòng trong sổ là ẢNH CHỤP, không phải con trỏ.
    Mã chưa đầy MỘT NGÀY TUỔI: hàm `napBoGhe` lên bản thật tối 05/09 trong commit `0b30719`.
    ⚠️ KHÔNG vá được bằng cách thêm dep: `dongO` là hàm thường, sinh lại mỗi lần vẽ
       ⇒ thêm vào là `napBoGhe` đổi danh tính liên tục. Phải bọc `dongO` thành `useCallback` TRƯỚC.
@@ -2090,6 +2111,98 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
 
 ㉕ 🔴 SỔ Ô LƯU «NHÃN GHẾ» VÀ «MÃ PHIÊN» TÁCH RỜI, KHÔNG CÓ GÌ KIỂM CHÉO
    Ca thật 06/09 (claude-phong-ban-pm đo, Owner gửi ảnh 09:34):
+
+   🔴 **CẬP NHẬT 06/09 14:3x — VÒNG 1/3 BỊ BÁC, và cả nhà đã hiểu sai `thu_muc`.**
+   Verdict `hermes-aiboss-app-reviewer` phiên `20260906_140852_fc35e9` (3m51s · 39 lượt gọi):
+   *«FAIL — Diff đúng chỉ-thêm, nhưng tác động đổi cwd/kho dùng chung chưa được chốt và trình
+   tự chuyển ô thiếu cổng xác minh runtime mới cùng bảo đảm không nối nhầm phiên.»*
+   🔑 **`thu_muc` KHÔNG phải nhãn mô tả — nó là tham số `cwd` truyền vào lệnh spawn:**
+   ```
+   chay-agent.ts:241-245   fs.mkdirSync(ts.thuMuc) ; spawn(lệnh, đối-số, { cwd: ts.thuMuc })
+   goc-tich.ts:46-60 · 145-146 · fork/route.ts:55-82   cùng lấy chỗ đứng từ đây
+   ⇒ khai thu_muc = RA LỆNH cho ghế chạy ở đó, KHÔNG phải mô tả chỗ nó đang đứng.
+     mkdirSync còn TẠO thư mục — một trường trông như mô tả, thật ra là mệnh lệnh.
+   ```
+   🕳 **DÒNG TRƯỢT BA NGƯỜI, HAI LƯỢT SỬA CHO NHAU, MỘT HƯỚNG:**
+   ```
+   12:09 phong-ban-pm «phiên nằm ở kho đó ⇒ thêm là mô tả đúng sự thật»
+   13:4x PM           diễn thành «khai SỰ THẬT về CHỖ ĐỨNG»
+   13:55 exe          bác PM, sửa thành «khai KHO nơi tệp phiên nằm»
+   14:11 người soi    cả ba đều sai — nó khai THƯ MỤC CHẠY
+   ```
+   📌 Ba ghế đọc TÀI LIỆU và đọc LỜI NHAU; người soi đi đọc CHỖ GỌI HÀM. Xem SO-BAY-DO 107.
+   🔬 SỐ ĐO ĐÃ CHỐT (dùng lại được, đừng đo lại):
+   ```
+   ~/claude-marketing-pm/          0 tệp — RỖNG. Không CLAUDE.md, không .goc-tich.json
+      đối chứng dương ~/claude-aiboss-app-exe/CLAUDE.md = 40.798 byte ⇒ thước sống
+   kho riêng marketing-pm 1 tệp  ·  kho nhà 354 tệp  ·  2f5f0c37 nằm ở kho NHÀ
+   UngDung.tsx:988  ds.find((p) => !p.dang_chay)  ← lấy phiên ĐẦU TIÊN rảnh
+      ⇒ chọn từ menu KHÔNG bảo đảm nối đúng phiên. ĐÚNG con bọ đã gây ra ca này.
+   hang-so.ts:210-217  BO_QUAN_LY_CU ghim `phien: '<uuid>'` từng ghế ⇒ cơ chế GHIM CÓ SẴN
+   ```
+   ✅ **CỔNG RUNTIME — exe tìm ra, giữ lại dùng cho mọi ca sửa dữ liệu bị nhập tĩnh:**
+   ```
+   GET /api/phien?ma_nhan_su=claude-marketing-pm  phải THẤY 2f5f0c37 sau khi dựng
+   đối chứng ÂM đã chạy TRƯỚC khi có số để nhìn: nay False; web-funnel True ⇒ thước sống
+   còn False sau khi dựng ⇒ bản mới CHƯA tới máy chủ ⇒ CẤM đổi sổ ô
+   ```
+   🔴 Người soi bác luôn chỗ PM và exe cùng tin: `doc-phien.ts:460-490` CÓ THỂ cho qua khi
+      không thấy tiến trình cầm UUID; GET thật trả `dang_chay: false`. **Chốt 5 phút KHÔNG
+      phải bảo đảm**, và mtime KHÔNG chứng minh tiến trình còn sống.
+   ✅✅ **OWNER QUYẾT LẦN HAI 16:26 06/09/2026 (round-12) — ĐÓNG vòng soi cũ:**
+      ```
+      ① 🅐 Nhận BẢN HẸP, và GỌI ĐÚNG TÊN NÓ: «ghim ở đường bấm tên và bấm thẻ»
+      ② 🅔 KHÔNG mở vòng bốn — coi là VIỆC MỚI, bộ đếm vòng ĐẾM LẠI TỪ 0/3
+      ```
+      🔑 **Owner không chỉ chọn phạm vi — ông ấy chọn CÁCH GỌI nó.** Nên việc chính của lượt
+      thi hành là **sửa TÊN trong mã**, không phải thêm tính năng.
+      PM đo: 3 chỗ trong `src/` còn gọi «ghim cứng», nặng nhất `nap-bo-ghe.ts:59` —
+      **đó là câu Owner NHÌN THẤY** khi phiên ghim mất. Cộng `UngDung.tsx:1006` mang cả hai
+      tên đã bỏ («ghim CỨNG» và «đường menu»).
+      🔴 ĐỪNG `sed` cả nắm: `MASTER-PLAN.md:2452` có «ghim cứng localhost:4319» = MÃ CỨNG địa chỉ,
+         nghĩa KHÁC HẲN · dòng 2142 · 2150 là ghi-sử trích lời Owner. Cả ba ĐỪNG ĐỘNG.
+      📌 Lại đúng bài học mục ⑤: **đếm ra 7 chỗ không có nghĩa là 7 việc.**
+      📄 đề thi hành: `ai/ban-giao/2026-09-06_o5-owner-quyet-A-E.md`
+      🔀 việc ㉘ (bốn đường chưa tôn trọng ghim) VẪN TREO — Owner nhận bản hẹp, không huỷ ㉘.
+
+   📜 **GHI-SỬ — quyết định LẦN MỘT 15:10, giữ để tra lại:**
+   ✅ **OWNER ĐÃ QUYẾT 15:10 06/09/2026 London — lựa chọn 🅐:**
+      *«Khai `thu_muc` VÀ ghim cứng phiên `2f5f0c37`»*
+      ⇒ ĐANG THI HÀNH. Owner nhắc đích danh «GIAO EXECUTOR — PM không tự làm».
+      ```
+      việc ① đóng dấu trang  → gemini-aiboss-app-exe (banner + badge, KHÔNG xoá câu cũ)
+                               chấm ba chốt: claude-phong-ban-pm (nếp mới: dựng ≠ chấm)
+      việc ② thi hành 🅐      → claude-aiboss-app-exe
+                               đề: ai/ban-giao/2026-09-06_o5-owner-quyet-A.md
+      ```
+      🔴 **PM CỐ Ý KHÔNG chốt hộ exe chỗ «ghim cứng ở ĐÂU»** — có ít nhất hai chỗ ghim được,
+      và chọn sai một chỗ thì đổi một menu Owner nhìn thấy. Đề ghi rõ: exe đọc mã tự quyết,
+      và **DỪNG báo PM** nếu cách đúng bắt buộc đưa marketing-pm vào bộ «Quản Lý Cũ» —
+      đó là hệ quả Owner CHƯA được nghe lúc tick.
+      🔢 Vòng soi việc này: **1/3 đã dùng** (FAIL 14:11). Lần trình tới là vòng 2/3.
+
+   📜 **GHI-SỬ — trang round-11 ĐÃ LÊN 06/09 14:5x, giữ nguyên để tra lại**
+      `https://aiboss-app-noibo.erocathanh.com/round-11`
+      dựng+đẩy: `gemini-aiboss-app-exe` (Antigravity — Owner chốt: tới 09/09 trang round đi đường này)
+      ```
+      ba chốt do người DỰNG chạy : RENDER-OK · md5 đĩa khớp web từng byte · round-9999 ⇒ 404
+      đo lại ĐỘC LẬP bởi exe     : md5 375bd200… khớp · 25.662 byte · RENDER-OK tự chạy
+                                   ⇒ người đo KHÁC người dựng, đây mới là đối chứng thật
+      PM kiểm tệp đĩa            : md5 KHỚP · dấu bản 4 «TAY LÁI» ⇒ 2 · đối chứng âm chuỗi bịa ⇒ 0
+      PM KHÔNG tự đo được bản live (401 với cả round-10 chắc chắn có thật) ⇒ khai là MÙ, đi hỏi
+      ```
+   🕳 **NỘI DUNG TRANG SỬA NĂM LẦN TRƯỚC KHI LÊN — và hình rất rõ:**
+      ```
+      SỐ ĐO trên trang     : sai 0 lần
+      CÂU TÓM TẮT CƠ CHẾ   : sai 5 lần, rút 5 lần
+         «khai CHỖ ĐỨNG» PM · «khai KHO» exe · «mkdirSync là CÁI GIÁ» PM
+         · «chỗ VẮNG nó» research · «TẮT cái máy» PM
+      ```
+      🔑 Cả năm bản sai đều là một câu MỘT DÒNG nghe gọn. **Các con số sống sót; các khẩu hiệu chết.**
+      Bốn trong năm bản được người khác chép lại trong vòng 20 phút — câu gọn lan nhanh hơn số đo.
+      ✅ Cảnh báo đó đã ghi THẲNG lên trang cho Owner: một câu gọn mà không kèm số dòng mã thì
+         đó là chỗ YẾU NHẤT, không phải chỗ chắc nhất.
+   📌 exe ĐANG NGHỈ việc ô 5, cây giữ nguyên (`nhan-su.json` băm `3a3f440d…`). ㉓ và ㉖ đứng yên.
      ô 5 khai ghế   claude-web-funnel
      mã phiên ô 5   2f5f0c37-… nằm ở kho ~/.claude/projects/-Users-erocathanh/
      phiên đó tự xưng  claude-marketing-pm 2.497 lần · claude-web-funnel 140 lần
@@ -2154,7 +2267,8 @@ HEAD e6e4872 · 12 mục chưa commit (next.config.mjs · package.json · tsconf
    💰 CÁI GIÁ THẬT: 9 trong 18 state phải truyền xuống làm tham số
       (phongMo · phongChon · tuKhoa · boCuc · kieuHai · boGheCu · nhacO1 · anKhu · anCot).
       Đó là công việc chính của lượt tách, khôngphải phần JSX.
-   ⚠️ ĐỤNG CÙNG TỆP với ㉓ (UngDung.tsx:1104) ⇒ KHÔNG chạy song song. Làm ㉓ trước hoặc sau,
+   ⚠️ ĐỤNG CÙNG TỆP với ㉓ (UngDung.tsx — số dòng TƯƠI, đo bằng eslint, đừng chép sổ)
+      ⇒ KHÔNG chạy song song. Làm ㉓ trước hoặc sau,
       đừng cùng lúc — luật hàng đợi của nhà.
    📌 Đây là LÁT CẮT CỤ THỂ ĐẦU TIÊN của việc ⑨ (chia thân logic). ⑨ chờ «tệp nguội»;
       lát này Owner khoanh vùng sẵn nên đo được ngay, khôngphải chờ.
@@ -2654,3 +2768,592 @@ Owner được hỏi thẳng (🅐 để cả hai nơi / 🅑 chỉ trong cột)
 ```
 📌 Đây là **đánh đổi có chủ ý**, không phải sót. Ai thấy rồi định thêm lại lối tắt trên thanh cho
 tiện thì DỪNG và hỏi Owner.
+
+---
+
+## 📖 TRƯỚC KHI ĐỤNG CỜ NỐI PHIÊN — đọc `~/ai-agent/claude-cli/CLAUDE.md`
+Bảng sáu dạng cờ CLI **thật sự** nhận / từ chối, tên phiên nằm ở đâu, `.jsonl` khai gì và KHÔNG
+khai gì. 🔴 Mục nợ ngay dưới đây sinh ra vì bộ khớp của ta HẸP HƠN CLI. Đừng đoán lại lần nữa.
+
+## 🕳 NỢ KỸ THUẬT CÓ ĐO — hai ca khớp lệnh SAI, Owner CHỌN KHÔNG VÁ (ghi 09/09/2026)
+
+**Đây KHÔNG phải việc quên. Owner tick Ⓒ ở round-21 («không đụng logic») nên hai chỗ này ở nguyên.**
+Ghi ra để người sau khỏi tưởng chưa ai biết — và để khi nào Owner đổi ý thì có sẵn số đo.
+
+```
+đo bởi hermes-aiboss-app-reviewer, chạy Claude Code 2.1.263 THẬT (HOME/config/cwd tạm, bare mode):
+  -r<mã>        CLI nhận  ·  ta nhận   ✅ đã vá ở vòng 4
+  --resume=<mã> CLI nhận  ·  ta nhận   ✅
+  --resume<mã>  CLI TỪ CHỐI «unknown option»  ·  ta không nhận  ✅ đúng
+🔴 -pr<mã>      CLI NHẬN  ·  ta KHÔNG nhận   ⇒ NGƯỜI GIỮ THẬT LỌT LƯỚI
+🔴 -pr <mã>     CLI NHẬN  ·  ta KHÔNG nhận   ⇒ cùng thế
+🟡 -r=<mã>      CLI TỪ CHỐI ·  ta NHẬN       ⇒ CHẶN OAN
+```
+🔑 **Vì sao ca `-pr` đáng lo:** cổng này sinh ra để chặn hai tiến trình cùng ghi một bản ghi phiên.
+Bộ khớp của ta KHÔNG nhận `-pr` ⇒ **ở khâu KHỚP CHUỖI, một tiến trình dùng `-pr` không được nhận ra.**
+
+🔴 **SỬA 09/09/2026 16:1x — bảng này TỪNG RỘNG HƠN NGUỒN, tôi (`claude-aiboss-app-pm`) viết rộng.**
+Bản cũ ghi «người giữ thật lọt lưới ⇒ **đúng con bug Owner gặp sáng 07/09**». `hermes-web-noibo` đo
+lại và chỉ ra chỗ hụt; tôi nhận:
+```
+đã đo   CLI 2.1.263 phân tích cú pháp thế nào (nhật ký reviewer, phiên 20260908_063343_05a132,
+        tin 3749): `-pr` + UUID bịa ⇒ «No conversation found» · `-r=` coi giá trị là «=<mã>» rồi từ chối
+        ⇒ chứng minh CÁCH ĐỌC CỜ, KHÔNG chứng minh đã có người giữ thật lọt qua
+đã đo   chạy cô lập hai hàm hiện tại với ps/mtime/đồng hồ giả:
+        `-pr` hụt + tệp tươi + mốc ta NULL      ⇒ VẪN CHẶN
+        `-pr` hụt + mốc ta KHÁC NULL            ⇒ MỞ ở cổng này
+        và chỗ gọi `:94` còn dẫn tới các cổng KHÁC phía sau
+CHƯA đo NHÂN QUẢ với ca Owner gặp 07/09 · TẦN SUẤT gặp lại · và liệu các cổng phía sau có đỡ không
+```
+🔑 **Một dòng «⇒ đúng con bug hôm ấy» nghe như kết luận của một phép đo, nhưng nó là một phép NỐI
+hai việc chưa ai nối.** Nó đã nằm trên trang round-22 gửi Owner cho tới khi bị bắt.
+⚠️ Ai cần dùng bảng này để quyết: đọc đúng phần **«đã đo»**, đừng đọc phần suy ra.
+🟡 Ca `-r=<mã>` chỉ phiền (chặn oan), chẳng nguy.
+
+📌 **Ai phát hiện:** `claude-phong-ban-pm` (research) tách ra từ verdict vòng 4/4, sau khi
+`claude-aiboss-app-pm` đã gộp sai cả bốn lý do bác thành «đều là lời khai, không phải logic».
+**Hai trong bốn là LOGIC.** Câu gộp sai đó nằm trên trang round-21 lúc Owner tick.
+⚠️ Muốn vá thì phải hỏi Owner — vá là đụng logic, mà Ⓒ cấm.
+
+---
+
+## 🔴 BỘ THƯỚC `ai/de-soi/2026-09-09_r21-vong3.mjs` ĐANG Ở TRẠNG THÁI **BỊ BÁC MÀ VẪN NẰM TRONG KHO** (ghi 09/09/2026 17:0x)
+
+**Đừng đọc tệp này như một thứ đã được duyệt. Nó KHÔNG.**
+
+```
+băm hiện tại  cb30999ef73dbdaf8c27b049bfb96255      ← CẬP NHẬT 09/09 18:0x, sau VÒNG NĂM
+băm vòng bốn  9dc5dad6caf988f3b1feb408ef908c4f      (bản lưu: ~/Operations/sao-luu-viec-do/r21-vong3.mjs.truoc-vong5-20260909-1745.mjs)
+băm nền gốc   78aeaacdd8402f086d92ac8da623eb99
+verdict       KHÔNG ĐẠT — VÒNG NĂM, vòng cuối của cả việc. DỪNG HẲN, KHÔNG xin vòng sáu.
+```
+🔴 **Owner đã cấp vòng năm lúc 17:37 ngày 09/09. Vòng năm cũng bị bác. Việc DỪNG HẲN.**
+Luật ba vòng đã được nới **hai lần** cho riêng việc này; PM sẽ KHÔNG đi xin lần thứ ba.
+
+**Vòng năm SỬA ĐƯỢC gì — người soi xác nhận, đừng bỏ vế này:**
+```
+· hai phản ví dụ giết vòng bốn nay CHẶN ĐÚNG. Nó dựng lại đúng hai thao tác cũ:
+  nền có 2 dòng mã · nền đã gỡ maNhanSu ⇒ Ⓑ7 và Ⓑ8 đều «KHÔNG kết luận được»
+  đối chứng bản vòng bốn: Ⓑ8 trả TRUE trên cả hai nền hỏng
+· nó ghi dấu LỜI GỌI chamKhoi ⇒ xác nhận đỏ VÌ TIỀN ĐỀ CHƯA ĐẠT, chẳng phải nhận công nhầm
+· ca MỚI Ⓑ9 canh chính phép kiểm nền, và cắt phụ thuộc ĐÚNG (fixture độc lập)
+· ba chỗ chuỗi báo lỗi được xác nhận sửa đúng
+```
+**Vòng năm CÒN THIẾU gì:**
+```
+· Ⓑ9 chỉ phủ MỘT trong HAI phản ví dụ đã biết. Phá guard thành «hơn một dòng mã VÀ nền chưa đạt»
+  ⇒ Ⓑ9 vẫn TRUE, mà Ⓑ8 lại xanh sai trên nền đã gỡ maNhanSu.
+  🔑 Người soi nói rõ cách vá RẺ: KHÔNG cần Ⓑ10 canh Ⓑ9 — chỉ cần cho CHÍNH Ⓑ9 kiểm thêm
+     một nền độc lập 0 DÒNG MÃ bên cạnh nền 2 dòng mã. **Dây chuyền dừng được, miễn tầng đang có
+     phủ hết phản ví dụ ĐÃ BIẾT.**
+· quét toàn tệp còn hai chỗ khai nguyên nhân vượt số đo: `:403` («0 khối thay đổi ⇒ đụng nhiều hơn
+  MỘT chỗ» — số đo bằng 0 mà kết luận nói hơn 1) và `:618` (thiếu log ⇒ suy thành «chưa chốt vét»)
+```
+🕳 **GIỚI HẠN NỀN TẢNG của bộ thước, đáng nhớ hơn cả chỗ bị bác:**
+```
+`dongCoMa` (:238-247) chỉ đếm dòng chứa ĐIỂM BẮT ĐẦU token, KHÔNG đếm mọi dòng token TRẢI QUA.
+đối chứng: thuộc tính có template literal ba dòng ⇒ trả [0,2], BỎ DÒNG GIỮA
+⇒ câu «khối có N dòng MÃ» ĐÚNG với các mẫu đã thử, KHÔNG đúng tổng quát.
+```
+⚠️ Người soi cũng khai rõ **phạm vi của chính nó**: nó chỉ chạy các phép chấm **cô lập trong RAM**,
+KHÔNG gọi main của suite ⇒ **các tổng 23/0 · 19/4 · 14/9 là số PM/exe báo, KHÔNG phải số nó tự chạy.**
+
+🔑 **Hai câu đều đúng, phải đọc CẢ HAI — bỏ vế nào cũng thành nói dối:**
+```
+① nó TỐT HƠN nền cũ: lỗ «thêm một dòng chú thích» ĐÃ ĐÓNG.
+   Người soi tự chèn «// REVIEW independent extra comment» ngay trước dòng `maNhanSu,`:
+     thước CŨ  19 ĐẠT · 0 TRƯỢT · thoát 0     ← lỗ
+     thước MỚI 21 ĐẠT · 1 TRƯỢT · thoát 1     ← Ⓑ6 bắt, một mình
+   19 ca cũ KHÔNG hỏng ca nào (so danh sách ID, có đối chứng bỏ một ID ⇒ phát hiện thiếu đúng một).
+② nó CHƯA ĐỦ CHUẨN: ca tự kiểm Ⓑ8 còn XANH-VÌ-LÝ-DO-SAI.
+   Ⓑ8 sinh bốn bản phá từ khối hiện tại nhưng KHÔNG kiểm nền của chính nó có được chấp nhận.
+   · đầu vào đã có 2 dòng mã ⇒ nền bị từ chối SẴN ⇒ bốn bản phá bị từ chối VÌ LÝ DO CÓ SẴN ⇒ Ⓑ8 ĐẠT
+     (gỡ luôn vế băm ⇒ Ⓑ8 VẪN ĐẠT ⇒ lúc ấy ca này KHÔNG đo gì)
+   · bản phá tên «thêm một dòng MÃ» chèn trước dòng ĐÓNG chú thích ⇒ nằm TRONG chú thích
+     ⇒ thực tế thêm 0 dòng mã ⇒ Ⓑ8 vẫn ĐẠT
+   Và Ⓑ7 «đỏ vì tiền đề hỏng» KHÔNG được đếm là một lớp bắt.
+```
+📌 Chi tiết đầy đủ: `~/Operations/SO-BAY-DO.md` mục 139.
+
+⚠️ **VÌ SAO KHÔNG LÙI VỀ NỀN CŨ:** lùi là mất luôn phần ① — cái lỗ thật sẽ mở lại. Giữ là mang một
+bộ thước bị bác trong kho. **Cả hai đường đều có giá**, nên tôi KHÔNG tự chọn: việc này đã DỪNG HẲN
+theo luật đếm vòng, và **chỉ Owner mở lại được**.
+🔴 Ai đọc mục này rồi định «sửa nốt cho xong» thì DỪNG. Vòng bốn là vòng cuối Owner cấp.
+
+📊 **Ba việc round-22, cả ba bị bác ít nhất một vòng, và KHÔNG việc nào bị bác vì MÃ SAI:**
+```
+Câu 1  vòng 4/4  bác vì BỘ THƯỚC còn xanh-vì-lý-do-sai       ⇒ DỪNG HẲN
+Câu 2  vòng 1/3  bác vì LỜI KHAI rộng + một rủi ro chưa khai (ca `-r=U` có thể mất một lần chặn đúng)
+Câu 3  vòng 1/3  bác vì SỬA CHƯA NHẤT QUÁN (câu :378 chọi câu :384 trong cùng khối)
+```
+🔑 Đây là **hình của cả ngày 09/09**: mã hầu như luôn đúng; thứ hỏng là **cách ta nói về mã**
+và **cách ta đo mã**. Ai lập kế hoạch cho ngày sau nên phân bổ công theo tỉ lệ đó.
+
+---
+
+## 🕳 NỢ CHÚ THÍCH — 36 NHÓM MỆNH ĐỀ SAI Ở LẠI TRONG MÃ (Owner chốt ĐÓNG HẲN 09/09/2026 18:11)
+
+**Đây KHÔNG phải việc quên. Owner tick 🅑 ở round-24 Câu 2: «Đóng hẳn — bỏ ứng viên, cây chính giữ
+chú thích cũ, ghi nợ.»** Ghi ra để người sau khỏi tưởng chưa ai biết.
+
+```
+cây chính GIỮ NGUYÊN:  src/lib/so-so-huu.ts  6d81f3e2f4943b66de7b77971f067494
+                       src/lib/chay-agent.ts c0191f8936944c49df275db53a98da63
+ứng viên BỎ:           84f84e53… + 841339a5…  (worktree wt-r22-cau3-hermes)
+```
+
+🔴 **THỨ CÒN SAI TRONG MÃ — đo được, KHÔNG phải phỏng đoán:**
+Bản quét vòng 3 (được người soi xác nhận là **quét thật**, nó tự lấy vùng chú thích bằng TypeScript
+rồi đối chiếu) chia 60 vùng chú thích thành **93 nhóm mệnh đề**:
+```
+36 nhóm ĐÚNG hiện tại
+36 nhóm SAI hoặc VƯỢT BẰNG CHỨNG   ← Ở LẠI TRONG MÃ, chưa sửa
+21 nhóm LỊCH SỬ (đúng trong quá khứ, cần rào)
+```
+**Hai chỗ nặng nhất, có số dòng:**
+```
+so-so-huu.ts:56-57   «LOGIC CHỌN/NỐI PHIÊN: KHÔNG đổi — trong phạm vi tôi kiểm được, chẳng nhánh
+                      nào rẽ theo sổ»  ⇒ SAI: api/phien/route.ts:116-129 ĐỌC sổ,
+                      UngDung.tsx:1127 đòi `co_so_huu === true`
+chay-agent.ts:120-121 «đường Owner GÕ TRONG Ô (api/chat/route.ts) hiện CHƯA truyền nó xuống»
+                      ⇒ SAI: chat/route.ts:318 CÓ `maNhanSu,`
+```
+⚠️ **Người đọc mã sẽ TIN hai câu ấy.** Đó là cái giá Owner đã cân và chấp nhận.
+
+## 🔑 VÌ SAO VIỆC NÀY DỪNG — ba vòng, ba lần cùng một họ lỗi
+```
+vòng 1  sửa câu được chỉ            → sót :378, cách đó SÁU DÒNG
+vòng 2  sửa :378 + :12-16           → sót :56-57 và :120-121
+vòng 3  QUÉT THẬT, tìm ra 36 nhóm   → nhưng câu THAY THẾ lại quá rộng theo CHIỀU NGƯỢC:
+        cũ «lượt nào cũng ĐƯỢC GHI» (quá mạnh chiều thành công) — bỏ, đúng
+        mới «CHỈ ghi thành công mới có mục» (quá mạnh chiều thất bại) — điểm chặn
+        phản ví dụ: ghi RỒI mới ném lỗi ⇒ hàm trả FALSE nhưng trên đĩa CÓ dòng hoàn chỉnh
+```
+📖 Chi tiết: `~/Operations/SO-BAY-DO.md` mục **142**.
+
+✅ **THỨ KHÔNG MẤT, nếu sau này Owner mở lại:** bảng ba rổ 93 nhóm là **hiện vật đã được người soi
+xác nhận**. Người làm sau khỏi quét lại từ đầu — chỉ cần sửa cách VIẾT câu thay thế.
+📌 Báo cáo và bảng nằm ở `wt-r22-cau3-hermes/ai/coder-reports/hermes-build-app/`.
+⚠️ Nếu worktree bị dọn thì bảng ấy mất theo. **Ai dọn worktree nhớ chép bảng về kho trước.**
+
+## 🔒 [2026-09-10T18:24:48Z · 19:24 BST] QUYẾT ĐỊNH round-26 Câu 1 — KHOÁ mã phiên với TÊN GHẾ
+
+**Owner tick 🅐 trong ô chat, 10/09/2026 lúc 19:1x BST.** Nguyên văn:
+
+> «làm thủ công chứ cần gì tự động 100%, tự động khoá session id với ghế 50% là tốt lắm rồi
+> kiểu đề xuất trước ấy. Tôi chọn "🅐 tay anh THẮNG — gán rồi thì máy không được ghi đè"»
+
+    ① Owner gán tay ⇒ máy KHÔNG được đè. Chữ «khoá» hiểu đúng nghĩa đen.
+    ② Tự động chỉ cần 50%, «kiểu ĐỀ XUẤT» — máy gợi, Owner gật thì mới dính.
+    ③ Owner đã cân và NHẬN cái giá của 🅐 (gán nhầm thì tự sửa). Đừng thêm cơ chế tự chữa.
+
+**Đây là việc tôi đã xếp SAI suốt mấy ngày.** Round-21 Owner dặn «session id nào là của ghế nào
+và dính chặt với ghế tên đó»; tôi ghi vào sổ là «chờ sổ sở hữu — đang kẹt» rồi để đó.
+Đo lại 10/09: sổ **KHÔNG kẹt** — nó chạy, được đọc (`api/phien/route.ts:116/:129`), và giao diện
+đã dùng (`UngDung.tsx:1127`). Thứ thiếu chỉ là **đường GHI do Owner điều khiển**.
+📌 Một việc **làm được** nằm trong ô **chờ** thì không ai đi kiểm lại, vì ô chờ trông rất hợp lệ.
+
+**Trạng thái lúc ghi mục này:**
+
+    trang round-26      LIVE. bốn chốt ĐẠT lúc 19:23 — RENDER-OK · 200/26.399 · 401 · bịa 404
+    đóng dấu Câu 1      đã giao hermes-web-noibo lúc 19:24
+    việc dựng mã        đã giao hermes-build-app lúc 19:22, VÒNG 1
+                        đề: ai/viec-r26-cau1-khoa-ghe.md
+    người soi           claude-aiboss-app-pm (Claude) — đo trước khi giao:
+                        hermes-build-app = gpt-6-astra ⇒ KHÁC mô hình ⇒ hợp luật 10/09
+    Câu 2 (phép thử CLI / bộ khớp -pr)   VẪN MỞ, Owner chưa tick
+
+🔴 **CHƯA CẤP PHÉP, ghi trước để khỏi trôi:** quyết định này KHÔNG tự cấp phép `next build`,
+KHÔNG tự cấp phép khởi động lại app 4319. App vẫn phục vụ `BUILD_ID ZCQFokMZg68vtNxCq86CS`
+(bản 06/09). Muốn thứ này tới tay Owner phải qua đủ: verdict ĐẠT ⇒ `claude-aiboss-app-exe` dựng
+⇒ Owner xác nhận khởi động lại HAI LẦN LIÊN TIẾP.
+
+🔴 **CHƯA ĐO, tôi tự khai:** «so-so-huu.ts xuất đúng hai hàm» · «ghiSoHuu gọi từ đúng một chỗ»
+· «không có đường ghi tay» — cả ba đo bằng `grep`. grep đếm CHỮ, không đếm CẤU TRÚC.
+Đường gọi gián tiếp thì tôi bỏ sót. Đề bài đã bắt người làm đo lại bằng thước của nó.
+
+## 🏗 [2026-09-10T20:17:59Z · 21:17 BST] MỘT LẦN DỰNG SẼ KÉO THEO GÌ — đo trước khi xin phép Owner
+
+Round-26 Câu 1 đã có verdict ĐẠT (`ai/coder-reports/verdict-r26-cau1-claude-pm.md`
+md5 `f28026b637ee5b403e0187082d5c1f2e`). Trước khi xin Owner một lượt dựng, tôi đo xem
+lượt ấy mang theo NHỮNG GÌ. Câu trả lời làm đổi hẳn hình dạng câu hỏi.
+
+    git diff --numstat -- src/   ⇒  438 dòng thêm · 42 dòng bớt · trên 9 tệp
+    cộng thêm src/lib/so-so-huu.ts — tệp MỚI, chưa từng vào git
+
+    chat/route.ts        36+  3-   sửa lần cuối 09/09 17:44
+    fork/route.ts        33+  0-              07/09 14:00
+    api/phien/route.ts   17+ 16-              10/09 19:36   ← việc round-26, ĐÃ có verdict
+    UngDung.tsx         105+  6-              08/09 12:19
+    ung-dung/kieu.ts     14+  2-              08/09 04:43
+    nap-bo-ghe.ts        15+  1-              07/09 08:50
+    chay-agent.ts        46+  0-              07/09 16:33
+    chay-mot-luot.ts      5+  0-              07/09 15:59
+    doc-phien.ts        167+ 14-              09/09 15:41
+
+🔴 **Chỉ 2 trong 10 tệp có verdict còn hiệu lực** (`so-so-huu.ts` + `api/phien/route.ts`).
+Tám tệp còn lại là việc của 07 · 08 · 09/09 chưa từng qua cổng dựng.
+⇒ **Một lượt dựng KHÔNG phải «đưa cái khoá lên app». Nó là «đưa BỐN NGÀY việc tồn lên app
+   cùng một lúc».** Đây mới là câu Owner phải quyết, chứ không phải câu «dựng hay chưa dựng».
+
+⚠️ **VÀ TÔI SUÝT BÁO SỐ SAI:** phép đếm thô của tôi (`grep -v '^\+\s*(//|\*)'`) khai
+`chat/route.ts` có **34 dòng MÃ thêm**. Mở diff ra đọc thì phần lớn là **một chuỗi thông báo
+lỗi nhiều dòng** — bộ đếm coi mỗi dòng chuỗi là một dòng mã. Thay đổi CHỨC NĂNG thật ở tệp ấy
+là **ĐÚNG MỘT DÒNG `maNhanSu,`** (round-21 Câu 1, Owner duyệt 🅒 lúc 23:04 · 08/09) cộng một
+lời báo lỗi được viết lại.
+🔑 **Bộ đếm dòng KHÔNG phân biệt được «mã» với «chuỗi ký tự nằm trong mã».** Số nó đưa ra vẫn
+là một con số có thật — chỉ là nó trả lời một câu hỏi khác câu tôi đang hỏi.
+📌 Cùng họ với mục 144 ghi chiều nay: **đếm được không có nghĩa là đếm đúng thứ mình cần.**
+`doc-phien.ts` cũng vậy: 167 dòng thêm, nhưng 155 là chú thích, chỉ 11 dòng là mã.
+
+## 🚢 [2026-09-10T21:29:51Z · 22:29 BST] ĐÃ LÊN APP — dòng đầu tiên kể từ 06/09
+
+    Owner duyệt hai lần liên tiếp: «cứ build đi» ⇒ «khởi động lại đi»
+    exe dựng 21:44  «Compiled successfully in 2.7s» · 0 lỗi kiểu · 1 cảnh báo
+    hẹn 21:48:03 · nổ 21:53:45 · pid 4873 → 76943
+    PM đo độc lập: app khai 4SIlEUuF-kNoSCc60etSN · bản cũ 0 lần · chuỗi bịa 0 lần
+                   trang chủ 200 · 8/8 tệp static tải được · đường bịa 404
+                   /api/phien 200 · co_so_huu có ở mọi phiên · ghế bịa 404
+
+## 🔑 CÁI KHOÁ MUA ĐƯỢC GÌ — đo tại chỗ dùng, KHÔNG suy từ tên tính năng
+
+Owner hỏi thẳng «khoá thì được gì? không khoá thì mất gì». Trả lời nằm ở ĐÚNG MỘT DÒNG,
+`UngDung.tsx:1127`, và nó vừa đổi tối nay:
+
+    HEAD  (bản chạy tới 21:53)   ds.find(p => !p.dang_chay)
+    nay   (bản đang chạy)        ds.find(p => !p.dang_chay && p.co_so_huu === true)
+
+    CÓ khoá     bấm ghế ⇒ tự nối đúng phiên đã chốt + nạp lịch sử
+    KHÔNG khoá  ô mở ra TRỐNG (rơi xuống ghiO(i, ten, null, true)), phải chọn phiên bằng tay
+
+🔴 **Tách hai thứ mà ai cũng gộp:**
+```
+cái KHOÁ                        mua TIỆN   — khỏi đi tìm mã phiên
+điều kiện && co_so_huu === true mua AN TOÀN — bỏ hẳn đường bốc «phiên gần nhất bất kể của ai»
+```
+Đường bốc bừa ấy CHÍNH LÀ con bug nối Owner vào bản ghi của ghế khác. Nó đã chết từ 21:53,
+**dù sổ còn rỗng**. Nên «chưa khoá» KHÔNG có nghĩa là «chưa được bảo vệ».
+
+## Ba giới hạn phải nói kèm, đo được cả ba
+    ① Tải lại trang KHÔNG mất ô: đường khôi phục (UngDung.tsx:958-975) đọc SỔ Ô o-phien.json,
+       KHÔNG hỏi sổ sở hữu. Khoá chỉ xen vào lúc bấm một ghế MỚI vào một ô.
+    ② Khoá gắn với MÃ PHIÊN, không gắn với ghế ⇒ mỗi phiên mới lại phải khoá tay một lần.
+       `api/phien/route.ts:56` chỉ nhìn `?.owner`; lượt tự động chỉ ghi `kind:'proposal'`
+       nên nó KHÔNG bao giờ tự bật cờ. **Đây là cái giá của 🅐, không phải lỗi.**
+    ③ Khoá KHÔNG phải hàng rào bảo mật — một dòng trong tệp, tiến trình cùng tài khoản sửa được.
+       Nó chống APP TỰ BỐC NHẦM, không chống người. (thợ tự khai mục 8, tôi xác nhận)
+
+## Nợ còn treo sau lượt dựng này
+    · 8 tệp chưa từng có verdict nay ĐANG CHẠY trên app — Owner biết và vẫn duyệt dựng.
+    · cảnh báo UngDung.tsx:1245 useCallback thiếu phụ thuộc 'dongO' — chưa đụng.
+    · bản .next cũ giữ ở ~/Operations/sao-luu-viec-do/next-truoc-dung-20260910-2143,
+      ĐỪNG xoá tới khi bản mới chạy êm vài ngày.
+    · round-26 Câu 2 (phép thử CLI / bộ khớp -pr) VẪN MỞ trên trang, Owner chưa tick.
+
+## 🧮 [2026-09-11T10:46:25Z · 11:46 BST] ĐÍNH CHÍNH — số 155/11 là CỦA TÔI, và BA thước cho BA đáp án
+
+`claude-aiboss-app-exe` nêu 11:4x, và nó đúng: con số `155 chú thích / 11 mã` cho `doc-phien.ts`
+**KHÔNG nằm trong tin nào của exe**. Nó nằm ở ba tệp của TÔI:
+
+    ai/round-27-noi-dung.md:61      ·  ai/de-dung-round-27.md:21  ·  ai/MASTER-PLAN.md (mục 21:1x)
+
+Tôi đã để `hermes-web-noibo` đính chính nó trên trang round-27 mà **không truy ngược xem số ấy
+từ đâu ra** — rồi thuật lại cho Owner như thể đó là chuyện giữa web-noibo và exe.
+📌 **Tôi tường thuật một cuộc tranh luận mà tôi là một bên, và kể như mình đứng ngoài.**
+
+## Ba thước, ba đáp án — trên CÙNG một diff 167 dòng thêm
+
+    tôi        155 chú thích / 11 mã / 1 trống    thước: grep mẫu `^\+\s*(//|\*|/\*)`
+    web-noibo  157 / 9 / 1                        thước: AST + đọc từng dòng
+    exe        167 thêm / 14 mã                   thước: chưa rõ, nó chưa nói
+
+🔴 **Đừng chọn số theo người nói. Chọn theo THƯỚC.** Thước của tôi là yếu nhất: nó chỉ nhận dòng
+BẮT ĐẦU bằng `//` `*` `/*`, nên mọi dòng nối tiếp bên trong một khối chú thích mà không mở đầu
+bằng `*` đều bị nó đếm nhầm thành MÃ. Hai dòng chênh giữa tôi và web-noibo gần như chắc nằm ở đó.
+⚠️ Và tôi đã «đo lại» rồi ra đúng 155/11 — **chạy lại một thước yếu thì được đúng cái sai cũ.**
+Lặp lại KHÔNG phải xác nhận.
+
+✅ **Việc phải làm trước khi ai dùng lại con số này:** chốt MỘT thước chung cho câu hỏi
+«dòng nào là mã, dòng nào là chú thích», rồi đo lại. Ba đáp án trên cùng một diff nghĩa là
+câu hỏi ấy **chưa có định nghĩa dùng chung**, chứ không phải ai đó cẩu thả.
+
+## Và một chỗ tôi KHÔNG phải sửa: lần khởi động lại 08:43 sáng nay
+
+exe báo máy chủ là pid 1480 khởi 08:43, KHÔNG phải pid 76943 của lần hẹn 21:53, và nó
+**không biết vì sao**. Tôi đo ra:
+
+    kern.boottime  = Fri Sep 11 08:41:38 2026     ⇐ MÁY khởi động lại
+    npm exec       = 08:43:00  (ppid 957)
+    next-server    = 08:43:14  (pid 1480)
+    plist com.eroca.phong-ban-lan: RunAtLoad = True · KeepAlive = True
+
+⇒ **Máy bật lại lúc 08:41:38, launchd tự dựng app sau 82 giây.** Không có gì hỏng, không ai hẹn
+sai. Đây đúng là ca tôi cảnh báo tối qua — *«bất kỳ lần nạp lại nào vì bất kỳ lý do gì»* — và
+lần này nó vô hại vì bản trên đĩa đã là bản tốt.
+📌 Ghi lại để lần sau không ai đi điều tra một cái bóng: **hỏi `kern.boottime` TRƯỚC khi đi tìm
+thủ phạm trong log ứng dụng.**
+
+
+## 🧭 [2026-09-14T14:18:27Z · 15:18 BST] ĐỢT M — HỌC TỪ MANDECK: theo dõi việc tới lúc được kiểm chứng · làn «Việc cần anh» · API/CLI/MCP dùng chung
+
+> **Owner giao 14/09/2026 (nguyên văn):** «Đọc hai tài liệu 2026-09-13_mandeck-*.md tại: ~/idea/inbox/aiboss-app-chat/tra-cuu/ Nghiên cứu tiếp và đối chiếu với mã AIBOSS App Chat hiện tại. Ưu tiên: theo dõi việc từ lúc giao đến kết quả được kiểm chứng, mục "Việc cần Owner", và API/CLI/MCP dùng chung. Đề xuất cải tiến cụ thể: phần nào tận dụng, phần nào cần sửa, thứ tự làm và tiêu chí nghiệm thu. Phân biệt kết quả đã kiểm thử với nhận định từ đọc mã; đưa vào MASTER PLAN để triển khai.»
+
+**Nguồn — mở lại được:**
+```
+Codex 13/09      ~/idea/inbox/aiboss-app-chat/tra-cuu/2026-09-13_mandeck-danh-gia.md (102 dòng)
+                 ~/idea/inbox/aiboss-app-chat/tra-cuu/2026-09-13_mandeck-de-xuat-dot-1.md (84 dòng, 12 kịch bản)
+PM chạy lại      ~/idea/inbox/aiboss-app-chat/tra-cuu/2026-09-14_mandeck-mock-test-PM-chay-lai.json (13:05:52)
+Hermes đo mã     ~/idea/inbox/aiboss-app-chat/tra-cuu/2026-09-14_doi-chieu-ma-hien-tai.md
+                 722 dòng · md5 9d3990a368162cd9df0cbad41d706323 · hermes-aiboss-app-reviewer · đo 14:59–15:02
+PM soi lại       8 chỗ trích dòng trong báo cáo Hermes, 15:1x — cả 8 khớp (lệnh ở mục ③)
+mã đối chiếu     HEAD 515785f4 + cây làm việc CHƯA commit. Bản đang chạy ở 4319 CHƯA được so với cây này.
+```
+
+### Ba nhãn — đọc trước khi đọc bất kỳ dòng nào dưới đây
+```
+[ĐÃ KIỂM THỬ]  chạy thật, ra HÀNH VI
+[ĐÃ ĐO]        đếm / đo hiện vật, có đối chứng — nói mã CÓ CHỮ GÌ, không nói mã CHẠY RA SAO
+[ĐỌC MÃ]       đọc mã rồi suy ra hành vi — CHƯA chạy
+```
+
+### ① Kết quả đã kiểm thử
+1. **[ĐÃ KIỂM THỬ] Mock Mandeck — KHÔNG phải app ta.** 23 công cụ · lỗi nghiệp vụ 403/409 KHÔNG gắn `isError` · CLI `spawn` trả mã thoát **0** khi việc CHƯA giao được · `job spawn` trả 2 · `deck_job_report` khai `readOnlyHint: true` mà lại đóng việc theo dõi. PM chạy lại ra ĐÚNG số của Codex.
+   ⇒ Đây là **bài học thiết kế** cho mặt tiền của ta (M3 · M5), không phải tính chất của mã ta.
+2. **[ĐÃ KIỂM THỬ] Ca thật ô 3 · 14/09** (từ bản ghi phiên + danh sách tiến trình): lượt 1 kết thúc 13:22:15 (`end_turn`, 5 hook dừng đều < 50 ms, 0 lỗi hook) · 13:27:24 ghế không còn tiến trình nào · sổ máy chủ `~/Operations/logs/phong-ban-lan.log` có **0 dòng** về lượt này (đối chứng: cùng tệp có dòng khởi động 12:59).
+   ⇒ Owner thấy «chạy hoài» mà **máy chủ không để lại dấu kết thúc nào để tra**.
+3. **[ĐÃ KIỂM THỬ] Trần phiên tài khoản Claude 13:47:15 · 14/09:** bản ghi ô 3 có đúng 1 dòng «You've hit your session limit · resets 2:20pm»; subagent của PM chết cùng giờ với 429.
+   ⇒ Một lượt thất bại vì hạn mức chỉ để lại dấu trong `.jsonl` — app không có bản ghi «lượt này hỏng, vì sao, mở lại lúc nào».
+
+### ② Nhận định từ đọc mã — bản đồ hiện trạng
+| Mảnh | Đang có | Đang thiếu | Chỗ trong mã | Nhãn |
+|---|---|---|---|---|
+| Hàng đợi đánh thức | bền trên đĩa · mã UUID · giữ chỗ `dang_giu` → ACK `da_giao` · khoá chống trùng | chỉ trạng thái VẬN CHUYỂN; lịch sử 10 phút / 60 dòng | `kho-danh-thuc.ts:52–53 · 64–68 · 380–385 · 445–448` | [ĐỌC MÃ] |
+| Sổ ô + generation | ghi binding kèm generation, lệch thì từ chối | không phải sổ lượt | `kho-phien.ts:105–122` · `nap-bo-ghe.ts:222–243` | [ĐỌC MÃ] |
+| Sổ tiến trình | `Map` trong bộ nhớ, xoá dòng khi tiến trình đóng · `GET /api/dung` | không bền · không giữ kết cục | `kho-tien-trinh.ts:146 · 323–327` · `api/dung/route.ts:18` | [ĐỌC MÃ] · PM soi |
+| Kết cục lượt | sự kiện `loi`, `xong` | `xong` VẪN phát sau `is_error` · `chayMotLuot` trả `loi: null` khi lỗi nằm trong luồng | `chay-agent.ts:487–508` · `chay-mot-luot.ts:203–208` | [ĐỌC MÃ] · PM soi |
+| Nối giao → chạy → kết cục | ACK mang mã yêu cầu | thân `/api/chat` không mang mã yêu cầu · `DauVaoLuot` không nhận | `UngDung.tsx:2105 · 2113 · 1704–1709` · `chay-mot-luot.ts:63–70` | [ĐỌC MÃ] |
+| Đã kiểm / nghiệm thu | chỉ trong TÀI LIỆU: verdict + md5, trang round | không có trạng thái nào trong mã | 0 dòng `job_id·attempt_id·artifact_refs·needs_input·da_kiem` / 46 tệp, có đối chứng | [ĐÃ ĐO] |
+| Việc cần Owner | một writer hẹp `can-nguoi.jsonl` (runner nền không thấy bản ghi phiên) | 0 người đọc · 0 giao diện · tệp chưa tồn tại ở gốc kho | `may-chay-nen.ts:55–76` · grep `can-nguoi` src+dev = 1 dòng, chính là writer | [ĐÃ ĐO] · [ĐỌC MÃ] |
+| Đèn «đang chạy» | khôi phục hỏi `GET /api/dung` | ô khôi phục-đang-chạy KHÔNG ai hạ cờ khi lượt xong | xem khối ngay dưới | [ĐÃ ĐO] · [ĐỌC MÃ] |
+| Cửa sinh tiến trình | `/api/chat` giữ chỗ theo ô (`datCho`) | runner nền 0 lần `datCho`; fork là cửa THỨ BA | `chat/route.ts:204` · `fork/route.ts:113–115` | [ĐÃ ĐO] 1 · 0 · 0 |
+| API / CLI / MCP | 9 route · 12 phương thức · CLI `dev/confirm-session-owner.mjs` dùng CHUNG `so-so-huu.ts` với `/api/session-owner` | không có mặt tiền việc chung · 0 dấu hiệu MCP server | `so-so-huu.ts:63–71` | [ĐÃ ĐO] 0 · đối chứng 12 |
+| Chạy nền | chỉ bật khi `CHAY_NEN` đúng bằng `'1'` | nhật ký khởi 12:59 in «TẮT» | `may-chay-nen.ts:142` | [ĐÃ ĐO] |
+
+**Đường làm đèn kẹt — PM đếm tại mã 15:1x:**
+```
+dangChay: false   chỉ ở UngDung.tsx:660 (nút Dừng) và :1768 (finally của tab ĐANG GIỮ luồng)
+GET /api/dung     chỉ gọi ở UngDung.tsx:912 (lúc khôi phục)
+tab hiện lại      UngDung.tsx:2186  if (o.dangChay || o.dangNap) continue;   ⇐ bỏ qua ô đang chạy
+⇒ [ĐỌC MÃ] tải lại trang lúc ghế đang chạy ⇒ đèn bật theo máy chủ ⇒ tab mới không giữ luồng
+   ⇒ lượt xong KHÔNG có đường nào hạ cờ, trừ bấm Dừng hoặc tải lại lần nữa.
+⚠️ CHƯA chứng minh đây là nguyên nhân ca ô 3 ngày 14/09 — chưa biết Owner có tải lại giữa lượt không. M1 trả lời.
+```
+
+### ③ Dòng trạng thái cũ trong chính kế hoạch này ĐÃ LỖI THỜI — đính chính, KHÔNG xoá chữ cũ
+```
+P0-7 ① · P1-7 ①   «thêm GET /api/dung» · «khôi phục đặt dangChay đúng sự thật»
+                  ⇒ MÃ ĐÃ CÓ (api/dung/route.ts:18 · UngDung.tsx:912 · 946)
+                  ⇒ CHƯA có phép nghiệm thu nào được chạy ⇒ trạng thái đúng: «có mã, CHƯA nghiệm thu»
+4e (31/08)        «/api/phien cờ đang-chạy 0 · GET /api/dung 0 · dangChay:false 3 chỗ»
+                  ⇒ nay: nhánh danh sách /api/phien có dang_chay (route.ts:57) · GET /api/dung có ·
+                     dangChay:false còn 2 chỗ, không chỗ nào ở khôi phục
+⑤c lớp 1          ⇒ có mã visibilitychange (UngDung.tsx:2147–2225) nhưng bỏ qua ô đang chạy. CHƯA nghiệm thu.
+CÒN ĐÚNG          P1-6 SQLite 0 · B0 khoá chung chưa có · CHAY_NEN tắt · P1a sổ đang chạy bền chưa có
+```
+**Cách đo lại (chạy trong `~/Projects/aiboss-app-chat`):**
+```bash
+grep -nE '^export async function (GET|POST)' src/app/api/dung/route.ts
+grep -nE "fetch\('/api/dung'\)|dangChayTheoO\.has" src/components/UngDung.tsx
+grep -nE 'dangChay\s*:' src/components/UngDung.tsx
+grep -c 'datCho(' src/app/api/chat/route.ts src/lib/may-chay-nen.ts src/lib/chay-mot-luot.ts
+grep -rn 'can-nguoi' src dev
+sed -n '487,508p' src/lib/chay-agent.ts | grep -nE "is_error|loai: 'loi'|loai: 'xong'"
+```
+
+### ④ Tận dụng gì — KHÔNG dựng lại từ số không
+1. `kho-danh-thuc.ts` — mã UUID + giữ chỗ/ACK + khoá chống trùng ⇒ làm **tầng vận chuyển** của việc. Chỉ thêm liên kết sang lượt.
+2. **generation** của sổ ô ⇒ làm hàng rào chặn tiến trình cũ ghi đè. Khỏi đẻ khái niệm mới.
+3. `chay-mot-luot.ts` ⇒ lõi chạy một lượt DUY NHẤT. `/api/chat` hiện gọi thẳng `chayAgent` (`chat/route.ts:302`) ⇒ gom về lõi là điều kiện để mọi cửa ghi sổ giống nhau.
+4. **Mẫu «một thư viện, hai mặt tiền» ĐÃ CHẠY THẬT:** `so-so-huu.ts` ← `/api/session-owner` + `dev/confirm-session-owner.mjs` ⇒ chép mẫu này cho HTTP · CLI · MCP của việc.
+5. `dev/claude-gia.sh` (CLI giả giao thức stream) + `dev/chay-dev.sh` (môi trường dev riêng) ⇒ dựng được ca «lỗi rồi vẫn xong», «chết giữa lượt» mà KHÔNG tốn lượt thật, KHÔNG chạm 4319.
+6. Writer `can-nguoi.jsonl` ⇒ nguồn đầu tiên cho làn «Việc cần anh».
+7. `ai/NGHIEN-CUU-kenh-sqlite.md` (3 bảng · WAL) + node 24.19.0 có sẵn `node:sqlite` (`DatabaseSync` có mặt, PM chạy 14/09) + `package.json` 0 thư viện sqlite ⇒ không cần thêm phụ thuộc.
+   ⚠️ Mức ổn định của `node:sqlite` và cách Next 15 đóng gói nó **CHƯA ĐO**.
+8. Nếp đội đang làm bằng tay — verdict ghi md5 (`ai/PROTOCOL-review-hash.md`), trang round ⇒ chính là **bằng chứng kiểm chứng** mà sổ việc cần trỏ tới. Không phát minh lại.
+
+### ⑤ Việc cần làm — thứ tự, mỗi bước một cổng
+Chạm `src/` ⇒ `claude-aiboss-app-exe` làm · `hermes-aiboss-app-reviewer` soi (khác mô hình, đo trước mỗi lần) · cổng băm + cổng dựng như cũ · khởi động lại chờ Owner xác nhận HAI lần · bộ đếm vòng áp theo VIỆC.
+
+#### M1 · TÁI HIỆN «ĐÈN KẸT» RỒI MỚI VÁ — nhỏ, chạm đúng thứ Owner than 14/09
+- **Vì sao đứng đầu:** Owner báo ô 3 «chạy hoài» ngày 14/09 (quan trọng ✅). Mã có đúng một đường làm đèn kẹt, và phép tái hiện rẻ (khẩn đủ để làm trước, vì rẻ).
+- **Việc:** trên môi trường dev (`dev/chay-dev.sh`, CLI giả, cổng khác 4319): cho một ô chạy lượt dài → tải lại trang giữa lượt → để lượt kết thúc → nhìn đèn.
+- **Tái hiện được thì vá:** tab đối soát những ô «đèn bật mà không giữ luồng» với `GET /api/dung` theo nhịp và khi tab hiện lại; máy chủ nói hết chạy ⇒ hạ cờ + nạp lại lịch sử.
+- **Nghiệm thu:**
+  ⓐ bản CŨ trên cùng kịch bản phải KẸT — không tái hiện được bệnh thì không biết mình chữa gì
+  ⓑ bản MỚI tắt đèn ≤ 10 giây sau khi tiến trình thoát, KHÔNG cần tải lại
+  ⓒ đối chứng: ô ở tab đang giữ luồng chạy y như cũ
+  ⓓ đo cả WebKit (Safari), không chỉ Chromium
+  ⓔ không tái hiện được ⇒ ghi «chưa rõ nguyên nhân ca 14/09», KHÔNG vá theo đoán
+
+#### M2 · SỔ LƯỢT BỀN + KẾT CỤC ĐÚNG — móng của mọi thứ sau
+- **M2a · chọn kho bằng số đo, không bằng cảm giác (một buổi):** `node:sqlite` chế độ WAL trong route Next 15 qua `next build` + `next start` · hai tiến trình ghi đồng thời · `kill -9` giữa lúc ghi. Trượt ⇒ lui về JSONL chỉ-nối-thêm + rename như `kho-danh-thuc.ts`.
+- **M2b · mỗi lượt một dòng:** `run_id` · `request_id` (mã yêu cầu đánh thức, có thể rỗng) · `ma_o` · `ma_nhan_su` · `ma_phien` · `binding_generation` · `provider` · `started_at` · `ended_at` · `status` (running / succeeded / failed / cancelled / interrupted) · `error_kind` (is_error / exit / spawn / rate_limit / stop) · `error` · `exit_code` · `usage` · `requested_by`.
+- **Luật ghi:**
+  ```
+  ghi dòng running TRƯỚC sự kiện đầu tiên gửi trình duyệt
+  ghi kết cục TRƯỚC khi gửi «xong»
+  succeeded CHỈ KHI exit 0 VÀ không is_error VÀ không có sự kiện loi
+  khởi động lại gặp dòng running mà tiến trình đã chết ⇒ interrupted, KHÔNG tự chạy lại
+  ghi bằng generation cũ ⇒ bị từ chối
+  mọi cửa sinh tiến trình (chat · nền · fork) ghi CÙNG một sổ; B0 (khoá chung theo ô) làm TRONG bước này
+  thân /api/chat và DauVaoLuot mang request_id
+  ```
+- **Tên tệp mã mới viết tiếng Anh** (luật Owner 09/09 — PM dự án chốt áp cho tệp MỚI của đợt này; tệp cũ giữ nguyên, không đổi tên hàng loạt).
+- **Nghiệm thu — chạy trên CLI giả, KHÔNG tốn lượt thật:**
+  ⓐ luồng «result is_error rồi xong» ⇒ `failed` — và bản CŨ trên cùng đầu vào báo «xong» (đối chứng dương cho bệnh)
+  ⓑ lượt thành công bình thường ⇒ `succeeded` (đối chứng âm: thước biết nói «không lỗi»)
+  ⓒ đóng hẳn trình duyệt giữa lượt ⇒ dòng vẫn có `ended_at` + kết cục đúng
+  ⓓ khởi động lại máy chủ dev giữa lượt ⇒ `interrupted`, số lần sinh tiến trình = 1
+  ⓔ đổi ô A → B → A giữa lượt ⇒ lần ghi của lượt cũ bị từ chối
+  ⓕ luồng có dòng «You've hit your session limit · resets …» ⇒ `failed · rate_limit` (ca thật 14/09 13:47)
+  ⓖ gửi hai lần cùng `request_id` ⇒ đúng một lượt · khác nội dung cùng khoá ⇒ từ chối
+
+#### M3 · LÀN «VIỆC CẦN ANH»
+- **Nguồn giai đoạn 1:** lượt failed / interrupted (từ M2) · `can-nguoi.jsonl` · yêu cầu ghế tự nộp qua một cổng mới (loại: duyệt / trả lời / xác nhận; kèm link; khoá chống trùng).
+- **Trạng thái mục:** open → answered → closed. Trả lời lần hai ⇒ từ chối, mục giữ nguyên.
+- **ĐỌC danh sách KHÔNG được đổi gì** — bài học đã kiểm thử ở ①.1.
+- Rủi ro Owner đã chấp nhận có ghi sổ **KHÔNG BAO GIỜ** vào làn này.
+- **Chỗ đặt trên màn hình là việc Owner chọn** ⇒ trình round khi M2 xong, kèm ảnh chụp bản thử.
+- **Nghiệm thu:**
+  ⓐ lượt failed hiện trong làn ≤ 10 giây
+  ⓑ trả lời hai lần ⇒ lần hai 409 · băm kho trước/sau lần hai GIỐNG
+  ⓒ mở / đọc làn ⇒ băm kho trước/sau GIỐNG
+  ⓓ bấm mục ⇒ mở đúng ghế + đúng phiên (dùng P1-2)
+  ⓔ đối chứng âm: lượt succeeded KHÔNG sinh mục
+
+#### M4 · NỐI «ĐÃ KIỂM CHỨNG» VÀO SỔ VIỆC — đuôi của chuỗi giao → kết quả được kiểm
+- **Sổ ghi:** verdict nào (đường dẫn + md5 tệp verdict) · người soi + mô hình · tệp được soi + md5 · kết luận ĐẠT / BÁC · trỏ về `run_id` / `request_id`.
+- **Trạng thái chấp nhận:** submitted → verified → accepted / changes_requested. Cổng băm thành một phép TRA: md5 tệp biên dịch hiện tại có khớp verdict ĐẠT không.
+- Bộ đếm vòng (dừng sau ba lần bác) đếm được từ sổ — khỏi đếm tay trên kênh.
+- **Nghiệm thu:**
+  ⓐ đổi một byte tệp sau verdict ⇒ phép tra báo verdict hết hiệu lực với phần đổi
+  ⓑ verdict của người soi CÙNG mô hình với người làm ⇒ từ chối ghi
+  ⓒ đường dẫn verdict chứa `../` hoặc nằm ngoài thư mục cho phép ⇒ từ chối
+  ⓓ đối chứng dương: verdict đúng băm ⇒ accepted
+
+#### M5 · MỘT THƯ VIỆN, BA MẶT TIỀN: HTTP · CLI · MCP — CHỈ TRONG MÁY
+- **Làm SAU M2–M4:** dựng mặt tiền trước khi nghĩa của trạng thái đứng yên là đóng băng một hợp đồng sai.
+- **Thao tác:** giao việc (bọc `/api/danh-thuc`) · xem việc / lượt · danh sách «việc cần anh» · trả lời mục · dừng (bọc `POST /api/dung`).
+- **CLI — mã thoát:** 0 đã giao · 2 sai cú pháp · 3 KHÔNG giao được (trùng / bận / từ chối) · 4 không thấy · 5 không tới được máy chủ · có cờ `--json`.
+- **MCP qua stdio, gọi `127.0.0.1:4319`:** lỗi nghiệp vụ ⇒ `isError: true`; công cụ khai chỉ-đọc thì THẬT SỰ chỉ đọc.
+- Thêm thư viện MCP SDK hay tự viết JSON-RPC tối giản: exe đề xuất kèm số đo, người soi chốt.
+- **Ranh giới:** chỉ trong máy. Mở bất kỳ mặt tiền nào ra ngoài máy (điện thoại, internet) là bài **P3-1** và phải **hỏi Owner TRƯỚC**.
+- **Nghiệm thu = chạy lại chính bộ thử mock Mandeck trên mặt tiền của TA:**
+  ⓐ 403 / 409 ⇒ `isError: true`
+  ⓑ CLI việc không giao được ⇒ mã thoát khác 0
+  ⓒ gọi công cụ chỉ-đọc ⇒ băm kho trước/sau GIỐNG
+  ⓓ cùng một yêu cầu qua HTTP · CLI · MCP ⇒ cùng kết quả
+
+**12 kịch bản đợt 1 của Codex** (`de-xuat-dot-1.md:63–78`) được phủ: đóng trình duyệt · nối lại luồng · lỗi-rồi-xong · chống trùng · A→B→A · khởi động lại giữa lượt · tiến trình cũ ghi đè ⇒ M2 · việc thiếu hiện vật chưa được chấp nhận · đọc bảng không đóng việc kiểm ⇒ M4 · trả lời hai lần ⇒ M3 · đường dẫn hiện vật đi lùi ⇒ M4 ⓒ. **Ca Host giả KHÔNG đưa vào** — đó là rủi ro Owner đã chấp nhận có ghi sổ.
+⚠️ Ca «nối lại luồng theo con trỏ» mới phủ một nửa: M2 giữ kết cục bền, M1 đối soát đèn; **phát lại luồng chữ sau F5 vẫn là việc khó của P0-7 ②**, chưa xếp vào đợt này.
+
+### ⑥ Nối vào bậc cũ — không đẻ mục trùng
+```
+M1  ⇒ P0-7 · P1-7 (đèn / nút Dừng)   hai mục đó đổi thành «có mã, CHƯA nghiệm thu»; M1 là phép nghiệm thu còn thiếu
+M2  ⇒ P1-6 (SQLite) · P1a (sổ bền) · B0 (khoá chung) · P1-1 (mức dùng theo ghế lấy từ usage của sổ lượt)
+M3  ⇒ P1-2 (đường dẫn đích danh ghế + phiên)
+M4  ⇒ ai/PROTOCOL-review-hash.md · bộ đếm vòng
+M5  ⇒ MỚI. Mặt tiền ra ngoài máy vẫn là P3-1
+CHAY_NEN=1 (B3) ⇒ vẫn chờ B0 + B1. M2 làm B0 nên rút ngắn đường tới B3, nhưng KHÔNG tự bật.
+```
+
+### ⑦ CHƯA ĐO — đừng đọc thành đã biết
+- Bản đang chạy ở 4319 có đúng cây mã được đối chiếu không — cây có nhiều tệp chưa commit.
+- Nguyên nhân thật của «chạy hoài» ô 3 ngày 14/09 — M1 trả lời.
+- `node:sqlite` ổn định tới đâu, Next 15 đóng gói nó ra sao — M2a trả lời.
+- Mọi ghế Claude có đứng trong khoảng 13:47–14:20 không — mới đo được ô 3 và subagent của PM.
+
+#### 🔄 [2026-09-14T15:22:27Z · 16:22 BST] Đợt M · M1 ⓐ ĐÃ TÁI HIỆN — [ĐÃ KIỂM THỬ] trên dev, CHƯA vá
+```
+nguồn     claude-aiboss-app-exe, kênh doi-aiboss-app-chat.md tin 15:16:16Z
+môi trường dev 4320 · CLI giả (FAKE_CLAUDE_DELAY_SEC=45) · Chromium 151 · app 4319 KHÔNG chạm (8/8 tài nguyên 200, pid 68284 giữ nguyên)
+«đèn»     div.o-chat[data-o="0"] .den-o  ·  kẹt = có lớp den-chay (aria-label «Đang chạy»)
+ca ĐỎ 1   gửi 15:12:15Z · tải lại 15:12:20Z · tiến trình thoát và /api/dung bỏ o-1 cùng lúc 15:13:04Z
+          35,1 giây sau đèn VẪN den-chay trong khi /api/dung không liệt kê ô (143 mẫu) ⇒ KẸT
+ca XANH   tab giữ luồng: den-chay 14:59:20 → den-noi 15:00:09 = tắt đúng lúc
+bộ thử    node dev/repro-stuck-light.mjs --case green|red-reload|red-second-tab|probe-dung (chạy lại được)
+bẫy đo    lần chạy ĐẦU của next dev: GET /api/dung trả rỗng suốt 213 mẫu dù tiến trình đang chạy ⇒ bộ thử nay có chốt hợp lệ
+CHƯA PHỦ  ca ĐỎ 2 (tab thứ hai) · XANH chạy lại · cả ba ca trên WebKit 26.5 · bản vá
+```
+⚠️ Tái hiện trên dev chứng minh ĐƯỜNG MÃ có lỗi. Nó CHƯA chứng minh ca ô 3 của Owner lúc 13:15–13:27 đi đúng đường này (chưa biết lúc đó có tải lại trang không).
+
+#### 🔄 [2026-09-14T15:52:16Z · 16:52 BST] Đợt M · M1 ĐÃ VÁ trên dev (chờ verdict) + mở M1b — nguồn: exe, kênh tin 15:48:43Z
+```
+[ĐÃ KIỂM THỬ] dev 4320 · giây tính từ lúc /api/dung thôi liệt kê ô
+                 xanh    tải lại    tab thứ hai          bấm Dừng
+CŨ   Chromium    0 s     KẸT ≥35,1  A 0 · B KẸT ≥35,2   KẸT ≥35,2
+CŨ   WebKit      0 s     KẸT ≥35,3  A 0 · B KẸT ≥35,6   chưa đo
+MỚI  Chromium    0 s     4,5 s      A 0 · B 5,0 s        1,1 s
+MỚI  WebKit      0 s     4,6 s      A 0 · B 4,6 s        1,7 s
+tệp   src/components/UngDung.tsx 166d4e0a… → 32e8ecf9162dc4eab19cb696303915e6 (+67 −2)
+soi   hermes-aiboss-app-reviewer đang chạy từ 16:47 · CHƯA dựng · CHƯA nạp
+rủi ro PM nêu: /api/dung trả rỗng hợp lệ lúc ghế còn chạy ⇒ bản vá tắt nhầm đèn ⇒ mất nút Dừng (P0-7 ③ chiều ngược)
+```
+**M1b · ba chỗ M1 chưa phủ — [ĐỌC MÃ], CHƯA đo, làm SAU lượt dựng M1:**
+- ⓐ tab không giữ luồng: đèn tắt nhưng khung chat KHÔNG tự nạp câu trả lời cuối, tới lần ẩn-hiện tab hoặc tải lại
+- ⓑ 🔴 câu Owner gõ vào ô đang chạy ở tab không giữ luồng vào hàng chờ, và chỉ finally của tab GIỮ luồng mới gửi hàng chờ ⇒ câu đó KHÔNG BAO GIỜ gửi. **Mất lời Owner ⇒ xếp ngay sau M1.**
+- ⓒ ô kẹt nằm trong ds_ban của vòng chuông ⇒ chuông cho ghế đó bị giữ suốt lúc kẹt
+- Nghiệm thu: tái hiện từng ca trên bản CŨ trước (dev 4320, bộ thử dev/repro-stuck-light.mjs) · bản mới: câu trả lời cuối hiện ≤ 10 giây sau khi lượt xong · câu gõ trong lúc chạy được gửi ĐÚNG MỘT lần · đối chứng tab giữ luồng không đổi.
+- Liên quan tới việc Owner than 16:48: tải lại ô exe ba lần mà không thấy chữ nào. [ĐÃ ĐO] lượt exe từ 15:41 có 138 lệnh công cụ và 0 khối chữ, nên dù có M1b thì khung vẫn trống nếu ghế không viết chữ.
+
+#### 🔄 [2026-09-14T16:13:40Z · 17:13 BST] Đợt M · verdict hermes-aiboss-app-reviewer 16:51: M1 vòng 1 BÁC 3/8 · ghim QLT ĐẠT 4/4 — dựng riêng việc ghim
+```
+verdict      ~/idea/inbox/aiboss-app-noibo/VERDICT-HERMES-2026-09-14_M1-den-ket-va-ghim-QLT.md
+A (M1)       BÁC  A1 A2 A3 A5 A6 đạt · A4 A7 A8 trượt · bộ đếm vòng: vòng bác 1
+B (ghim)     ĐẠT  nhan-su.json 2a10d350 · hang-so.ts d9484990
+dựng riêng   16:56 XANH · BUILD_ID tjf65Bwn2Xjn3I16zWbqM · UngDung.tsx trả về 166d4e0a trước khi dựng · CHƯA nạp
+PM đo 17:12  BUILD_ID đĩa khớp · 2 md5 khớp verdict · 3 mã ghim có trong .next, đối chứng có, mã bịa 0
+```
+- **A4 lộ một lỗ CÓ TỪ TRƯỚC, không phải của M1** — [ĐỌC MÃ] theo verdict: `chay-agent.ts:512–522` sự kiện `error` gọi `khiChet` mà không kiểm tiến trình đã thoát ⇒ `api/chat/route.ts:381` ⇒ `kho-tien-trinh.ts:320–327` xoá dòng sổ ⇒ /api/dung thôi liệt kê ô trong khi con có thể còn sống.
+  ⇒ **thêm vào M2, bắt buộc:** chỉ ghi kết cục / xoá dòng khi có bằng chứng tiến trình đã thoát (exitCode hoặc signalCode) · nghiệm thu: ép sự kiện error trên CLI giả còn sống ⇒ dòng sổ còn, nút Dừng còn, đối chứng: tiến trình thoát thật ⇒ dòng mất.
+- «Mất dòng sổ» KHÔNG chứng minh «tiến trình đã đóng» — M1 vòng 2 gỡ vế bấm Dừng vì đúng lý do này.
+
+#### 🆕 [2026-09-14T16:27:42Z · 17:27 BST] Đợt M · M1c — OWNER YÊU CẦU: chuyển bộ ghế là nạp ĐÚNG bộ, lượt cũ chạy ngầm
+> Owner (nguyên văn): «khi bấm menu vào 1 phòng nào đó như kiểu "Quản lý trường" trong category "Vào phòng ban" thì mặc định load đúng danh sách ô đã fix kèm session id của ghế đã ghim (gắn) mà tôi đã quyết chứ không hiện thông báo ô <n> đang chạy rồi không load ô ghế mới của giao diện mới. Đã chuyển qua bộ mới (giao diện mới) thì giao diện cũ cứ kệ nó chạy ngầm mà.»
+```
+[ĐỌC MÃ] nap-bo-ghe.ts:167–168 · 173 · 180 bỏ qua ô đang chạy; câu hiện ra ở :110 «đang chạy — chưa đổi. Xong việc rồi bấm lại»
+[ĐÃ ĐO]  GET /api/o 15:19:23: Owner đã sang bộ Công Nghệ mà ô 3 vẫn là claude-phong-dao-tao (đang chạy)
+[ĐỌC MÃ] khoá sinh tiến trình theo Ô: chat/route.ts:204 · kho-tien-trinh.ts:177 datCho(maO)
+         ⇒ đổi ghế trong ô đang chạy mà KHÔNG đổi trục khoá thì ghế mới nhiều khả năng không gửi được tới khi lượt cũ xong (CHƯA đo)
+[ĐỌC MÃ] chat/route.ts:420 cancel() cố ý không giết con · chay-agent.ts ~:572–584 có chayNen thì giữ con, không thì SIGTERM — CHƯA đo lượt HTTP
+```
+- **Thứ tự:** ngay sau khi M1 vòng 2 nộp người soi; trước M1b. Quan trọng ✅ (mỗi lần chuyển bộ lúc có ghế chạy) · Owner yêu cầu thẳng.
+- **Cổng:** thiết kế trước (ghi chú ngắn trong ai/de-soi/) → hermes-aiboss-app-reviewer soi thiết kế → mới viết mã.
+- **Hệ quả lên B0:** gợi ý «lượt thuộc về PHIÊN, ô chỉ là cửa sổ» đổi trục khoá từ Ô sang PHIÊN. Nếu thiết kế được duyệt, dòng B0 cũ («trục Ô duy nhất theo cấu trúc») phải sửa theo.
+- **Ràng buộc an toàn:** chạy ngầm KHÔNG được mất đường dừng · một phiên không chạy hai lượt · đổi ghế không giết và không bị lượt cũ ghi đè · chỗ hiện lượt ngầm trên màn hình là việc Owner chọn (round kèm ảnh).
+- **Nghiệm thu** (chi tiết ⓐ–ⓘ trong ai/GIAO-EXE-M1c-chuyen-bo-ghe-chay-ngam-20260914.md): chuyển bộ lúc ô đang chạy ⇒ ô hiện ngay ghế + phiên ghim của bộ mới · lượt cũ chạy tới hết, bị giết 0 lần · ghế mới gửi được ngay · lượt ngầm thấy và dừng được · quay lại thì đèn đúng · lượt cũ xong không đổi liên kết ô · gửi trùng vào phiên đang chạy bị từ chối rõ · đối chứng không ô nào chạy thì y như cũ · Chromium + WebKit.
+
+#### 🔀 [2026-09-14T17:47:49Z · 18:47 BST] Đợt M · M1 BÁC VÒNG 2 ⇒ GỘP M1 · M1c · lỗ «error xoá dòng» · M1b ⓑ thành «LÕI SỔ LƯỢT ĐÚNG SỰ THẬT» · ghim QLT ĐÃ LÊN APP
+```
+ghim QLT      nạp 18:39:50 · pid 68284 → 96400 · tjf65Bwn · bộ đo tách rời ĐẠT 18:40 · PM đo lại 18:46 ĐẠT (3 mã ghim 1·1·1 · đối chứng 1 · bịa 0 · gợi ý cũ 0)
+M1 vòng 2b    BÁC 5/9 (R2 danh tính lượt tái dùng được · R6 bộ thử · R7 chú thích · R8 phản ví dụ: lượt thấy đã thoát ≠ ô không còn lượt sống)
+              verdict ~/idea/inbox/aiboss-app-noibo/VERDICT-HERMES-2026-09-14_M1-vong2b.md · cây đã trả về bản có verdict
+quyết định    KHÔNG vá vòng 3 trong M1. Gộp thành một việc, THIẾT KẾ TRƯỚC — đề ai/GIAO-EXE-loi-so-luot-20260914.md
+bộ đếm        mang vòng bác 2 từ M1, KHÔNG đặt lại (đã báo Owner). Bác thêm một lần ⇒ PM dừng, báo Owner.
+bước đề nghị  B1 máy chủ nói đúng (danh tính lượt · chỉ xoá khi thoát thật · khoá trục mới) → B2 đèn → B3 chuyển bộ ghế → B4 câu gõ không mất
+```
+- Mục M1 · M1b · M1c ở trên giữ nguyên làm NGUỒN nghiệm thu; việc thi công đi theo đề gộp.
+- M2 (sổ lượt BỀN trên đĩa) xây trên B1 — B1 giữ trong bộ nhớ nhưng đặt đúng danh tính và bất biến để M2 chỉ việc ghi xuống đĩa.
+
+#### 📥 [2026-09-15T13:01:45Z · 14:01 BST] Việc tồn từ lượt soi «đổi tên ghế ô 4» (hermes-aiboss-app-reviewer 15/09, ngoài đề) — [ĐỌC MÃ], chưa xếp lịch
+- `kho-phien.ts:109` chỉ giữ `moc_ket_thuc` khi CẢ tên ghế lẫn mã phiên không đổi ⇒ đổi tên ghế làm mốc về null ⇒ cổng «đang chạy nơi khác» có thể chặn oan lần gửi đầu. Nghiệm thu khi làm: đổi tên một ghế trên dev, gửi ngay ⇒ không bị chặn.
+- `api/danh-thuc/route.ts:62–75` nhánh chống trùng có thể trả 200 TRƯỚC khi kiểm tên ghế ⇒ gọi tên không tồn tại với khoá cũ nhận 200. Nghiệm thu: tên bịa + khoá đã dùng ⇒ 404.
+- `dev/sinh-ho-so-ghe.mjs:92–100` chép lại logic suy thư mục ghế (bản thứ hai của `thuMucAgent`) ⇒ trỏ về một nguồn. Nghiệm thu: grep chỉ còn một chỗ suy thư mục.
+- Liên quan việc gộp «lõi sổ lượt»: điểm 1 và 2 đụng đúng vùng khoá + sổ ô ⇒ cân nhắc gộp khi thiết kế.
+
+#### 🆕 [2026-09-17T14:02:43Z · 15:02 BST] P2-5 · HAI MỨC CỠ CHỮ + MENU «CÀI ĐẶT» — Owner giao 17/09
+- Owner: «font chữ hiện tại là Trung Bình, cần thêm mức Lớn to hơn hai nấc, thêm menu cài đặt để chọn».
+- [ĐÃ ĐO] cỡ chữ khai cứng bằng px: mau09.css 92 dòng font-size · globals.css 22 dòng · .bong 13px (:316) · .bc-2 .bong 12,5px (:382) · .bc-4 .bong 11,5px (:391) · ô soạn 16px kèm ghi chú KHÔNG hạ (globals.css:112-113).
+- [ĐỌC MÃ] không có biến cỡ chữ gốc ⇒ làm hai mức bằng cách sửa tay từng dòng là đường dài; exe tự chọn cách, PM chỉ giữ ràng buộc.
+- Nghiệm thu: mức Trung bình không đổi (ảnh trước/sau) · mức Lớn đo được bằng px · nhớ sau khi tải lại · ô soạn ≥ 16px · 390px và 1366px không vỡ · xoá lựa chọn thì về Trung bình.
+- Đề: ai/GIAO-EXE-hai-muc-co-chu-20260917.md. Xếp TRƯỚC việc «lõi sổ lượt», và dựng chung với việc đổi tên ghế ô 4 đang chờ nạp để Owner chỉ xác nhận khởi động lại một lần.
