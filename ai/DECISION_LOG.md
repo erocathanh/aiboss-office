@@ -215,3 +215,26 @@ khong-co-may-nay...:8443/             → 000                  ĐỐI CHỨNG Â
 **Còn nợ:** rà 31 tệp trỏ tên cũ — đọc từng chỗ để tách cấu hình sống khỏi sổ sách, chưa làm.
 
 (ghi 30/08/2026 09:46 London · claude-phong-ban-pm — Owner giao lưu sổ sau khi đổi tên xong)
+
+
+---
+
+## Q-006 · 10/10/2026 11:13 · Hai đội viết mã song song · đổi tên ghế Antigravity
+**Chốt (anh nguyên văn, ô PM):** «em làm cái này đi tôi muốn đổi tên gemini-aiboss-app-exe thành antigravity-aiboss-office vì tên dự án này sắp tới sẽ đổi em thảo luận với pm-r3 sau đó tiến hành sớm đề nghị của em này».
+Đề nghị được duyệt: **đội A** (đường đổi bản phục hồi) — `claude-aiboss-app-exe` viết, Hermes soát · **đội B** — cây git riêng, tránh bảy tệp của thiết kế vòng 1, hai việc đầu là sổ ghế đọc lúc chạy và VE-015; đầu ra đội B soát xong trước, chờ đường đổi bản có rồi lên app cùng lúc.
+**Số đo lúc chốt:** exe đang làm thiết kế vòng 2 (bộ đếm 2/3) · ghế Antigravity ký tin lần cuối 12/09 (`~/Operations/kenh-mcp/da-doc.json`), tên mới 0 dòng · pm-r3 (`claude-bos-funnel-pm`) đồng ý 11:29.
+**Việc kèm theo:** `AGENTS.md` (commit 427f303) và `GEMINI.md` (commit f93486f) đổi tên ghế, chưa đẩy · đề đội B gửi lại tên mới (tin-20261010-103054-5d46).
+**Ai chốt:** anh Thanh.
+**Mở lại khi:** anh đổi cách chia đội, hoặc đường đổi bản nhập kho và bảy tệp hết bị giữ.
+
+## Q-007 · 10/10/2026 11:31 · Hermes chỉ soát · hai phiên soát song song cho hai đường
+**Chốt (anh nguyên văn, ô PM):** «từ giờ hermes chỉ review nên khi cần review thì em nhớ session của hermes review của dự án này để đường A và đường B có 2 người review chạy song song không phải xếp hàng chờ. Em vẽ luôn sơ đồ tổ chức lưu file dự án đi nhé. lưu luôn DECISION của tôi.»
+**PM hiểu thành việc (anh sửa nếu sai):**
+- Hermes chỉ soát cho dự án app ⇒ `hermes-build-app` thôi viết mã (PM huỷ đường lui «đội B sang hermes-build-app» đã ghi 11:39) · trang round của app không lui sang `hermes-web-noibo` nữa: `antigravity-web-noibo` tắc thì PM tự dựng (đường lui cuối) và báo anh.
+- Mỗi đường một phiên soát riêng của `hermes-aiboss-app-reviewer`, nhớ mã phiên, lần soát sau nối lại đúng phiên đó; hai phiên chạy song song.
+**Số đo lúc chốt:** người soát gpt-6-astra (OpenAI Codex) · exe và PM claude-opus-5-5 · đường A = phiên `20261010_082735_6338e9` (soát vòng 1 thiết kế đổi bản, verdict d53f1b4c) · đường B chưa có phiên · script phóng người soát (27cd0e61) chưa nhận mã phiên nối · câu lệnh này nằm trong hàng chờ ô PM lúc 11:31:18 (ảnh `ai/anh-giao-dien/2026-10-10_nut-dung-len-tren_cu_4319-may-tinh-2584.png`).
+**Việc kèm theo:** sổ phiên `/Users/erocathanh/idea/inbox/aiboss-app-noibo/SO-PHIEN-SOAT-HERMES.md` · sơ đồ `ai/SO-DO-TO-CHUC.md` + `ai/SO-DO-TO-CHUC.svg` · hồ sơ ghế PM cập nhật · giao exe thêm tham số nối phiên cho script phóng người soát.
+**Ai chốt:** anh Thanh.
+**Mở lại khi:** anh báo hạn mức Hermes tuần xuống mức một phiên một lúc (khi đó đường A đi trước), hoặc anh đổi vai Hermes.
+
+(ghi 10/10/2026 11:51 London · claude-aiboss-app-pm)

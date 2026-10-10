@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="960" viewBox="0 0 1200 960" role="img" aria-labelledby="tieu-de mo-ta">
+  <title id="tieu-de">Sơ đồ tổ chức đội app AIBOSS (aiboss-app-chat), cập nhật 10/10/2026</title>
+  <desc id="mo-ta">Anh Thanh trên cùng; PM claude-aiboss-app-pm giao việc cho hai đường viết mã: đường A (claude-aiboss-app-exe) và đường B (antigravity-aiboss-office). Mỗi đường có một phiên soát riêng của hermes-aiboss-app-reviewer. Cột phải là ghế hỗ trợ và đối tác ngoài đội. Dưới cùng là luật chạy đội.</desc>
+  <defs>
+    <marker id="mui-ten" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0B1F3A"/>
+    </marker>
+    <style>
+      text{font-family:Inter,-apple-system,"Helvetica Neue",Arial,sans-serif;fill:#0B1F3A}
+      .h{font-size:22px;font-weight:700}
+      .sub{font-size:12px;fill:#5A6475}
+      .name{font-size:15px;font-weight:700}
+      .name14{font-size:14px;font-weight:700}
+      .name13{font-size:13px;font-weight:700}
+      .line{font-size:12.5px}
+      .small{font-size:12px}
+      .bold{font-size:12.5px;font-weight:700}
+      .band{font-size:12.5px;font-weight:700}
+      .bandsang{font-size:12.5px;font-weight:700;fill:#F6F1E7}
+      .lbl{font-size:11.5px;fill:#5A6475;font-style:italic}
+      .tagc{font-size:11px;font-weight:600;fill:#8A3B1E}
+      .tagg{font-size:11px;font-weight:600;fill:#1A4FA0}
+      .tago{font-size:11px;font-weight:600;fill:#0B6B53}
+      .hop{fill:#FFFFFF;stroke:#0B1F3A;stroke-width:1.5}
+      .hopdut{fill:#FFFFFF;stroke:#0B1F3A;stroke-width:1.2;stroke-dasharray:6 4}
+      .noi{stroke:#0B1F3A;stroke-width:1.5;fill:none}
+      .noidut{stroke:#5A6475;stroke-width:1.3;fill:none;stroke-dasharray:6 4}
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="960" fill="#F6F1E7"/>
+
+  <text x="40" y="44" class="h">SƠ ĐỒ TỔ CHỨC — ĐỘI APP AIBOSS (aiboss-app-chat)</text>
+  <text x="40" y="66" class="sub">Cập nhật 10/10/2026 theo quyết định Q-006 và Q-007 của anh Thanh · bản chữ: ai/SO-DO-TO-CHUC.md · mã phiên soát: SO-PHIEN-SOAT-HERMES.md</text>
+
+  <!-- Owner -->
+  <rect x="440" y="92" width="320" height="76" rx="12" class="hop"/>
+  <text x="456" y="118" class="name">Anh Thanh · Owner</text>
+  <text x="456" y="140" class="small">quyết trang round · mở lượt ghế Antigravity</text>
+  <text x="456" y="159" class="small">xác nhận khởi động lại app HAI LẦN liền nhau</text>
+
+  <!-- Tổng giám đốc -->
+  <rect x="880" y="92" width="280" height="76" rx="12" class="hopdut"/>
+  <text x="896" y="118" class="name13">claude-eroca-boss · Tổng giám đốc</text>
+  <text x="896" y="140" class="small">đọc TIEN-DO-app.md hai tiếng một lần</text>
+  <text x="896" y="159" class="small">gom báo cáo cho anh · chỉ đọc</text>
+  <line x1="880" y1="130" x2="762" y2="130" class="noidut" marker-end="url(#mui-ten)"/>
+  <text x="792" y="122" class="lbl">báo cáo</text>
+
+  <!-- PM -->
+  <line x1="600" y1="168" x2="600" y2="206" class="noi" marker-end="url(#mui-ten)"/>
+  <rect x="430" y="208" width="340" height="104" rx="12" class="hop"/>
+  <text x="446" y="234" class="name">claude-aiboss-app-pm · PM</text>
+  <rect x="446" y="243" width="110" height="18" rx="9" fill="#F4E1D7" stroke="#D97757"/>
+  <text x="501" y="256" class="tagc" text-anchor="middle">Claude opus-5-5</text>
+  <text x="446" y="280" class="line">giữ sổ · soạn đề · giao việc · nghiệm thu</text>
+  <text x="446" y="299" class="line">soạn câu hỏi trang round · không viết mã</text>
+  <polyline points="770,232 1020,232 1020,170" class="noidut" marker-end="url(#mui-ten)"/>
+  <text x="846" y="226" class="lbl">TIEN-DO-app.md</text>
+
+  <!-- PM xuống hai đường -->
+  <polyline points="600,312 600,336" class="noi"/>
+  <polyline points="220,336 600,336" class="noi"/>
+  <line x1="220" y1="336" x2="220" y2="358" class="noi" marker-end="url(#mui-ten)"/>
+  <line x1="600" y1="336" x2="600" y2="358" class="noi" marker-end="url(#mui-ten)"/>
+
+  <!-- Đường A -->
+  <rect x="40" y="360" width="360" height="130" rx="12" class="hop"/>
+  <rect x="41" y="361" width="358" height="27" rx="11" fill="#C9A227"/>
+  <rect x="41" y="374" width="358" height="14" fill="#C9A227"/>
+  <text x="56" y="379" class="band">ĐƯỜNG A · đổi bản phục hồi (49C)</text>
+  <text x="56" y="412" class="name">claude-aiboss-app-exe · thợ code</text>
+  <rect x="56" y="421" width="110" height="18" rx="9" fill="#F4E1D7" stroke="#D97757"/>
+  <text x="111" y="434" class="tagc" text-anchor="middle">Claude opus-5-5</text>
+  <text x="56" y="458" class="line">viết mã đường đổi bản · DUY NHẤT chạy next build</text>
+  <text x="56" y="477" class="line">dựng chỉ sau verdict ĐẠT của người soát</text>
+
+  <!-- Đường B -->
+  <rect x="430" y="360" width="340" height="130" rx="12" class="hop"/>
+  <rect x="431" y="361" width="338" height="27" rx="11" fill="#C9A227"/>
+  <rect x="431" y="374" width="338" height="14" fill="#C9A227"/>
+  <text x="446" y="379" class="band">ĐƯỜNG B · cây git riêng (worktree)</text>
+  <text x="446" y="412" class="name14">antigravity-aiboss-office · thợ code</text>
+  <rect x="446" y="421" width="130" height="18" rx="9" fill="#DCE7FB" stroke="#4285F4"/>
+  <text x="511" y="434" class="tagg" text-anchor="middle">Gemini · Antigravity</text>
+  <text x="446" y="458" class="line">tránh 7 tệp đường A đang sửa · không build</text>
+  <text x="446" y="477" class="line">tên cũ gemini-aiboss-app-exe, đổi 10/10/2026</text>
+
+  <!-- nộp bài sang người soát -->
+  <line x1="220" y1="490" x2="220" y2="528" class="noi" marker-end="url(#mui-ten)"/>
+  <text x="228" y="514" class="lbl">nộp → phiên A</text>
+  <line x1="600" y1="490" x2="600" y2="528" class="noi" marker-end="url(#mui-ten)"/>
+  <text x="608" y="514" class="lbl">nộp → phiên B</text>
+
+  <!-- Người soát -->
+  <rect x="40" y="530" width="730" height="150" rx="12" class="hop"/>
+  <rect x="41" y="531" width="728" height="27" rx="11" fill="#0B1F3A"/>
+  <rect x="41" y="544" width="728" height="14" fill="#0B1F3A"/>
+  <text x="56" y="549" class="bandsang">NGƯỜI SOÁT DUY NHẤT · hermes-aiboss-app-reviewer</text>
+  <rect x="56" y="566" width="170" height="18" rx="9" fill="#D7F0E8" stroke="#10A37F"/>
+  <text x="141" y="579" class="tago" text-anchor="middle">gpt-6-astra · OpenAI Codex</text>
+  <text x="240" y="579" class="line">Hermes chỉ soát (anh chốt 10/10/2026) · chạy --safe-mode, chỉ đọc kho</text>
+  <rect x="56" y="596" width="335" height="60" rx="10" fill="#F6F1E7" stroke="#C9A227" stroke-width="1.3"/>
+  <text x="70" y="618" class="bold">Phiên A · 20261010_082735_6338e9</text>
+  <text x="70" y="639" class="small">soát đường A · lần sau nối lại đúng phiên này</text>
+  <rect x="419" y="596" width="335" height="60" rx="10" fill="#F6F1E7" stroke="#C9A227" stroke-width="1.3"/>
+  <text x="433" y="618" class="bold">Phiên B · mở ở lần nộp đầu của đội B</text>
+  <text x="433" y="639" class="small">soát đường B · ghi mã phiên vào sổ phiên</text>
+  <text x="56" y="673" class="lbl">Hai phiên chạy song song, không xếp hàng chờ nhau · mã phiên: SO-PHIEN-SOAT-HERMES.md</text>
+
+  <!-- PM sang cột hỗ trợ -->
+  <polyline points="770,280 790,280 790,679" class="noi"/>
+  <line x1="790" y1="400" x2="808" y2="400" class="noi" marker-end="url(#mui-ten)"/>
+  <line x1="790" y1="492" x2="808" y2="492" class="noi" marker-end="url(#mui-ten)"/>
+  <line x1="790" y1="584" x2="808" y2="584" class="noi" marker-end="url(#mui-ten)"/>
+  <line x1="790" y1="679" x2="808" y2="679" class="noidut" marker-end="url(#mui-ten)"/>
+
+  <!-- Hỗ trợ -->
+  <rect x="810" y="360" width="350" height="80" rx="12" class="hop"/>
+  <text x="826" y="384" class="name13">claude-phong-ban-pm · research</text>
+  <rect x="826" y="392" width="60" height="18" rx="9" fill="#F4E1D7" stroke="#D97757"/>
+  <text x="856" y="405" class="tagc" text-anchor="middle">Claude</text>
+  <text x="826" y="428" class="small">đọc mã nhà khác, mang bằng chứng · không soát</text>
+
+  <rect x="810" y="452" width="350" height="80" rx="12" class="hop"/>
+  <text x="826" y="476" class="name13">antigravity-web-noibo · dựng trang round</text>
+  <rect x="826" y="484" width="64" height="18" rx="9" fill="#DCE7FB" stroke="#4285F4"/>
+  <text x="858" y="497" class="tagg" text-anchor="middle">Gemini</text>
+  <text x="826" y="520" class="small">dựng + đẩy aiboss-app-noibo.erocathanh.com</text>
+
+  <rect x="810" y="544" width="350" height="80" rx="12" class="hop"/>
+  <text x="826" y="568" class="name13">claude-bos-funnel-pm · ghế terminal</text>
+  <rect x="826" y="576" width="60" height="18" rx="9" fill="#F4E1D7" stroke="#D97757"/>
+  <text x="856" y="589" class="tagc" text-anchor="middle">Claude</text>
+  <text x="826" y="612" class="small">canh lần khởi động lại app · nhắc anh xác nhận</text>
+
+  <rect x="810" y="636" width="350" height="86" rx="12" class="hopdut"/>
+  <text x="826" y="660" class="name13">Đối tác ngoài đội</text>
+  <text x="826" y="684" class="small">claude-phong-cong-nghe · công nghệ mới, sổ ghế</text>
+  <text x="826" y="704" class="small">claude-aiboss-office-pm · PM sản phẩm AIBOSS Office</text>
+
+  <!-- Luật -->
+  <rect x="40" y="740" width="1120" height="200" rx="12" class="hop"/>
+  <rect x="41" y="741" width="1118" height="27" rx="11" fill="#0B1F3A"/>
+  <rect x="41" y="754" width="1118" height="14" fill="#0B1F3A"/>
+  <text x="56" y="759" class="bandsang">LUẬT CHẠY ĐỘI (trích · bản đầy đủ: hồ sơ ghế PM và ai/DECISION_LOG.md)</text>
+  <text x="56" y="790" class="line">① Người soát phải KHÁC MÔ HÌNH người làm: Claude hoặc Gemini làm ⇒ Hermes (gpt) soát · gpt làm ⇒ PM (Claude) soát. Đo mô hình trước mỗi lần giao.</text>
+  <text x="56" y="811" class="line">② Hermes chỉ soát (Q-007, 11:31 ngày 10/10/2026): không viết mã, không dựng trang cho dự án app.</text>
+  <text x="56" y="832" class="line">③ Hai đường không chờ nhau: mỗi đường một phiên soát riêng; mã phiên ghi ở /Users/erocathanh/idea/inbox/aiboss-app-noibo/SO-PHIEN-SOAT-HERMES.md</text>
+  <text x="56" y="853" class="line">④ Đội B không sửa 7 tệp đường A đang giữ: src/lib/van-hanh.ts · src/lib/kho-danh-thuc.ts · src/app/api/chat/route.ts · src/lib/may-chay-nen.ts</text>
+  <text x="74" y="874" class="line">src/lib/chay-agent.ts · src/components/UngDung.tsx · src/app/api/van-hanh/route.ts</text>
+  <text x="56" y="895" class="line">⑤ Chỉ exe chạy next build, sau verdict ĐẠT · đổi bản hay khởi động lại app cần anh xác nhận HAI LẦN liền nhau, ghế terminal canh.</text>
+  <text x="56" y="916" class="line">⑥ Bị bác ba vòng thì dừng và báo anh · câu cần anh quyết đi trang round aiboss-app-noibo.erocathanh.com, không hỏi trong ô chat.</text>
+</svg>
