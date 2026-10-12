@@ -127,7 +127,11 @@ if (!gotTheLock) {
               res.on('end', () => {
                 try {
                   const json = JSON.parse(body);
-                  if (Array.isArray(json.activeSeats)) {
+                  if (json && json.o && typeof json.o === 'object') {
+                    const slots = Object.values(json.o);
+                    const activeSlots = slots.filter((s) => s && s.ma_nhan_su && s.ma_phien && s.moc_ket_thuc === null);
+                    resolve(activeSlots.length);
+                  } else if (Array.isArray(json.activeSeats)) {
                     resolve(json.activeSeats.length);
                   } else if (typeof json.runningCount === 'number') {
                     resolve(json.runningCount);
@@ -293,6 +297,47 @@ if (!gotTheLock) {
     ipcMain.handle('desktop:get-status', () => getDesktopStatus());
     ipcMain.handle('desktop:get-login-item', () => app.getLoginItemSettings());
     ipcMain.handle('desktop:set-login-item', (_e, enabled) => setStartAtLogin(enabled));
+    ipcMain.handle('desktop:report-running', (_e, count) => {
+      updatePowerSaveState(count);
+      return count;
+    });
+
+    // Measurement automation flag for 5B-2 live testing
+    if (process.argv.includes('--measure-live')) {
+      const { execSync } = require('node:child_process');
+      const pid = process.pid;
+      console.log(`[MEASURE_START] Live measurement for PID ${pid} at ${new Date().toISOString()}`);
+
+      console.log('--- 1. POWER ASSERTION (BEFORE) ---');
+      const b = execSync('pmset -g assertions', { encoding: 'utf8' });
+      const bLines = b.split('\n').filter((l) => l.includes(`pid ${pid}`) || (l.includes('NoIdleSleepAssertion') && l.includes('Electron')));
+      console.log(bLines.join('\n') || `(no assertion for pid ${pid})`);
+
+      console.log('--- 1. POWER ASSERTION (ACTIVE) ---');
+      const blockerId = updatePowerSaveState(1).blockerId;
+      await new Promise((r) => setTimeout(r, 600));
+      const activeOut = execSync('pmset -g assertions', { encoding: 'utf8' });
+      const activeLines = activeOut.split('\n').filter((l) => l.includes(`pid ${pid}`) || (l.includes('NoIdleSleepAssertion') && l.includes('Electron')));
+      console.log(activeLines.join('\n'));
+
+      console.log('--- 1. POWER ASSERTION (RELEASED) ---');
+      updatePowerSaveState(0);
+      await new Promise((r) => setTimeout(r, 600));
+      const relOut = execSync('pmset -g assertions', { encoding: 'utf8' });
+      const relLines = relOut.split('\n').filter((l) => l.includes(`pid ${pid}`) || (l.includes('NoIdleSleepAssertion') && l.includes('Electron')));
+      console.log(relLines.join('\n') || `(assertion released for pid ${pid})`);
+
+      console.log('--- 2. LOGIN ITEM (TOGGLE TEST) ---');
+      console.log('Before toggle:', JSON.stringify(app.getLoginItemSettings()));
+      setStartAtLogin(true);
+      console.log('After ON:', JSON.stringify(app.getLoginItemSettings()));
+      setStartAtLogin(false);
+      console.log('After OFF:', JSON.stringify(app.getLoginItemSettings()));
+
+      app.isQuitting = true;
+      app.quit();
+      return;
+    }
 
     // Start background polling
     pollStatus();

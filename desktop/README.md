@@ -7,7 +7,7 @@ Tài liệu kỹ thuật nội bộ dành cho đội ngũ phát triển và vậ
 ## 1. Giới thiệu tổng quan
 
 Vỏ desktop Electron (`desktop/`) đóng vai trò là lớp vỏ bao bọc ứng dụng (desktop shell), mang lại trải nghiệm bản địa (native app) trên macOS:
-- **Cửa sổ chuẩn:** Kích thước mặc định 1280×800, giới hạn thu nhỏ tối thiểu 900×600, nạp trực tiếp giao diện văn phòng từ máy chủ HTTP nội bộ.
+- **Cửa sổ chuẩn:** Kích thước cửa sổ 1280×800 (khung nhìn bên trong 1280×768 sau khi trừ thanh tiêu đề macOS), giới hạn thu nhỏ tối thiểu 900×600, nạp trực tiếp giao diện văn phòng từ máy chủ HTTP nội bộ.
 - **Khoá một thể hiện (Single Instance Lock):** Ngăn chặn người dùng mở nhiều cửa sổ trùng lặp. Khi kích hoạt lần hai, ứng dụng tự động đưa cửa sổ hiện tại lên tiêu điểm (focus).
 - **Màn hình chờ (Splash Screen):** Nếu máy chủ chưa sẵn sàng, ứng dụng hiển thị màn hình chờ màu Navy/Gold thương hiệu và tự động khởi động dịch vụ nền, chờ tối đa 60 giây.
 - **Biểu tượng thanh trạng thái (System Tray):** Đóng cửa sổ sẽ ẩn vào khay thay vì tắt hẳn ứng dụng; cho phép bật/tắt khởi động cùng hệ thống (Start at login), xem trạng thái máy chủ và số ghế đang chạy lượt.
