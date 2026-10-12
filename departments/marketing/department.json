@@ -1,0 +1,30 @@
+{
+  "id": "marketing",
+  "name": "Marketing",
+  "owner": {
+    "name": "Owner",
+    "role": "Human owner, decides money, customers, publishing"
+  },
+  "lead": "marketing-lead",
+  "seats": [
+    "marketing-lead",
+    "content-writer",
+    "social-community",
+    "email-crm",
+    "paid-ads",
+    "video-creative",
+    "search-ai-visibility",
+    "reviewer"
+  ],
+  "packs": [
+    "core",
+    "company-facts",
+    "marketing-ops"
+  ],
+  "gates": [
+    "money-out",
+    "customer-message",
+    "publish",
+    "delete"
+  ]
+}

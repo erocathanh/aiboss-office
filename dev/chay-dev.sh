@@ -24,8 +24,8 @@
 set -u
 export PATH="/opt/homebrew/bin:$PATH"
 KHO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NHA="${NHA_DEV:-$HOME/Projects/aiboss-dev-4320}"
-CONG="${CONG_DEV:-4320}"
+NHA="${NHA_DEV:-$HOME/Projects/aiboss-dev-4330}"
+CONG="${CONG_DEV:-4330}"
 
 if lsof -nP -iTCP:"$CONG" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "🔴 cổng $CONG ĐANG BẬN — DỪNG, đừng giẫm lên ai" >&2; exit 1

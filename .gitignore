@@ -27,3 +27,10 @@ out/
 .next-dev/
 # khoá chống hai bản dev giẫm nhau (dev/chay-dev.sh sinh ra, xoá khi thoát)
 *.khoa/
+
+# AIBOSS Office runtime data & local agent settings
+operations/data/**
+!operations/data/**/
+!operations/data/**/.gitkeep
+private/
+agents/*/.claude/settings.local.json

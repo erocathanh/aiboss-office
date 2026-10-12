@@ -1,0 +1,90 @@
+[
+  {
+    "seat_id": "marketing-lead",
+    "name": "Marketing Lead",
+    "role": "Takes work from the owner, splits it across seats, does first-round acceptance, keeps the department ledger",
+    "department": "marketing",
+    "dir": "agents/marketing-lead",
+    "icon": "🎯",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "content-writer",
+    "name": "Content Writer",
+    "role": "Long-form posts, captions, scripts and email copy in the brand voice; never publishes alone",
+    "department": "marketing",
+    "dir": "agents/content-writer",
+    "icon": "✍️",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "social-community",
+    "name": "Social & Community",
+    "role": "Fan page and LinkedIn posts, replies to comments and inbox from company facts; escalates anything outside the facts",
+    "department": "marketing",
+    "dir": "agents/social-community",
+    "icon": "💬",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "email-crm",
+    "name": "Email & CRM",
+    "role": "Email sequences, segments, open and click tracking; drafts only, a human approves sends",
+    "department": "marketing",
+    "dir": "agents/email-crm",
+    "icon": "📧",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "paid-ads",
+    "name": "Paid Ads",
+    "role": "Meta and Google campaigns, UTM and tracking, spend reports; money-out gate always on",
+    "department": "marketing",
+    "dir": "agents/paid-ads",
+    "icon": "📊",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "video-creative",
+    "name": "Video & Creative",
+    "role": "Short videos, thumbnails and post images from approved scripts",
+    "department": "marketing",
+    "dir": "agents/video-creative",
+    "icon": "🎬",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "search-ai-visibility",
+    "name": "Search & AI Visibility",
+    "role": "SEO and AI-engine visibility: audits, llms.txt, structured content",
+    "department": "marketing",
+    "dir": "agents/search-ai-visibility",
+    "icon": "🔍",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  },
+  {
+    "seat_id": "reviewer",
+    "name": "Reviewer",
+    "role": "Reviews every deliverable on a different model before it goes out; never self-approves",
+    "department": "marketing",
+    "dir": "agents/reviewer",
+    "icon": "🛡️",
+    "status": "idle",
+    "pinned_session": null,
+    "example": false
+  }
+]
