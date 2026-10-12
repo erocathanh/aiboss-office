@@ -2083,8 +2083,8 @@ export default function UngDung({
           <button
             className="nut-tron nut-ve-chat" type="button"
             onClick={() => datAnKhu(false)}
-            title="Quay lại khu trò chuyện"
-            aria-label="Quay lại khu trò chuyện"
+            title="Return to conversation space"
+            aria-label="Return to conversation space"
           >
             <ChatCircleDots size={17} weight={DAM_ICON} aria-hidden="true" />
           </button>
@@ -2095,51 +2095,19 @@ export default function UngDung({
         </div>
       )}
 
-      {/**
-        * 🔖 BĂNG «TRANG NÀY ĐANG CHẠY MÃ CŨ» (P1-8 · 31/08/2026)
-        *
-        * ⛔ NÓI QUÁ THỨ BIẾT CHẮC: ta CHƯA đo được cơ chế hỏng (giả thuyết 404 đã bị BÁC
-        *    bằng số — xem route.ts). Nên câu chữ chỉ khai đúng một điều kiểm được:
-        *    **mã trang này cũ hơn mã máy chủ.** ⛔ hứa «vì thế nên app im».
-        * ⛔ TỰ TẢI LẠI: Owner đang gõ dở một câu là mất trắng. Băng DÍNH, ⛔ tự tắt,
-        *    ⛔ chặn thao tác — để Owner chọn LÚC.
-        * ♿ `role="status"` để trình đọc màn hình đọc lên khi băng xuất hiện.
-        */}
       {(maCu || cuaHong || tinhLaiHong) && (
         <div className={`bang-ma-cu${maCu ? '' : ' bang-cua-hong'}`} ref={banRef} role="status">
-          {/**
-            * 🔀 MỘT BĂNG, HAI CÂU — ⛔ dựng băng thứ hai.
-            *    Hai băng thì chúng giành nhau chỗ trên đỉnh màn, và biến `--cao-bang` chỉ đo
-            *    được MỘT cái ⇒ cái kia đẩy đáy ra ngoài. Đúng thứ vừa vá xong ở cổng ⑥.
-            * 🥇 `maCu` ĐI TRƯỚC: «mã của bạn cũ» là việc Owner LÀM ĐƯỢC ngay (bấm Tải lại).
-            *    «cửa ⛔ trả lời» thì anh ấy ⛔ làm gì được — báo trước cái làm được.
-            */}
           {maCu ? (
             <span>
-              Bản mới đã lên máy chủ. Trang này đang chạy mã <b>CŨ</b>.
+              A new build is available on the server. This page is running an <b>OUTDATED</b> version.
             </span>
           ) : tinhLaiHong ? (
-            /**
-             * 🔴 THÊM 01/09/2026 (P0 tab-tỉnh-lại). Owner chốt: hết lượt thử mà vẫn trượt thì
-             *    phải HIỆN RA. Trước bản vá này, tab tỉnh dậy mà lấy tin cũ KHÔNG được thì nó
-             *    IM — và cái im đó chính là bệnh Owner gặp mỗi ngày.
-             * ⚠️ NÓI ĐÚNG THỨ BIẾT CHẮC: ta biết đã thử 3 lần và trượt cả 3.
-             *    Ta KHÔNG biết vì sao, và KHÔNG biết tin cũ còn nguyên trên máy chủ hay KHÔNG.
-             * 🥈 Xếp SAU `maCu` và TRƯỚC `cuaHong`, theo đúng lẽ đã ghi ở trên: báo trước cái
-             *    Owner LÀM ĐƯỢC. «Tải lại» chữa được ca này; «cửa KHÔNG trả lời» thì KHÔNG.
-             */
             <span>
-              Tab vừa mở lại nhưng <b>chưa lấy được tin cũ</b> (đã thử 3 lần). Danh sách bên dưới
-              có thể đang thiếu tin mới.
+              Tab resumed but <b>failed to retrieve previous history</b> (tried 3 times). New messages may not be displayed.
             </span>
           ) : (
-            /**
-             * ⚠️ NÓI ĐÚNG THỨ BIẾT CHẮC. Ta biết: đã hỏi 3 lần liên tiếp mà ⛔ ai trả lời.
-             *    Ta ⛔ biết vì sao, và ⛔ biết app có còn chạy việc ⛔ ⇒ ⛔ hứa hộ điều đó.
-             */
             <span>
-              Đã hỏi máy chủ <b>3 lần liên tiếp</b> mà chưa nhận được trả lời. Câu gửi tới các ghế
-              có thể chưa đi được.
+              Server connection <b>unresponsive after 3 attempts</b>. Messages dispatched to seats may be delayed.
             </span>
           )}
           <button
@@ -2147,7 +2115,7 @@ export default function UngDung({
             className="nut-tai-lai"
             onClick={() => window.location.reload()}
           >
-            Tải lại
+            Reload
           </button>
         </div>
       )}
@@ -2155,36 +2123,26 @@ export default function UngDung({
       <div className={`khung bc-${boCuc}${(anCot === null ? boCuc === 6 : anCot) ? ' an-cot' : ' hien-cot'}`}>
         {/* ===== Cột 1 — cây phòng ban ===== */}
         <aside className="cot cot-1">
-          <div className="de-cot">Cơ cấu tổ chức</div>
+          <div className="de-cot">Organization Structure</div>
           <div className="cay">
-            {/**
-              * 🏢 «VÀO PHÒNG BAN» — Owner quyết 04/09 (round-8 hướng A + ba chốt chiều 04/09).
-              *
-              * CHUYỂN, KHÔNG nhân đôi: 5 bộ ghế trước ở menu «Giao diện» trên thanh, nay về ĐÂY.
-              * Nút «Giao diện» đã BỎ HẲN — Owner: «ở Giao diện có gì chuyển hết về Vào Phòng Ban».
-              *
-              * 🔑 Danh sách vẽ từ `SO_BO_GHE` — MỘT sổ duy nhất, dùng chung với `LA_BO_DUNG_SAN`.
-              *    Chép danh sách ra đây là đẻ chỗ thứ ba phải nhớ, và người thêm bộ thứ sáu sẽ
-              *    quên một trong ba. Hỏng kiểu đó KHÔNG kêu: menu vẫn hiện, chỉ đội THẬT của
-              *    Owner bị ghi đè lặng lẽ ở lần bấm bộ thứ hai.
-              *
-              * ⬅️ «Ghế hiện tại» đứng ĐẦU, TRÊN danh sách phòng ban: nó là ĐƯỜNG VỀ của đúng
-              *    cái việc liệt kê ngay dưới nó. Đặt lối thoát cạnh cái cửa — vì phút Owner cần
-              *    nó là phút Owner vừa bấm nhầm bộ.
-              *
-              * ⚖️ CÁI GIÁ OWNER ĐÃ CHỌN, ghi ra để KHÔNG ai «sửa giúp»: ẩn cột thì KHÔNG đổi
-              *    phòng ban được, phải mở cột ra trước. Owner được hỏi thẳng và chọn thế.
-              *    Ai định thêm lại lối tắt trên thanh cho tiện thì DỪNG và hỏi Owner.
-              */}
-            {/* ⑲ 05/09 — Owner xem bản cách ly 4320 rồi đặt: «Vào phòng ban» phải LUÔN MỞ.
-                ⇒ Bỏ HẲN trạng thái gập, KHÔNG giữ lại vỏ nút bấm-không-làm-gì.
-                🔑 Giữ vỏ mà bỏ tác dụng thì tệ hơn bỏ hẳn: người ta bấm, chờ, rồi tưởng app hỏng.
-                Nay đây là NHÃN MỤC ⇒ bỏ luôn role="button" · tabIndex · aria-expanded · mũi tên xổ.
-                Khai một thứ là nút trong khi nó KHÔNG bấm được là nói dối với cả người dùng lẫn
-                trình đọc màn hình — và trình đọc màn hình KHÔNG tự phát hiện ra được điều đó. */}
+            {/* 👑 Owner Node */}
+            <div className="o-owner-box" title="Executive Owner: Eroca Thanh">
+              <div className="owner-card">
+                <span className="owner-icon">👑</span>
+                <div className="owner-details">
+                  <div className="owner-name">Eroca Thanh</div>
+                  <div className="owner-role">Owner & Founder</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="org-divider">
+              <span>Department Tree</span>
+            </div>
+
             <div className="goc nut-vao-pb de-muc">
               <span className="ic">🏢</span>
-              <span className="nhan-ten">Vào phòng ban</span>
+              <span className="nhan-ten">Department Sets</span>
             </div>
 
             <div className="menu-vao-pb" role="menu">
@@ -2195,11 +2153,11 @@ export default function UngDung({
                 disabled={!boGheCu}
                 title={boGheCu
                   ? boGheCu.map((m) => m.ten).filter(Boolean).join(' · ')
-                  : 'Chưa lưu bộ nào — bấm một phòng ban thì bộ đang xếp sẽ được cất lại'}
+                  : 'No saved layout — select a department to save current layout'}
                 onClick={() => { void napBoGhe(boGheCu ?? [], false); }}
               >
                 <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
-                {boGheCu ? 'Ghế hiện tại (bộ đã lưu)' : 'Chưa có bộ nào để quay về'}
+                {boGheCu ? 'Current Layout (Saved)' : 'No saved layout'}
               </button>
 
               {SO_BO_GHE.map((bo) => {
@@ -2212,7 +2170,7 @@ export default function UngDung({
                     onClick={() => { void napBoGhe(bo.ghe, true); }}
                   >
                     <Icon size={15} weight={DAM_ICON} aria-hidden="true" />
-                    {bo.ten} — {bo.ghe.length} ô
+                    {bo.ten} — {bo.ghe.length} slots
                   </button>
                 );
               })}
@@ -2228,7 +2186,7 @@ export default function UngDung({
               onClick={() => { datPhongChon(null); datPhongMo(null); }}
             >
               <span className="ic">🏛</span>
-              <span className="nhan-ten">Toàn bộ nhân sự</span>
+              <span className="nhan-ten">All Seats</span>
               <span className="dem-nho">{nhanSu.length}</span>
             </div>
 
@@ -2270,15 +2228,15 @@ export default function UngDung({
               📏 Cột trái rộng 264px, mà `.so-lieu` xếp một hàng ngang rộng 290px ⇒ KHÔNG vừa.
                  ⇒ đổi sang LƯỚI 3 CỘT — xem `.cot-1 .so-lieu` trong mau09.css. */}
           <div className="so-lieu">
-            <div className="o-so"><b>{tong.nhan_su}</b><span>Nhân sự</span></div>
+            <div className="o-so"><b>{tong.nhan_su}</b><span>Seats</span></div>
             <div className="vach" />
-            <div className="o-so"><b>{tong.phong_ban}</b><span>Phòng ban</span></div>
+            <div className="o-so"><b>{tong.phong_ban}</b><span>Departments</span></div>
             <div className="vach" />
-            <div className="o-so"><b>{tong.truong_phong}</b><span>Trưởng phòng</span></div>
+            <div className="o-so"><b>{tong.truong_phong}</b><span>Leads</span></div>
           </div>
 
           <div className="thanh-mau">
-            <div className="tieu">Tỉ trọng nhân sự</div>
+            <div className="tieu">Seat Distribution</div>
             <div className="thanh-ty">
               {phongBan.map((p, i) => (
                 <i key={p.ma} style={{
@@ -2296,23 +2254,53 @@ export default function UngDung({
               ))}
             </div>
           </div>
+
+          <div className="thanh-mau" style={{ marginTop: '12px' }}>
+            <div className="tieu">Human Approval Gates (6)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+              {[
+                { id: 'ads-account-write', label: 'Ads Write' },
+                { id: 'customer-message', label: 'Customer Message' },
+                { id: 'publish', label: 'Publish' },
+                { id: 'delete', label: 'Delete' },
+                { id: 'customer-page-deploy', label: 'Page Deploy' },
+                { id: 'crm-bulk-or-edit', label: 'CRM Bulk / Edit' },
+              ].map((g) => (
+                <span
+                  key={g.id}
+                  title={`Gated action: ${g.id} (requires human approval)`}
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 7px',
+                    borderRadius: '10px',
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    color: '#f87171',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    fontFamily: 'var(--font-mono, monospace)',
+                  }}
+                >
+                  🔒 {g.label}
+                </span>
+              ))}
+            </div>
+          </div>
         </aside>
 
-        {/* ===== Cột 2 — danh sách nhân sự ===== */}
+        {/* ===== Column 2 — Seat Directory & Cards ===== */}
         <section className="cot cot-2">
           <div className="de-cot">
-            <span>{phongChon ? phongBan.find((p) => p.ma === phongChon)?.ten : 'Toàn bộ nhân sự'}</span>
+            <span>{phongChon ? phongBan.find((p) => p.ma === phongChon)?.ten : 'All Seats'}</span>
             <span className="dem">{dsHien.length}</span>
           </div>
           <div className="hop-tim">
             <input
               type="search" autoComplete="off" value={tuKhoa}
               onChange={(e) => datTuKhoa(e.target.value)}
-              placeholder="Tìm theo việc hoặc theo tên kỹ thuật…"
+              placeholder="Search seats by name, role, or slug…"
             />
           </div>
           <div className="ds">
-            {dsHien.length === 0 && <div className="rong">Không có ai khớp.</div>}
+            {dsHien.length === 0 && <div className="rong">No matching seats found.</div>}
             {dsHien.map((n) => (
               <div
                 key={n.ten}
@@ -2321,13 +2309,31 @@ export default function UngDung({
                 }`}
                 data-vai={n.vai}
                 onClick={() => void chonNhanSu(n)}
-                title={`${n.nhan}\n${n.ten}`}
+                title={`${n.nhan}\n${n.vai}\n${n.ten}`}
               >
-                <div className="vuong">{n.viet_tat}</div>
+                <div className="vuong">{n.icon || n.viet_tat}</div>
                 <div className="noi">
-                  {/* ⭐ Dòng CHÍNH = nhãn dễ hiểu · dòng PHỤ = tên kỹ thuật (nhỏ, mờ) */}
-                  <div className="ten">{n.nhan}</div>
+                  <div className="ten-hang">
+                    <span className="ten">{n.nhan}</span>
+                    <span className={`huy-hieu-trang-thai ${n.status || 'idle'}`}>
+                      {n.status || 'idle'}
+                    </span>
+                  </div>
                   <div className="ma-ky-thuat">{n.ten}</div>
+                  <div className="vai-tom-tat">{n.vai}</div>
+                </div>
+                <div className="nut-the-ns">
+                  <button
+                    className="nut-mo-chat"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void chonNhanSu(n);
+                    }}
+                    title={`Open chat with ${n.nhan}`}
+                  >
+                    Chat
+                  </button>
                 </div>
               </div>
             ))}
@@ -2384,15 +2390,32 @@ export default function UngDung({
                 datAnKhu(!anKhu);       // mobile  THẤY: vào/rời danh bạ
               }}
               title={(anCot === null ? boCuc === 6 : anCot)
-                ? 'Hiện lại hai cột danh bạ + phòng ban'
-                : 'Ẩn hai cột trái để khung trò chuyện rộng thêm 584px'}
-              aria-label="Danh bạ và hai cột trái"
+                ? 'Show sidebar columns'
+                : 'Hide sidebar columns'}
+              aria-label="Toggle sidebar columns"
               aria-pressed={(anCot === null ? boCuc === 6 : anCot)}
             >
               <List size={17} weight={DAM_ICON} aria-hidden="true" />
             </button>
-            <span className="nhan-khu ten-app" title="AIBOSS.VN — phòng ban AI của Eroca Thanh">AIBOSS.VN</span>
-            <span className="nhan-that">● Nối thẳng Claude Code trên máy</span>
+            <span className="nhan-khu ten-app" title="AIBOSS Office — Marketing Department">AIBOSS Office</span>
+            <span className="nhan-dept-badge">Marketing</span>
+            <span className="nhan-that">● Local Engine Connected</span>
+            <span className="nhan-tz-badge" title="Office Timezone">London (BST / UTC+1)</span>
+            <button
+              className="nut-tron nut-refresh"
+              type="button"
+              onClick={() => window.location.reload()}
+              title="Refresh AIBOSS Office"
+              aria-label="Refresh workspace"
+            >
+              <ArrowsClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
+            </button>
+            <div className="progress-marks-bar" title="AIBOSS Office Progress Marks">
+              <span className="pm-label">Marks:</span>
+              {[7, 9, 11, 13, 15, 17, 19, 21].map((hour) => (
+                <span key={hour} className="pm-mark">{hour}:00</span>
+              ))}
+            </div>
             {nhacO1 && (
               <span className="nhan-mau" title={nhacO1}>
                 <Crown size={12} weight={DAM_ICON} aria-hidden="true" className="vuong-mien" /> {nhacO1}
@@ -2402,7 +2425,7 @@ export default function UngDung({
               <button
                 className={`nut-bc${boCuc === 1 ? ' chon' : ''}`} type="button" data-bc="1"
                 onClick={() => doiBoCuc(1)}
-                title="1 ô — một cuộc trò chuyện toàn khung" aria-label="Bố cục 1 ô"
+                title="1 slot — single full conversation" aria-label="1 slot layout"
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2412,22 +2435,18 @@ export default function UngDung({
                 className={`nut-bc${boCuc === 2 && kieuHai === 'tren-duoi' ? ' chon' : ''}`}
                 type="button" data-bc="2"
                 onClick={() => doiBoCuc(2, 'tren-duoi')}
-                title="2 ô — chia trên / dưới" aria-label="Bố cục 2 ô trên dưới"
+                title="2 slots — split top / bottom" aria-label="2 slots top bottom"
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
                   <line x1=".8" y1="7" x2="17.2" y2="7" />
                 </svg>
               </button>
-              {/* 🆕 ⑲③ 05/09 — «2 ô TRÁI-PHẢI». Owner mở bản cách ly 4320 rồi báo thiếu.
-                  Đây là nút THỨ NĂM, KHÔNG thay nút «2 ô» cũ và KHÔNG dùng kiểu bấm-lần-hai-đổi-kiểu:
-                  bấm-lần-hai giấu trạng thái vào LỊCH SỬ BẤM, mà lịch sử bấm là thứ KHÔNG nhìn thấy được
-                  — người dùng phải thử mới biết mình đang ở đâu. */}
               <button
                 className={`nut-bc${boCuc === 2 && kieuHai === 'trai-phai' ? ' chon' : ''}`}
                 type="button" data-bc="2-tp"
                 onClick={() => doiBoCuc(2, 'trai-phai')}
-                title="2 ô — chia trái / phải" aria-label="Bố cục 2 ô trái phải"
+                title="2 slots — split left / right" aria-label="2 slots left right"
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2437,7 +2456,7 @@ export default function UngDung({
               <button
                 className={`nut-bc${boCuc === 4 ? ' chon' : ''}`} type="button" data-bc="4"
                 onClick={() => doiBoCuc(4)}
-                title="4 ô — lưới 2×2" aria-label="Bố cục 4 ô"
+                title="4 slots — 2×2 grid" aria-label="4 slots grid"
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2445,12 +2464,10 @@ export default function UngDung({
                   <line x1="9" y1=".8" x2="9" y2="13.2" />
                 </svg>
               </button>
-              {/* 🆕 Bố cục 6 ô (Owner 20/08). Ở 6 ô thì GIẤU hai cột trái để lấy chỗ —
-                  xem `.khung.bc-6` trong mau09.css. Đường vào danh bạ giữ bằng nút ☰. */}
               <button
                 className={`nut-bc${boCuc === 6 ? ' chon' : ''}`} type="button" data-bc="6"
                 onClick={() => doiBoCuc(6)}
-                title="6 ô — ba cột, hai hàng (ẩn hai cột trái để lấy chỗ)" aria-label="Bố cục 6 ô"
+                title="6 slots — 3 columns, 2 rows" aria-label="6 slots grid"
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2459,7 +2476,7 @@ export default function UngDung({
                   <line x1=".8" y1="7" x2="17.2" y2="7" />
                 </svg>
               </button>
-              <div className="goi-y-phim">Phím <b>1</b>…<b>6</b> — nhảy tiêu điểm sang ô tương ứng</div>
+              <div className="goi-y-phim">Keys <b>1</b>…<b>6</b> switch slot focus</div>
             </div>
           </div>
 
@@ -2476,25 +2493,25 @@ export default function UngDung({
                     <div className="de-o">
                       <button
                         className="nut-tron nut-lui" type="button"
-                        onClick={() => datAnKhu(true)} title="Quay lại danh bạ"
-                        aria-label="Quay lại danh bạ"
+                        onClick={() => datAnKhu(true)} title="Back to team list"
+                        aria-label="Back to team list"
                       >
                         <ArrowLeft size={17} weight={DAM_ICON} aria-hidden="true" />
                       </button>
                       <div className="anh-o trong-o">—</div>
                       <div className="tt-o">
-                        <b>Ô trống</b>
-                        <div className="ma-ky-thuat">Chưa chọn nhân sự</div>
+                        <b>Empty Slot</b>
+                        <div className="ma-ky-thuat">No seat selected</div>
                       </div>
-                      <span className="so-o" title={`Ô ${i + 1}`} aria-label={`Ô ${i + 1}`}>
+                      <span className="so-o" title={`Slot ${i + 1}`} aria-label={`Slot ${i + 1}`}>
                         {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
                           return <IconSo size={17} weight={DAM_ICON} aria-hidden="true" />; })()}
                       </span>
                     </div>
                     <div className="rong-o">
                       <div className="to">💬</div>
-                      <b>Ô {i + 1} đang trống</b>
-                      <span>Bấm vào ô này rồi chọn một nhân sự ở cột giữa.</span>
+                      <b>Slot {i + 1} is empty</b>
+                      <span>Click this slot and select a seat from the team list to begin.</span>
                     </div>
                   </>
                 ) : (
@@ -2502,69 +2519,39 @@ export default function UngDung({
                     <div className="de-o">
                       <div className="anh-o">
                         {o.ns.viet_tat}
-                        {/**
-                        * 🚦 ĐÈN TRẠNG THÁI (Owner 17/08 · DỜI sang ẢNH ĐẠI DIỆN 30/08 theo Owner).
-                        * Nằm ở góc ảnh — thứ TRÁI CÙNG trên thanh, mắt bắt được ngay.
-                        * ⚠️ NEO của nó là `position:relative` trên `.anh-o` (mau09:256). Gỡ dòng neo đó
-                        *    thì đèn văng lên tổ tiên khác, ra SAI CHỖ mà ⛔ báo lỗi dòng nào.
-                        * Bốn mức, mỗi mức dựa vào một SỰ THẬT ĐO ĐƯỢC — ⛔ không đèn trang trí:
-                        *   cam nhấp nháy = luồng vừa ĐỨT (matKetNoi)
-                        *   xanh nhấp nháy = ĐANG chảy chữ (dangChay)
-                        *   xanh = có phiên, rảnh
-                        *   xám = CHƯA nối phiên nào
-                        */}
                         <span
-                        className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
-                        title={o.matKetNoi ? 'Mất kết nối — luồng vừa đứt, gửi lại để nối'
-                        : o.dangChay ? 'Đang chạy — chữ đang về'
-                        : o.phienHienTai ? 'Đã nối phiên — sẵn sàng'
-                        : 'Chưa nối phiên nào'}
-                        aria-label={o.matKetNoi ? 'Mất kết nối' : o.dangChay ? 'Đang chạy' : o.phienHienTai ? 'Đã nối phiên' : 'Chưa nối phiên'}
+                          className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
+                          title={o.matKetNoi ? 'Connection lost — stream interrupted, send to reconnect'
+                            : o.dangChay ? 'Running — generating response'
+                            : o.phienHienTai ? 'Ready — session active'
+                            : 'Idle — no active session'}
+                          aria-label={o.matKetNoi ? 'Connection lost' : o.dangChay ? 'Running' : o.phienHienTai ? 'Ready' : 'Idle'}
                         />
                       </div>
                       <div className="tt-o">
-                        {/* ⭐ nhãn to · slug nhỏ mờ */}
                         <b title={o.ns.nhan}>
-                          {/* 👑 → icon bộ (skill taste §3.D: hạn chế emoji, dùng glyph thư viện).
-                              Giữ nguyên NGHĨA «ghế trùm», chỉ đổi cách vẽ. */}
-                          {i === 0 && <Crown size={14} weight={DAM_ICON} aria-label="Ghế trùm" className="vuong-mien" />}
+                          {i === 0 && <Crown size={14} weight={DAM_ICON} aria-label="Lead Seat" className="vuong-mien" />}
                           {o.ns.nhan}
                         </b>
                         <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
                       </div>
-                      {/**
-                        * 🔢ℹ SỐ Ô KIÊM NÚT HỒ SƠ (Owner 17/08: «ghép icon i vào cạnh số 2
-                        * cho gọn và dễ bấm»). Gộp hai thứ ⇒ bớt một nút trên thanh chật,
-                        * và vùng chạm rộng hơn nút tròn — hợp ngón tay hơn.
-                        * ⚠️ Nút ℹ riêng trước đó bị TÔI XOÁ NHẦM khi dọn nút ¶: biểu thức
-                        *    xoá dùng `.*?` trên JSX lồng nhau nên nuốt luôn nút đứng trước.
-                        *    📌 ⛔ Đừng xoá khối JSX bằng biểu thức nhiều dòng — cắt theo mốc rõ.
-                        */}
                       <button
                         className={`so-o nut-so${o.moHoSo ? ' bat' : ''}`} type="button"
                         onClick={() => capNhat(i, { moHoSo: !o.moHoSo })}
-                        title={`Ô ${i + 1} — bấm xem hồ sơ ghế · mã phiên · token · chi phí`}
-                        aria-label={`Ô ${i + 1} — hồ sơ ghế`}
+                        title={`Slot ${i + 1} — view seat profile · session · tokens · cost`}
+                        aria-label={`Slot ${i + 1} — seat profile`}
                         aria-pressed={o.moHoSo}
                       >
                         {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
                           return <IconSo size={17} weight={DAM_ICON} aria-hidden="true" />; })()}
                         <Info size={15} weight={DAM_ICON} aria-hidden="true" className="dau-i" />
                       </button>
-                      {/**
-                        * 🔽 NÚT THU KHUNG — CHỈ ô 1 (TỔNG GIÁM ĐỐC), CHỈ màn hẹp (CSS lo phần ẩn/hiện).
-                        * Owner: «sau khi thu sẽ đổi thành icon bấm để mở ra» ⇒ icon ĐỔI CHIỀU,
-                        * ⛔ không phải hai nút. Đang mở → mũi tên LÊN (bấm là thu lên);
-                        * đã thu → mũi tên XUỐNG (bấm là mở xuống).
-                        * ⚠️ Ô 1 ⛔ KHÔNG có nút đóng và ⛔ KHÔNG đổi được ghế — hai luật đó GIỮ NGUYÊN.
-                        *    Thu khung chỉ là chuyện NHÌN nên ⛔ không đụng vào chúng.
-                        */}
                       {i === 0 && (
                         <button
                           className="nut-tron nut-thu" type="button"
                           onClick={() => capNhat(i, { thuKhung: !o.thuKhung })}
-                          title={o.thuKhung ? 'Mở lại khung trò chuyện' : 'Thu khung trò chuyện, chỉ chừa thanh tên'}
-                          aria-label={o.thuKhung ? 'Mở lại khung trò chuyện' : 'Thu khung trò chuyện'}
+                          title={o.thuKhung ? 'Expand chat pane' : 'Collapse chat pane'}
+                          aria-label={o.thuKhung ? 'Expand chat pane' : 'Collapse chat pane'}
                           aria-expanded={!o.thuKhung}
                         >
                           {o.thuKhung
@@ -2572,27 +2559,13 @@ export default function UngDung({
                             : <CaretUp size={18} weight={DAM_ICON} aria-hidden="true" />}
                         </button>
                       )}
-                      {/**
-                        * ⏱ NÚT NẠP LỊCH SỬ CŨ HƠN — đứng trên THANH ĐẦU Ô, ⛔ trong luồng chat.
-                        *
-                        * 🐛 Hai thiết kế trước đều hỏng, và hỏng ở GỐC chứ ⛔ ở chi tiết:
-                        *    nút trong luồng + ghim  ⇒ dải ĐÈ LÊN CHỮ (Owner chụp ảnh 14:46)
-                        *    nút trong luồng + ⛔ ghim ⇒ đẩy chữ xuống rồi TRÔI MẤT khi cuộn
-                        * ✅ Lên thanh thì ⛔ phải chọn giữa hai cái dở: thanh vốn cố định, ⛔ chồng chữ,
-                        *    ⛔ ăn chỗ khung chat, và luôn nhìn thấy dù cuộn tới đâu. (Owner đề xuất.)
-                        * ⚠️ ⛔ dùng CaretUp — trùng nút thu khung ngay bên cạnh, người nhìn sẽ lẫn.
-                        */}
                       {o.conNua && o.phienHienTai && o.ns && (
                         <button
-                          /* 📌 `nut-lich-su` CỐ Ý ⛔ CÓ LUẬT CSS RIÊNG — hình dáng đã do
-                             `nut-tron` lo trọn (kể cả lúc bị khoá: `.nut-tron[disabled]`).
-                             Giữ tên vì nó là CÁI MÓC để phép đo trình duyệt tìm đúng nút này
-                             ở cổng nghiệm thu. ⛔ Đi tìm luật cho nó — ⛔ có luật là ĐÚNG Ý. */
                           className="nut-tron nut-lich-su" type="button"
                           disabled={o.dangNap || o.dangChay}
                           onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.viTri)}
-                          title={o.dangNap ? 'Đang nạp phần cũ hơn…' : 'Nạp thêm phần trò chuyện cũ hơn'}
-                          aria-label="Nạp thêm phần cũ hơn"
+                          title={o.dangNap ? 'Loading older history…' : 'Load older messages'}
+                          aria-label="Load older messages"
                         >
                           <ClockCounterClockwise size={18} weight={DAM_ICON} aria-hidden="true" />
                         </button>
@@ -2600,51 +2573,37 @@ export default function UngDung({
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => { ghiNhoDay(); datToanMan(toanMan === i ? null : i); }}
-                        title={toanMan === i ? 'Thu về lưới' : 'Xem ô này TRỌN khung'}
-                        aria-label="Xem trọn khung"
+                        title={toanMan === i ? 'Return to grid' : 'View slot fullscreen'}
+                        aria-label="View slot fullscreen"
                         aria-pressed={toanMan === i}
                       >
-                        {/* Icon ĐỔI THEO TRẠNG THÁI: đang trọn khung thì mũi tên thu vào,
-                            chưa thì mũi tên mở ra — nhìn là biết bấm sẽ ra sao. */}
                         {toanMan === i
                           ? <CornersIn size={18} weight={DAM_ICON} aria-hidden="true" />
                           : <CornersOut size={18} weight={DAM_ICON} aria-hidden="true" />}
                       </button>
-                      {/**
-                        * ⋯ MENU XỔ — gom việc ÍT DÙNG (Owner 17/08: «tôi ít khi bấm nút đóng ô;
-                        * gom nút đóng ô và mấy nút vừa đưa vào hồ sơ thành menu bên phải»).
-                        * 📌 Nguyên tắc xếp: thanh giữ thứ bấm THƯỜNG XUYÊN, menu chứa thứ THỈNH THOẢNG.
-                        * 👑 Ô 1 vẫn CÓ menu (còn cần ranh giới mẩu · danh sách phiên) — chỉ ⛔ không có
-                        *    mục «Đóng ô», vì TỔNG GIÁM ĐỐC luôn ngồi đó.
-                        */}
                       <div className="boc-menu">
                         <button
                           className={`nut-tron nut-menu${o.moMenu ? ' bat' : ''}`} type="button"
                           onClick={() => capNhat(i, { moMenu: !o.moMenu })}
-                          title="Thêm việc khác"
-                          aria-label="Menu ô"
+                          title="Slot actions"
+                          aria-label="Slot menu"
                           aria-expanded={o.moMenu}
                         >
                           <DotsThreeVertical size={18} weight={DAM_ICON} aria-hidden="true" />
                         </button>
                         {o.moMenu && (
                           <>
-                            {/* Nền trong suốt phủ toàn màn: chạm ra ngoài là ĐÓNG.
-                                ⛔ Đừng bắt người dùng bấm đúng cái nút mới đóng được. */}
                             <button
-                              className="man-che" type="button" aria-label="Đóng menu"
+                              className="man-che" type="button" aria-label="Close menu"
                               onClick={() => capNhat(i, { moMenu: false })}
                             />
                             <div className="menu-xo" role="menu">
-                              {/* 🛑 DỪNG lên ĐẦU MENU — việc gấp nhất phải ở chỗ ngón tay tới trước.
-                                  ⚠️ Đánh đổi Owner cần biết: dừng gấp nay mất HAI chạm (⋯ rồi Dừng),
-                                     trước là một. Đổi lại thanh chỉ còn 2 nút như Owner muốn. */}
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => capNhat(i, { moHoSo: !o.moHoSo, moMenu: false })}
                               >
                                 <Info size={15} weight={DAM_ICON} aria-hidden="true" />
-                                {o.moHoSo ? 'Đóng hồ sơ ghế' : 'Hồ sơ ghế · phiên · token'}
+                                {o.moHoSo ? 'Close Seat Profile' : 'Seat Profile · Session · Tokens'}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
@@ -2652,14 +2611,9 @@ export default function UngDung({
                               >
                                 <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
                                 {o.dsPhien.length === 0
-                                  ? 'Chưa có phiên nào'
-                                  : `Danh sách phiên (${o.dsPhien.length})`}
+                                  ? 'No sessions yet'
+                                  : `Session History (${o.dsPhien.length})`}
                               </button>
-                              {/* 🔄 NẠP LẠI ĐOẠN CHAT của RIÊNG ô này (Owner 18/08: «giống kiểu F5
-                                  trình duyệt… nút load thì CHỈ load mới chat của ô mình bấm»).
-                                  ⛔ Khoá khi ô đang chạy (nạp giữa lúc chữ đang chảy = mất chữ) và khi
-                                  ô chưa có phiên (⛔ không có gì để nạp). Nhãn NÓI RÕ vì sao khoá —
-                                  nút mờ mà ⛔ không nói lý do thì Owner bấm hoài rồi tưởng app hỏng. */}
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 disabled={o.dangChay || !o.phienHienTai}
@@ -2667,31 +2621,31 @@ export default function UngDung({
                               >
                                 <ArrowsClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
                                 {o.dangChay
-                                  ? 'Đang chạy — nạp lại sau'
+                                  ? 'Running — reload later'
                                   : !o.phienHienTai
-                                    ? 'Chưa có phiên để nạp lại'
-                                    : 'Nạp lại đoạn chat'}
+                                    ? 'No session to reload'
+                                    : 'Reload Chat'}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => capNhat(i, { hienMau: !o.hienMau, moMenu: false })}
                               >
                                 <TextAlignLeft size={15} weight={DAM_ICON} aria-hidden="true" />
-                                {o.hienMau ? 'Tắt ranh giới mẩu' : 'Hiện ranh giới mẩu'}
+                                {o.hienMau ? 'Hide Chunk Boundaries' : 'Show Chunk Boundaries'}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => { capNhat(i, { moMenu: false }); void phienMoi(i); }}
                               >
                                 <Plus size={15} weight={DAM_ICON} aria-hidden="true" />
-                                Mở phiên mới
+                                New Session
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => capNhat(i, { moDan: !o.moDan, loiDan: '', moMenu: false })}
                               >
                                 <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
-                                Dán lệnh resume
+                                Paste Resume Command
                               </button>
                               {i > 0 && (
                                 <>
@@ -2701,7 +2655,7 @@ export default function UngDung({
                                     onClick={() => { void dongOTuMenu(i); }}
                                   >
                                     <X size={15} weight={DAM_ICON} aria-hidden="true" />
-                                    Đóng ô — bỏ trống
+                                    Close Slot — Clear
                                   </button>
                                 </>
                               )}
@@ -2711,20 +2665,18 @@ export default function UngDung({
                       </div>
                     </div>
 
-                    {/* Dòng nhắc chỉ hiện ở 1 ô — 2/4 ô đã có vạch trạng thái dưới đáy. */}
                     {boCuc === 1 && (
                       <div className="nhac-phien">
                         {o.phienHienTai ? (
                           <>
-                            Đang nối phiên <code>{o.phienHienTai.slice(0, 8)}…</code> — phiên cũ giữ nguyên
-                            bối cảnh lúc nó được mở.{' '}
+                            Active session <code>{o.phienHienTai.slice(0, 8)}…</code>.{' '}
                             <button type="button" className="lien-ket" onClick={() => phienMoi(i)}>
-                              Mở phiên mới
+                              Start new session
                             </button>{' '}
-                            nếu vừa đổi cấu hình mà chưa thấy tác dụng.
+                            to reset conversational context.
                           </>
                         ) : (
-                          <>Phiên mới — sẽ có mã sau lượt gửi đầu tiên.</>
+                          <>New session — session ID assigned upon first message.</>
                         )}
                       </div>
                     )}
@@ -2732,8 +2684,8 @@ export default function UngDung({
                     {o.moDan && (
                       <div className="hop-dan">
                         <div className="dan-nhan">
-                          Dán lệnh chép từ sổ phiên (<code>resume.erocathanh.com</code>) — nhận cả
-                          <code>claude --resume &lt;mã&gt;</code>, lệnh có <code>cd &quot;…&quot;</code>, hoặc mã trần.
+                          Paste command copied from session notebook (<code>resume.erocathanh.com</code>) — supports
+                          <code>claude --resume &lt;id&gt;</code>, commands with <code>cd &quot;…&quot;</code>, or raw UUID.
                         </div>
                         <div className="dan-hang">
                           <input
@@ -2745,7 +2697,7 @@ export default function UngDung({
                             spellCheck={false}
                           />
                           <button className="nut-chu manh" type="button" onClick={() => danLenhResume(i)}>
-                            Nối phiên
+                            Attach Session
                           </button>
                         </div>
                         {o.loiDan && <div className="dan-ket-qua">{o.loiDan}</div>}
@@ -2753,12 +2705,10 @@ export default function UngDung({
                         {o.phienChoFork && (
                           <div className="khoi-fork">
                             <button className="nut-chu manh" type="button" disabled={o.dangFork} onClick={() => forkVeGhe(i)}>
-                              {o.dangFork ? `🧬 Đang fork… (${moTaHanFork()})` : '🧬 Fork về ghế này'}
+                              {o.dangFork ? `🧬 Forking… (${moTaHanFork()})` : '🧬 Fork to this seat'}
                             </button>
                             <span className="ghi-chu-fork">
-                              Tạo bản MỚI mang mã riêng cho ghế này. Bản gốc ⛔ KHÔNG bị đụng — app đo lại và báo số.
-                              {' '}<b>Đánh đổi:</b> bản mới chỉ mang theo khoảng 6,5% nội dung (đo 20/08: 19.305 → 1.257 dòng);
-                              phần mất KHÔNG lấy lại được. Khai <code>thu_muc</code> cho ghế là lối giữ đủ.
+                              Create a new session branch for this seat. The original session remains untouched.
                             </span>
                             {/**
                               * 🗣 CÂU DẶN ĐẦU — tuỳ chọn. Gửi NGAY sau khi fork xong.
@@ -2769,7 +2719,7 @@ export default function UngDung({
                               className="o-dan o-cau-dau"
                               value={o.cauDauFork}
                               onChange={(e) => capNhat(i, { cauDauFork: e.target.value })}
-                              placeholder="Câu dặn đầu sau khi fork — bỏ trống cũng được"
+                              placeholder="Initial prompt after fork (optional)"
                               spellCheck={false}
                             />
                           </div>
@@ -2781,7 +2731,7 @@ export default function UngDung({
                       <div className="chon-nhanh">
                         <div className="ds-nhanh">
                           {o.dsPhien.length === 0 && (
-                            <div className="rong">Chưa có phiên nào. Gửi câu đầu tiên để mở phiên.</div>
+                            <div className="rong">No sessions found. Send your first message to start a session.</div>
                           )}
                           {o.dsPhien.map((p) => (
                             <div
@@ -2789,16 +2739,16 @@ export default function UngDung({
                               className={`mon${p.dang_chay ? ' dang-chay' : ''}`}
                               onClick={() => chonPhien(i, p)}
                               title={p.dang_chay
-                                ? 'Đang chạy ở nơi khác — nối vào sẽ hỏng bản ghi phiên'
+                                ? 'Running elsewhere — attaching may disrupt session state'
                                 : p.ma}
                             >
                               <b>
                                 {p.ma === o.phienHienTai ? '● ' : ''}
-                                {p.tin_cuoi || '(chưa có tin)'}
+                                {p.tin_cuoi || '(empty)'}
                               </b>
                               <i>
-                                {p.moc_doc} · {p.so_luot} lượt
-                                {p.dang_chay ? ' · ⛔ đang chạy nơi khác' : ''}
+                                {p.moc_doc} · {p.so_luot} turns
+                                {p.dang_chay ? ' · ⛔ running elsewhere' : ''}
                               </i>
                             </div>
                           ))}
@@ -2811,12 +2761,12 @@ export default function UngDung({
                         className="bang-tin"
                         ref={(el) => { bangTinRefs.current[i] = el; }}
                       >
-                        {o.dangNap && <div className="moc-ngay">Đang nạp lịch sử phiên…</div>}
+                        {o.dangNap && <div className="moc-ngay">Loading session history…</div>}
                         {!o.dangNap && o.tin.length === 0 && (
                           <div className="rong-o">
                             <div className="to">✨</div>
-                            <b>{o.phienHienTai ? 'Phiên trống' : 'Phiên mới'}</b>
-                            <span>Gõ câu hỏi bên dưới để bắt đầu.</span>
+                            <b>{o.phienHienTai ? 'Empty Session' : 'New Session'}</b>
+                            <span>Type your message below to get started.</span>
                           </div>
                         )}
                         {/**
@@ -2833,14 +2783,12 @@ export default function UngDung({
                           */}
                         {chuaBietAiChay && (
                           <div className="moc-ngay canh-hut">
-                            ⚠️ Chưa hỏi được máy chủ xem ghế nào đang chạy — nút Dừng có thể chưa hiện
-                            dù ghế đang chạy thật. Tải lại trang để hỏi lại.
+                            ⚠️ Unable to query running agent status from server — Stop button may not appear even if the seat is running. Reload the page to retry.
                           </div>
                         )}
                         {o.catDongDai && (
                           <div className="moc-ngay canh-hut">
-                            ⚠️ Có một đoạn quá lớn nên app đọc hụt — phần trên đây khuyết một khúc.
-                            Bản gốc vẫn còn nguyên trong tệp phiên.
+                            ⚠️ Message truncated due to excessive length. Original content remains in session log.
                           </div>
                         )}
                         {o.tin.map((t) => (
@@ -2849,8 +2797,8 @@ export default function UngDung({
                             <div>
                               {/* 🔔 Câu này máy tự gửi, ⛔ KHÔNG phải Owner gõ — phải nói rõ ai gọi. */}
                               {t.tu_ai && (
-                                <span className="nhan-danh-thuc" title={`Ghế ${t.tu_ai} gọi qua cổng đánh thức`}>
-                                  {nhanCua(t.tu_ai)} đánh thức
+                                <span className="nhan-danh-thuc" title={`Seat ${t.tu_ai} woke this seat`}>
+                                  Woken by {nhanCua(t.tu_ai)}
                                 </span>
                               )}
                               {/* 💬 Bong bóng MEMO HOÁ — markdown dựng NGAY CẢ khi đang chảy.
@@ -2894,8 +2842,8 @@ export default function UngDung({
                           <span className="so-cho">⏭ {o.hangCho.length}</span>
                           <span className="chu-cho" title={o.hangCho.join('\n———\n')}>
                             {o.hangCho.length === 1
-                              ? `câu đang chờ: ${o.hangCho[0]}`
-                              : `câu — sẽ gửi GỘP làm một lượt: ${o.hangCho.join(' / ')}`}
+                              ? `Queued message: ${o.hangCho[0]}`
+                              : `Queued messages (will be sent in batch): ${o.hangCho.join(' / ')}`}
                           </span>
                           <button
                             className="lien-ket" type="button"
@@ -2919,9 +2867,9 @@ export default function UngDung({
                                 el?.focus();
                               }, 0);
                             }}
-                            title="Đưa các câu đang chờ về ô soạn để sửa lại"
+                            title="Return queued messages to input box to edit"
                           >
-                            sửa hàng chờ
+                            edit queue
                           </button>
                         </div>
                       )}
@@ -2967,10 +2915,8 @@ export default function UngDung({
                           rows={1}
                           /* Ô hẹp thì lời nhắc dài sẽ xuống dòng rồi bị cắt cụt — rút gọn. */
                           placeholder={o.dangChay
-                            ? 'Đang trả lời — cứ gõ, gửi là xếp hàng'
-                            : boCuc === 1 && !camUng
-                              ? `Nhắn cho ${o.ns.nhan}… (Enter để gửi)`
-                              : `Nhắn cho ${o.ns.nhan}…`}
+                            ? 'Responding — you can type now, messages will queue'
+                            : 'Type a message or press / for commands...'}
                         />
                         {/**
                           * 🛑 NÚT DỪNG — Owner 18/08: «nút stop hiện ngay sau khi bấm nút gửi
@@ -2988,21 +2934,26 @@ export default function UngDung({
                           <button
                             className="nut-dung nut-dung-soan" type="button"
                             onClick={() => dungViec(i)}
-                            title="Dừng việc đang chạy ở ô này"
-                            aria-label="Dừng việc đang chạy"
+                            title="Stop task running in this slot"
+                            aria-label="Stop running task"
                           >
                             <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
                           </button>
                         )}
                         <button
+                          className="nut-clear-soan" type="button"
+                          onClick={() => capNhat(i, { soan: '' })}
+                          disabled={!o.soan.trim()}
+                          title="Clear input text"
+                        >
+                          Clear
+                        </button>
+                        <button
                           className="nut-gui" type="button"
                           onClick={() => gui(i)} disabled={!o.soan.trim()}
-                          title={o.dangChay ? 'Ghế đang trả lời — câu này sẽ xếp hàng, xong là gửi tiếp' : 'Gửi'}
+                          title={o.dangChay ? 'Seat is responding — this message will be queued' : 'Send'}
                         >
-                          {/* Owner 17/08: nhãn về «Gửi» như ban đầu — CHỈ đổi chữ,
-                              hành vi giữ nguyên (đang chạy thì vẫn xếp hàng).
-                              Ý nghĩa vẫn nói rõ ở tooltip + dải hàng chờ bên dưới. */}
-                          Gửi
+                          Send
                         </button>
                       </div>
 
@@ -3016,37 +2967,45 @@ export default function UngDung({
                       {o.moHoSo && (
                         <div className="the-ho-so">
                           <div className="hs-hang">
-                            <span className="hs-nhan">Ghế</span>
+                            <span className="hs-nhan">Seat</span>
                             <span className="hs-gia"><b>{o.ns.nhan}</b> · <code>{o.ns.ten}</code></span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Vai</span>
-                            <span className="hs-gia">{o.ns.vai} · phòng {o.ns.ten_phong}</span>
+                            <span className="hs-nhan">Role</span>
+                            <span className="hs-gia">{o.ns.vai} · {o.ns.ten_phong}</span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Phiên</span>
+                            <span className="hs-nhan">Department</span>
+                            <span className="hs-gia">{o.ns.ten_phong}</span>
+                          </div>
+                          <div className="hs-hang">
+                            <span className="hs-nhan">Status</span>
+                            <span className="hs-gia"><span className={`seat-badge ${o.ns.status || 'idle'}`}>{o.ns.status || 'idle'}</span></span>
+                          </div>
+                          <div className="hs-hang">
+                            <span className="hs-nhan">Session</span>
                             <span className="hs-gia">
                               <span className={`cham-noi${o.phienHienTai ? '' : ' tat'}`} />
                               {o.phienHienTai
-                                ? <><code>{o.phienHienTai}</code>{o.noiTiep ? ' · giữ mạch' : ''}</>
-                                : 'Phiên mới — chưa có mã'}
+                                ? <><code>{o.phienHienTai}</code>{o.noiTiep ? ' · continuous' : ''}</>
+                                : 'New session — no ID'}
                             </span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Lượt vừa rồi</span>
+                            <span className="hs-nhan">Last Turn</span>
                             <span className="hs-gia">
                               {o.token === null && o.chiPhi === null
-                                ? '— chưa có số đo'
+                                ? '— no measurements'
                                 : <>
-                                    {o.token !== null && <b style={{ color: 'var(--vang-sang)' }}>{o.token.toLocaleString('vi-VN')} token</b>}
+                                    {o.token !== null && <b style={{ color: 'var(--vang-sang)' }}>{o.token.toLocaleString('en-US')} tokens</b>}
                                     {o.token !== null && o.chiPhi !== null && ' · '}
-                                    {o.chiPhi !== null && `≈ ${o.chiPhi.toFixed(4)} USD`}
+                                    {o.chiPhi !== null && `≈ $${o.chiPhi.toFixed(4)}`}
                                   </>}
                             </span>
                           </div>
                           {o.ns.soul && (
                             <div className="hs-hang">
-                              <span className="hs-nhan">Linh hồn</span>
+                              <span className="hs-nhan">Soul</span>
                               <span className="hs-gia"><code>{o.ns.soul}</code></span>
                             </div>
                           )}

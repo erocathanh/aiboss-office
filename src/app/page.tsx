@@ -28,22 +28,10 @@ export default function Trang() {
     vai: n.vai,
     viet_tat: n.viet_tat,
     tim: n.tim,
-    // 👑 PHẢI mang sang giao diện — thiếu trường này thì UI ⛔ không biết ghế nào được ghim,
-    //    và TỔNG GIÁM ĐỐC rơi tuột xuống giữa danh sách (đo thật: vị trí 126/212).
-    //    ⛔ Đừng đưa `soul` ra đây — đường dẫn tệp là chuyện phía máy chủ.
     ghim: n.ghim ?? false,
-    /**
-     * 📌 PHIÊN GHIM (ghim ở đường bấm tên và bấm thẻ) — PHẢI có mặt ở đây, cùng lý do với `ghim` ngay trên.
-     *    ⚠️ Tên này do Owner chốt 16:26 06/09/2026. Tên cũ «ghim cứng» là NÓI QUÁ —
-     *    xem phạm vi thật ở `UngDung.tsx` khối trên `datNguoi`.
-     * 🕳 Ca thật 06/09/2026: tôi thêm `phien_ghim` vào dữ liệu, vào kiểu, và vào chỗ
-     *    QUYẾT ĐỊNH trong `datNguoi` — nhưng KHÔNG thêm vào đây. Danh sách trường này
-     *    là một BỘ LỌC CHO PHÉP: thiếu tên trong danh sách thì trường bị đánh rơi ở
-     *    ranh giới máy chủ → trình duyệt, và nhánh `if (n.phien_ghim)` thành MÃ CHẾT.
-     * 🔑 `tsc` XANH và `eslint` XANH suốt lúc đó — vì kiểu `optional` KHÔNG tự sinh dữ
-     *    liệu. Kiểu chỉ nói «được phép vắng», nó KHÔNG nói «có mặt».
-     */
     phien_ghim: n.phien_ghim,
+    icon: n.icon ?? '👤',
+    status: n.status ?? 'idle',
   }));
 
   return <UngDung phongBan={dsPhongBan()} nhanSu={nhanSu} tong={tongSo()} />;

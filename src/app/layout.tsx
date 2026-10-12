@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AIBOSS.VN — Phòng ban AI',
-  description: 'Nói chuyện thật với trợ lý AI qua trình duyệt.',
-  robots: { index: false, follow: false }, // web NỘI BỘ
+  title: 'AIBOSS Office — Marketing Department',
+  description: 'Autonomous AI operations workspace and management interface.',
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
@@ -15,7 +15,7 @@ export const viewport: Viewport = {
 
 export default function BoCucGoc({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="vi">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

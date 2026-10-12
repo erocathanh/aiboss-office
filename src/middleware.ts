@@ -22,17 +22,6 @@ export const config = {
 };
 
 export function middleware(req: NextRequest) {
-  const USER = process.env.PHONGBAN_USER;
-  const PASS = process.env.PHONGBAN_PASS;
-
-  // fail-closed: chưa cấu hình thì không ai vào được
-  if (!USER || !PASS) {
-    return new NextResponse(
-      'Chua cau hinh mat khau (PHONGBAN_USER/PHONGBAN_PASS). Trang dong de an toan.',
-      { status: 503 },
-    );
-  }
-
   /* ── Gọi TỪ CHÍNH MÁY thì đi thẳng (Owner chốt 17/08 tối) ──────────────
      Vì sao: các ghế AI trên cùng máy gọi nhau qua 127.0.0.1 (vd POST /api/danh-thuc
      để đánh thức ghế khác). Lớp mật khẩu ⛔ không phân biệt được «người lạ ngoài wifi»
@@ -46,6 +35,17 @@ export function middleware(req: NextRequest) {
   const host = (req.headers.get('host') || '').toLowerCase();
   const tuChinhMay = host.startsWith('127.0.0.1') || host.startsWith('localhost') || host.startsWith('[::1]');
   if (tuChinhMay) return NextResponse.next();
+
+  const USER = process.env.PHONGBAN_USER;
+  const PASS = process.env.PHONGBAN_PASS;
+
+  // fail-closed: chưa cấu hình thì không ai vào được
+  if (!USER || !PASS) {
+    return new NextResponse(
+      'Chua cau hinh mat khau (PHONGBAN_USER/PHONGBAN_PASS). Trang dong de an toan.',
+      { status: 503 },
+    );
+  }
 
   const header = req.headers.get('authorization') || '';
   if (header.startsWith('Basic ')) {

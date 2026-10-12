@@ -446,3 +446,203 @@ body { padding-top: var(--cao-bang); }
 /* 🗣 Ô nhập CÂU DẶN ĐẦU sau khi fork — nằm dưới nút fork, chiếm trọn hàng.
    Cỡ chữ ≥16px: dưới mức đó iOS TỰ PHÓNG TO trang khi bấm vào ô, đẩy nút Gửi khỏi màn. */
 .o-cau-dau { width: 100%; margin-top: 6px; font-size: 16px; }
+
+/* ==========================================================================
+   AIBOSS Office Phase 2 UI Styles - English & Marketing MVP
+   ========================================================================== */
+
+/* Owner node in Org Structure */
+.o-owner-box {
+  margin: 8px 12px 10px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(200, 148, 37, 0.15), rgba(13, 33, 54, 0.6));
+  border: 1px solid rgba(200, 148, 37, 0.35);
+  border-radius: 8px;
+}
+.owner-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.owner-icon {
+  font-size: 20px;
+}
+.owner-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--vang-sang);
+}
+.owner-role {
+  font-size: 11px;
+  color: var(--kem-mo);
+}
+.org-divider {
+  padding: 4px 12px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--kem-mo-2);
+  border-top: 1px solid var(--vien);
+  margin-top: 6px;
+}
+
+/* Header badges */
+.nhan-dept-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(200, 148, 37, 0.2);
+  border: 1px solid rgba(200, 148, 37, 0.4);
+  color: var(--vang-sang);
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+.nhan-tz-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(250, 247, 240, 0.08);
+  border: 1px solid var(--vien);
+  color: var(--kem-mo);
+  font-size: 10.5px;
+  font-family: ui-monospace, monospace;
+  margin-left: 8px;
+}
+.nut-refresh {
+  margin-left: 6px;
+  background: transparent;
+  color: var(--kem-mo);
+  border: 1px solid var(--vien);
+}
+.nut-refresh:hover {
+  color: var(--kem);
+  background: rgba(250, 247, 240, 0.1);
+}
+.progress-marks-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+  padding: 2px 8px;
+  background: rgba(13, 33, 54, 0.7);
+  border: 1px solid var(--vien);
+  border-radius: 4px;
+}
+.pm-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--kem-mo-2);
+  letter-spacing: 0.4px;
+  margin-right: 2px;
+}
+.pm-mark {
+  font-size: 10px;
+  padding: 1px 4px;
+  background: rgba(250, 247, 240, 0.06);
+  border-radius: 3px;
+  color: var(--kem-mo);
+  font-family: ui-monospace, monospace;
+}
+
+/* Status Badges */
+.huy-hieu-trang-thai {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+.huy-hieu-trang-thai.idle {
+  background: rgba(250, 247, 240, 0.12);
+  color: var(--kem-mo);
+}
+.huy-hieu-trang-thai.working {
+  background: rgba(46, 204, 113, 0.2);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.4);
+}
+.huy-hieu-trang-thai.waiting_approval {
+  background: rgba(241, 196, 15, 0.2);
+  color: #f1c40f;
+  border: 1px solid rgba(241, 196, 15, 0.4);
+}
+.huy-hieu-trang-thai.blocked {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.4);
+}
+
+/* Seat Card Extra Info */
+.the-ns .ten-hang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.the-ns .vai-tom-tat {
+  font-size: 11px;
+  color: var(--kem-mo);
+  margin-top: 3px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.the-ns .nut-the-ns {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+}
+.the-ns .nut-mo-chat {
+  background: rgba(200, 148, 37, 0.15);
+  border: 1px solid rgba(200, 148, 37, 0.35);
+  color: var(--vang-sang);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.the-ns .nut-mo-chat:hover {
+  background: var(--vang);
+  color: var(--navy-0);
+}
+
+/* Clear button in composer */
+.nut-clear-soan {
+  background: transparent;
+  border: 1px solid var(--vien);
+  color: var(--kem-mo);
+  border-radius: 6px;
+  padding: 0 12px;
+  height: 36px;
+  font-size: 12.5px;
+  cursor: pointer;
+  margin-right: 6px;
+  transition: all 0.15s ease;
+}
+.nut-clear-soan:hover:not(:disabled) {
+  background: rgba(250, 247, 240, 0.08);
+  color: var(--kem);
+}
+.nut-clear-soan:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.nut-dung-soan {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+}
+.nut-dung-soan .nut-chu-nhan {
+  font-size: 12px;
+  font-weight: 600;
+}
