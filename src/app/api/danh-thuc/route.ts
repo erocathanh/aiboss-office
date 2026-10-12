@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
     con_lai_phut_nay: suat.con_lai,
     het_han_sau_giay: Math.round(HAN_YEU_CAU_MS / 1000),
     ghi_chu:
-      `Đã xếp hàng cho ${maO}. Trình duyệt đang mở ô đó sẽ tự gửi trong ~5 giây. ` +
-      'Trang KHÔNG mở → yêu cầu tự hết hạn sau 3 phút (⛔ không đánh thức bằng câu đã cũ).',
+      `Queued for ${maO}. Server runner will pick it up (~5s). ` +
+      'If server runner is off, request will expire after 3 minutes.',
   });
 }

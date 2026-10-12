@@ -123,8 +123,8 @@ const KHOA_AN_COT = 'phong-ban-ai.an-cot';
  *    ⇒ dòng này là để ĐỌC HIỂU, ⛔ không phải để ghi.
  */
 const BO_MARKETING: string[] = [
-  'claude-eroca-boss', 'claude-marketing', 'claude-ketoan',
-  'claude-cskh', 'claude-sales', 'claude-web-demo',
+  'marketing-lead', 'content-writer', 'social-community', 'email-crm',
+  'paid-media', 'video-creative', 'funnel-offer', 'reviewer',
 ];
 
 /**
@@ -275,11 +275,7 @@ type BoGheDungSan = {
 const chuoiThanhGhe = (ds: string[]): CapGheDungSan[] => ds.map((t) => ({ ten: t, phien: null }));
 
 const SO_BO_GHE: BoGheDungSan[] = [
-  { ma: 'marketing',      ten: 'Phòng Marketing',  ghe: chuoiThanhGhe(BO_MARKETING),  icon: 'vuong-mien' },
-  { ma: 'van-hanh',       ten: 'Vận hành',         ghe: chuoiThanhGhe(BO_VAN_HANH),   icon: 'danh-sach' },
-  { ma: 'quan-ly-cu',     ten: 'Quản Lý Cũ',       ghe: BO_QUAN_LY_CU,                icon: 'bang-ghi' },
-  { ma: 'quan-ly-truong', ten: 'Quản Lý Trường',   ghe: BO_QUAN_LY_TRUONG,            icon: 'bang-ghi' },
-  { ma: 'cong-nghe',      ten: 'Phòng Công Nghệ',  ghe: BO_CONG_NGHE,                 icon: 'bang-ghi' },
+  { ma: 'marketing', ten: 'Marketing Department', ghe: chuoiThanhGhe(BO_MARKETING), icon: 'vuong-mien' },
 ];
 
 // Đọc TỪ SỔ. Thêm một bộ vào `SO_BO_GHE` là hàm này biết ngay — KHÔNG còn nửa sau phải nhớ.
