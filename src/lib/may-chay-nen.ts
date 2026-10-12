@@ -366,17 +366,12 @@ export function datNguonThamDo(f: (maO: string) => number | undefined): void {
   layThamDo = f;
 }
 
-/** Bật bộ chạy nền. Gọi nhiều lần cũng chỉ chạy MỘT bộ. */
+/** Bật bộ chạy nền. Trong AIBOSS Office, office-runner là động cơ duy nhất; may-chay-nen luôn tắt. */
 export function bat(): boolean {
-  if (dangChay) return false;
-  if (process.env.CHAY_NEN !== '1') return false; // ⇦ mặc định TẮT, xem đầu tệp
-  dangChay = true;
-  donGio = setInterval(() => {
-    void raMotVong().catch(() => {
-      dem.loi++;
-    });
-  }, NHIP_MS);
-  return true;
+  if (process.env.CHAY_NEN === '1') {
+    console.warn('[chay-nen] CHAY_NEN ignored: office-runner is the single engine');
+  }
+  return false;
 }
 
 /** Tắt — cho nghiệm thu và cho lúc máy chủ đóng. */

@@ -85,8 +85,6 @@
  * 🔑 Thứ kéo `node:*` sang edge là `instrumentation.ts` — tệp bị dựng cho CẢ HAI runtime.
  *    Nó đi rồi thì KHÔNG cần mẹo nào nữa. **Đừng giữ một mẹo sau khi lý do của nó đã hết.**
  */
-import { bat as batBoNen, datNguonThamDo } from '@/lib/may-chay-nen';
-import { thamDoCuoiCua } from '@/lib/kho-danh-thuc';
 import { startOfficeRunner } from '@/lib/office-runner';
 
 /**
@@ -111,41 +109,18 @@ let dangBat = false;
 export function batMotLan(): void {
   if (daBat || dangBat) return;
   dangBat = true;
-  /**
-   * 🔴 HẸN RA NGOÀI ĐƯỜNG YÊU CẦU — `hermes-aiboss-app-review` FAIL ⑥, 01/09.
-   *
-   * 🕳 Bản trước gọi thẳng, ĐỒNG BỘ, và các cửa gọi nó TRƯỚC cả `req.json()`:
-   * ```
-   * POST có thân JSON hỏng
-   *   TRƯỚC bản vá: parse hỏng → trả 400
-   *   SAU  bản vá : nạp cả đồ thị `may-chay-nen` + dựng đồng hồ → RỒI MỚI phát hiện JSON hỏng → 400
-   * ⇒ lượt đầu chậm thêm, và TÁC DỤNG PHỤ xảy ra TRƯỚC khi xác thực đầu vào.
-   * ```
-   * 🔑 **Một lời gọi «rẻ» đặt trước cửa kiểm tra thì nó KHÔNG còn rẻ nữa — nó thành cái giá
-   *    mà MỌI yêu cầu phải trả, kể cả yêu cầu sai.**
-   * ✅ Hẹn ở đây, KHÔNG phải ở nơi gọi: người gọi KHÔNG thể quên, và mọi cửa chỉ tốn đúng một dòng.
-   *    `setImmediate` chạy sau khi lượt hiện tại nhả — bộ nền vẫn thức trong cùng nhịp,
-   *    nhưng KHÔNG nằm trong đường đo thời gian đáp của ai cả.
-   */
+
   setImmediate(() => {
-  try {
-    // Cắm nguồn dấu thăm dò TRƯỚC khi bật — thiếu bước này thì chốt ③ chạy bằng mặc định
-    // «coi như có trình duyệt» và bộ nền đứng ngoài mãi mãi (an toàn, nhưng vô dụng).
-    datNguonThamDo(thamDoCuoiCua);
-    const bat = batBoNen();
-    startOfficeRunner();
-    console.log(
-      bat
-        ? '[chay-nen] ĐÃ BẬT — máy chủ sẽ tự rút mẩu khỏi hàng đợi khi KHÔNG có trình duyệt lái.'
-        : '[chay-nen] TẮT (đặt CHAY_NEN=1 để bật). App chạy y như cũ.',
-    );
-    daBat = true; // ✅ CHỈ đặt ở CUỐI nhánh thành công
-  } catch (e) {
-    // Bật bộ nền hỏng thì KHÔNG được làm chết một lượt chat thật. Nhưng phải KÊU,
-    // và phải để lần sau CÒN THỬ LẠI — đó là chỗ bản trước của tôi khoá chết.
-    console.error('[chay-nen] KHÔNG bật được (sẽ thử lại ở lượt gọi sau):', e instanceof Error ? e.message : e);
-  } finally {
-    dangBat = false; // dù thành hay bại đều nhả cờ đua — KHÔNG để nó kẹt
-  }
+    try {
+      if (process.env.CHAY_NEN === '1') {
+        console.warn('[chay-nen] CHAY_NEN ignored: office-runner is the single engine');
+      }
+      startOfficeRunner();
+      daBat = true; // ✅ CHỈ đặt ở CUỐI nhánh thành công
+    } catch (e) {
+      console.error('[office-runner] Failed to start:', e instanceof Error ? e.message : e);
+    } finally {
+      dangBat = false; // dù thành hay bại đều nhả cờ đua — KHÔNG để nó kẹt
+    }
   });
 }

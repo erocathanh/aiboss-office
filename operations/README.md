@@ -51,6 +51,13 @@ AIBOSS Office được thiết kế để chạy như một daemon nền thườ
 
 Bộ lập lịch máy chủ `src/lib/office-runner.ts` giúp hệ thống tự động kiểm tra hàng đợi đánh thức (`kho-danh-thuc`) và kích hoạt các lượt chạy của ghế mà **không phụ thuộc vào trình duyệt của người dùng**.
 
+### Kiến trúc một động cơ duy nhất (Single Engine Architecture)
+Hệ thống tuân thủ nguyên tắc: **one engine: office-runner; may-chay-nen (inherited from app-chat) stays disabled**.
+- Toàn bộ cơ chế rút mẩu hàng đợi chuông do `src/lib/office-runner.ts` đảm nhiệm độc quyền.
+- Bộ chạy nền cũ kế thừa từ app-chat (`src/lib/may-chay-nen.ts`) được vô hiệu hóa hoàn toàn để chống xung đột chạy trùng mẩu giữa hai động cơ.
+- Cấu hình LaunchAgent (`com.aiboss.office.plist`) và script cài đặt (`service-install.sh`) tuyệt đối không đặt cờ `CHAY_NEN`.
+- Nếu cờ `CHAY_NEN=1` được đặt thủ công trong môi trường, máy chủ sẽ in dòng cảnh báo: `[chay-nen] CHAY_NEN ignored: office-runner is the single engine` và bỏ qua.
+
 ### Nguyên lý hoạt động
 - Khởi chạy một lần duy nhất lúc máy chủ nạp qua `src/instrumentation.ts` (Next.js Node runtime) và được bảo hiểm bổ sung tại `src/lib/khoi-dong-nen.ts`.
 - Định kỳ mỗi `runner.interval_s` (mặc định 5 giây), runner quét các yêu cầu chuông có trạng thái `cho` và còn hạn.

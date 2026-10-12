@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   try {
     than = (await req.json()) as Than;
   } catch {
-    return Response.json({ loi: 'Thân yêu cầu không phải JSON.' }, { status: 400 });
+    return Response.json({ loi: 'Request body must be valid JSON.' }, { status: 400 });
   }
 
   const maNhanSu = typeof than.ma_nhan_su === 'string' ? than.ma_nhan_su.trim() : '';
@@ -69,34 +69,34 @@ export async function POST(req: NextRequest) {
         ma_nhan_su: cu.ma_nhan_su,
         ma_yeu_cau: cu.ma,
         ghi_chu:
-          'Khoá này đã dùng rồi — trả lại ĐÚNG mẩu cũ, ⛔ tạo mẩu mới. ' +
-          'Ghế sẽ chỉ chạy MỘT lần cho khoá này.',
+          'This key has already been used — returning existing request without creating a new one. ' +
+          'The seat will run only once for this key.',
       });
     }
   }
 
-  if (!maNhanSu) return Response.json({ loi: 'Thiếu `ma_nhan_su` — muốn đánh thức ai?' }, { status: 400 });
-  if (!cauHoi) return Response.json({ loi: 'Thiếu `cau_hoi` — đánh thức mà không nói gì thì phí một lượt.' }, { status: 400 });
+  if (!maNhanSu) return Response.json({ loi: 'Missing `ma_nhan_su` — who do you want to wake up?' }, { status: 400 });
+  if (!cauHoi) return Response.json({ loi: 'Missing `cau_hoi` — waking up without prompt wastes a turn.' }, { status: 400 });
   if (cauHoi.length > CAU_HINH.toiDaKyTu) {
-    return Response.json({ loi: `Câu dài quá ${CAU_HINH.toiDaKyTu} ký tự.` }, { status: 413 });
+    return Response.json({ loi: `Prompt exceeds ${CAU_HINH.toiDaKyTu} characters.` }, { status: 413 });
   }
   // ⭐ Bắt buộc khai tên: nhãn "ai đánh thức" trên giao diện phải chỉ đúng người,
   //    và luật "⛔ không đánh thức chính mình" chỉ kiểm được khi biết người gửi.
   if (!tuAi) {
     return Response.json(
-      { loi: 'Thiếu `tu_ai` — phải khai ghế nào đang gọi (nhãn "ai đánh thức" lấy từ đây).' },
+      { loi: 'Missing `tu_ai` — must specify which seat is calling.' },
       { status: 400 },
     );
   }
 
   if (!timNhanSu(maNhanSu)) {
-    return Response.json({ loi: `Không có nhân sự tên "${maNhanSu}".` }, { status: 404 });
+    return Response.json({ loi: `Seat "${maNhanSu}" not found.` }, { status: 404 });
   }
 
   // ⛔ CHỐNG VÒNG LẶP #1 — ⛔ không đánh thức chính mình (tự gọi tự trả lời = vòng vô tận).
   if (tuAi === maNhanSu) {
     return Response.json(
-      { loi: '⛔ Không đánh thức chính mình. Bạn đang chạy sẵn rồi — cứ làm tiếp trong lượt này.' },
+      { loi: 'Cannot wake up yourself. You are already running — continue within this turn.' },
       { status: 400 },
     );
   }
@@ -126,10 +126,10 @@ export async function POST(req: NextRequest) {
     return Response.json(
       {
         loi:
-          `⛔ Không ô nào đang mở ghế "${maNhanSu}" — ⛔ không đánh thức được. ` +
-          'Cổng này ⛔ KHÔNG tự mở ô mới (mở hộ = giẫm lên ô của người khác). ' +
-          'Nhờ Owner mở ghế đó vào một ô rồi gọi lại.',
-        dang_mo: dangMo.length ? dangMo : ['(không ô nào có ghế)'],
+          `No slot is currently holding seat "${maNhanSu}". ` +
+          'This endpoint does not auto-open new slots. ' +
+          'Please assign the seat to a slot in the UI and try again.',
+        dang_mo: dangMo.length ? dangMo : ['(no slot assigned)'],
       },
       { status: 404 },
     );
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
     con_lai_phut_nay: suat.con_lai,
     het_han_sau_giay: Math.round(HAN_YEU_CAU_MS / 1000),
     ghi_chu:
-      `Queued for ${maO}. Server runner will pick it up (~5s). ` +
-      'If server runner is off, request will expire after 3 minutes.',
+      `Queued; the server runner will pick it up (~5s). ` +
+      'If server runner is disabled, request will expire after 3 minutes.',
   });
 }

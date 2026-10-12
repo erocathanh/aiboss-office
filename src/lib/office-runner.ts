@@ -33,7 +33,7 @@ export interface RunnerLogEvent {
   start?: string;
   end?: string;
   duration_ms?: number;
-  exit?: number;
+  exit?: number | null;
   session_id?: string;
   error?: string;
   skipped_reason?: string;
@@ -43,6 +43,42 @@ let runnerTimer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
 let isTickInProgress = false;
 const activeSeats = new Set<string>();
+
+interface InFlightTurn {
+  seat: string;
+  bell_id: string;
+  startIso: string;
+  startTime: number;
+}
+const inFlightTurns = new Map<string, InFlightTurn>();
+
+/**
+ * Flush any active in-flight turns with exit null and error reason.
+ * Ensures every logged start event has a matching end event even during abrupt stops.
+ */
+export function flushInFlightTurns(reason: string): void {
+  for (const [seat, turn] of inFlightTurns.entries()) {
+    const endIso = new Date().toISOString();
+    logRunnerEvent({
+      timestamp: endIso,
+      seat: turn.seat,
+      bell_id: turn.bell_id,
+      event: 'end',
+      start: turn.startIso,
+      end: endIso,
+      duration_ms: Date.now() - turn.startTime,
+      exit: null,
+      error: reason,
+    });
+    inFlightTurns.delete(seat);
+  }
+}
+
+if (typeof process !== 'undefined') {
+  process.once('SIGINT', () => flushInFlightTurns('server received SIGINT'));
+  process.once('SIGTERM', () => flushInFlightTurns('server received SIGTERM'));
+  process.once('beforeExit', () => flushInFlightTurns('server beforeExit'));
+}
 
 /**
  * Read runner configuration from config/office.json with defaults.
@@ -179,6 +215,13 @@ export async function tickRunner(): Promise<number> {
       const startIso = new Date().toISOString();
       const startTime = Date.now();
 
+      inFlightTurns.set(y.ma_nhan_su, {
+        seat: y.ma_nhan_su,
+        bell_id: y.ma,
+        startIso,
+        startTime,
+      });
+
       logRunnerEvent({
         timestamp: startIso,
         seat: y.ma_nhan_su,
@@ -215,9 +258,12 @@ export async function tickRunner(): Promise<number> {
               timestamp: endIso,
               seat: y.ma_nhan_su,
               bell_id: y.ma,
-              event: 'skipped',
-              skipped_reason: 'terminal',
+              event: 'end',
+              start: startIso,
+              end: endIso,
               duration_ms: durationMs,
+              exit: null,
+              error: result.loi,
             });
           } else {
             logRunnerEvent({
@@ -258,10 +304,11 @@ export async function tickRunner(): Promise<number> {
             start: startIso,
             end: endIso,
             duration_ms: Date.now() - startTime,
-            exit: 1,
+            exit: null,
             error: errMsg,
           });
         } finally {
+          inFlightTurns.delete(y.ma_nhan_su);
           activeSeats.delete(y.ma_nhan_su);
         }
       })();
@@ -303,7 +350,9 @@ export function stopOfficeRunner(): void {
     clearInterval(runnerTimer);
     runnerTimer = null;
   }
+  flushInFlightTurns('runner stopped');
   isRunning = false;
+  activeSeats.clear();
 }
 
 /**
