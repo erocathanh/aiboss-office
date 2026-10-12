@@ -80,11 +80,11 @@
   <rect x="431" y="361" width="338" height="27" rx="11" fill="#C9A227"/>
   <rect x="431" y="374" width="338" height="14" fill="#C9A227"/>
   <text x="446" y="379" class="band">ĐƯỜNG B · cây git riêng (worktree)</text>
-  <text x="446" y="412" class="name14">antigravity-aiboss-office · thợ code</text>
+  <text x="446" y="412" class="name14">antigravity-aiboss-app-chat · thợ code</text>
   <rect x="446" y="421" width="130" height="18" rx="9" fill="#DCE7FB" stroke="#4285F4"/>
   <text x="511" y="434" class="tagg" text-anchor="middle">Gemini · Antigravity</text>
   <text x="446" y="458" class="line">tránh 7 tệp đường A đang sửa · không build</text>
-  <text x="446" y="477" class="line">tên cũ gemini-aiboss-app-exe, đổi 10/10/2026</text>
+  <text x="446" y="477" class="line">tên cũ: gemini-aiboss-app-exe → antigravity-aiboss-office</text>
 
   <!-- nộp bài sang người soát -->
   <line x1="220" y1="490" x2="220" y2="528" class="noi" marker-end="url(#mui-ten)"/>
