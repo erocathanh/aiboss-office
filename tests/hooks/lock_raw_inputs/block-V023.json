@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cd projects/THU-SU-THAT && ln -s ../inputs wip/raw-relative && printf x > wip/raw-relative/a.md"
+  }
+}

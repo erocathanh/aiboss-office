@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm install lodash@4.17.21"
+  }
+}

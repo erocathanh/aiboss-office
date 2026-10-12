@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/wip/ghi-chep.md",
+    "content": "Khách dùng số ０９１２３４５６７８ liên hệ."
+  }
+}

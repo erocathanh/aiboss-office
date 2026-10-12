@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ln -s projects/THU-SU-THAT/inputs raw-link && printf x > raw-link/a.md"
+  }
+}

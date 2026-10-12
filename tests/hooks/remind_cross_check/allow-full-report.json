@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/wip/su-that-van-hanh_v01_20260930.md",
+    "content": "# Báo cáo\n## Ba chi tiết đã lược bỏ\n- Chi tiết 1: lược bỏ vì khách không nhắc tới.\n- Chi tiết 2: lược bỏ vì số liệu tuần trước đã cũ.\n- Chi tiết 3: lược bỏ vì trùng lặp với kênh khác.\n## Trục Vận hành\nNội dung trục vận hành."
+  }
+}

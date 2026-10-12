@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo '- [18:00] BƯỚC 1 · xong · không · đã cập nhật' >> projects/THU-SU-THAT/CHANNEL.md"
+  }
+}

@@ -14,6 +14,8 @@
 .next/
 .trang-thai/
 ai/__pycache__/
+__pycache__/
+logs/
 chon-mau/.vercel/
 chon-mau/node_modules/
 next-env.d.ts

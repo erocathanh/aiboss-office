@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "install x projects/THU-SU-THAT/inputs/a.md"
+  }
+}

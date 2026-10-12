@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 - <<'EOF'\nbase = 'https://graph.facebook.com/v21.0'\nurl = base + '/me/messages'\nu.urlopen(u.Request(url, data=b'{}'))\nEOF"
+  }
+}

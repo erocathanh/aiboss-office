@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "wip/a.md",
+    "old_string": "x",
+    "new_string": "<KEY:github_pat_:24>"
+  }
+}

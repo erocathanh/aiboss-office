@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "mcp__claude_ai_Gmail__reply",
+  "tool_input": {
+    "message_id": "msg_001",
+    "body": "Nội dung phản hồi"
+  }
+}

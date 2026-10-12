@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/outputs/su-that-van-hanh_final.md",
+    "content": "# Báo cáo chốt\n## Câu nguyên văn của khách\nĐã xong."
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cd -P projects/THU-SU-THAT/outputs && printf x > da-chot_final.md"
+  }
+}

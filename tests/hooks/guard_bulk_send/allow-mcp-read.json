@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "mcp__github__get_issue",
+  "tool_input": {
+    "issue_number": 1
+  }
+}

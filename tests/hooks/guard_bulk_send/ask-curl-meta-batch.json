@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -F 'batch=[{\"method\":\"POST\",\"relative_url\":\"me/messages\"}]' https://graph.facebook.com/v21.0"
+  }
+}

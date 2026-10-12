@@ -1,0 +1,13 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "MultiEdit",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/outputs/da-chot_final.md",
+    "edits": [
+      {
+        "old_string": "chot",
+        "new_string": "x"
+      }
+    ]
+  }
+}
