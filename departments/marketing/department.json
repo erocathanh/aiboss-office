@@ -11,20 +11,29 @@
     "content-writer",
     "social-community",
     "email-crm",
-    "paid-ads",
+    "paid-media",
     "video-creative",
-    "search-ai-visibility",
+    "funnel-offer",
     "reviewer"
   ],
   "packs": [
     "core",
     "company-facts",
-    "marketing-ops"
+    "funnel-method",
+    "connector-map",
+    "measurement-budget"
   ],
   "gates": [
-    "money-out",
+    "ads-account-write",
     "customer-message",
     "publish",
-    "delete"
+    "delete",
+    "customer-page-deploy",
+    "crm-bulk-or-edit"
+  ],
+  "tier10": [
+    "search-ai-visibility",
+    "community-zalo-skool",
+    "marketing-analytics"
   ]
 }

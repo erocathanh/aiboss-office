@@ -2,7 +2,7 @@
   {
     "seat_id": "marketing-lead",
     "name": "Marketing Lead",
-    "role": "Takes work from the owner, splits it across seats, does first-round acceptance, keeps the department ledger",
+    "role": "Takes work from the owner, splits it across seats, does first-round acceptance, keeps the department ledger and the measurement conventions (UTM, CRM reconciliation, weekly numbers)",
     "department": "marketing",
     "dir": "agents/marketing-lead",
     "icon": "🎯",
@@ -23,8 +23,8 @@
   },
   {
     "seat_id": "social-community",
-    "name": "Social & Community",
-    "role": "Fan page and LinkedIn posts, replies to comments and inbox from company facts; escalates anything outside the facts",
+    "name": "Social Media & Community Manager",
+    "role": "Posting calendar for the pages and Instagram, replies to comments and inbox from company facts; escalates anything outside the facts",
     "department": "marketing",
     "dir": "agents/social-community",
     "icon": "💬",
@@ -34,7 +34,7 @@
   },
   {
     "seat_id": "email-crm",
-    "name": "Email & CRM",
+    "name": "Email & CRM Specialist",
     "role": "Email sequences, segments, open and click tracking; drafts only, a human approves sends",
     "department": "marketing",
     "dir": "agents/email-crm",
@@ -44,11 +44,11 @@
     "example": false
   },
   {
-    "seat_id": "paid-ads",
-    "name": "Paid Ads",
-    "role": "Meta and Google campaigns, UTM and tracking, spend reports; money-out gate always on",
+    "seat_id": "paid-media",
+    "name": "Paid Media Specialist",
+    "role": "Meta and Google campaigns, UTM and tracking, spend reports; every write to the ad account is gated",
     "department": "marketing",
-    "dir": "agents/paid-ads",
+    "dir": "agents/paid-media",
     "icon": "📊",
     "status": "idle",
     "pinned_session": null,
@@ -56,7 +56,7 @@
   },
   {
     "seat_id": "video-creative",
-    "name": "Video & Creative",
+    "name": "Video & Creative Producer",
     "role": "Short videos, thumbnails and post images from approved scripts",
     "department": "marketing",
     "dir": "agents/video-creative",
@@ -66,19 +66,19 @@
     "example": false
   },
   {
-    "seat_id": "search-ai-visibility",
-    "name": "Search & AI Visibility",
-    "role": "SEO and AI-engine visibility: audits, llms.txt, structured content",
+    "seat_id": "funnel-offer",
+    "name": "Funnel & Offer Strategist",
+    "role": "Lead magnet, free class, offer, sales page and checkout path; drafts the funnel, a human approves what customers see",
     "department": "marketing",
-    "dir": "agents/search-ai-visibility",
-    "icon": "🔍",
+    "dir": "agents/funnel-offer",
+    "icon": "🧲",
     "status": "idle",
     "pinned_session": null,
     "example": false
   },
   {
     "seat_id": "reviewer",
-    "name": "Reviewer",
+    "name": "Marketing QA Reviewer",
     "role": "Reviews every deliverable on a different model before it goes out; never self-approves",
     "department": "marketing",
     "dir": "agents/reviewer",
