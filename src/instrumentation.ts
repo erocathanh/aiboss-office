@@ -7,6 +7,9 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    if (process.env.CHAY_NEN === '1') {
+      console.warn('[chay-nen] CHAY_NEN ignored: office-runner is the single engine');
+    }
     const { startOfficeRunner } = await import('@/lib/office-runner');
     startOfficeRunner();
   }
