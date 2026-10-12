@@ -22,7 +22,7 @@
                     │                                 │
      ┌──────────────┴──────────────┐   ┌──────────────┴──────────────┐
      │ ĐƯỜNG A · đổi bản phục hồi  │   │ ĐƯỜNG B · cây git riêng     │
-     │ claude-aiboss-app-exe       │   │ antigravity-aiboss-office   │
+     │ claude-aiboss-app-exe       │   │ antigravity-aiboss-app-chat │
      │ Claude · DUY NHẤT dựng      │   │ Gemini · tránh 7 tệp đường A│
      └──────────────┬──────────────┘   └──────────────┬──────────────┘
                     │ nộp                             │ nộp
@@ -40,7 +40,7 @@
 | Anh Thanh | Owner: quyết trang round · xác nhận khởi động lại app hai lần liền · mở lượt ghế Antigravity | — | — | ô chat app · trang round |
 | `claude-aiboss-app-pm` | PM: giữ sổ · soạn đề · giao việc · nghiệm thu · soạn câu hỏi trang round · không viết mã | claude-opus-5-5 | sổ sách tự giữ; quyết lớn trình anh | ô 2 trong app |
 | `claude-aiboss-app-exe` | thợ đường A (đổi bản phục hồi) · DUY NHẤT chạy `next build`, chỉ sau verdict ĐẠT | claude-opus-5-5 | Hermes phiên A | kênh `doi-aiboss-app-chat.md` + chuông `/api/danh-thuc` |
-| `antigravity-aiboss-office` | thợ đường B · cây git riêng · tránh 7 tệp đường A · không dựng | Gemini (Antigravity) | Hermes phiên B | hộp thư broker `gui_tin` + anh mở lượt trong Antigravity |
+| `antigravity-aiboss-app-chat` | thợ đường B · cây git riêng · tránh 7 tệp đường A · không dựng | Gemini (Antigravity) | Hermes phiên B | hộp thư broker `gui_tin` + anh mở lượt trong Antigravity |
 | `hermes-aiboss-app-reviewer` | người soát duy nhất · chỉ soát · `--safe-mode` chỉ đọc | gpt-6-astra (OpenAI Codex) | — | script phóng tách rời; mã phiên ở sổ phiên |
 | `claude-phong-ban-pm` | research: đọc mã nhà khác, mang bằng chứng · không ra verdict | Claude | — | kênh + chuông |
 | `antigravity-web-noibo` | dựng và đẩy trang round lên `aiboss-app-noibo.erocathanh.com` (PM soạn đề) | Gemini | PM đo bản live (render-test · md5 · trang bịa ra 404) | hộp thư broker + anh mở lượt |
@@ -60,3 +60,4 @@
 ## 4. Lịch sử
 
 - **10/10/2026** — lập sơ đồ (bản chữ + bản vẽ). Ghế Antigravity của app đổi tên `gemini-aiboss-app-exe` → `antigravity-aiboss-office` (Q-006). Hermes chỉ soát; hai phiên soát cho hai đường (Q-007). `hermes-build-app` thôi viết mã cho dự án app.
+- **12/10/2026 10:3x** — ghế `antigravity-aiboss-office` chuyển sang dự án aiboss-office (anh Thanh 09:5x) ⇒ đội B của app dùng ghế mới `antigravity-aiboss-app-chat` theo luật «mỗi dự án một ghế Antigravity» (AGENTS.md + GEMINI.md kho app, commit 9c632a7).
