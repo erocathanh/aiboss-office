@@ -9,6 +9,7 @@
 - **Nature:** Autonomous AI operations workspace and management platform for small businesses and agencies. Provides org charts, department seat management, multi-agent coordination, and execution dashboards.
 - **Port:** Runs locally at **`http://127.0.0.1:4330`**.
   - **HARD RULE:** Port 4330 is reserved for AIBOSS Office. Do NOT use port 4319 (reserved for `aiboss-app-chat`).
+- **Seat Layout:** Seats reside within department directories: `departments/<dept>/seats/<seat_id>/` (e.g. `departments/marketing/seats/<seat_id>/`).
 - **Owner:** Anh **Eroca Thanh**.
 
 ---

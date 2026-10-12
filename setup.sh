@@ -41,17 +41,19 @@ for dir in "${DATA_DIRS[@]}"; do
 done
 check_pass "Runtime data directories (operations/data/*) initialized"
 
-# 2. Ensure packs and operations directories exist
+# 2. Ensure packs and structural directories exist
 STRUCT_DIRS=(
   "packs/core"
   "packs/company-facts"
   "packs/methods"
   "packs/connectors"
+  "packs/funnel-method"
+  "packs/connector-map"
+  "packs/measurement-budget"
   "operations/hooks"
   "operations/scripts"
   "operations/templates"
-  "agents"
-  "departments/marketing"
+  "departments/marketing/seats"
   "projects"
   "data"
   "config"
@@ -64,6 +66,29 @@ for dir in "${STRUCT_DIRS[@]}"; do
   fi
 done
 check_pass "Workspace structural directories verified"
+
+# 2b. Ensure 8 marketing seat directories exist under departments/marketing/seats
+MARKETING_SEATS=(
+  "marketing-lead"
+  "content-writer"
+  "social-community"
+  "email-crm"
+  "paid-media"
+  "video-creative"
+  "funnel-offer"
+  "reviewer"
+)
+
+SEATS_OK=1
+for seat in "${MARKETING_SEATS[@]}"; do
+  if [ ! -d "departments/marketing/seats/$seat" ]; then
+    check_fail "Seat directory departments/marketing/seats/$seat missing"
+    SEATS_OK=0
+  fi
+done
+if [ "$SEATS_OK" -eq 1 ]; then
+  check_pass "All 8 marketing seat directories verified under departments/marketing/seats"
+fi
 
 # 3. Check configuration & data JSON readability and syntax
 JSON_FILES=(
@@ -109,6 +134,32 @@ else
     check_fail "pnpm install failed"
   fi
 fi
+
+# 6. Check Basic Auth environment variables (PHONGBAN_USER / PHONGBAN_PASS)
+set +u
+AUTH_U="${PHONGBAN_USER:-}"
+AUTH_P="${PHONGBAN_PASS:-}"
+
+if [ -z "$AUTH_U" ] || [ -z "$AUTH_P" ]; then
+  if [ -f ".env" ]; then
+    AUTH_U="$(grep -E '^PHONGBAN_USER=' .env 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '\r\n\"'\'' ')"
+    AUTH_P="$(grep -E '^PHONGBAN_PASS=' .env 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '\r\n\"'\'' ')"
+  fi
+fi
+
+if [ -z "$AUTH_U" ] || [ -z "$AUTH_P" ]; then
+  if [ -f "$HOME/.bos-funnel-basic-auth" ]; then
+    AUTH_U="$(sed -n '1p' "$HOME/.bos-funnel-basic-auth" 2>/dev/null | sed -E 's/^[^:]*:[[:space:]]*//' | tr -d '\r\n')"
+    AUTH_P="$(sed -n '2p' "$HOME/.bos-funnel-basic-auth" 2>/dev/null | sed -E 's/^[^:]*:[[:space:]]*//' | tr -d '\r\n')"
+  fi
+fi
+
+if [ -n "$AUTH_U" ] && [ -n "$AUTH_P" ]; then
+  check_pass "Authentication variables configured (PHONGBAN_USER / PHONGBAN_PASS detected)"
+else
+  check_fail "Authentication variables missing: PHONGBAN_USER and/or PHONGBAN_PASS not set (add to .env)"
+fi
+set -u
 
 # Summary
 echo "=================================================="

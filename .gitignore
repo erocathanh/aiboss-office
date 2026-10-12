@@ -33,4 +33,4 @@ operations/data/**
 !operations/data/**/
 !operations/data/**/.gitkeep
 private/
-agents/*/.claude/settings.local.json
+departments/*/seats/*/.claude/settings.local.json

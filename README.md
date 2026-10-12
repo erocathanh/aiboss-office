@@ -11,29 +11,31 @@ AIBOSS Office is a standalone workspace platform providing org charts, multi-sea
 
 ## Getting Started
 
-1. **Bootstrap Workspace & Run Health Checks:**
+1. **Bootstrap & Health Checks:**
    ```bash
    ./setup.sh
    ```
 
-2. **Start Development Server:**
+2. **Environment & Authentication:**
+   Configure `PHONGBAN_USER` and `PHONGBAN_PASS` in `.env` (or environment).
+
+3. **Development Server:**
    ```bash
    pnpm dev
    ```
-   Access the dashboard at `http://127.0.0.1:4330`.
 
-3. **Production Build & Run:**
+4. **Production Build & Run:**
    ```bash
    pnpm build
    pnpm start
    ```
+   Access the dashboard at `http://127.0.0.1:4330`.
 
 ## Repository Structure
 
 - `config/` - Core office configuration (`office.json`).
-- `departments/` - Department definitions and org structures (`marketing/`).
+- `departments/` - Department structures and seats (`departments/marketing/seats/<seat_id>/`).
 - `data/` - Static seat and department manifests (`seats.json`, `departments.json`).
-- `agents/` - Execution seats and agent configurations.
-- `packs/` - Operational packs (`core`, `company-facts`, `methods`, `connectors`).
+- `packs/` - Operational packs (`core`, `company-facts`, `funnel-method`, `connector-map`, `measurement-budget`).
 - `operations/` - Automation scripts, hooks, templates, and runtime state (`data/`).
 - `projects/` - Work project containers and active initiatives.
