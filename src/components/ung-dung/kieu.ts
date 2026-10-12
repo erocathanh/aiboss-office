@@ -2,11 +2,21 @@ interface PhongBan { ma: string; icon: string; ten: string; so_nhan_su: number }
 interface NhanSu {
   ten: string; nhan: string; phong: string; ten_phong: string;
   vai: string; viet_tat: string; tim: string;
-  /** 👑 Ghim đầu danh sách · ô 1 mọi chế độ chia ô. */
+  /** 👑 Ghim đầu danh sách · ⛔ không nút tắt · ô 1 mọi chế độ chia ô. */
   ghim?: boolean;
-  /** Đường dẫn tệp LINH HỒN của ghế. */
+  /**
+   * Đường dẫn tệp LINH HỒN của ghế (7/218 ghế có, đo trong `du-lieu/nhan-su.json`).
+   * ⚠️ Kiểu này là BẢN CHÉP của `src/lib/nhan-su.ts` — dữ liệu vẫn về đủ, chỉ là bản
+   * chép thiếu trường nên TypeScript báo lỗi khi tôi hiện nó ra thẻ hồ sơ (17/08/2026).
+   * 📌 Hai bản khai cùng một thứ thì sớm muộn cũng lệch; đáng gộp về một nguồn.
+   */
   soul?: string;
-  /** Phiên ghim cho ghế này. */
+  /**
+   * 📌 Phiên ghim — tên chính thức «ghim ở đường bấm tên và bấm thẻ» (Owner chốt 16:26 06/09/2026).
+   *    Xem chú thích đầy đủ, kèm PHẠM VI đo được, ở `src/lib/nhan-su.ts`.
+   * ⚠️ Thêm ở CẢ HAI nơi vì kiểu này là BẢN CHÉP; chính chú thích trên đã cảnh báo
+   *    bản chép sẽ lệch, và `thu_muc` đã lệch thật. Đây là lần thứ hai.
+   */
   phien_ghim?: string;
   icon?: string;
   status?: string;

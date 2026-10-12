@@ -153,6 +153,9 @@ export type PhuThuocNap = {
   dongO: (i: number) => Promise<boolean>;
   ghiO: (i: number, ten: string, phien: string) => Promise<boolean>;
   napLichSu: (i: number, ten: string, phien: string) => Promise<'xong' | 'loi-thoi' | 'hong'>;
+  /** 🔒 Phiên GHIM của ghế, hoặc null. Tuỳ chọn: cổng cũ chẳng khai thì coi như KHÔNG ghim,
+   *  nên mọi chỗ gọi sẵn có giữ nguyên nết. */
+  phienGhimCua?: (ten: string) => string | null;
   moDan?: (i: number, goiY: string) => void;
   donTruocKhiGhi?: (i: number) => void;
 };
@@ -187,12 +190,23 @@ export async function chayNapBoGhe(muc: CapGheNap[], pt: PhuThuocNap): Promise<K
     // 🔑 ĐÂY là chỗ vòng 2 đứt: kết quả `datNguoi` bị vứt. Nay nó ĐI QUA đúng một cửa.
     const ketO = await pt.datNguoi(i, dich);
     ghiVaoSo(kq, i + 1, ketO);
-    if (!ketO.xong && 'hong' in ketO) continue;        // ghế chưa đặt được thì đừng khôi phục phiên
+    if (!ketO.xong) continue;
 
     const goiY = muc[i]?.goiY;
     if (goiY) pt.moDan?.(i, goiY);
 
-    const phienLuu = muc[i]?.phien ?? null;
+    /**
+     * 🔒 ㉘ 🅰 — GHẾ CÓ GHIM thì ẢNH CHỤP BỘ GHẾ KHÔNG được ghi chồng lên nó (Owner quyết 07/09).
+     *
+     * 🕳 Đường cũ: `datNguoi` phía trên ĐÃ nối ô vào đúng phiên ghim, rồi mấy dòng dưới lấy
+     *    `phienLuu` — mã phiên chụp lúc LƯU BỘ GHẾ — thấy khác sổ nên GHI CHỒNG lên.
+     *    Ô rơi về phiên cũ, và cả hai bước đều báo THÀNH CÔNG.
+     * 🔑 Đây là đường Owner KHÔNG chủ động chọn phiên: anh ấy bấm «nạp bộ ghế», chẳng chọn
+     *    phiên nào cả. Nên cái ghim phải thắng ảnh chụp.
+     * ⚠️ `pt.phienGhimCua` là TUỲ CHỌN ⇒ cổng nào chẳng khai thì hành vi y hệt trước.
+     */
+    const ghim = pt.phienGhimCua?.(dich) ?? null;
+    const phienLuu = ghim ? null : (muc[i]?.phien ?? null);
     if (phienLuu && pt.docO(i).phien !== phienLuu) {
       pt.donTruocKhiGhi?.(i);
       if (!(await pt.ghiO(i, dich, phienLuu))) { kq.hong.push({ o: i + 1, vi_sao: 'ghi-so' }); continue; }
@@ -204,11 +218,37 @@ export async function chayNapBoGhe(muc: CapGheNap[], pt: PhuThuocNap): Promise<K
   return kq;
 }
 
+// Shared contract for both write adapters. Revisions distinguish A -> B -> A.
+export type WriteBinding = Readonly<{ seat: string | null; session: string | null; generation: number }>;
+
+export function bindingOf(row?: { ma_nhan_su: string | null; ma_phien: string | null; generation?: number } | null): WriteBinding {
+  return { seat: row?.ma_nhan_su ?? null, session: row?.ma_phien ?? null, generation: row?.generation ?? 0 };
+}
+
+export function isWriteBinding(value: unknown): value is WriteBinding {
+  if (!value || typeof value !== 'object') return false;
+  const b = value as WriteBinding;
+  return (b.seat === null || typeof b.seat === 'string') &&
+    (b.session === null || typeof b.session === 'string') &&
+    Number.isSafeInteger(b.generation) && b.generation >= 0;
+}
+
+export function sameBinding(current: WriteBinding, expected: WriteBinding): boolean {
+  return isWriteBinding(expected) && current.generation === expected.generation &&
+    current.seat === expected.seat && current.session === expected.session;
+}
+
+export function nextBinding(current: WriteBinding, seat: string | null, session: string | null): WriteBinding {
+  if (current.generation >= Number.MAX_SAFE_INTEGER) throw new Error('Binding generation exhausted');
+  return { seat, session, generation: current.generation + 1 };
+}
+
 export type ThanGhiO = {
   ma_o: string;
   ma_nhan_su: string | null;
   ma_phien: string | null;
   xoa_lien_ket: boolean;
+  binding?: WriteBinding;
 };
 
 /**

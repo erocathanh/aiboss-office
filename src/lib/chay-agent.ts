@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import { CAU_HINH } from './cau-hinh';
+import { ghiSoHuu } from './so-so-huu';
 
 /**
  * Gọi Claude Code ở CHẾ ĐỘ KHÔNG-TƯƠNG-TÁC và đẩy ra từng mẩu trả lời.
@@ -48,26 +49,112 @@ const CAM_KHI_HAN_CHE = [
   'TaskCreate', 'TaskUpdate', 'TaskStop', 'EnterWorktree', 'ExitWorktree',
 ];
 
+/** Where this process learned its bind address, and what it learned. */
+type HostDangNghe = { host: string | null; nguon: string };
+
+/**
+ * Reads the address this server is ACTUALLY listening on.
+ *
+ * `-H` is a command-line FLAG, not an env var. Measured 11/09/2026 on next 15.5.4:
+ * `next start` parses that flag inside its OWN process (next-start.js spawns no child)
+ * and rewrites only `process.title`, never `process.argv`. So argv is the honest source.
+ * That title rewrite is also why `ps` shows "next-server (v15.5.4)" and tells you
+ * nothing about -H: reading the process list here would measure the wrong thing.
+ *
+ * 🕳 ROUND 2, 12/09/2026 — the reviewer (gemini-aiboss-app-review) rejected round 1 and it was
+ *    right: reading `HOST` let anyone LIE to this brake. Measured on next 15.5.4:
+ *
+ *      `grep env.HOST` in next/dist            -> 0 hits   (positive control: env.PORT 14 hits)
+ *      HOST=127.0.0.1 npx next start           -> argv has no -H, so Next binds its default `::`
+ *                                                 while this function would answer "127.0.0.1"
+ *      => brake OFF at the exact moment the app is open to the network.
+ *
+ * 🔴 And the SAME hole exists for `HOSTNAME`, which the reviewer's recommendation would have kept.
+ *    Measured the same way: `HOSTNAME=127.0.0.1 npx next start` -> argv still has no -H, Next still
+ *    binds `::`. Next only honours HOSTNAME inside the STANDALONE server it generates
+ *    (build/utils.js writes `process.env.HOSTNAME || '0.0.0.0'` into that file), and this app has
+ *    no `output: 'standalone'` and no `.next/standalone` directory. So here HOSTNAME is a lie too.
+ *
+ * ⇒ ONE source only: the `-H` / `--hostname` flag in `process.argv`. Anything else means nobody
+ *   declared a host, which means Node's default: every interface. That reads as EXTERNAL.
+ *   If this app ever ships a standalone build, this function must be revisited — but the failure
+ *   direction is safe: a standalone server.js has no -H, so the brake would over-restrict, not
+ *   under-restrict.
+ */
+export function hostDangNghe(): HostDangNghe {
+  const argv = process.argv;
+  for (let i = 0; i < argv.length; i += 1) {
+    const co = argv[i] ?? '';
+    if ((co === '-H' || co === '--hostname') && typeof argv[i + 1] === 'string') {
+      return { host: argv[i + 1], nguon: 'cờ dòng lệnh' };
+    }
+    const gan = /^--hostname=(.+)$/.exec(co);
+    if (gan && gan[1]) return { host: gan[1], nguon: 'cờ dòng lệnh' };
+  }
+  return { host: null, nguon: 'không ai khai' };
+}
+
+/** Addresses that mean "this machine only". Everything else is reachable from outside. */
+const CHI_MAY_NAY = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/**
+ * True when this server can be reached from outside this machine.
+ *
+ * 🔴 "Nobody declared a host" is NOT local. Measured 11/09/2026: `server.listen(port)`
+ *    with no address binds `::`, i.e. every interface. The old line read that empty
+ *    case as local, which is backwards — it handed out full tools in exactly the
+ *    configuration the brake existed to catch.
+ */
+function ngheRaNgoai(): boolean {
+  const { host } = hostDangNghe();
+  if (host === null) return true;
+  return !CHI_MAY_NAY.has(host.trim().toLowerCase());
+}
+
 /**
  * 🔒 KHOÁ DUY NHẤT CÒN LẠI — chế độ terminal CHỈ bật khi máy chủ nghe ở MÁY NÀY.
  *
- * ⛔ Đây ⛔ KHÔNG phải rào chắn Owner, mà là **phanh chống quên**: ngày nào đưa trang
+ * Đây KHÔNG phải rào chắn Owner, mà là **phanh chống quên**: ngày nào đưa trang
  *    ra ngoài mạng, "ai vào được trang" lập tức đồng nghĩa "chạy được lệnh trên máy Owner".
- *    Người quên thường là người bận, ⛔ không phải người ẩu — nên để máy nhớ hộ.
+ *    Người quên thường là người bận, KHÔNG phải người ẩu — nên để máy nhớ hộ.
  *    Muốn mở ra ngoài mà vẫn full quyền: tự đặt `GIONG_TERMINAL=1`, nhưng phải
  *    dựng lớp đăng nhập TRƯỚC.
+ *
+ * 🕳 Ca thật 11/09/2026 — cái phanh này CHƯA TỪNG NỔ một lần nào.
+ *    Bản cũ chỉ đọc `process.env.HOST`, mà trên máy này KHÔNG ai đặt HOST: không
+ *    `chay-lan.sh`, không plist. Vậy `ngheNgoai` luôn false, phanh luôn nhả — trong
+ *    khi app THẬT SỰ bám ra mọi giao diện mạng.
+ *    📌 Một cái phanh trông như đang canh mà chưa từng canh thì tệ hơn KHÔNG có phanh:
+ *       ai đọc mã cũng tin là đã có người gác, nên KHÔNG ai đi gác nữa.
  */
 function chayNhuTerminal(): boolean {
   if (process.env.GIONG_TERMINAL === '1') return true;          // Owner ép bật
   if (process.env.GIONG_TERMINAL === '0') return false;         // Owner ép tắt
-  const ngheNgoai = ['0.0.0.0', '::'].includes(process.env.HOST ?? '');
-  return !ngheNgoai;
+  return !ngheRaNgoai();
 }
 
 const GIONG_TERMINAL = chayNhuTerminal();
 
 /** Giống terminal ⇒ ⛔ KHÔNG cấm công cụ nào. Terminal có gì, app có nấy. */
-const CONG_CU_CAM: string[] = GIONG_TERMINAL ? [] : CAM_KHI_HAN_CHE;
+// Exported so a test can read the DECISION itself instead of scraping the log line below.
+// The reviewer called the old harness a blind ruler for exactly that reason: change the logic,
+// keep the string, and a string-reading test stays green.
+export const CONG_CU_CAM: string[] = GIONG_TERMINAL ? [] : CAM_KHI_HAN_CHE;
+
+// The brake has to say out loud what it decided, once per server process. A silent
+// brake is how the old one stayed broken: nothing it decided was ever visible, so
+// nobody could notice it had decided nothing at all.
+{
+  const { host, nguon } = hostDangNghe();
+  const ep = process.env.GIONG_TERMINAL;
+  const lyDo = ep === '1' || ep === '0'
+    ? `GIONG_TERMINAL=${ep} (Owner ép)`
+    : `tự đo — host «${host ?? 'không ai khai'}» từ ${nguon}`;
+  console.log(
+    `[chay-agent] giọng terminal: ${GIONG_TERMINAL ? 'BẬT' : 'TẮT'}`
+    + ` · lý do: ${lyDo} · số công cụ bị cấm: ${CONG_CU_CAM.length}`,
+  );
+}
 
 export type MauTraLoi =
   | { loai: 'phien'; ma_phien: string }
@@ -113,6 +200,16 @@ export interface ThamSoChay {
   khiChet?: (tien: ChildProcess, ma: number | null) => void;
   /** Thư mục làm việc RIÊNG của nhân sự — quyết định phiên nằm ở kho nào. */
   thuMuc: string;
+  /**
+   * 🏷 GHẾ nào đang chạy lượt này — dùng để ghi SỔ SỞ HỮU PHIÊN (`so-so-huu.ts`).
+   *
+   * TUỲ CHỌN, và cố ý để tuỳ chọn: đường Owner GÕ TRONG Ô (`api/chat/route.ts`) hiện CHƯA
+   * truyền nó xuống, vì tệp đó đang giữ bản vá round-16 bị bác và PM KHÔNG mở ở vòng này.
+   * ⇒ Thiếu nó thì sổ ghi chủ là `null` (CHƯA RÕ), và việc chính chạy y như cũ.
+   * 🔴 ĐỪNG suy ghế từ `thuMuc` để lấp chỗ này — sáu ghế dùng chung một thư mục, xem lời
+   *    cảnh báo dài ở đầu `so-so-huu.ts`.
+   */
+  maNhanSu?: string | null;
 }
 
 /**
@@ -341,6 +438,41 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     if (typeof j.session_id === 'string' && j.session_id && !maPhien) {
       maPhien = j.session_id;
       day({ loai: 'phien', ma_phien: maPhien });
+      /**
+       * 🏷 GHI SỔ SỞ HỮU — theo `session_id` ĐẦU TIÊN QUAN SÁT ĐƯỢC của lượt, kèm phép so
+       *    với `maPhienCu`.
+       * 🔴 Cách nói cũ («chỉ khi LƯỢT NÀY THẬT SỰ SINH RA phiên đó») bị bác vòng 2, và bác đúng:
+       *    :352 chỉ nhận `session_id` ĐẦU TIÊN của lượt, còn phép so ở dưới đọc đối số `maPhienCu`.
+       *    Cả hai đều là QUAN SÁT, chẳng cái nào CHỨNG NHẬN rằng một phiên vừa được sinh ra.
+       *
+       * 🔴 LỖI CHẶN NGƯỜI SOI BẮT Ở VÒNG 1 (07/09/2026) — giữ nguyên văn để đừng ai lặp:
+       *    tôi khai «sổ chỉ ghi ở lượt SINH (điều kiện `!maPhien`)». SAI.
+       *    `maPhien` khởi tạo rỗng cho MỖI LƯỢT (:326), nên `!maPhien` chỉ nghĩa là
+       *    «mã phiên ĐẦU TIÊN CỦA LƯỢT NÀY», chẳng phải «phiên vừa được sinh ra».
+       *    ⇒ Mỗi lần NỐI LẠI, `session_id` cũ quay về và bản cũ ghi THÊM một lời nhận sở hữu,
+       *      mang tên GHẾ ĐANG NỐI. Người soi đo ra ba dòng cùng một mã phiên:
+       *      seat-A (lượt sinh) · seat-B (lượt nối) · null (nối mà thiếu ghế).
+       * 🔑 Nối lại KHÔNG phải sở hữu. Ghi như thế là tự tay đẻ ra đúng thứ dữ liệu gây nhầm chủ
+       *    mà cuốn sổ này sinh ra để chống.
+       *
+       * ⇒ Điều kiện ĐÚNG, đọc thẳng từ đối số của lượt:
+       *      KHÔNG có `maPhienCu`            ⇒ lượt này mở phiên MỚI            ⇒ GHI
+       *      có `maPhienCu`, mã trả về KHÁC  ⇒ fork: đẻ mã mới                  ⇒ GHI
+       *      có `maPhienCu`, mã trả về TRÙNG ⇒ chỉ NỐI LẠI, chẳng sinh gì       ⇒ THÔI
+       *
+       * ⚠️ `ghiSoHuu` KHÔNG BAO GIỜ NÉM, và ta CỐ Ý KHÔNG đọc giá trị trả về — lượt chạy
+       *    KHÔNG được đổi hướng vì một cuốn sổ mà hiện chưa ai đọc.
+       * ⚠️ NÓ CÓ LÀM CHẬM. Người soi đo: tiêm 250 ms vào lượt ghi thì lượt đo mất ~315 ms.
+       *    `day()` chỉ XẾP mẩu tin vào hàng đợi, nên lời ghi đồng bộ vẫn chặn vòng lặp sự kiện
+       *    trước khi bên tiêu thụ chạy tiếp. Câu cũ của tôi («KHÔNG làm chậm») đã bị bác.
+       *    ⇒ Thứ bản vá này KHÔNG đổi là LOGIC CHỌN/NỐI PHIÊN. Độ trễ thì CÓ đổi.
+       * 🔴 VÀ NHẮC LẠI HAI VẾ Ở `so-so-huu.ts`, đừng đọc bản vá này rộng hơn:
+       *      ① sổ này CHƯA AI ĐỌC ⇒ nó KHÔNG chữa gì, app vẫn bốc phiên y như cũ
+       *      ② nó mới phủ MỘT trong HAI đường vào — chỉ đường CHẠY NỀN. Phiên sinh từ ô chat
+       *        của Owner vẫn vào sổ với chủ `null`.
+       */
+      const laPhienMoi = !ts.maPhienCu || ts.maPhienCu !== maPhien;
+      if (laPhienMoi) ghiSoHuu(maPhien, ts.maNhanSu);
     }
 
     // Chảy từng chữ
