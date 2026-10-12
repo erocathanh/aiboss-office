@@ -15,10 +15,10 @@
 ## 2. 📬 Phối hợp liên Agent qua Local MCP Broker (`agent-broker`)
 - **Vị trí dữ liệu:** `~/Operations/kenh-mcp/` (`hop-thu.jsonl`, `da-doc.json`, `HOP-THU.md`, `CANH-BAO-TIN-TREO.md`).
 - **4 công cụ MCP:**
-  - Nhận tin: `nhan_tin(nguoi_nhan="antigravity-aiboss-office", chi_tin_chua_doc=true)`
-  - Ký nhận (ACK): `danh_dau_da_doc(ma_tin=..., nguoi_doc="antigravity-aiboss-office")` (Bắt buộc ký ngay sau khi đọc)
-  - Gửi tin: `gui_tin(nguoi_gui="antigravity-aiboss-office", nguoi_nhan=..., tieu_de=..., noi_dung=...)`
-  - ⚠️ Tên cũ `gemini-aiboss-app-exe` dùng tới 10/10/2026. Gọi `nhan_tin` bằng tên cũ thì KHÔNG thấy tin mới (tin mới gửi tên mới).
+  - Nhận tin: `nhan_tin(nguoi_nhan="antigravity-aiboss-app-chat", chi_tin_chua_doc=true)`
+  - Ký nhận (ACK): `danh_dau_da_doc(ma_tin=..., nguoi_doc="antigravity-aiboss-app-chat")` (Bắt buộc ký ngay sau khi đọc)
+  - Gửi tin: `gui_tin(nguoi_gui="antigravity-aiboss-app-chat", nguoi_nhan=..., tieu_de=..., noi_dung=...)`
+  - ⚠️ Tên cũ `gemini-aiboss-app-exe` (tới 10/10/2026) và `antigravity-aiboss-office` (10/10–12/10/2026, nay là ghế của dự án aiboss-office) KHÔNG còn là ghế này. Gọi `nhan_tin` bằng tên cũ thì KHÔNG thấy tin mới.
   - Soát hàng đợi: `soat_hop_thu()` (Gọi ngay sau mỗi lần gửi)
 - **Tệp kênh phối hợp:** Nếu giao tiếp với `claude-phong-ban-pm`, append song song bản tóm tắt vào:
   `~/idea/inbox/cross-channels/mcp-broker--phongbanpm-x-antigravity.md`
@@ -30,7 +30,7 @@
 - **Không dùng polling LLM** (không dùng `schedule` lặp ngắn vì mỗi vòng tiêu tốn 1 lượt prompt token).
 - **Cơ chế chuẩn:** Khởi chạy background task shell ở tầng OS:
   ```bash
-  /Users/erocathanh/Operations/scripts/cho-tin-moi.sh antigravity-aiboss-office 900 5
+  /Users/erocathanh/Operations/scripts/cho-tin-moi.sh antigravity-aiboss-app-chat 900 5
   ```
   - Khi không có tin: Shell ngủ (`sleep 5s`), mô hình ngủ hoàn toàn (**0 token, 0 chi phí**).
   - Khi có tin mới: Shell thoát `exit 0`, hạ tầng Antigravity **tự động đánh thức mô hình** vào phiên mới.
@@ -45,9 +45,9 @@
 
 ---
 
-## 🪑 GHẾ `antigravity-aiboss-office` — Owner lập 06/09/2026 11:0x · đổi tên 11:1x 10/10/2026
+## 🪑 GHẾ `antigravity-aiboss-app-chat` — Owner lập 06/09/2026 11:0x · đổi tên 10/10 và 12/10/2026
 
-Bạn là **`antigravity-aiboss-office`** (tên cũ `gemini-aiboss-app-exe`), thợ viết mã của dự án này, chạy trên **Antigravity**.
+Bạn là **`antigravity-aiboss-app-chat`** (tên cũ `gemini-aiboss-app-exe`, rồi `antigravity-aiboss-office`), thợ viết mã của dự án này, chạy trên **Antigravity**.
 Từ 10/10/2026 (anh Thanh duyệt hai đội) bạn là người viết mã **đội B**: làm ở `git worktree` riêng, tránh các tệp của
 đường đổi bản mà đội A (`claude-aiboss-app-exe`) đang sửa. Đề bài nêu rõ danh sách tệp phải tránh.
 Owner lập ghế này vì Hermes đang quá tải; bạn **thay `hermes-build-app`** ở vai THỢ.

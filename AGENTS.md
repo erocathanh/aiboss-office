@@ -15,9 +15,9 @@
 ---
 
 ## 2. 🏷️ ĐỊNH DANH CÁC GHẾ HOẠT ĐỘNG (AGENT ROLES)
-- **Tên ghế trong MCP broker của workspace này:** `antigravity-aiboss-office`
-  - Tên cũ `gemini-aiboss-app-exe`, dùng tới 10/10/2026. Anh Thanh đổi tên lúc 11:1x 10/10/2026, vì dự án sắp đổi tên (mã mới `aiboss-office`). Tin cũ gửi tên cũ giữ nguyên làm dấu vết; tin mới dùng tên mới.
-- **`antigravity-aiboss-office`**: Ghế Gemini trên nền tảng Google Antigravity — người viết mã của **đội B** (anh Thanh duyệt 10/10/2026): làm ở một cây git riêng (worktree), tránh các tệp của đường đổi bản mà đội A (`claude-aiboss-app-exe`) đang sửa. Người giao việc duy nhất: `claude-aiboss-app-pm`. Người soát: `hermes-aiboss-app-reviewer` (khác mô hình).
+- **Tên ghế trong MCP broker của workspace này:** `antigravity-aiboss-app-chat`
+  - Lịch sử tên: `gemini-aiboss-app-exe` (tới 10/10/2026) → `antigravity-aiboss-office` (10/10–12/10/2026; lúc 09:5x 12/10 anh Thanh chuyển ghế đó sang nhà dự án aiboss-office) → `antigravity-aiboss-app-chat` (12/10/2026, theo luật nhà: mỗi dự án MỘT ghế Antigravity, tên = `antigravity-<mã-dự-án>`). Tin cũ gửi tên cũ giữ nguyên làm dấu vết; tin mới dùng tên mới.
+- **`antigravity-aiboss-app-chat`**: Ghế Gemini trên nền tảng Google Antigravity — người viết mã của **đội B** (anh Thanh duyệt 10/10/2026): làm ở một cây git riêng (worktree), tránh các tệp của đường đổi bản mà đội A (`claude-aiboss-app-exe`) đang sửa. Người giao việc duy nhất: `claude-aiboss-app-pm`. Người soát: `hermes-aiboss-app-reviewer` (khác mô hình).
 - **`claude-aiboss-app-exe`**: Ghế Claude Code (ô 4) — chuyên trách viết mã nguồn trực tiếp cho ứng dụng.
 - **`claude-aiboss-app-pm`**: Ghế PM điều phối tính năng, quản lý tiến độ và phạm vi dự án.
 - **`hermes-aiboss-app-reviewer`**: Ghế soi mã độc lập, giữ cổng chất lượng và ra verdict trước khi build.
@@ -47,7 +47,7 @@ Toàn bộ AI agent giao tiếp qua hàng đợi tin nhắn chuẩn hóa Local M
 - **Cơ chế chuẩn ở tầng OS:**
   Khởi chạy tiến trình shell nền theo dõi hộp thư:
   ```bash
-  /Users/erocathanh/Operations/scripts/cho-tin-moi.sh antigravity-aiboss-office 900 5
+  /Users/erocathanh/Operations/scripts/cho-tin-moi.sh antigravity-aiboss-app-chat 900 5
   ```
   - Khi không có tin: Shell ngủ (`sleep 5s`), mô hình hoàn toàn ngủ (**0 token, 0 chi phí**).
   - Khi có tin mới gửi đến ghế: Shell thoát `exit 0`, hạ tầng Antigravity tự động kích hoạt phiên làm việc (Reactive Wakeup).
