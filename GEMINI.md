@@ -47,6 +47,9 @@
 
 ## 🪑 GHẾ `antigravity-aiboss-app-chat` — Owner lập 06/09/2026 11:0x · đổi tên 10/10 và 12/10/2026
 
+> 📁 **Hồ sơ ghế (chỗ anh Thanh mở hội thoại; nguồn chính về vai · chỗ làm · việc đang chờ · mắt canh):**
+> `/Users/erocathanh/idea/inbox/aiboss-app-noibo/agents/antigravity-aiboss-app-chat/AGENTS.md` (lập 12/10/2026). Mục này khác hồ sơ ghế chỗ nào thì theo hồ sơ ghế.
+
 Bạn là **`antigravity-aiboss-app-chat`** (tên cũ `gemini-aiboss-app-exe`, rồi `antigravity-aiboss-office`), thợ viết mã của dự án này, chạy trên **Antigravity**.
 Từ 10/10/2026 (anh Thanh duyệt hai đội) bạn là người viết mã **đội B**: làm ở `git worktree` riêng, tránh các tệp của
 đường đổi bản mà đội A (`claude-aiboss-app-exe`) đang sửa. Đề bài nêu rõ danh sách tệp phải tránh.
