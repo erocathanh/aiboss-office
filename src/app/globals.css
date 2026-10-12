@@ -648,11 +648,12 @@ body { padding-top: var(--cao-bang); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   TOP BAR & MOBILE TWEAKS (Pha 4)
+   TOP BAR & MOBILE TWEAKS (Pha 4b)
    ═══════════════════════════════════════════════════════════════════ */
 .boc-cai-dat {
   display: inline-flex;
   align-items: center;
+  margin-left: 6px;
 }
 .boc-cai-dat .nut-cai-dat {
   text-decoration: none;
@@ -661,18 +662,23 @@ body { padding-top: var(--cao-bang); }
   justify-content: center;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 480px) {
+  .de-khu {
+    gap: 4px;
+  }
   .nhom-bo-cuc {
-    display: none !important;
+    gap: 4px;
+  }
+  .nut-bc {
+    width: 34px;
+    height: 30px;
+  }
+  .nut-bc svg {
+    width: 18px;
+    height: 14px;
   }
   .boc-cai-dat {
-    margin-left: auto;
-  }
-}
-
-@media (max-width: 480px) {
-  .nut-clear-soan {
-    display: none !important;
+    margin-left: 4px;
   }
 }
 
@@ -680,6 +686,52 @@ body { padding-top: var(--cao-bang); }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TEXT SIZE SCALING (Medium = 1.0, Large = 1.25)
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  --text-scale: 1;
+  --ti-le-chu: 1;
+}
+
+html[data-text-size="large"],
+html[data-co-chu="lon"] {
+  --text-scale: 1.25;
+  --ti-le-chu: 1.25;
+}
+
+.bong {
+  font-size: calc(13px * var(--text-scale, 1)) !important;
+  line-height: 1.55;
+}
+.bc-2 .bong {
+  font-size: calc(12.5px * var(--text-scale, 1)) !important;
+}
+.bc-4 .bong {
+  font-size: calc(11.5px * var(--text-scale, 1)) !important;
+}
+.gio {
+  font-size: calc(10px * var(--text-scale, 1)) !important;
+}
+.soan textarea {
+  font-size: max(16px, calc(16px * var(--text-scale, 1))) !important;
+}
+.ds-nhanh .mon b {
+  font-size: calc(12.5px * var(--text-scale, 1)) !important;
+}
+.ds-nhanh .mon i {
+  font-size: calc(10.5px * var(--text-scale, 1)) !important;
+}
+.rong-o b {
+  font-size: calc(14px * var(--text-scale, 1)) !important;
+}
+.rong-o span {
+  font-size: calc(12px * var(--text-scale, 1)) !important;
+}
+.moc-ngay {
+  font-size: calc(10.5px * var(--text-scale, 1)) !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -978,6 +1030,71 @@ body { padding-top: var(--cao-bang); }
   color: var(--kem-mo-2);
   margin: 0;
   line-height: 1.4;
+}
+
+/* Display & Typography Settings Card */
+.display-settings-card {
+  border-color: rgba(200, 148, 37, 0.3);
+  background: rgba(13, 33, 54, 0.75);
+}
+
+.text-size-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.text-size-options {
+  display: flex;
+  gap: 10px;
+}
+
+.text-size-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(250, 247, 240, 0.05);
+  border: 1px solid var(--vien-2);
+  color: var(--kem-mo);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.text-size-btn:hover {
+  background: rgba(200, 148, 37, 0.12);
+  border-color: rgba(200, 148, 37, 0.4);
+  color: var(--vang-sang);
+}
+
+.text-size-btn.active {
+  background: rgba(200, 148, 37, 0.2);
+  border-color: var(--vang);
+  color: var(--vang-sang);
+  box-shadow: 0 0 12px rgba(200, 148, 37, 0.25);
+}
+
+.text-size-check {
+  color: var(--vang);
+}
+
+@media (max-width: 560px) {
+  .text-size-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .text-size-options {
+    width: 100%;
+  }
+  .text-size-btn {
+    flex: 1;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 768px) {

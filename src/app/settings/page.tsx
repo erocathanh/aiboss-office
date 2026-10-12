@@ -9,6 +9,7 @@ import {
   Info,
   Lock,
 } from '@phosphor-icons/react/dist/ssr';
+import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 
 interface OfficeConfig {
   version: number;
@@ -136,7 +137,10 @@ export default function SettingsPage() {
         </div>
 
         <div className="settings-grid">
-          {/* Card 1: Office Schedule & Timezone */}
+          {/* Card 1: Display & Typography (Client Preferences) */}
+          <DisplaySettingsCard />
+
+          {/* Card 2: Office Schedule & Timezone */}
           <section className="settings-card">
             <div className="settings-card-header">
               <Clock size={20} weight="bold" className="settings-card-icon" />

@@ -14,6 +14,11 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { SO_O } from '@/lib/so-o';
 import type { PhongBan, NhanSu, TomTatPhien, Tin, OChat } from '@/components/ung-dung/kieu';
+import {
+  readTextSize,
+  applyTextSize,
+  TEXT_SIZE_STORAGE_KEY,
+} from '@/components/office/text-size';
 
 /* Bố cục + tên lớp CSS bê nguyên bản mẫu 09 Owner đã duyệt. ⛔ Không thiết kế lại. */
 
@@ -127,6 +132,19 @@ export default function UngDung({
         if (Array.isArray(j) && j.every((x) => x && typeof x === 'object')) datBoGheCu(j as CapGhe[]);
       }
     } catch { /* hỏng thì coi như chưa lưu, ⛔ đừng để vỡ cả trang */ }
+  }, []);
+
+  useEffect(() => {
+    const s = readTextSize();
+    applyTextSize(s);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key !== null && e.key !== TEXT_SIZE_STORAGE_KEY) return;
+      const next = readTextSize();
+      applyTextSize(next);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   const [camUng, datCamUng] = useState(false);
