@@ -75,7 +75,9 @@ export type TrangThaiMau =
 export const BO_QUA_HAN = 'qua-han';
 export const BO_QUA_TRAN_GIU = 'qua-tran-giu';
 export const BO_QUET_THEO_TUOI = 'quet-theo-tuoi';
-const LY_DO_BIET = new Set([BO_QUA_HAN, BO_QUA_TRAN_GIU, BO_QUET_THEO_TUOI]);
+/** Bị /api/chat từ chối «thử lại sau» quá `TRAN_TRA_VE` lần — xem `traVeHangDoi`. */
+export const BO_TU_CHOI_LAP = 'tu-choi-lap';
+const LY_DO_BIET = new Set([BO_QUA_HAN, BO_QUA_TRAN_GIU, BO_QUET_THEO_TUOI, BO_TU_CHOI_LAP]);
 
 /**
  * 📐 Học `heartbeat-reason.ts`: lý do rỗng được chuẩn hoá thành MỘT giá trị ổn định,
@@ -107,12 +109,32 @@ export interface YeuCauDanhThuc {
   trang_thai?: TrangThaiMau;
   /** Vì sao bỏ — BẮT BUỘC khi `trang_thai === 'bo'`. */
   ly_do?: string;
+  /** Số lần /api/chat từ chối «thử lại sau» rồi mẩu được TRẢ về hàng — xem `traVeHangDoi`. */
+  so_lan_tra?: number;
+  /** Lần trả gần nhất vì sao (mã trạng thái + lối từ chối của /api/chat). */
+  ly_do_tra?: string;
+  /** Mốc tạo của mẩu ĐẦU TIÊN trong chuỗi trả-về — trần tuổi `TRAN_GIU_MS` đo từ đây, không từ `luc`. */
+  luc_goc?: number;
+  /** Mã của mẩu mà mẩu này THAY THẾ khi được trả về hàng (mỗi lần trả sinh mã mới). */
+  thay_cho?: string;
+  /**
+   * Lúc một đường chạy GIÀNH quyền chạy mẩu này (`nhanChayMau`): đường HTTP `api/chat` hoặc đường nền
+   * `may-chay-nen`. Dấu đặt TRƯỚC khi gọi agent ⇒ nó KHÔNG chứng minh tiến trình đã sinh (sửa S6a lượt soi 2:
+   * bản trước viết «đã nhận và đẻ lượt»). Có dấu này ⇒ mẩu KHÔNG được trả về hàng, KHÔNG được giành lần nữa.
+   */
+  da_chay_luc?: number;
   /** Mã trình duyệt đang GIỮ CHỖ mẩu này (⛔ phải mã phiên chat). */
   giu_boi?: string;
   /** Hạn giữ chỗ; quá hạn mà chưa xác nhận ⇒ TỰ TRẢ VỀ 'cho'. */
   giu_han?: number;
   /** Khoá chống trùng do người gửi cấp — cùng khoá ⇒ trả lại mẩu CŨ. */
   khoa?: string;
+  /**
+   * NHÓM của lô tin mà mẩu này gọi tới (round-33 ②A lượt 3 · S5, và ③). Bộ canh khai: ghế + mốc đọc từng kênh.
+   * Cùng nhóm mà đang có mẩu SỐNG ⇒ `xepHangTheoNhom` trả lại mẩu đó, KHÔNG xếp mẩu mới. Khác `khoa` ở chỗ CHỈ khớp
+   * mẩu SỐNG — xem `songTheoNhom`. Mẩu trả về hàng giữ nguyên nhóm.
+   */
+  nhom?: string;
   /** Bỏ LÚC NÀO. ⛔ có trường này thì người đọc phải đi mượn mốc khác, và mốc khác nghĩa khác. */
   bo_luc?: number;
   /** Bỏ TỪ trạng thái nào. Ra 'da_giao' là mâu thuẫn TỰ KHAI, khỏi phải suy. */
@@ -203,7 +225,7 @@ function donDep(s: So, bayGio: number): So {
    */
   for (const y of s.hang_doi) {
     if (trangThai(y) !== 'cho') continue;
-    if (bayGio - y.luc >= TRAN_GIU_MS) { boMau(y, BO_QUA_TRAN_GIU, bayGio); continue; }
+    if (tuoiGoc(y, bayGio) >= TRAN_GIU_MS) { boMau(y, BO_QUA_TRAN_GIU, bayGio); continue; }
     if (!conDung(y, bayGio)) boMau(y, BO_QUA_HAN, bayGio);
   }
 
@@ -228,6 +250,11 @@ function donDep(s: So, bayGio: number): So {
  * ⚠️ Sổ trên đĩa lúc nâng cấp vẫn còn mẩu kiểu CŨ. Đọc thẳng `y.trang_thai` là
  *    `undefined` ⇒ mọi so sánh đều sai âm thầm. Phải quy đổi từ `da_xu`.
  */
+/** Tuổi tính trần `TRAN_GIU_MS`: từ lúc tạo mẩu ĐẦU TIÊN, kể cả khi mẩu đã được trả về hàng và mang mã mới. */
+function tuoiGoc(y: YeuCauDanhThuc, bayGio: number): number {
+  return bayGio - (y.luc_goc ?? y.luc);
+}
+
 export function trangThai(y: YeuCauDanhThuc): TrangThaiMau {
   if (y.trang_thai) return y.trang_thai;
   return y.da_xu ? 'da_giao' : 'cho';
@@ -302,7 +329,7 @@ function traVeMauHetHan(s: So, bayGio: number): number {
  */
 export function conDung(y: YeuCauDanhThuc, bayGio = Date.now()): boolean {
   if (trangThai(y) !== 'cho') return false;
-  if (bayGio - y.luc >= TRAN_GIU_MS) return false;
+  if (tuoiGoc(y, bayGio) >= TRAN_GIU_MS) return false;
   const mocDem = Math.max(y.luc, y.giu_toi ?? 0);
   return bayGio - mocDem < HAN_YEU_CAU_MS;
 }
@@ -323,7 +350,7 @@ export function giuChoOBan(dsBan: string[], bayGio = Date.now()): number {
   for (const y of s.hang_doi) {
     if (trangThai(y) !== 'cho') continue;   // ⛔ đọc `da_xu` nữa — nó ⛔ còn nghĩa «đã xong»
     if (!ban.has(y.ma_o)) continue;
-    if (bayGio - y.luc >= TRAN_GIU_MS) continue;   // quá trần ⇒ để nó chết đúng hẹn
+    if (tuoiGoc(y, bayGio) >= TRAN_GIU_MS) continue;   // quá trần ⇒ để nó chết đúng hẹn
     y.giu_toi = bayGio;
     dem += 1;
   }
@@ -449,16 +476,129 @@ export function xacNhanDaGiao(ma: string, maTrinhDuyet: string): KetQuaXacNhan {
   return { xong: true };
 }
 
-export function xepHang(ts: {
+/**
+ * 🔁 TRẢ MẨU VỀ HÀNG khi /api/chat TỪ CHỐI «thử lại sau» (round-33 ②A, vòng 2 · 21/09/2026).
+ *
+ * 🕳 CA 20/09 19:53: trình duyệt thấy ô RẢNH, nhặt + xác nhận mẩu (`da_giao`), gọi /api/chat — máy chủ
+ *    thấy ghế ĐANG CHẠY nên trả 409. Mẩu mang dấu «đã giao» nên KHÔNG còn đường quay lại: tin mất.
+ *
+ * 🔒 BẢO ĐẢM THẬT SỰ CÓ — viết đúng bằng mã, không hơn (vòng 1 bị bác vì chú thích hứa mạnh hơn mã):
+ *    · Một YÊU CẦU bị từ chối trước lúc đẻ tiến trình thì chính yêu cầu đó chưa chạy. Điều đó KHÔNG nói
+ *      gì về MẨU nó mang: cùng mã mẩu có thể đã chạy ở một yêu cầu KHÁC (người soi dựng được phản ví dụ:
+ *      trả ⇒ nhặt ⇒ chạy ⇒ phát lại cùng mã lúc ô bận ⇒ mẩu sống lại ⇒ agent chạy lần hai).
+ *    · Nên mẩu chỉ được trả khi: đúng ô + đúng ghế · đang `da_giao` · CHƯA từng bị một đường chạy giành
+ *      (`da_chay_luc` trống — xem `nhanChayMau`; HAI đường đặt dấu này: `api/chat` và đường nền
+ *      `may-chay-nen`). Đã bị giành một lần thì KHÔNG bao giờ trả, KHÔNG giành lại.
+ *    · Mỗi lần trả, mẩu được phát lại dưới MÃ MỚI (mẩu cũ rời khỏi sổ). Yêu cầu nào còn cầm mã của lần
+ *      giao TRƯỚC thì không tìm thấy mẩu nữa ⇒ không trả được, không chạy được.
+ *    · `luc` của mẩu mới là lúc trả ⇒ bộ canh (phanh v6, đo tuổi từ `luc`) KHÔNG coi mẩu vừa trả còn sống
+ *      là «rung hụt». Trần tuổi thật vẫn đo từ `luc_goc`.
+ * ❗ KHÔNG bảo đảm: hỏng SAU khi `nhanChayMau` đã đánh dấu mà TRƯỚC khi tiến trình sinh ra thì mẩu mang dấu
+ *    đã-giành mà không có lượt nào — mất, như trước việc này. Khoảng đó KHÔNG phải hai dòng liền nhau (sửa S6b
+ *    lượt soi 2): ở `api/chat` nó trải từ `nhanChayMau` qua dựng bộ huỷ, bộ đếm, luồng trả lời, xếp hàng tra
+ *    chuỗi tới `chayAgent`; ở đường nền nó trải từ `nhanChayMau` qua `withSlotBinding` → `chayMotLuot` tới
+ *    `chayAgent`. Chưa ai đo độ dài thời gian của nó — đừng mô tả nó là «rất nhỏ».
+ * 🧱 Trần số lần trả `TRAN_TRA_VE`: máy chủ và trình duyệt nhìn ô bận/rảnh khác nhau thì mẩu nảy qua lại;
+ *    quá trần thì BỎ kèm lý do `tu-choi-lap`.
+ */
+export const TRAN_TRA_VE = 3;
+
+/**
+ * Kết quả trả mẩu. `bo: true` ⇔ SAU lời gọi này mẩu nằm ở trạng thái BỎ — do chính nhánh trả bỏ (quá trần
+ * trả / quá tuổi), HOẶC do `donDep` chạy ngay đầu lời gọi (sửa S6c lượt soi 2: bản trước chỉ tính trường hợp
+ * đầu, nên mẩu bị `donDep` bỏ trong CHÍNH lời gọi này lại ra `bo: false`). Route khai `tra_ve_hang_doi: false`
+ * đúng khi cờ này bật. Các lý do còn lại (không thấy · khác ô/ghế · đã bị giành chạy · trạng thái khác bỏ)
+ * nghĩa là lời gọi này KHÔNG trả mẩu về — nhưng `donDep` vẫn chạy, nên sổ có thể đã đổi (vd một lease hết hạn
+ * về `cho`); `ly_do` nói trạng thái sau cùng, không nói «mẩu không bị đụng».
+ */
+export type KetQuaTraVe =
+  | { tra: true; lan: number; ma_moi: string }
+  | { tra: false; bo: boolean; ly_do: string };
+
+type DinhDanhYeuCau = { maO: string; maNhanSu: string };
+
+function khopYeuCau(y: YeuCauDanhThuc, dd: DinhDanhYeuCau): boolean {
+  return y.ma_o === dd.maO && y.ma_nhan_su === dd.maNhanSu;
+}
+
+export function traVeHangDoi(ma: string, lyDo: string, dd: DinhDanhYeuCau, bayGio = Date.now()): KetQuaTraVe {
+  const s = donDep(doc(), bayGio);
+  const k = s.hang_doi.findIndex((x) => x.ma === ma);
+  const y = k >= 0 ? s.hang_doi[k] : undefined;
+  if (!y) { ghi(s); return { tra: false, bo: false, ly_do: 'khong-thay-mau' }; }
+  if (!khopYeuCau(y, dd)) { ghi(s); return { tra: false, bo: false, ly_do: 'khac-o-ghe' }; }
+  if (y.da_chay_luc) { ghi(s); return { tra: false, bo: false, ly_do: 'mau-da-chay' }; }
+  const tt = trangThai(y);
+  // Đã BỎ — có thể do chính `donDep` ở đầu hàm này ⇒ khai là bỏ (S6c), đừng khai «không bị đụng».
+  if (tt === 'bo') { ghi(s); return { tra: false, bo: true, ly_do: 'trang-thai-bo' }; }
+  if (tt !== 'da_giao') { ghi(s); return { tra: false, bo: false, ly_do: `trang-thai-${tt}` }; }
+  if (tuoiGoc(y, bayGio) >= TRAN_GIU_MS) {
+    boMau(y, BO_QUA_TRAN_GIU, bayGio);
+    ghi(s);
+    return { tra: false, bo: true, ly_do: BO_QUA_TRAN_GIU };
+  }
+  const lan = (y.so_lan_tra ?? 0) + 1;
+  if (lan > TRAN_TRA_VE) {
+    boMau(y, BO_TU_CHOI_LAP, bayGio);
+    ghi(s);
+    return { tra: false, bo: true, ly_do: BO_TU_CHOI_LAP };
+  }
+  const moi: YeuCauDanhThuc = {
+    ma: randomUUID(),
+    ma_o: y.ma_o,
+    ma_nhan_su: y.ma_nhan_su,
+    tu_ai: y.tu_ai,
+    cau_hoi: y.cau_hoi,
+    luc: bayGio,
+    da_xu: false,
+    trang_thai: 'cho',
+    ...(y.khoa ? { khoa: y.khoa } : {}),
+    ...(y.nhom ? { nhom: y.nhom } : {}),
+    xu_luc: null,
+    luc_goc: y.luc_goc ?? y.luc,
+    thay_cho: y.ma,
+    so_lan_tra: lan,
+    ly_do_tra: lyDo,
+  };
+  s.hang_doi.splice(k, 1, moi);   // mẩu cũ RỜI sổ: mã của lần giao trước chết theo
+  ghi(s);
+  return { tra: true, lan, ma_moi: moi.ma };
+}
+
+/**
+ * ▶ GIÀNH QUYỀN CHẠY một mẩu đánh thức — HAI đường gọi hàm này, mỗi đường một lần, TRƯỚC khi gọi agent:
+ *   · `api/chat` (trình duyệt gửi câu từ hàng đợi, kèm `ma_yeu_cau`) — sau mọi cổng từ chối «thử lại sau»
+ *   · đường nền `may-chay-nen` — sau `xacNhanDaGiao`, trước `chayMotLuot` (thêm ở lượt soi 2, S4: thiếu nó thì
+ *     mẩu chạy qua đường nền vẫn trả về hàng được rồi chạy lần hai)
+ * Đánh dấu `da_chay_luc` trong CÙNG một lượt đọc-ghi sổ, nên hai lời giành cùng mã không thể cùng qua: lời thứ
+ * hai thấy dấu và bị từ chối. «Trước khi gọi agent» KHÔNG có nghĩa «liền kề» — xem ❗ ở `traVeHangDoi`.
+ */
+export type KetQuaNhanChay = { chay: true } | { chay: false; ly_do: string };
+
+export function nhanChayMau(ma: string, dd: DinhDanhYeuCau, bayGio = Date.now()): KetQuaNhanChay {
+  const s = donDep(doc(), bayGio);
+  const y = s.hang_doi.find((x) => x.ma === ma);
+  if (!y) { ghi(s); return { chay: false, ly_do: 'khong-thay-mau' }; }
+  if (!khopYeuCau(y, dd)) { ghi(s); return { chay: false, ly_do: 'khac-o-ghe' }; }
+  if (y.da_chay_luc) { ghi(s); return { chay: false, ly_do: 'mau-da-chay' }; }
+  const tt = trangThai(y);
+  if (tt !== 'da_giao') { ghi(s); return { chay: false, ly_do: `trang-thai-${tt}` }; }
+  y.da_chay_luc = bayGio;
+  ghi(s);
+  return { chay: true };
+}
+
+type ThamSoXepHang = {
   maO: string;
   maNhanSu: string;
   tuAi: string;
   cauHoi: string;
   khoa?: string;
-}): YeuCauDanhThuc {
-  const bayGio = Date.now();
-  const s = donDep(doc(), bayGio);
-  const yeuCau: YeuCauDanhThuc = {
+  nhom?: string;
+};
+
+function taoMau(ts: ThamSoXepHang, bayGio: number): YeuCauDanhThuc {
+  return {
     ma: randomUUID(),
     ma_o: ts.maO,
     ma_nhan_su: ts.maNhanSu,
@@ -468,11 +608,56 @@ export function xepHang(ts: {
     da_xu: false,
     trang_thai: 'cho',
     ...(ts.khoa ? { khoa: ts.khoa } : {}),
+    ...(ts.nhom ? { nhom: ts.nhom } : {}),
     xu_luc: null,
   };
+}
+
+export function xepHang(ts: ThamSoXepHang): YeuCauDanhThuc {
+  const bayGio = Date.now();
+  const s = donDep(doc(), bayGio);
+  const yeuCau = taoMau(ts, bayGio);
   s.hang_doi.push(yeuCau);
   ghi(s);
   return yeuCau;
+}
+
+/** Mẩu đã giao mà chưa bị giành chạy còn tính là SỐNG trong bấy nhiêu ms — CÙNG số với `con_chuong_song` của bộ canh. */
+export const DA_GIAO_SONG_MS = 60_000;
+
+/**
+ * Mẩu này còn có thể được giao / được chạy / được trả về hàng không — định nghĩa «SỐNG» cho chốt nhóm.
+ *   cho       còn dùng được (`conDung`: hạn 3 phút, trần 30 phút)
+ *   dang_giu  một tab đang giữ chỗ, chưa xác nhận
+ *   da_giao   đã xác nhận nhưng CHƯA bị giành chạy, và mới giao chưa tới `DA_GIAO_SONG_MS` — trong khoảng này
+ *             /api/chat của tab có thể còn tới và TRẢ mẩu về hàng (đúng khe của S5)
+ */
+function songTheoNhom(y: YeuCauDanhThuc, bayGio: number): boolean {
+  const tt = trangThai(y);
+  if (tt === 'cho') return conDung(y, bayGio);
+  if (tt === 'dang_giu') return true;
+  return tt === 'da_giao' && !y.da_chay_luc && bayGio - (y.xu_luc ?? 0) < DA_GIAO_SONG_MS;
+}
+
+/**
+ * 🔒 XẾP HÀNG THEO NHÓM — chốt S5 (người soi lượt 2) đặt ở MÁY CHỦ.
+ * 🕳 Bộ canh hỏi «còn chuông sống không» rồi mới POST ⇒ giữa lúc hỏi và lúc POST, /api/chat vẫn có thể trả một mẩu cũ
+ *    về hàng ⇒ hai mẩu sống cho cùng một lô tin. Hỏi-rồi-làm ở phía người gọi KHÔNG bịt được khe đó.
+ * ✅ Ở đây việc kiểm và việc xếp nằm trong CÙNG một lượt đọc-ghi sổ (hàm đồng bộ, không có `await` giữa hai bước):
+ *    đang có mẩu SỐNG cùng nhóm, cùng ghế ⇒ trả lại chính mẩu đó (`trung: true`), KHÔNG xếp mẩu mới.
+ * 📌 Vì sao KHÔNG dùng `khoa` sẵn có: `timTheoKhoa` khớp MỌI mẩu còn trong sổ — kể cả đã chết, đã giao — tới hết
+ *    `GIU_LICH_SU_MS`. Bộ canh mà dùng `khoa` thì lần gọi lại SAU khi mẩu chết cũng bị chặn ⇒ đổi nhịp gọi, và tin
+ *    đang giữ mất đường gọi lại. Nhóm CHỈ khớp mẩu SỐNG ⇒ mẩu chết / đã chạy thì lần gọi kế tiếp xếp bình thường.
+ */
+export function xepHangTheoNhom(ts: ThamSoXepHang & { nhom: string }): { y: YeuCauDanhThuc; trung: boolean } {
+  const bayGio = Date.now();
+  const s = donDep(doc(), bayGio);
+  const cu = s.hang_doi.find((x) => x.nhom === ts.nhom && x.ma_nhan_su === ts.maNhanSu && songTheoNhom(x, bayGio));
+  if (cu) { ghi(s); return { y: cu, trung: true }; }
+  const y = taoMau(ts, bayGio);
+  s.hang_doi.push(y);
+  ghi(s);
+  return { y, trung: false };
 }
 
 /**

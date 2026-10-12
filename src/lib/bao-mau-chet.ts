@@ -53,6 +53,46 @@ export interface MauChet {
   cau_hoi: string;
   luc: number;
   da_xu: boolean;
+  /** Nhóm lô tin (bộ canh khai, `kho-danh-thuc` `nhom`) — cùng nhóm thì chỉ lần chết ĐẦU lên kênh (③). */
+  nhom?: string;
+}
+
+/** Nhìn lại sổ đếm bao xa khi đếm các lần chết trước của một nhóm. */
+const NHIN_LAI_NHOM_MS = 24 * 60 * 60_000;
+const DUOI_SO_DOC = 256 * 1024;
+
+/**
+ * Nhóm này đã chết bao nhiêu lần trong `NHIN_LAI_NHOM_MS` — đếm THẲNG trong sổ đếm trên đĩa (đọc 256 KB cuối).
+ * 📌 Vì sao đọc sổ mà KHÔNG nhớ trong bộ nhớ như `daBao`: nhớ trong bộ nhớ thì khởi động lại là quên ⇒ chuỗi đang
+ *    gọi lại lại lên kênh thêm một dòng; và `next dev` giữ mỗi cửa một bản mô-đun riêng. Sổ là thứ DUY NHẤT mọi
+ *    đường cùng thấy — và nó đã có sẵn, KHÔNG thêm người ghi đĩa mới.
+ * Đọc hỏng ⇒ trả 0 ⇒ lần chết này lên kênh như cũ: hỏng về phía CÓ TIẾNG, không về phía im.
+ */
+function lanChetTruocCuaNhom(nhom: string, bayGio: number): number {
+  try {
+    const kt = fs.statSync(SO_DEM).size;
+    const fd = fs.openSync(SO_DEM, 'r');
+    try {
+      const doDai = Math.min(kt, DUOI_SO_DOC);
+      const buf = Buffer.alloc(doDai);
+      fs.readSync(fd, buf, 0, doDai, kt - doDai);
+      let dem = 0;
+      for (const dong of buf.toString('utf8').split('\n')) {
+        if (!dong.includes(nhom)) continue;
+        try {
+          const d = JSON.parse(dong) as { nhom?: unknown; luc?: unknown };
+          if (d.nhom === nhom && typeof d.luc === 'number' && bayGio - d.luc < NHIN_LAI_NHOM_MS) dem += 1;
+        } catch {
+          /* dòng cắt dở ở đầu vùng đọc, hoặc dòng hỏng — bỏ qua */
+        }
+      }
+      return dem;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return 0;
+  }
 }
 
 /** Lượt thăm dò quan sát được — do `kho-danh-thuc` giữ trong bộ nhớ. */
@@ -115,6 +155,14 @@ export function baoMauChet(m: MauChet, td: ThamDo, bayGio = Date.now()): MaCua |
   }
 
   const cua = doanCua(m, td);
+  /**
+   * ③ (round-33 · PM 21:43 lối c): bộ canh gọi lại CÙNG một lô tin vào trình duyệt đóng thì mỗi lần gọi chết một mẩu.
+   *    Ghi hết lên kênh ⇒ ~20 dòng ⚰️/giờ chôn tin thật. Nay: lần chết ĐẦU của một nhóm lên kênh; các lần sau CHỈ vào
+   *    sổ đếm (kèm `nhom` + `lan_trong_nhom`), để số lần đầy đủ vẫn cộng được. Không có nhóm ⇒ y như cũ.
+   * 🔒 Cố ý KHÔNG sửa dòng cũ trên kênh để ghi số lần: kênh chỉ-ghi-thêm, ghế khác đang ghi `>>` vào đó —
+   *    đọc-sửa-ghi đè sẽ đua với họ và có thể nuốt tin của họ.
+   */
+  const lanTrongNhom = m.nhom ? lanChetTruocCuaNhom(m.nhom, bayGio) + 1 : 0;
 
   // ── sổ đếm (máy đọc) — đúng khuôn S1-KHUON-SO-DEM.md
   try {
@@ -131,6 +179,7 @@ export function baoMauChet(m: MauChet, td: ThamDo, bayGio = Date.now()): MaCua |
         tuoi_giay: Math.round((bayGio - m.luc) / 1000),
         so_lan_thu: m.da_xu ? 1 : 0,
         ghi_chu: '',
+        ...(m.nhom ? { nhom: m.nhom, lan_trong_nhom: lanTrongNhom } : {}),
       })}\n`,
       'utf8',
     );
@@ -138,9 +187,13 @@ export function baoMauChet(m: MauChet, td: ThamDo, bayGio = Date.now()): MaCua |
     /* sổ ⛔ ghi được thì thôi — ⛔ để lỗi lan ra lượt gọi */
   }
 
-  // ── kênh (người đọc)
+  // ── kênh (người đọc) — cùng nhóm thì CHỈ lần đầu
+  if (lanTrongNhom > 1) return cua;
+  const duoiNhom = m.nhom
+    ? ` · nhóm=${m.nhom} (các lần chết SAU của cùng nhóm chỉ vào sổ đếm, KHÔNG lên kênh)`
+    : '';
   try {
-    fs.appendFileSync(KENH, `${dongKenh(m, cua, bayGio)}\n`, 'utf8');
+    fs.appendFileSync(KENH, `${dongKenh(m, cua, bayGio)}${duoiNhom}\n`, 'utf8');
   } catch {
     /* kênh ⛔ ghi được thì thôi */
   }

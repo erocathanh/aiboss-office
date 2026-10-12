@@ -57,6 +57,11 @@ export function khoPhienCua(maNhanSu: string): string {
 
 export interface TomTatPhien {
   ma: string;
+  /** First valid recorded timestamp in the bounded prefix; may predate a fork. */
+  started_at: number | null;
+  /** Filesystem creation time, not necessarily the conversation start. */
+  file_created_at: number | null;
+  size_bytes: number;
   /** Mốc sửa cuối (mili-giây). */
   moc: number;
   moc_doc: string;
@@ -72,6 +77,27 @@ interface DongPhien {
   userType?: string;
   timestamp?: string;
   message?: { content?: unknown };
+}
+
+// Read complete records only, with bounded memory even for very large transcripts.
+// Missing, malformed or oversized prefixes remain unknown; never substitute birthtime.
+function firstRecordedTimestamp(file: string, size: number): number | null {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(Math.min(size, 256 * 1024));
+    const count = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const lines = buffer.subarray(0, count).toString('utf8').split('\n');
+    if (count < size) lines.pop();
+    for (const line of lines) {
+      try {
+        const value: unknown = JSON.parse(line)?.timestamp;
+        if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(value)) continue;
+        const stamp = Date.parse(value);
+        if (Number.isFinite(stamp)) return stamp;
+      } catch { /* Skip records without a usable timestamp. */ }
+    }
+    return null;
+  } finally { fs.closeSync(fd); }
 }
 
 function bocChu(m: unknown): string {
@@ -194,6 +220,9 @@ export function dsPhien(
 
     ra.push({
       ma,
+      started_at: (() => { try { return firstRecordedTimestamp(p, st.size); } catch { return null; } })(),
+      file_created_at: st.birthtimeMs > 0 ? st.birthtimeMs : null,
+      size_bytes: st.size,
       moc: st.mtimeMs,
       moc_doc: new Date(st.mtimeMs).toLocaleString('vi-VN', { hour12: false }),
       tin_cuoi: tinCuoi.slice(0, 90),
@@ -421,19 +450,41 @@ export function mocTepPhien(maNhanSu: string, maPhien: string): number | null {
  *
  * 🪤 Chỉ nhìn mtime là SAI: sau khi CHÍNH TA chạy xong, tệp cũng vừa mới đổi
  *    ⇒ câu hỏi thứ hai của Owner sẽ bị chính ta chặn. Đã cắn thật lúc nghiệm thu.
+ * LỜI KHAI CŨ — đã bị bác vòng 4/4; giữ để tránh lặp, KHÔNG dùng làm mô tả hiện tại:
  * ⇒ So thêm với `mocKetThucCuaTa` (mốc ghi lại ngay sau lượt của ta):
- *      · tệp cũ hơn 5 phút            → chắc chắn rảnh
- *      · tệp mới, nhưng ĐÚNG BẰNG mốc ta ghi → người sửa cuối là TA, đã xong → rảnh
- *      · tệp mới, và MỚI HƠN mốc của ta      → có kẻ khác đang ghi → CHẶN
+ *      · tệp cũ hơn 5 phút                   → CỔNG NÀY mở (KHÔNG kết luận gì về «rảnh»)
+ *      · tệp mới, nhưng ĐÚNG BẰNG mốc ta ghi → người sửa cuối là TA, đã xong → mở
+ *      · tệp mới, và MỚI HƠN mốc của ta      → có kẻ khác vừa ghi → CHẶN
+ * ĐÍNH CHÍNH: `dangChay` xét lần lượt: mtime null → MỞ; tuổi tệp đạt ngưỡng → MỞ;
+ * `phienCoTienTrinhSong` trả true → CHẶN; còn lại mốc ta khác null → MỞ, null → CHẶN.
+ * KHÔNG so độ mới của mốc ta với mtime. Mtime bằng mốc ta cũng KHÔNG chứng minh ai vừa ghi.
  */
 /**
- * Có tiến trình NÀO đang sống mà cầm đúng mã phiên này không.
+ * Có tiến trình nào đang sống mà KHAI Ý ĐỊNH nối đúng mã phiên này không.
  *
- * ⭐ Đây là BẰNG CHỨNG THẬT, khác hẳn phép suy từ mốc-sửa-tệp. Mốc tệp chỉ nói
- *    "vừa có ai đó ghi", ⛔ không nói ai — mà "ai" mới là thứ ta cần biết.
- * ⚠️ Đo được KHÔNG có ⇒ chắc chắn rảnh (⛔ không tiến trình nào giữ). Đo được CÓ
- *    ⇒ chắc chắn bận. Phiên mở KHÔNG kèm `--resume` thì mã ⛔ không nằm trong dòng
- *    lệnh — nên đây là bằng chứng MỘT CHIỀU: thấy là chắc, ⛔ không thấy chưa đủ kết luận.
+ * ⭐ Đây là bằng chứng khác hẳn phép suy từ mốc-sửa-tệp. Mốc tệp chỉ nói
+ *    "vừa có ai đó ghi", KHÔNG nói ai — mà "ai" mới là thứ ta cần biết.
+ *
+ * 🔴 GIỚI HẠN CỦA THƯỚC — `ps` KHÔNG đủ dữ liệu để kết luận một phiên đang RẢNH.
+ *    Nó trả lời được ĐÚNG MỘT câu, và câu đó chỉ có một chiều:
+ *      TÌM THẤY một lời khai ý định                              ⇒ trả `true`
+ *      KHÔNG tìm thấy — kể cả vì `ps` chạy hỏng, vì người giữ mở phiên
+ *      KHÔNG kèm cờ, vì tiến trình chớp tắt giữa hai lần đo      ⇒ trả `false`
+ * ⇒ `false` ở đây nghĩa là KHÔNG NHẬN DIỆN ĐƯỢC, KHÔNG phải "đã chứng minh là rảnh".
+ * ⇒ Và KHÔNG nhận diện được thì quyền quyết KHÔNG nằm ở hàm này — nó rơi về `dangChay`.
+ * 🔴 NHƯNG CÂU CŨ Ở ĐÂY SAI, người soi bác vòng 3 và bác đúng. Câu cũ:
+ *      «tệp còn được ghi trong NGUONG_SONG_PHUT phút thì VẪN CHẶN, chẳng cần hàm này gật»
+ *    Ba ca dưới đây KHÔNG phải toàn bộ nhánh của `dangChay`:
+ *      tệp mới · ps KHÔNG nhận diện · `mocKetThucCuaTa` là null   ⇒ CHẶN     ✅ đúng như câu cũ
+ *      đã bị bác vòng 4/4: «tệp mới · `mocKetThucCuaTa` CÓ, dù CŨ HƠN lần ghi mới nhất ⇒ **MỞ**»
+ *      ĐÍNH CHÍNH: cần thêm `phienCoTienTrinhSong` trả false; nếu trả true thì VẪN CHẶN.
+ *      `ps` NÉM LỖI · tệp mới · `mocKetThucCuaTa` CÓ              ⇒ **MỞ**   🔴 và ở đây
+ * 🔑 Gốc: SAU cửa tuổi tệp và cửa `phienCoTienTrinhSong`, `dangChay` mới xét
+ *    `mocKetThucCuaTa !== null` để trả false; KHÔNG so giá trị mốc ấy với lần ghi mới nhất.
+ * ⚠️ Đó là ĐÁNH ĐỔI CÓ CHỦ Ý, chẳng phải quên — lý do gốc ghi ngay tại chỗ ấy: `claude` nhận
+ *    SIGTERM rồi còn xả nốt bản ghi, nên phép so mốc từng chặn oan chính ghế mình (ca 14/08).
+ *    Tôi KHÔNG tự lật đánh đổi đó ở vòng này — nó cần một quyết định, chẳng phải một bản vá.
+ *    Ở đây tôi chỉ sửa LỜI KHAI cho khớp thứ mã thật sự làm.
  */
 export function phienCoTienTrinhSong(maPhien: string): boolean {
   if (!maPhien) return false;
@@ -442,9 +493,99 @@ export function phienCoTienTrinhSong(maPhien: string): boolean {
       encoding: 'utf8',
       maxBuffer: 8 * 1024 * 1024,
     });
-    return ra.includes(maPhien);
+    /**
+     * 🅐 (Owner quyết round-16 lúc 09:18 · PM gật hướng lúc 10:42, 07/09/2026)
+     *    THÔI HỎI «AI GIỮ». HỎI «CÓ AI KHAI Ý ĐỊNH NỐI ĐÚNG PHIÊN NÀY».
+     *
+     * 🕳 BA VÒNG TRƯỚC ĐỀU HỎI SAI CÂU, nên vòng nào cũng đẻ ra một danh sách DÀI HƠN:
+     *   vòng 0  `ra.includes(maPhien)` — mã phiên nằm BẤT KỲ ĐÂU cũng chặn. Đo thật lúc
+     *           09:2x trên máy này: 104 dòng `ps` chứa một mã phiên, phần lớn chỉ là
+     *           ĐƯỜNG DẪN thư mục nháp (`tail -f …/<mã>/scratchpad/x.log`).
+     *   vòng 1  thêm «mã đứng ở vị trí THAM SỐ» — hụt: mã nằm trong CÂU NHẮC
+     *           (`claude -p "kiểm tra phiên <mã>"`) cũng đứng đúng vị trí đó.
+     *   vòng 2  thêm «dòng phải có token tên `claude`» — CHÍNH ĐIỀU KIỆN ẤY LÀ DANH SÁCH.
+     *           Người soi nêu ngay ba dạng người giữ THẬT mà nó bỏ sót:
+     *               node cli.js --resume <mã>       (chạy qua trình thông dịch)
+     *               claude-1.2.3 --resume <mã>      (nhị phân đặt tên theo phiên bản)
+     *               /bin/zsh -c … --resume <mã> …   (vỏ bọc, tiến trình con)
+     * 🔑 Hỏi «dòng lệnh này CÓ PHẢI claude KHÔNG» thì BẮT BUỘC phải kể tên mọi CÁCH KHỞI
+     *    CHẠY — mà cách khởi chạy KHÔNG có biên, nên danh sách luôn thiếu. Cái CÓ biên là
+     *    CỜ NỐI PHIÊN: nó là LỜI KHAI Ý ĐỊNH, và giống hệt nhau bất kể chạy bằng gì.
+     *    ⇒ Vòng này XOÁ danh sách, KHÔNG nối dài nó.
+     * Lời mô tả cũ, KHÔNG đầy đủ cho phép khớp hiện tại:
+     * ⇒ Điều kiện DUY NHẤT: mã phiên đi ngay sau một cờ nối phiên (hoặc dính bằng dấu `=`).
+     * Hiện tại còn nhận `-r<mã>` dính liền; đây là phép khớp token, KHÔNG phải bộ phân tích CLI.
+     *    Ba dạng trên đều mang cờ đó ⇒ cả ba tự khớp mà KHÔNG phải kể tên chúng.
+     *
+     * 📏 Bộ cờ lấy từ ĐO, KHÔNG lấy từ trí nhớ — `claude --help` trên máy này 07/09/2026:
+     *      d203  `-r, --resume [value]`        d217  `--session-id <uuid>`
+     *    Đây là TỪ VỰNG CỜ của một chương trình (có biên, tra lại được bằng một lệnh),
+     *    khác hẳn danh sách CÁCH KHỞI CHẠY (KHÔNG có biên) mà ba vòng trước đã sa vào.
+     *
+     * ⚠️ CÁC CA BẮT OAN CÒN LẠI — vòng 3 tôi khai «HAI ca», người soi đo thêm và ra NHIỀU HƠN.
+     *    Khai ĐIỀU KIỆN, KHÔNG khai mức độ:
+     *    ① câu nhắc chứa nguyên văn chuỗi cờ + mã (`claude -p "… --resume <mã> …"`)
+     *    ② chương trình KHÁC dùng cờ ngắn `-r` với đối số đúng bằng mã (`grep -r <mã> …`)
+     *    ③ chương trình KHÁC dùng `--resume <mã>` hoặc `--session-id <mã>` — cờ dài KHÔNG
+     *       phải của riêng `claude`
+     *    ④ `claude -- --resume <mã>` — sau `--` thì đó là ĐỐI SỐ, chẳng phải cờ
+     *    ⑤ 🔑 CA ĐÁNG NHỚ NHẤT: `claude --resume <mã> --fork-session`. `claude --help` d98-100
+     *       nói fork TẠO MÃ MỚI ⇒ **mang cờ nối phiên KHÔNG đồng nghĩa có ý định ghi lại bản
+     *       gốc.** Chính fixture của bộ thử vòng 3 cũng chứa `--fork-session` — tôi đã nhìn nó
+     *       mỗi lần chạy mà KHÔNG thấy.
+     *    TẦN SUẤT ngoài đời của tất cả: CHƯA ĐO. Tôi chưa đếm ca thật lần nào, và người soi
+     *    cũng ghi CHƯA ĐO — đừng ai đọc danh sách dài hơn này thành «hiếm» hay «hay gặp».
+     *
+     * 📏 VÀ MỘT DẠNG NGƯỜI SOI NÊU MÀ TÔI ĐO LẠI TRÊN `claude` THẬT, chẳng tin `ps` giả:
+     *      `claude -r<mã>` DÍNH LIỀN      ⇒ claude THẬT NHẬN (báo đúng «No conversation found
+     *                                       with session ID: <mã>») ⇒ đây là dạng THẬT, và
+     *                                       phép khớp hiện tại BỎ SÓT nó
+     *      Đính chính thời điểm: câu «BỎ SÓT» trên mô tả bản trước vòng 4; mã dưới đã nhận `-r<mã>`.
+     *      `claude --resume=<mã>`         ⇒ cũng nhận
+     *      `claude --continue`            ⇒ 🔴 KHÁC HẲN: `-c, --continue` KHÔNG nhận mã phiên
+     *                                       nào (help d63: «Continue the most recent
+     *                                       conversation in the current directory»).
+     *                                       ⇒ KHÔNG một phép khớp theo MÃ nào có thể thấy nó,
+     *                                         và thêm `--continue` vào bộ cờ chỉ đẻ ra bắt oan
+     *                                         hàng loạt. Đây là GIỚI HẠN, chẳng phải lỗ để vá.
+     * LỜI KHAI CŨ — đã bị bác vòng 4/4; KHÔNG còn là lời bảo đảm:
+     * 🔑 Vì sao nghiêng về phía CHẶN: bắt oan CÓ HẠN — 🅑 dưới đây cho nó hết hạn sau
+     *    NGUONG_SONG_PHUT phút. Còn BỎ SÓT thì KHÔNG có hạn: hai tiến trình cùng ghi một
+     *    bản ghi phiên là hỏng bản ghi, và hỏng rồi thì KHÔNG tự lành.
+     * ĐÍNH CHÍNH: 🅑 trả false khi `(Date.now() - mtime) / 60000 >= NGUONG_SONG_PHUT`.
+     * KHÔNG lưu lúc bắt đầu chặn, nên KHÔNG có hạn tối đa tính từ lần chặn đầu.
+     * Mtime làm mới mỗi 4 phút có thể giữ CHẶN ở phút 0·4·8·12; mtime tương lai 1 giờ
+     * vẫn có thể giữ CHẶN sau 10 phút dù KHÔNG ai ghi. Cả hai ca cần cửa còn lại trả CHẶN.
+     */
+    const CO_NOI_PHIEN = ['--resume', '-r', '--session-id'];
+    /**
+     * Dòng lệnh này có KHAI ý định nối đúng mã phiên đang hỏi không.
+     *
+     * BA hình dạng, và cả ba đều ĐO ĐƯỢC trên `claude` THẬT (08/09/2026), chẳng lấy từ `ps` giả:
+     *   `-r <mã>` rời      · `--resume=<mã>` dính bằng dấu bằng · `-r<mã>` DÍNH LIỀN
+     * 🔴 Hình thứ ba là chỗ vòng 3 BỎ SÓT. Người soi nêu nó từ một `ps` GIẢ và tự khai CHƯA
+     *    kiểm trên `claude` thật; tôi kiểm lại trước khi vá, và nó THẬT:
+     *      `claude -r00000000-…-000000000000 -p x`
+     *        ⇒ claude trả «No conversation found with session ID: 00000000-…» ⇒ nó ĐÃ PHÂN TÍCH
+     *          mã ấy ra khỏi cờ ⇒ đây là một người giữ THẬT mà phép khớp cũ KHÔNG thấy.
+     * ⚠️ CHỈ áp dạng dính liền cho CỜ NGẮN. `--resume<mã>` KHÔNG phải cú pháp hợp lệ, thêm nó
+     *    vào chỉ mở thêm đường bắt oan mà chẳng bắt thêm người giữ nào.
+     * GIỚI HẠN CHƯA VÁ (Owner chọn Ⓒ): phép khớp bỏ sót `-pr<mã>` và `-pr <mã>`,
+     * nhưng nhận `-r=<mã>`. Người soi đã đo CLI 2.1.263 nhận hai dạng đầu, từ chối dạng cuối;
+     * đây là số đo được dẫn lại, KHÔNG phải lần chạy CLI trong lượt sửa chú thích này.
+     * KHÔNG coi các hình dạng nêu trên là danh sách đầy đủ cú pháp CLI hoặc người giữ thật.
+     */
+    const khaiYDinhNoiPhien = (tokens: string[]): boolean =>
+      tokens.some((t, k) =>
+        (CO_NOI_PHIEN.includes(t) && tokens[k + 1] === maPhien) ||
+        CO_NOI_PHIEN.some((c) => t === `${c}=${maPhien}`
+          || (c.length === 2 && c.startsWith('-') && t === `${c}${maPhien}`)));
+    return ra.split('\n').some((dong) => khaiYDinhNoiPhien(dong.trim().split(/\s+/)));
   } catch {
-    return false; // ⛔ đo không được thì ⛔ đừng bịa "đang bận" — trả về để nhánh dưới quyết.
+    /* `ps` chạy KHÔNG được ⇒ KHÔNG nhận diện được ⇒ trả `false`, KHÔNG bịa "đang bận".
+       `false` ở đây KHÔNG có nghĩa "rảnh" — nó nhường quyền quyết cho luật MỐC TỆP
+       trong `dangChay`, đúng như phần GIỚI HẠN CỦA THƯỚC đã khai ở đầu hàm. */
+    return false;
   }
 }
 
@@ -456,10 +597,51 @@ export function dangChay(
   const mtime = mocTepPhien(maNhanSu, maPhien);
   if (mtime === null) return false;
 
-  // ⛔ CHẶN CỨNG: sờ tận tay có tiến trình đang cầm phiên này ⇒ bận, khỏi bàn.
-  if (phienCoTienTrinhSong(maPhien)) return true;
-
+  /**
+   * 🅑 (Owner quyết round-16, 09:18 07/09/2026) — ĐỔI THỨ TỰ: ngưỡng 5 phút xét TRƯỚC.
+   *
+   * 🕳 Bản cũ đặt phép sờ-tiến-trình LÊN TRƯỚC và trả `true` NGAY, nên nhánh ấy KHÔNG có hạn.
+   *    Người soi giả lập đồng hồ: tuổi tệp 1 phút · 1 tiếng · 1 ngày · 1 NĂM đều «đang chạy»,
+   *    chừng nào còn một dòng lệnh chứa mã phiên. Đó là chặn VĨNH VIỄN — đúng thứ Owner chụp:
+   *    «phiên thì im mà báo lỗi».
+   * ⇒ Nay tuổi tệp `(Date.now() - mtime) / 60000` đạt ngưỡng thì trả `false` TRƯỚC khi xét ps.
+   *
+   * ⚠️ CÁI GIÁ, khai ĐÚNG mức đo được:
+   *      ĐIỀU KIỆN mở nhầm: phiên ĐANG chạy thật + tuổi tệp đạt ngưỡng ⇒ cổng mtime mở
+   *      HẬU QUẢ: hai bên cùng ghi một bản ghi phiên ⇒ hỏng bản ghi
+   *      TẦN SUẤT ngoài đời: CHƯA ĐO — tôi chỉ chạy dữ liệu dựng sẵn, chẳng đếm ca thật.
+   *    🔴 Vòng 1 tôi viết «diện hẹp» và «🅐 mua lại một phần». Người soi bác: cả hai là câu
+   *       RỘNG HƠN thứ tôi đo. Bỏ. Chưa biết tần suất thì nói CHƯA BIẾT, đừng nói HẸP.
+   * KHỐI LỜI KHAI CŨ DƯỚI ĐÂY: giữ làm lịch sử, KHÔNG dùng làm bảo đảm hoặc hướng dẫn lùi.
+   * đã bị bác vòng 4/4: «🅐 VÀ 🅑 CHE ĐÚNG ĐIỂM YẾU CỦA NHAU — lùi MỘT vế mà giữ vế kia là hỏng cả hai».
+   *      đã bị bác vòng 4/4: «🅐 làm ca bắt oan còn ÍT ĐƯỜNG VÀO hơn, nhưng CÒN hai điều kiện chưa bịt»
+   *         (khai đủ ở `phienCoTienTrinhSong` phía trên)
+   *      🅑 làm ca bắt oan hết hạn sau NGUONG_SONG_PHUT phút **KHI VÀ CHỈ KHI mốc tệp đứng yên**
+   *         🔴 CÂU CŨ («làm MỌI ca bắt oan HẾT HẠN») SAI — người soi chạy và bác:
+   *              mtime đứng yên, đồng hồ chạy   ⇒ 299.999ms còn chặn · 300.000ms mở   ✅ đúng
+   *              một tác nhân KHÔNG giữ phiên làm mới mtime mỗi 4 phút
+   *                                             ⇒ phút 0·4·8·12 VẪN CHẶN               🔴
+   *              mtime nằm ở TƯƠNG LAI 1 giờ    ⇒ sau 10 phút giả lập VẪN CHẶN         🔴
+   *         🔑 Gốc: mã KHÔNG lưu thời điểm BẮT ĐẦU bắt oan, nên chẳng có hạn tối đa tính từ
+   *            lần chặn ĐẦU. Nó chỉ đo khoảng cách giữa `Date.now()` và mtime HIỆN TẠI —
+   *            mà mtime thì người khác chạm được.
+   *         ⇒ Câu hẹp ở `api/chat/route.ts` («riêng cổng mốc-tệp hết hạn sau N phút im») ĐÚNG
+   *            cho ca mtime bình thường, và **KHÔNG được dùng để bảo lãnh cho lời hứa «MỌI ca»**.
+   *    đã bị bác vòng 4/4: «lùi 🅐 : hai điều kiện oan kia mở lại thành nhiều đường vào hơn»
+   *    ⇒ lùi 🅑 : ca oan còn sót của 🅐 quay về thành chặn VĨNH VIỄN — đúng thứ Owner chụp
+   *    (mã thì vẫn lùi riêng từng cái được; đây là cảnh báo về HẬU QUẢ, KHÔNG phải cú pháp)
+   * HẾT KHỐI CŨ. ĐÍNH CHÍNH: 🅐 khớp token trong đầu ra ps; 🅑 xét tuổi tệp trước 🅐.
+   * Tuổi tệp đạt ngưỡng thì MỞ mà KHÔNG gọi 🅐; mtime liên tục làm mới hoặc ở tương lai
+   * có thể giữ tuổi dưới ngưỡng. KHÔNG có bảo đảm hai vế bù điểm yếu hoặc giới hạn thời gian chặn.
+   * Các ca oan liệt kê phía trên gồm câu nhắc, cờ của chương trình khác, đối số sau `--`,
+   * `--fork-session` và `-r=<mã>`; KHÔNG phải chỉ «hai điều kiện», cũng KHÔNG khai là đã vét hết.
+   * KHÔNG suy hậu quả của mọi cách lùi từ số ca này; lượt sửa chữ KHÔNG thử lùi 🅐 hay 🅑.
+   */
   if ((Date.now() - mtime) / 60000 >= NGUONG_SONG_PHUT) return false;
+
+  // Tệp CÒN TƯƠI (đã qua cửa trên) và có một lời khai ý định nối đúng phiên này ⇒ CHẶN.
+  // Trả `false` ở hàm dưới KHÔNG có nghĩa "rảnh" — xem GIỚI HẠN CỦA THƯỚC tại hàm đó.
+  if (phienCoTienTrinhSong(maPhien)) return true;
 
   /**
    * 🔴 Ca thật 14/08 — bộ canh này TỰ KHOÁ GHẾ CỦA CHÍNH NÓ.

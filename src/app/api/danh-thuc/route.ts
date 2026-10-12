@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { layTatCa } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { CAU_HINH } from '@/lib/cau-hinh';
-import { xinLuot, xepHang, xemSo, timTheoKhoa, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
+import { xinLuot, xepHang, xepHangTheoNhom, xemSo, timTheoKhoa, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
 import { batMotLan } from '@/lib/khoi-dong-nen';
 
 export const runtime = 'nodejs';
@@ -28,6 +28,7 @@ interface Than {
   tu_ai?: unknown;
   /** 🔑 Khoá chống trùng — TUỲ CHỌN. Cùng khoá ⇒ trả lại mẩu CŨ, ⛔ tạo mẩu mới. */
   khoa?: unknown;
+  nhom?: unknown;
 }
 
 export async function GET() {
@@ -49,6 +50,9 @@ export async function POST(req: NextRequest) {
   const cauHoi = typeof than.cau_hoi === 'string' ? than.cau_hoi.trim() : '';
   const tuAi = typeof than.tu_ai === 'string' ? than.tu_ai.trim() : '';
   const khoa = typeof than.khoa === 'string' ? than.khoa.trim().slice(0, 80) : '';
+  // NHÓM lô tin (round-33 · S5): tuỳ chọn, chỉ nhận chuỗi gọn — sai khuôn thì coi như không khai, xếp như cũ.
+  const nhomTho = typeof than.nhom === 'string' ? than.nhom.trim() : '';
+  const nhom = /^[\w.:|-]{1,120}$/.test(nhomTho) ? nhomTho : '';
 
   /**
    * 🔑 KHOÁ CHỐNG TRÙNG — kiểm TRƯỚC MỌI THỨ, kể cả trước khi xin suất.
@@ -135,7 +139,26 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const yeuCau = xepHang({ maO, maNhanSu, tuAi, cauHoi, ...(khoa ? { khoa } : {}) });
+  /**
+   * 🔒 Có `nhom` ⇒ xếp qua chốt nhóm: đang có mẩu SỐNG cùng lô tin thì trả lại mẩu đó (`trung_nhom: true`), KHÔNG xếp
+   *    thêm — kiểm và xếp trong CÙNG một lượt đọc-ghi sổ (S5 lượt soi 2). Không có `nhom` ⇒ đường cũ, y nguyên.
+   */
+  const kq = nhom
+    ? xepHangTheoNhom({ maO, maNhanSu, tuAi, cauHoi, nhom, ...(khoa ? { khoa } : {}) })
+    : { y: xepHang({ maO, maNhanSu, tuAi, cauHoi, ...(khoa ? { khoa } : {}) }), trung: false };
+  if (kq.trung) {
+    return Response.json({
+      xong: true,
+      trung_nhom: true,
+      ma_o: kq.y.ma_o,
+      ma_nhan_su: kq.y.ma_nhan_su,
+      ma_yeu_cau: kq.y.ma,
+      ghi_chu:
+        'Lô tin này đang có một mẩu CÒN SỐNG — trả lại mẩu đó, KHÔNG xếp mẩu mới. ' +
+        'Mẩu ấy chết hoặc đã chạy thì lần gọi kế tiếp mới xếp mẩu mới.',
+    });
+  }
+  const yeuCau = kq.y;
 
   return Response.json({
     xong: true,

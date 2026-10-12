@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { SO_O, oTrongTam } from './so-o';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { bindingOf, sameBinding, nextBinding, type WriteBinding } from '@/components/ung-dung/nap-bo-ghe';
 
 /**
  * SỔ GHI "Ô NÀO ĐANG MỞ PHIÊN NÀO" — ghi XUỐNG ĐĨA.
@@ -16,6 +18,7 @@ const THU_MUC = path.join(process.cwd(), '.trang-thai');
 const TEP = path.join(THU_MUC, 'o-phien.json');
 
 export interface TrangThaiO {
+  generation?: number;
   ma_nhan_su: string | null;
   ma_phien: string | null;
   cap_nhat: number;
@@ -31,6 +34,14 @@ export interface TrangThaiO {
 }
 
 type So = Record<string, TrangThaiO>;
+
+// Carry origin through the existing runner, including its internal datO call.
+// Only a successful owned write advances this token; never recapture on return.
+const writeContext = new AsyncLocalStorage<{ slot: string; binding: WriteBinding }>();
+export function withSlotBinding<T>(slot: string, binding: WriteBinding, run: (owned: () => WriteBinding) => T): T {
+  const context = { slot, binding };
+  return writeContext.run(context, () => run(() => context.binding));
+}
 
 function doc(): So {
   try {
@@ -66,7 +77,7 @@ export function layTatCa(): So {
   return doc();
 }
 
-export function datO(maO: string, maNhanSu: string | null, maPhien: string | null): boolean {
+export function datO(maO: string, maNhanSu: string | null, maPhien: string | null, expected?: WriteBinding): boolean {
   /**
    * 🚧 CHẶN Ô NGOÀI TẦM — sổ ⛔ BAO GIỜ được đẻ lại mục mà app ⛔ vẽ nổi.
    *
@@ -91,18 +102,22 @@ export function datO(maO: string, maNhanSu: string | null, maPhien: string | nul
   }
   const s = doc();
   const cu = s[maO];
-  // Đổi sang phiên KHÁC thì mốc kết thúc cũ hết giá trị.
-  const giuMoc = cu?.ma_phien === maPhien ? (cu?.moc_ket_thuc ?? null) : null;
-  s[maO] = { ma_nhan_su: maNhanSu, ma_phien: maPhien, cap_nhat: Date.now(), moc_ket_thuc: giuMoc };
+  const context = writeContext.getStore();
+  const origin = expected ?? (context?.slot === maO ? context.binding : undefined);
+  if (!origin || !sameBinding(bindingOf(cu), origin)) return false;
+  const next = nextBinding(bindingOf(cu), maNhanSu, maPhien);
+  const giuMoc = cu?.ma_nhan_su === maNhanSu && cu?.ma_phien === maPhien ? (cu?.moc_ket_thuc ?? null) : null;
+  s[maO] = { ma_nhan_su: maNhanSu, ma_phien: maPhien, generation: next.generation, cap_nhat: Date.now(), moc_ket_thuc: giuMoc };
   ghi(s);
+  if (context?.slot === maO) context.binding = next;
   return true;
 }
 
 /** Ghi mốc "lượt của TA vừa chạy xong" — gọi NGAY SAU khi tiến trình con thoát. */
-export function ghiMocKetThuc(maO: string, mocTep: number): void {
+export function ghiMocKetThuc(maO: string, mocTep: number, expected: WriteBinding): void {
   const s = doc();
   const cu = s[maO];
-  if (!cu) return;
+  if (!cu || !sameBinding(bindingOf(cu), expected)) return;
   s[maO] = { ...cu, moc_ket_thuc: mocTep };
   ghi(s);
 }

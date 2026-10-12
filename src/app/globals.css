@@ -42,10 +42,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ds-nhanh .mon b { font-weight: 600; font-size: 12.5px; }
-.ds-nhanh .mon i { font-size: 10.5px; margin-top: 1px; }
+.ds-nhanh .mon b { font-weight: 600; font-size: calc(12.5px * var(--ti-le-chu, 1)); }
+.ds-nhanh .mon i { font-size: calc(10.5px * var(--ti-le-chu, 1)); margin-top: 1px; }
 .ds-nhanh .mon.dang-chay { opacity: 0.45; cursor: default; }
-.ds-nhanh .mon .ma-ky-thuat { font-size: 10.5px; }
+.ds-nhanh .mon .ma-ky-thuat { font-size: calc(10.5px * var(--ti-le-chu, 1)); }
 
 /* ==========================================================================
    Phần chạy thật
@@ -96,7 +96,7 @@
   /* 🔴 16px LÀ NGƯỠNG CHỐNG ZOOM — ⛔ ĐỪNG HẠ (đo 17/08/2026).
      iOS Safari và Chrome Android TỰ PHÓNG TO trang khi chạm ô chữ < 16px
      ⇒ nút «Gửi»/«⏭ Xếp» bị đẩy khỏi màn. Owner cắn đúng lỗi này hai lần. */
-  color: var(--kem); font-size: 16px; font-family: inherit; line-height: 1.5;
+  color: var(--kem); font-size: max(16px, calc(16px * var(--ti-le-chu, 1))); font-family: inherit; line-height: 1.5;
   outline: none;
 }
 .soan textarea::placeholder { color: var(--kem-mo-2); }
@@ -109,8 +109,8 @@
 
 /* Chia 2 / 4 ô: ô soạn phải thấp lại cho khớp nhịp thu nhỏ của bản mẫu 09.
    ⚠️ mau09.css chỉ chỉnh `.soan input` — ta dùng `textarea` nên phải chỉnh riêng. */
-.bc-2 .soan textarea { font-size: 16px; min-height: 34px; max-height: 96px; }   /* ⛔ KHÔNG hạ — xem ghi chú chống zoom trên */
-.bc-4 .soan textarea { font-size: 16px; min-height: 30px; max-height: 76px; padding: 6px 10px; }   /* ⛔ KHÔNG hạ */
+.bc-2 .soan textarea { font-size: max(16px, calc(16px * var(--ti-le-chu, 1))); min-height: 34px; max-height: 96px; }   /* ⛔ KHÔNG hạ — xem ghi chú chống zoom trên */
+.bc-4 .soan textarea { font-size: max(16px, calc(16px * var(--ti-le-chu, 1))); min-height: 30px; max-height: 76px; padding: 6px 10px; }   /* ⛔ KHÔNG hạ */
 
 /* Nhãn "đang chạy thật" ở đầu khu — thay nhãn "bản mẫu" của mockup. */
 .nhan-that {
@@ -361,7 +361,7 @@
 
 /* ⚠️ Báo Owner khi app đọc hụt một khúc — im lặng khuyết tệ hơn báo lỗi. */
 .moc-ngay.canh-hut{
-  color:#e8b339; font-size:12.5px; line-height:1.5;
+  color:#e8b339; font-size:calc(12.5px * var(--ti-le-chu, 1)); line-height:1.5;
   padding:6px 12px; max-width:52ch; text-align:center; opacity:.95;
 }
 
@@ -445,4 +445,56 @@ body { padding-top: var(--cao-bang); }
 
 /* 🗣 Ô nhập CÂU DẶN ĐẦU sau khi fork — nằm dưới nút fork, chiếm trọn hàng.
    Cỡ chữ ≥16px: dưới mức đó iOS TỰ PHÓNG TO trang khi bấm vào ô, đẩy nút Gửi khỏi màn. */
-.o-cau-dau { width: 100%; margin-top: 6px; font-size: 16px; }
+.o-cau-dau { width: 100%; margin-top: 6px; font-size: max(16px, calc(16px * var(--ti-le-chu, 1))); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🔠 HAI MỨC CỠ CHỮ — «Trung bình» (mặc định) và «Lớn» (Owner đặt 17/09/2026)
+   ═══════════════════════════════════════════════════════════════════════════
+   Owner: «font chữ hiện tại là Trung Bình, cần thêm 1 mức to hơn 2 mức nữa là Mức lớn.
+   Chắc thêm menu cài đặt để vào đó chọn.»
+
+   CÁCH LÀM — MỘT tỉ lệ ở gốc, nhân vào chính những cỡ chữ ĐANG CÓ của vùng đọc:
+     · Trung bình = tỉ lệ 1 ⇒ `calc(13px * 1)` tính ra ĐÚNG 13px ⇒ CỠ CHỮ của bản cũ KHÔNG lệch một pixel.
+       🔴 Lời hứa đó DỪNG Ở CỠ CHỮ, KHÔNG phải ở cả giao diện (người soi 18/09 bắt đúng chỗ này):
+          thanh trên đã KHÁC bản cũ vì việc này thêm một nút ⚙️, và ở khổ hẹp tên app rút còn «AIB…».
+       Chọn nhân-với-1 thay vì khai một bảng cỡ chữ THỨ HAI cho mức Trung bình, vì bảng thứ hai
+       là một BẢN CHÉP: hôm nào ai sửa 13px ở đây mà quên bản kia thì hai bên lệch nhau, và
+       KHÔNG bên nào tự biết mình là bên sai.
+     · Lớn = 1.25 ⇒ `.bong` 13px thành 16,25px · 2 cột 12,5 thành 15,63 · 4 cột 11,5 thành 14,38
+       · ô soạn 16px thành 20px.
+
+   ⚠️ Mọi chỗ dùng đều viết biến KÈM GIÁ TRỊ LUI (số 1). Mất dòng khai dưới đây (nhập thiếu tệp,
+      chép nhầm nửa bộ) thì cỡ chữ về ĐÚNG bản cũ, KHÔNG rơi về cỡ thừa kế — `calc()` gặp biến
+      KHÔNG tồn tại thì cả khai báo bị bỏ, và chữ nhảy lung tung mà KHÔNG báo lỗi dòng nào.
+
+   📌 CHỖ NÀO chạy theo tỉ lệ (vòng 2 bổ sung sau khi người soi chỉ ra vòng 1 phủ thiếu):
+      bong bóng chat · giờ · mốc ngày · mốc ngày báo đọc hụt · nhãn đánh thức · ô soạn và ô câu dặn đầu ·
+      chữ ở ô trống · dòng nhắc phiên · hướng dẫn dán phiên · kết quả nối phiên · ghi chú fork ·
+      thẻ hồ sơ ghế · dải hàng chờ (câu Owner đang đợi gửi) · danh sách phiên trong bộ chọn.
+      🕳 Vòng 1 chỉ phủ năm thứ đầu và bị BÁC: chữ chính to lên mà cảnh báo đọc hụt, câu đang xếp
+         hàng và lời nhắc phiên vẫn đứng yên — mà đó đều là chữ Owner PHẢI ĐỌC, ngay trong khung chat.
+      📌 Ranh giới KHÔNG phải «trong bong bóng hay ngoài bong bóng», mà là **Owner có đọc nó không**.
+      Thanh công cụ · danh bạ · nút bấm GIỮ NGUYÊN cỡ: đó là chỗ để BẤM, phóng to là vỡ thanh
+      ở khổ 390px. Muốn phóng cả thanh thì phải đo lại toàn bộ thanh trên, KHÔNG suy từ đây.
+   ✂️ CỐ Ý ĐỂ NGUYÊN: biểu tượng 💬 to ở ô trống (`.rong-o .to`) — nó là hình trang trí, KHÔNG phải
+      chữ để đọc. Người soi 18/09 liệt kê chỗ phải sửa và KHÔNG có dòng này.
+
+   🔴 Ô SOẠN có SÀN CỨNG 16px, viết bằng `max()`. Dưới 16px là iOS/Chrome Android tự phóng to
+      trang (khối chú thích dài ở `.soan textarea` phía trên). Sàn đặt bằng MÃ chứ KHÔNG bằng
+      lời dặn — lời dặn chỉ ràng buộc người ĐÃ ĐỌC nó, còn `max()` ràng buộc cả người chưa từng
+      nghe, kể cả khi mai mốt có ai thêm một mức thứ ba nhỏ hơn.
+
+   Mức nằm ở `data-co-chu` trên thẻ <html>, do `src/components/ung-dung/text-size.ts` gắn. */
+:root { --ti-le-chu: 1; }
+html[data-co-chu="lon"] { --ti-le-chu: 1.25; }
+
+/* ⚙️ Menu «Cài đặt» ở cuối thanh khu trao đổi — dùng LẠI `.boc-menu` / `.man-che` / `.menu-xo` /
+   `.muc-menu` của menu ⋯ từng ô, KHÔNG đẻ bộ kiểu thứ hai cho cùng một thứ. */
+.boc-cai-dat { margin-left: 6px; }
+.tieu-menu {
+  padding: 7px 10px 3px; font-size: 10.5px; letter-spacing: 1.1px;
+  text-transform: uppercase; color: var(--kem-mo-2);
+}
+.muc-menu[aria-checked="true"] { color: var(--vang-sang); }
+.muc-menu .dau-chon { margin-left: auto; color: var(--vang-sang); }

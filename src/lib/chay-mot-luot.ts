@@ -155,6 +155,11 @@ export async function chayMotLuot(
       cauHoi: cauGui,
       maPhienCu,
       thuMuc: thuMucAgent(maNhanSu),
+      /* 🏷 round-18 🅐: truyền TÊN GHẾ xuống để `chay-agent.ts` ghi SỔ SỞ HỮU khi phiên MỚI
+         sinh ra. Đây là ĐƯỜNG DUY NHẤT hiện có truyền được — đường Owner gõ trong ô
+         (`api/chat/route.ts`) đang đóng băng vì round-16, nên phiên sinh từ ô VẪN vào sổ
+         với chủ `null`. Đừng đọc bản vá này thành «đã phủ hết». */
+      maNhanSu,
       // 👑 Ghế có LINH HỒN RIÊNG thì KHÔNG nhét qua lời dặn hệ thống — linh hồn nằm ở
       //    `CLAUDE.md` trong thư mục ghế và Claude Code tự nạp theo chỗ đứng.
       loiDan: ns.soul ? undefined : loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong),

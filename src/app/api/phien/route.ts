@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { dsPhien, lichSuPhien } from '@/lib/doc-phien';
+import { dsPhien, lichSuPhien, phienCoTienTrinhSong } from '@/lib/doc-phien';
 import { layO } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
+import { readOwnership } from '@/lib/so-so-huu';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/phien?ma_nhan_su=X            → danh sách phiên THẬT của nhân sự đó
  * GET /api/phien?ma_nhan_su=X&ma_phien=Y → lịch sử THẬT của một phiên
  *
- * Đọc thẳng `~/.claude/projects/**\/*.jsonl` — ⛔ không bóc chữ màn hình.
+ * Read transcript files directly rather than scraping terminal output.
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
@@ -23,17 +24,8 @@ export async function GET(req: NextRequest) {
   try {
     if (maPhien) {
       /**
-       * 📖 PHÂN TRANG BẰNG CON TRỎ — ⛔ phải bằng cách nới trần.
-       * `truoc_byte` = trang trước bắt đầu ở byte nào. Xin trang CŨ HƠN thì gửi lại số đó.
-       * ⛔ truyền gì ⇒ lấy phần MỚI NHẤT (mở phiên).
-       * 🛡 Trần RAM nằm ở `TRAN_CUNG` trong doc-phien.ts và **⛔ tham số nào nới được nó** —
-       *    người gọi ⛔ còn cách nào bảo máy chủ đọc trọn tệp 375 MB nữa.
-       */
-      /**
-       * 🐛 FAIL 4 (Hermes lần 3): bản trước gộp «⛔ truyền» với «truyền số 0» làm một
-       *    ⇒ client xin `truoc_byte=0` (nghĩa là «tôi đã ở ĐẦU tệp») thì máy chủ hiểu thành
-       *    «⛔ truyền gì» rồi trả lại **CUỐI tệp**. Nhảy từ đầu về cuối, ⛔ ai báo.
-       * ✅ Phân biệt bằng CÓ MẶT THAM SỐ, ⛔ bằng giá trị.
+       * Pagination uses a byte cursor, never a caller-controlled memory limit.
+       * Missing cursor means newest page; zero means the beginning, not a missing cursor.
        */
       const troTho = q.get('truoc_byte');
       const troSo = troTho === null ? NaN : Number(troTho);
@@ -50,11 +42,23 @@ export async function GET(req: NextRequest) {
     // Ô nào đang giữ phiên nào → để không tự gắn cờ "đang chạy nơi khác" lên chính nó.
     const maO = /^o-\d+$/.test(q.get('ma_o') ?? '') ? q.get('ma_o')! : 'o-1';
     const o = layO(maO);
+    const ownerPicker = q.get('owner_picker') === '1';
+    const ds = dsPhien(maNhanSu, ownerPicker ? undefined : {
+      ma: o?.ma_nhan_su === maNhanSu ? (o?.ma_phien ?? null) : null,
+      mocKetThuc: o?.moc_ket_thuc ?? null,
+    });
+    // Keep every discovered session visible; only an Owner-confirmed binding authorizes
+    // the existing co_so_huu auto-pick path. Suggestions never authorize auto-picking.
+    // Missing ledger is normal on first use. Other failures reach the visible error response.
+    const ownership = readOwnership();
     return Response.json({
-      phien: dsPhien(maNhanSu, {
-        ma: o?.ma_nhan_su === maNhanSu ? (o?.ma_phien ?? null) : null,
-        mocKetThuc: o?.moc_ket_thuc ?? null,
-      }),
+      phien: ds.map((session) => ({
+        ...session,
+        dang_chay: session.dang_chay || (ownerPicker && phienCoTienTrinhSong(session.ma)),
+        co_so_huu: ownership.get(session.ma)?.owner === maNhanSu,
+        owner_seat: ownership.get(session.ma)?.owner ?? null,
+        de_xuat_ghe: ownership.get(session.ma)?.proposal ?? null,
+      })),
     });
   } catch (e) {
     return Response.json(

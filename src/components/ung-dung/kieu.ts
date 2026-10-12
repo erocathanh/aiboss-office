@@ -23,6 +23,18 @@ interface TomTatPhien {
   ma: string; moc: number; moc_doc: string;
   tin_cuoi: string; so_luot: number; dang_chay: boolean;
 }
+
+/**
+ * 🏷 round-19 CÂU 1 — MỘT phiên kèm câu trả lời «sổ sở hữu có nhận nó là của ghế đang hỏi KHÔNG».
+ *
+ * `co_so_huu` do `/api/phien` GẮN THÊM lúc trả lời; nó KHÔNG có trong `TomTatPhien` của
+ * `doc-phien.ts` — cố ý, để bản vá Câu 1 KHÔNG chạm tệp đang thuộc phạm vi Câu 2.
+ *   true  = sổ có mục cho phiên này VÀ chủ đúng là ghế đang hỏi
+ *   false = MÙ: chưa có sổ · sổ đọc KHÔNG được · chưa có mục · hoặc chủ là ghế KHÁC
+ * ⚠️ Để dấu `?` vì máy chủ bản CŨ KHÔNG gắn trường này. Thiếu ⇒ `undefined` ⇒ phép so
+ *    `=== true` cho ra false ⇒ THÔI BỐC. Hỏng về phía an toàn.
+ */
+type PhienCoChu = TomTatPhien & { co_so_huu?: boolean };
 interface Tin {
   /** 🔑 Mã riêng do máy khách cấp — xem `datMa()`. ⛔ Đừng thay bằng chỉ số hay `luc`. */
   ma: string;
@@ -84,7 +96,7 @@ interface OChat {
   catDongDai: boolean;
   /** CON TRỎ: trang đang hiện bắt đầu ở byte nào. Xin trang cũ hơn thì gửi lại số này. */
   viTri: number;
-  dsPhien: TomTatPhien[];
+  dsPhien: PhienCoChu[];
   phienHienTai: string | null;
   moChonPhien: boolean;
   moDan: boolean;
@@ -93,16 +105,6 @@ interface OChat {
   /** 🧬 Mã phiên đọc được nhưng thuộc THƯ MỤC KHÁC — chờ Owner bấm «Fork về ghế này». */
   phienChoFork: string | null;
   dangFork: boolean;
-  /**
-   * 🗣 CÂU DẶN ĐẦU TIÊN gửi NGAY SAU khi fork xong. TUỲ CHỌN — bỏ trống là KHÔNG gửi gì.
-   *
-   * 🕳 Ca sinh ra nó (Owner 31/08): bản fork mang mạch cũ, nên nó vẫn xưng TÊN CŨ.
-   *    Trước đây Owner phải fork xong rồi tự gõ lại câu dặn — mà lúc đó ô đã chuyển
-   *    sang mạch mới, dễ quên, và quên thì ghế mang nhầm danh tính CẢ PHIÊN.
-   * 🔒 Bỏ trống thì đường đi y hệt cũ — thêm cái này KHÔNG đổi hành vi của ai
-   *    đang dùng fork theo nếp cũ.
-   */
-  cauDauFork: string;
   /** ¶ Hiện RANH GIỚI MẨU: mỗi mẩu máy chủ bắn về xuống một dòng. */
   hienMau: boolean;
   /** ℹ Mở thẻ hồ sơ ghế (gồm mã phiên · token · chi phí). */
@@ -131,4 +133,4 @@ interface OChat {
    */
   thuKhung: boolean;
 }
-export type { PhongBan, NhanSu, TomTatPhien, Tin, CapGheDungSan, OChat };
+export type { PhongBan, NhanSu, TomTatPhien, PhienCoChu, Tin, CapGheDungSan, OChat };

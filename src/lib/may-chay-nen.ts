@@ -32,9 +32,10 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 import { chayMotLuot } from '@/lib/chay-mot-luot';
-import { nhanYeuCau, xacNhanDaGiao, xemSo } from '@/lib/kho-danh-thuc';
+import { nhanYeuCau, xacNhanDaGiao, xemSo, nhanChayMau } from '@/lib/kho-danh-thuc';
 import { dsViec } from '@/lib/kho-tien-trinh';
-import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
+import { layO, ghiMocKetThuc, withSlotBinding } from '@/lib/kho-phien';
+import { bindingOf, sameBinding } from '@/components/ung-dung/nap-bo-ghe';
 import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,6 +96,8 @@ export const dem = {
   /** ghế đang chạy Ở NƠI KHÁC (terminal) ⇒ đứng ngoài */ boQuaChayNoiKhac: 0,
   /** lượt CHẠY THẬT mà `datO` từ chối buộc vào ô ⇒ «lượt vô hình» */ buocOThatBai: 0,
   /** vòng bị bỏ vì vòng trước CHƯA xong ⇒ chốt tái nhập đã chặn */ boQuaTaiNhap: 0,
+  /** mẩu đã xác nhận giao nhưng KHÔNG giành được quyền chạy (đã chạy ở đường khác · lệch ô) ⇒ KHÔNG chạy */
+  khongNhanChay: 0,
 };
 
 /**
@@ -268,13 +271,24 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
     if (!ket.y) continue; // ai đó nhanh tay hơn — đúng thứ ta muốn
     const xn = xacNhanDaGiao(ket.y.ma, NGUOI_GIU_NEN);
     if (!xn.xong) continue;
+    /**
+     * 🔒 GIÀNH QUYỀN CHẠY — CÙNG một dấu với đường HTTP (`api/chat` gọi `nhanChayMau` trước `chayAgent`).
+     * 🕳 Round-33 ②A, người soi lượt 2 (S4): đường nền thiếu dấu này ⇒ mẩu chạy ở đây vẫn là `da_giao` mà
+     *    KHÔNG có `da_chay_luc` ⇒ một yêu cầu /api/chat mang mã ấy, bị từ chối lúc ô bận, vẫn qua được cửa
+     *    trả về hàng ⇒ mẩu được giao lại và chạy LẦN HAI (đo trong RAM: TOTAL_AGENT_CALLS 2).
+     * ⚠️ Dấu đặt TRƯỚC `chayMotLuot`: nó nói «đã giành quyền chạy», KHÔNG nói «đã sinh tiến trình».
+     *    Hỏng giữa hai bước thì mẩu KHÔNG chạy mà cũng KHÔNG được trả về — giới hạn đã khai (S8a), cố ý
+     *    KHÔNG tự gỡ dấu, vì lỗi mơ hồ có thể là tiến trình đã sinh mà mất bằng chứng.
+     */
+    const nc = nhanChayMau(ket.y.ma, { maO: y.ma_o, maNhanSu: y.ma_nhan_su });
+    if (!nc.chay) { dem.khongNhanChay++; continue; }
 
     // ⚠️ ĐÁNH DẤU NGAY, trước khi gọi — KHÔNG đợi tới lúc có pid.
     //    Đặt sau `nhanYeuCau` để mẩu bị người khác nhanh tay lấy mất thì KHÔNG khoá oan ghế.
     daNhanTrongVong.add(y.ma_nhan_su);
 
     // KHÔNG `await` — một mẩu chạy chậm KHÔNG được chặn mẩu của ô khác.
-    void chayMotLuot(
+    void withSlotBinding(y.ma_o, bindingOf(o), (owned) => chayMotLuot(
       { maO: y.ma_o, maNhanSu: y.ma_nhan_su, cauHoi: y.cau_hoi, maPhienCu },
       () => {
         /* KHÔNG có ai xem. Chữ tự nằm trong .jsonl của Claude Code — xem chú thích
@@ -306,6 +320,7 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
          */
         if (kq.maPhien) {
           const maP = kq.maPhien;
+          const stampBinding = owned();
           const ghiLai = () => {
             /**
              * 🔴 KIỂM Ô CÒN LÀ CỦA MÌNH ⛔ (claude-phong-ban-pm bắt vòng 3).
@@ -315,9 +330,9 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
              * 🔑 Một phép ghi có HẸN GIỜ phải kiểm lại điều kiện LÚC NÓ NỔ, ⛔ lúc nó được hẹn.
              */
             const oNay = layO(y.ma_o);
-            if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP) return;
+            if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP || !sameBinding(bindingOf(oNay), stampBinding)) return;
             const m = mocTepPhien(y.ma_nhan_su, maP);
-            if (m !== null) ghiMocKetThuc(y.ma_o, m);
+            if (m !== null) ghiMocKetThuc(y.ma_o, m, stampBinding);
           };
           ghiLai();
           for (const cho2 of [1_500, 5_000, 15_000]) setTimeout(ghiLai, cho2).unref?.();
@@ -326,7 +341,7 @@ async function raMotVongLoi(bayGio: number): Promise<number> {
       () => {
         dem.loi++;
       },
-    );
+    ));
     dem.daChay++;
     daChay++;
   }

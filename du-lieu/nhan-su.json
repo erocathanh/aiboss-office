@@ -499,10 +499,11 @@
       "viet_tat": "CM"
     },
     {
-      "ten": "claude-chuyen-may-pm",
+      "ten": "claude-chuyen-may-moi-pm-app",
       "phong": "ky-thuat",
       "vai": "Trưởng phòng",
-      "viet_tat": "CM"
+      "viet_tat": "CM",
+      "thu_muc": "/Users/erocathanh/claude-chuyen-may-pm"
     },
     {
       "ten": "claude-code",
@@ -731,6 +732,12 @@
       "ten": "claude-email-funnel-pm-r2",
       "phong": "marketing",
       "vai": "Trưởng phòng",
+      "viet_tat": "EF"
+    },
+    {
+      "ten": "claude-email-funnel-exec",
+      "phong": "marketing",
+      "vai": "Thực thi",
       "viet_tat": "EF"
     },
     {
@@ -1414,7 +1421,8 @@
       "phong": "quan-ly-truong",
       "vai": "Phòng Đào Tạo",
       "viet_tat": "PĐT",
-      "nhan": "PHÒNG ĐÀO TẠO"
+      "nhan": "PHÒNG ĐÀO TẠO",
+      "phien_ghim": "e5c3c00e-022f-4965-9d08-3b8786d37c41"
     },
     {
       "ten": "claude-phong-cong-nghe",
@@ -1428,15 +1436,17 @@
       "phong": "quan-ly-truong",
       "vai": "Phòng Tài Chính",
       "viet_tat": "PTC",
-      "nhan": "PHÒNG TÀI CHÍNH"
+      "nhan": "PHÒNG TÀI CHÍNH",
+      "phien_ghim": "53cba10b-a210-4b91-abbc-97cb16855426"
     },
     {
       "ten": "claude-phong-hanh-chinh",
       "phong": "quan-ly-truong",
       "vai": "Phòng Hành Chính",
       "viet_tat": "PHC",
-      "nhan": "PHÒNG HÀNH CHÍNH"
+      "nhan": "PHÒNG HÀNH CHÍNH",
+      "phien_ghim": "ed295efb-54e2-48b3-86c9-646685db96dd"
     }
   ],
-  "tong": 225
+  "tong": 226
 }

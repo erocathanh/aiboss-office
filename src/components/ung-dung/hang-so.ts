@@ -142,8 +142,8 @@ const BO_MARKETING: string[] = [
  *    còn `spawn` cần THƯ MỤC làm chỗ đứng — cả sáu đều có. Và ô 5-6 ĐANG chạy thật.
  */
 const BO_VAN_HANH: string[] = [
-  'claude-eroca-boss', 'claude-aiboss-app-pm', 'claude-phong-ban-pm',
-  'claude-aiboss-app-exe', 'claude-zalo-bot', 'claude-chat-channels',
+  'claude-eroca-boss', 'claude-email-funnel-pm-296', 'claude-email-funnel-exec',
+  'claude-chuyen-may-moi-pm-app', 'claude-maracafi-ceo', 'claude-chat-channels',
 ];
 
 /**
@@ -195,16 +195,19 @@ const BO_VAN_HANH: string[] = [
  * 🔑 Hai bộ KHÔNG thay thế nhau — chúng là HAI BƯỚC của một việc:
  *    ① mở «Quản Lý Cũ» đọc phiên gốc   ② fork sang «Quản Lý Trường» thành phiên MỚI
  *      mà vẫn mang theo lịch sử.
- * ⚠️ Mã phiên ở đây đi vào `goiY` (mồi ô dán), KHÔNG vào `phien` — xem chú thích `CapGhe`.
- *    Nhét vào `phien` là ô mở ra TRỐNG và KHÔNG có nút Fork.
+ * ⚠️ Pinned seats take their session from `phien_ghim` in du-lieu/nhan-su.json (round-30, Owner 15:50 14/09):
+ *    claude-phong-dao-tao · claude-phong-tai-chinh · claude-phong-hanh-chinh. `nap-bo-ghe.ts:208-209` ignores
+ *    `phien` for a pinned seat, so their rows keep `phien: null` and carry no `goiY` — the pin is the only
+ *    place that names their session. The other rows put a session id into `goiY` (paste-box prefill), NOT
+ *    into `phien` — see the `CapGhe` note. Putting it into `phien` opens the slot EMPTY and without Fork.
  */
 const BO_QUAN_LY_TRUONG: CapGheDungSan[] = [
   { ten: 'claude-eroca-boss',       phien: null },
   { ten: 'claude-hieu-truong',      phien: null, goiY: 'e888d879-dcfe-4dd5-87e1-3df4cc7bfe6b' },
-  { ten: 'claude-phong-dao-tao',    phien: null, goiY: '5956cd23-1533-4565-a7fc-0050769887dc' },
+  { ten: 'claude-phong-dao-tao',    phien: null },
   { ten: 'claude-phong-cong-nghe',  phien: null, goiY: '7911258a-2109-4d48-8a53-5286836daef6' },
-  { ten: 'claude-phong-tai-chinh',  phien: null, goiY: '823ce356-1bb7-4174-991f-8ccee76582fd' },
-  { ten: 'claude-phong-hanh-chinh', phien: null, goiY: '1f08afd0-73d8-45e9-86b5-0a06417bf7e1' },
+  { ten: 'claude-phong-tai-chinh',  phien: null },
+  { ten: 'claude-phong-hanh-chinh', phien: null },
 ];
 
 const BO_QUAN_LY_CU: CapGheDungSan[] = [
@@ -235,10 +238,10 @@ const BO_QUAN_LY_CU: CapGheDungSan[] = [
 const BO_CONG_NGHE: CapGheDungSan[] = [
   { ten: 'claude-eroca-boss',       phien: '9050b662-3b7f-41f9-b55f-cbb124588ceb' },
   { ten: 'claude-aiboss-app-pm',    phien: 'b195c209-d020-4720-83a7-8fe7c47140c8' },
-  { ten: 'claude-phong-ban-pm',     phien: '73d7ce9a-4be9-4833-8759-e18c96762d83' },
   { ten: 'claude-aiboss-app-exe',   phien: '1b696a63-f02d-405d-918e-0a909d8d6ae4' },
   { ten: 'claude-zalo-bot',         phien: '93cdee4b-c31e-4484-a2ee-8b2385bb480b' },
-  { ten: 'claude-tro-ly-dieu-hanh', phien: '1f08afd0-73d8-45e9-86b5-0a06417bf7e1' },
+  { ten: 'claude-phong-cong-nghe',  phien: '7911258a-2109-4d48-8a53-5286836daef6' },
+  { ten: 'claude-bcls-platform-pm', phien: '118dadd2-b8da-4f5b-976b-c2f2a4e24417' },
 ];
 
 /**
@@ -304,7 +307,7 @@ const MAU_PHONG = ['#c89425', '#5b8def', '#3fb27f', '#e0724a', '#9b6bd6', '#d94f
 const O_TRONG: OChat = {
   ns: null, tin: [], soan: '', dangChay: false, dangNap: false,
   chiPhi: null, token: null, noiTiep: false, conNua: false, catDongDai: false, viTri: 0, dsPhien: [],
-  phienHienTai: null, moChonPhien: false, moDan: false, chuoiDan: '', loiDan: '', phienChoFork: null, dangFork: false, cauDauFork: '',
+  phienHienTai: null, moChonPhien: false, moDan: false, chuoiDan: '', loiDan: '', phienChoFork: null, dangFork: false,
   // ¶ MẶC ĐỊNH TẮT (đổi 17/08/2026 sau phản hồi thật của Owner).
   // Bật mặc định ⇒ mọi câu in THÔ ⇒ Owner thấy nguyên dấu ** và tưởng markdown hỏng.
   // Tính năng giữ nguyên, chỉ đổi mặc định: cần xem nhịp mẩu thì bấm ¶.

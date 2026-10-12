@@ -99,4 +99,40 @@ cd ~/Projects/aiboss-app-chat
 # Owner mở bằng iPhone thấy khung đỏ "hydration mismatch" tưởng app hỏng, trong khi
 # đó chỉ là cảnh báo của chế độ dựng-thử. Bản thật: không lớp phủ, không biên dịch lại, nhanh hơn.
 # Sửa mã xong PHẢI dựng lại: cd ~/Projects/aiboss-app-chat && npx next build
-exec npx next start -H 0.0.0.0 -p 4319
+#
+# Bind `::` (dual-stack), not `0.0.0.0`. Owner decided round-27 Q1 = A, 11/09/2026.
+# `0.0.0.0` claims IPv4 only, so another server could take the IPv6 side of this same
+# port and the OS would raise no conflict at all. That happened on the night of
+# 10/09/2026: next-server from another repo held [::]:4319 beside this app on
+# 0.0.0.0:4319, and every request written as `localhost` went to the other app
+# (macOS resolves ::1 first) and came back 401 with realm "claude-master-xemtruoc".
+# Nothing crashed; the wake endpoint simply stopped reaching the seats, silently.
+#
+# Measured 11/09/2026 on a scratch port, both directions:
+#   ::      + ::       -> EADDRINUSE   (loud, correct)
+#   ::      + 0.0.0.0  -> EADDRINUSE   (loud, correct)
+#   0.0.0.0 + ::       -> BOTH BIND    (the hole that bit us)
+#   ::      + ::1      -> BOTH BIND    (still open: a specific address can squeeze in)
+# So this closes two of the three doors, including the one that actually bit.
+# It does not close the [::1] door. Do not read this line as "the port is now safe".
+#
+# `-H ::` still serves IPv4: 127.0.0.1 -> 200 and the wifi address -> 401 auth
+# challenge from realm "phong-ban-ai" (reachable, just asking for the password),
+# byte-identical to how this app answers on 4319 today.
+#
+# Deliberately NOT `HOST=::`. Any build of src/lib/chay-agent.ts still reads HOST as a
+# fallback, and reads it to mean "this app is open to the network" -> restricted tools.
+# Binding a port and changing every seat's tool set are two different decisions; do not
+# ride one on the other.
+#
+# 11/09/2026: the brake in src/lib/chay-agent.ts now reads the `-H` flag straight out of
+# process.argv, so it finally sees the truth — this app IS reachable from outside. Left
+# alone it would drop all 26 tools at the next restart. That is not what this app is for:
+# it stands in for the terminal, so it keeps full tools, and the line below SAYS so
+# instead of letting a silent default decide it.
+#
+# Keep that line next to the -H flag on purpose. The bug being fixed was exactly a
+# declaration living far away from the thing it claimed to describe: they drifted apart
+# and no one saw it happen. Move the flag, move this line with it.
+export GIONG_TERMINAL=1
+exec npx next start -H :: -p 4319

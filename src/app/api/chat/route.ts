@@ -2,13 +2,15 @@ import { NextRequest } from 'next/server';
 import { chayAgent } from '@/lib/chay-agent';
 import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
-import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
+import { layO, layTatCa, datO, ghiMocKetThuc } from '@/lib/kho-phien';
+import { bindingOf, sameBinding } from '@/components/ung-dung/nap-bo-ghe';
 import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT } from '@/lib/doc-phien';
 import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
 import { batMotLan } from '@/lib/khoi-dong-nen';
+import { traVeHangDoi, nhanChayMau } from '@/lib/kho-danh-thuc';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
 export const dynamic = 'force-dynamic';
@@ -32,10 +34,11 @@ function goi(du_lieu: unknown): Uint8Array {
 }
 
 export async function POST(req: NextRequest) {
+  const initialSlots = layTatCa();
   batMotLan(); // 🚀 cửa Node có nhịp gọi dày nhất — hermes FAIL ⑤
   const khach = nhanDangKhach(req.headers);
 
-  let than: { ma_o?: unknown; ma_nhan_su?: unknown; cau_hoi?: unknown; phien_moi?: unknown };
+  let than: { ma_o?: unknown; ma_nhan_su?: unknown; cau_hoi?: unknown; phien_moi?: unknown; ma_yeu_cau?: unknown };
   try {
     than = await req.json();
   } catch {
@@ -46,6 +49,36 @@ export async function POST(req: NextRequest) {
   const maNhanSu = typeof than.ma_nhan_su === 'string' ? than.ma_nhan_su.trim() : '';
   const cauHoi = typeof than.cau_hoi === 'string' ? than.cau_hoi.trim() : '';
   const phienMoi = than.phien_moi === true;
+  /**
+   * 🔁 Mẩu đánh thức nào đã đẻ ra lượt gửi này (round-33 ②A). Trình duyệt chỉ gửi kèm khi câu đến từ hàng
+   * đợi đánh thức. Mã này dùng ở HAI chỗ, và chỉ hai chỗ:
+   *   · `tuChoiThuLai` — cổng từ chối «thử lại sau» xin kho TRẢ mẩu về hàng (kho tự quyết có trả hay không)
+   *   · `nhanChayMau` — sau mọi cổng từ chối, trước khi gọi agent: đánh dấu mẩu đã bị GIÀNH quyền chạy, và
+   *     CHẶN mẩu đã bị giành (ở đây hoặc ở đường nền) / của lần giao cũ
+   */
+  const maYeuCau = typeof than.ma_yeu_cau === 'string' && /^[\w-]{1,80}$/.test(than.ma_yeu_cau)
+    ? than.ma_yeu_cau : '';
+  /**
+   * 🚪 MỘT CỬA cho mọi lần từ chối «thử lại sau» — CHỈ dùng ở các cổng nằm TRƯỚC lúc đẻ tiến trình.
+   * Gom một chỗ vì bốn cổng đang từ chối kiểu này; vá từng cổng thì cổng thứ năm thêm về sau sẽ quên.
+   * Cổng lỗi VĨNH VIỄN (thiếu trường, quá dài, sai nhân sự) KHÔNG đi qua đây.
+   * 📜 Hợp đồng với trình duyệt — ba khả năng, KHÔNG gộp:
+   *   `tra_ve_hang_doi: true`   mẩu đã về hàng dưới MÃ MỚI (`ma_moi`); lần giao sau mang mã đó
+   *   `tra_ve_hang_doi: false`  SAU lần từ chối này mẩu nằm ở trạng thái BỎ — do nhánh trả bỏ (quá trần trả /
+   *                            quá tuổi) HOẶC do `donDep` chạy đầu lời gọi trả (kho `KetQuaTraVe`)
+   *   KHÔNG có trường đó       lần từ chối này KHÔNG trả mẩu về (không thấy · khác ô/ghế · đã bị giành chạy ·
+   *                            trạng thái khác); lý do ở `ly_do_khong_tra`. Lời gọi trả vẫn chạy `donDep`, nên
+   *                            KHÔNG nói được «mẩu không bị đụng» (sửa S6c lượt soi 2)
+   *   Vòng 1 khai `false` cho cả ba ca cuối, trong khi trình duyệt hiểu `false` là «đã bỏ» — người soi bắt.
+   */
+  const tuChoiThuLai = (noi: Record<string, unknown>, status: number, lyDo: string, headers?: HeadersInit) => {
+    const tv = maYeuCau ? traVeHangDoi(maYeuCau, `${status}-${lyDo}`, { maO, maNhanSu }) : null;
+    const khai = !tv ? {}
+      : tv.tra ? { tra_ve_hang_doi: true, lan_tra: tv.lan, ma_moi: tv.ma_moi }
+        : tv.bo ? { tra_ve_hang_doi: false, ly_do_khong_tra: tv.ly_do }
+          : { ly_do_khong_tra: tv.ly_do };
+    return Response.json({ ...noi, ...khai }, { status, ...(headers ? { headers } : {}) });
+  };
 
   if (!maNhanSu) return Response.json({ loi: 'Thiếu nhân sự.' }, { status: 400 });
   if (!cauHoi) return Response.json({ loi: 'Câu hỏi trống.' }, { status: 400 });
@@ -58,6 +91,10 @@ export async function POST(req: NextRequest) {
 
   // Phiên nào? Lấy từ SỔ TRÊN ĐĨA — ⛔ trình duyệt không tự chỉ định mã phiên.
   const o = layO(maO);
+  let turnBinding = bindingOf(initialSlots[maO]);
+  if (!sameBinding(bindingOf(o), turnBinding)) {
+    return Response.json({ loi: 'Liên kết ô đã đổi. Gửi lại từ ô hiện tại.' }, { status: 409 });
+  }
   let maPhienCu = phienMoi || !o || o.ma_nhan_su !== maNhanSu ? null : (o.ma_phien ?? null);
 
   /**
@@ -107,10 +144,24 @@ export async function POST(req: NextRequest) {
       ? `Ghế này ĐANG CHẠY DỞ ngay trong app (ô ${dangTrongApp.ma_o}, đã chạy ` +
         `${Math.round((Date.now() - dangTrongApp.bat_dau) / 1000)} giây). ` +
         'Chờ nó xong, hoặc bấm nút Dừng ở ô đó rồi gửi lại.'
-      : `Phiên này vừa đổi trong ${NGUONG_SONG_PHUT} phút mà sổ tiến trình của app ⛔ có nó. ` +
-        'Nhiều khả năng nó đang chạy ở NƠI KHÁC (cửa sổ dòng lệnh chẳng hạn) — đây là SUY ĐOÁN, ' +
-        '⛔ phải điều app đo được. Nối vào lúc này sẽ hỏng bản ghi phiên; hãy mở phiên mới.';
-    return Response.json({ loi, trong_app: !!dangTrongApp }, { status: 409 });
+      /* 🔗 CÂU NÀY DÍNH VỚI 🅑 trong doc-phien.ts (thứ tự: tuổi tệp xét TRƯỚC phép sờ tiến
+         trình). LÙI 🅑 thì PHẢI sửa lại câu «riêng cổng này hết hạn…» — chẳng còn đúng nữa. */
+      : `⏳ Tệp phiên này vừa được ghi trong ${NGUONG_SONG_PHUT} phút qua, nên cổng MỐC-TỆP KHÔNG mở lượt đè lên.\n\n` +
+        'BA khả năng: (1) có tiến trình khác đang giữ ĐÚNG phiên này (cửa sổ dòng lệnh ' +
+        'chẳng hạn); (2) app thiếu sổ để biết lượt vừa rồi là của chính nó; (3) app nhận ' +
+        'diện NHẦM — một dòng lệnh vô can mang đúng chuỗi cờ nối phiên kèm mã này. App ' +
+        'KHÔNG phân biệt được ba ca, nên chặn cả ba — hai bên cùng ghi một bản ghi phiên ' +
+        'thì bản ghi hỏng.\n\n' +
+        'Một ca (3) đáng nhắc riêng vì hay gặp: một lượt **fork** cũng mang `--resume <mã>` ' +
+        'nhưng nó ĐẺ MÃ MỚI, chẳng ghi lại bản gốc. App vẫn chặn, vì nó chỉ đọc được cái cờ.\n\n' +
+        `**RIÊNG cổng mốc-tệp hết hạn sau ${NGUONG_SONG_PHUT} phút TỆP NÀY IM.** «Im» nghĩa là ` +
+        'KHÔNG ai ghi thêm vào tệp phiên — chẳng phải "chờ đủ phút là xong". Còn thứ gì chạm ' +
+        'vào tệp (một tiến trình khác, một bộ canh) thì đồng hồ ấy **được đặt lại từ đầu** và ' +
+        'cổng này KHÔNG bao giờ hết hạn.\n\n' +
+        'App còn cổng khác (ô đang chạy một lượt khác) có thể vẫn chặn — hết hạn KHÔNG đồng ' +
+        'nghĩa gửi lại là chạy được.\n\n' +
+        'Hoặc mở phiên mới.';
+    return tuChoiThuLai({ loi, trong_app: !!dangTrongApp }, 409, 'phien-dang-chay');
   }
 
   /**
@@ -172,7 +223,7 @@ export async function POST(req: NextRequest) {
           : `Ô ${maO} ĐANG CHẠY một lượt khác (${v.ma_nhan_su}, đã chạy ${giay} giây). ` +
             'Chờ nó xong, hoặc bấm Dừng ở ô đó rồi gửi lại.';
       traCho(maO);
-      return Response.json({ loi: chung, trong_app: true }, { status: 409 });
+      return tuChoiThuLai({ loi: chung, trong_app: true }, 409, 'o-dang-chay');
     }
   }
 
@@ -182,10 +233,10 @@ export async function POST(req: NextRequest) {
    *    HAI yêu cầu tới CÙNG LÚC: cả hai cùng thấy sổ trống, cả hai cùng đi tiếp, cả hai cùng sinh.
    */
   if (!datCho(maO)) {
-    return Response.json({
+    return tuChoiThuLai({
       loi: `Ô ${maO} đang mở một lượt khác ngay lúc này. Thử lại sau vài giây.`,
       trong_app: true,
-    }, { status: 409 });
+    }, 409, 'o-dang-mo-luot');
   }
   /**
    * ⚠️ KHOÁ NHẢ Ở ĐÂU MỚI ĐÚNG: nó phải phủ đúng quãng «từ cổng tới lúc DÒNG SỔ ĐÃ CÓ».
@@ -200,10 +251,33 @@ export async function POST(req: NextRequest) {
   const chan = xinLuot(khach);
   if (!chan.cho_qua) {
     traCho(maO);   // lối thoát sớm ⇒ NHẢ, KHÔNG thì ô kẹt vĩnh viễn
-    return Response.json(
-      { loi: chan.ly_do, cho_giay: chan.cho_giay },
-      { status: 429, headers: { 'Retry-After': String(chan.cho_giay) } },
+    return tuChoiThuLai(
+      { loi: chan.ly_do, cho_giay: chan.cho_giay }, 429, 'tran-luot',
+      { 'Retry-After': String(chan.cho_giay) },
     );
+  }
+
+  /**
+   * ▶ CỔNG CUỐI cho yêu cầu đến từ hàng đợi đánh thức — sau MỌI cổng từ chối «thử lại sau», trước lúc đẻ lượt.
+   * `nhanChayMau` đánh dấu mẩu đã bị giành quyền chạy trong CÙNG một lượt đọc-ghi sổ ⇒ yêu cầu thứ hai mang
+   * cùng mã bị chặn ở đây, KHÔNG đẻ lượt thứ hai (S4 vòng 1: phát lại cùng mã từng làm agent chạy hai lần).
+   * Đường nền `may-chay-nen` đặt CÙNG dấu này (S4 lượt soi 2) ⇒ mẩu đã chạy ở đó cũng bị chặn ở đây.
+   * Cổng này KHÔNG đi qua `tuChoiThuLai`: mẩu đã chạy / của lần giao cũ / khác ô-ghế mà trả về hàng thì
+   * chính là mời nó chạy thêm lần nữa.
+   * ⚠️ Đặt SAU `xinLuot`: đặt trước thì một lần 429 sau đó sẽ bỏ lại mẩu mang dấu đã-chạy mà không có lượt.
+   *    Giá phải trả: yêu cầu bị chặn ở đây đã tiêu một suất của trần lượt.
+   * ❗ Cửa sổ còn hở: nếu luồng hỏng từ đây tới lúc đẻ tiến trình, mẩu đã mang dấu mà không có lượt nào.
+   */
+  if (maYeuCau) {
+    const nc = nhanChayMau(maYeuCau, { maO, maNhanSu });
+    if (!nc.chay) {
+      traCho(maO);
+      return Response.json({
+        loi: `Mẩu đánh thức này KHÔNG được chạy (${nc.ly_do}) — nhiều khả năng nó đã chạy ở một lượt khác, ` +
+          'hoặc thuộc một lần giao cũ đã được phát lại dưới mã mới.',
+        ly_do_khong_chay: nc.ly_do,
+      }, { status: 409 });
+    }
   }
 
   /**
@@ -283,6 +357,25 @@ export async function POST(req: NextRequest) {
           cauHoi: cauGui,
           maPhienCu,
           thuMuc: thuMucAgent(maNhanSu),
+          /* 🏷 round-21 CÂU 1 — Owner quyết 🅒 lúc 23:04 · 08/09/2026: «làm việc RIÊNG, vòng soi
+             riêng, cho đúng MỘT DÒNG `maNhanSu` ở chat/route.ts».
+             Đây là ĐƯỜNG OWNER GÕ TRONG Ô. Trước dòng này nó truyền `thuMuc` mà KHÔNG truyền tên
+             ghế ⇒ `chay-agent.ts:389` gọi `ghiSoHuu(maPhien, undefined)` ⇒ mọi phiên sinh từ ô
+             chat vào SỔ SỞ HỮU với chủ `null` ⇒ MÙ ⇒ nhánh tự bốc phiên ở UngDung.tsx thôi bốc.
+             🔴 CÁI GIÁ THẬT của việc thiếu dòng này KHÔNG phải «sổ nhỏ hơn» mà là **SỔ LỆCH**:
+                đường chạy nền có ghi chủ, đường gõ trong ô thì không ⇒ `co_so_huu: true` thực chất
+                nghĩa là «sinh ra từ đường đánh thức», chẳng phải «thuộc về ghế này».
+                Một cuốn sổ mù MỘT NỬA nguy hơn một cuốn sổ nhỏ — sổ nhỏ thì ai cũng biết là thiếu,
+                sổ lệch thì trông như đủ. (lý do của `claude-phong-ban-pm`, Owner chọn theo lý đó)
+             ⚠️ ĐỪNG suy chủ từ `thuMuc`: đo 07/09 — `thu_muc` duy nhất cho 219/225 ghế, nhưng SÁU
+                ghế dùng chung `/Users/erocathanh`, tức nó mơ hồ ĐÚNG Ở SÁU GHẾ đang gây ra vụ này.
+             📌 Đối xứng với `chay-mot-luot.ts:162` (đường CHẠY NỀN) — hai đường nay khai giống nhau.
+             📏 ĐO ĐƯỢC BAO NHIÊU: bộ thử chạy POST thật → chayAgent thật → ghiSoHuu thật → đọc tệp
+                sổ trên đĩa, với một bản tin phiên do đồ giả phát ra. Nó chứng minh CHỦ ĐƯỢC TRUYỀN
+                TỚI SỔ khi đã có `session_id` hợp lệ. Nó KHÔNG chứng nhận tiến trình `claude` thật
+                đã sinh, cũng KHÔNG chứng nhận phiên thật tồn tại — người soi đo: trỏ lệnh claude vào
+                một đường dẫn KHÔNG tồn tại thì bộ thử VẪN xanh, còn đường chạy thật trả `ENOENT`. */
+          maNhanSu,
           // 👑 Ghế có LINH HỒN RIÊNG (TỔNG GIÁM ĐỐC) thì ⛔ KHÔNG nhét qua lời dặn hệ thống nữa —
           //    linh hồn được chép sẵn thành `CLAUDE.md` trong THƯ MỤC GHẾ, và Claude Code
           //    TỰ NẠP theo chỗ đứng (đúng cơ chế cascade — xem chon-mau/luat-nap.html).
@@ -344,7 +437,9 @@ export async function POST(req: NextRequest) {
           if (mau.loai === 'phien') {
             // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
             maPhienDaDung = mau.ma_phien;
-            datO(maO, maNhanSu, mau.ma_phien);
+            if (datO(maO, maNhanSu, mau.ma_phien, turnBinding)) {
+              turnBinding = bindingOf(layO(maO));
+            }
             dieu.enqueue(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
           } else if (mau.loai === 'chu') {
             dieu.enqueue(goi({ loai: 'chu', chu: mau.chu }));
@@ -396,9 +491,10 @@ export async function POST(req: NextRequest) {
          */
         if (maPhienDaDung) {
           const maP = maPhienDaDung;
+          const stampBinding = turnBinding;
           const ghiLai = () => {
             const m = mocTepPhien(maNhanSu, maP);
-            if (m !== null) ghiMocKetThuc(maO, m);
+            if (m !== null && stampBinding.seat === maNhanSu && stampBinding.session === maP) ghiMocKetThuc(maO, m, stampBinding);
           };
           ghiLai();
           for (const cho of [1_500, 5_000, 15_000]) {

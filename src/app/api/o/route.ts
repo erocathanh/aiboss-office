@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { layTatCa, datO } from '@/lib/kho-phien';
+import { bindingOf, isWriteBinding, sameBinding } from '@/components/ung-dung/nap-bo-ghe';
 import { coPhien } from '@/lib/doc-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { ghiVetGhiRong } from '@/lib/vet-mat-lien-ket';
@@ -16,7 +17,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let than: { ma_o?: unknown; ma_nhan_su?: unknown; ma_phien?: unknown; xoa_lien_ket?: unknown };
+  let than: { ma_o?: unknown; ma_nhan_su?: unknown; ma_phien?: unknown; xoa_lien_ket?: unknown; binding?: unknown };
   try {
     than = await req.json();
   } catch {
@@ -28,6 +29,10 @@ export async function POST(req: NextRequest) {
 
   const maNhanSu = typeof than.ma_nhan_su === 'string' ? than.ma_nhan_su.trim() : null;
   const maPhien = typeof than.ma_phien === 'string' ? than.ma_phien.trim() : null;
+  // Body decoding may finish after another request has replaced this binding.
+  if (!isWriteBinding(than.binding) || !sameBinding(bindingOf(layTatCa()[maO]), than.binding)) {
+    return Response.json({ xong: false, bo_qua: 'loi-thoi', loi: 'Liên kết ô đã đổi. Đọc lại ô trước khi ghi.' }, { status: 409 });
+  }
 
   if (maNhanSu && !timNhanSu(maNhanSu)) {
     return Response.json({ loi: 'Không có nhân sự này.' }, { status: 404 });
@@ -64,6 +69,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  datO(maO, maNhanSu, maPhien);
+  if (!datO(maO, maNhanSu, maPhien, than.binding)) {
+    return Response.json({ xong: false, bo_qua: 'loi-thoi' }, { status: 409 });
+  }
   return Response.json({ xong: true });
 }
