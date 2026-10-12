@@ -6,10 +6,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
  * và `lucide-react` thì skill KHUYÊN TRÁNH. MỘT họ icon cho cả dự án, ⛔ không trộn.
  * Dùng bản `ssr` cho hợp Next. Độ đậm thống nhất `bold` — ⛔ đừng trộn nhiều độ đậm.
  */
+import Link from 'next/link';
 import {
   NumberOne, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
   Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
-  CaretUp, CaretDown, ArrowsClockwise,
+  CaretUp, CaretDown, ArrowsClockwise, GearSix,
 } from '@phosphor-icons/react/dist/ssr';
 import { SO_O } from '@/lib/so-o';
 import type { PhongBan, NhanSu, TomTatPhien, Tin, OChat } from '@/components/ung-dung/kieu';
@@ -129,13 +130,22 @@ export default function UngDung({
   }, []);
 
   const [camUng, datCamUng] = useState(false);
+  const [manHep, datManHep] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
     const mq = window.matchMedia('(pointer: coarse)');
-    const doLai = () => datCamUng(mq.matches);
+    const mqHep = window.matchMedia('(max-width: 768px)');
+    const doLai = () => {
+      datCamUng(mq.matches);
+      datManHep(mqHep.matches);
+    };
     doLai();
     mq.addEventListener('change', doLai);
-    return () => mq.removeEventListener('change', doLai);
+    mqHep.addEventListener('change', doLai);
+    return () => {
+      mq.removeEventListener('change', doLai);
+      mqHep.removeEventListener('change', doLai);
+    };
   }, []);
   const [tieuDiem, datTieuDiemThuan] = useState(0);
   const [nhacO1, datNhacO1] = useState('');
@@ -2125,24 +2135,9 @@ export default function UngDung({
         <aside className="cot cot-1">
           <div className="de-cot">Organization Structure</div>
           <div className="cay">
-            {/* 👑 Owner Node */}
-            <div className="o-owner-box" title="Executive Owner: Eroca Thanh">
-              <div className="owner-card">
-                <span className="owner-icon">👑</span>
-                <div className="owner-details">
-                  <div className="owner-name">Eroca Thanh</div>
-                  <div className="owner-role">Owner & Founder</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="org-divider">
-              <span>Department Tree</span>
-            </div>
-
             <div className="goc nut-vao-pb de-muc">
               <span className="ic">🏢</span>
-              <span className="nhan-ten">Department Sets</span>
+              <span className="nhan-ten">Enter department</span>
             </div>
 
             <div className="menu-vao-pb" role="menu">
@@ -2255,35 +2250,6 @@ export default function UngDung({
             </div>
           </div>
 
-          <div className="thanh-mau" style={{ marginTop: '12px' }}>
-            <div className="tieu">Human Approval Gates (6)</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
-              {[
-                { id: 'ads-account-write', label: 'Ads Write' },
-                { id: 'customer-message', label: 'Customer Message' },
-                { id: 'publish', label: 'Publish' },
-                { id: 'delete', label: 'Delete' },
-                { id: 'customer-page-deploy', label: 'Page Deploy' },
-                { id: 'crm-bulk-or-edit', label: 'CRM Bulk / Edit' },
-              ].map((g) => (
-                <span
-                  key={g.id}
-                  title={`Gated action: ${g.id} (requires human approval)`}
-                  style={{
-                    fontSize: '11px',
-                    padding: '2px 7px',
-                    borderRadius: '10px',
-                    background: 'rgba(239, 68, 68, 0.12)',
-                    color: '#f87171',
-                    border: '1px solid rgba(239, 68, 68, 0.25)',
-                    fontFamily: 'var(--font-mono, monospace)',
-                  }}
-                >
-                  🔒 {g.label}
-                </span>
-              ))}
-            </div>
-          </div>
         </aside>
 
         {/* ===== Column 2 — Seat Directory & Cards ===== */}
@@ -2296,7 +2262,7 @@ export default function UngDung({
             <input
               type="search" autoComplete="off" value={tuKhoa}
               onChange={(e) => datTuKhoa(e.target.value)}
-              placeholder="Search seats by name, role, or slug…"
+              placeholder="Search by role or seat name…"
             />
           </div>
           <div className="ds">
@@ -2309,31 +2275,12 @@ export default function UngDung({
                 }`}
                 data-vai={n.vai}
                 onClick={() => void chonNhanSu(n)}
-                title={`${n.nhan}\n${n.vai}\n${n.ten}`}
+                title={`${n.nhan}\n${n.ten}`}
               >
-                <div className="vuong">{n.icon || n.viet_tat}</div>
+                <div className="vuong">{n.viet_tat}</div>
                 <div className="noi">
-                  <div className="ten-hang">
-                    <span className="ten">{n.nhan}</span>
-                    <span className={`huy-hieu-trang-thai ${n.status || 'idle'}`}>
-                      {n.status || 'idle'}
-                    </span>
-                  </div>
+                  <div className="ten">{n.nhan}</div>
                   <div className="ma-ky-thuat">{n.ten}</div>
-                  <div className="vai-tom-tat">{n.vai}</div>
-                </div>
-                <div className="nut-the-ns">
-                  <button
-                    className="nut-mo-chat"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void chonNhanSu(n);
-                    }}
-                    title={`Open chat with ${n.nhan}`}
-                  >
-                    Chat
-                  </button>
                 </div>
               </div>
             ))}
@@ -2397,25 +2344,8 @@ export default function UngDung({
             >
               <List size={17} weight={DAM_ICON} aria-hidden="true" />
             </button>
-            <span className="nhan-khu ten-app" title="AIBOSS Office — Marketing Department">AIBOSS Office</span>
-            <span className="nhan-dept-badge">Marketing</span>
-            <span className="nhan-that">● Local Engine Connected</span>
-            <span className="nhan-tz-badge" title="Office Timezone">London (BST / UTC+1)</span>
-            <button
-              className="nut-tron nut-refresh"
-              type="button"
-              onClick={() => window.location.reload()}
-              title="Refresh AIBOSS Office"
-              aria-label="Refresh workspace"
-            >
-              <ArrowsClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
-            </button>
-            <div className="progress-marks-bar" title="AIBOSS Office Progress Marks">
-              <span className="pm-label">Marks:</span>
-              {[7, 9, 11, 13, 15, 17, 19, 21].map((hour) => (
-                <span key={hour} className="pm-mark">{hour}:00</span>
-              ))}
-            </div>
+            <span className="nhan-khu ten-app" title="AIBOSS Office">AIBOSS Office</span>
+            <span className="nhan-that">● Connected to Claude Code on this machine</span>
             {nhacO1 && (
               <span className="nhan-mau" title={nhacO1}>
                 <Crown size={12} weight={DAM_ICON} aria-hidden="true" className="vuong-mien" /> {nhacO1}
@@ -2477,6 +2407,16 @@ export default function UngDung({
                 </svg>
               </button>
               <div className="goi-y-phim">Keys <b>1</b>…<b>6</b> switch slot focus</div>
+            </div>
+            <div className="boc-menu boc-cai-dat">
+              <Link
+                href="/settings"
+                className="nut-tron nut-menu nut-cai-dat"
+                title="Office Settings"
+                aria-label="Open Office Settings"
+              >
+                <GearSix size={17} weight={DAM_ICON} aria-hidden="true" />
+              </Link>
             </div>
           </div>
 
@@ -2646,6 +2586,13 @@ export default function UngDung({
                               >
                                 <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
                                 Paste Resume Command
+                              </button>
+                              <button
+                                className="muc-menu" type="button" role="menuitem"
+                                onClick={() => { capNhat(i, { soan: '', moMenu: false }); }}
+                              >
+                                <X size={15} weight={DAM_ICON} aria-hidden="true" />
+                                Clear Input Text
                               </button>
                               {i > 0 && (
                                 <>
@@ -2915,8 +2862,10 @@ export default function UngDung({
                           rows={1}
                           /* Ô hẹp thì lời nhắc dài sẽ xuống dòng rồi bị cắt cụt — rút gọn. */
                           placeholder={o.dangChay
-                            ? 'Responding — you can type now, messages will queue'
-                            : 'Type a message or press / for commands...'}
+                            ? 'Responding…'
+                            : (camUng || manHep)
+                              ? `Message ${o.ns ? o.ns.nhan : 'seat'}…`
+                              : `Message ${o.ns ? o.ns.nhan : 'seat'}… (Enter to send)`}
                         />
                         {/**
                           * 🛑 NÚT DỪNG — Owner 18/08: «nút stop hiện ngay sau khi bấm nút gửi

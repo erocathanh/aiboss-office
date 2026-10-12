@@ -1,8 +1,18 @@
+import path from 'node:path';
 import duLieuCu from '../../du-lieu/nhan-su.json';
 import dataSeatsRaw from '../../data/seats.json';
 import dataDepartmentsRaw from '../../data/departments.json';
 import officeConfigRaw from '../../config/office.json';
 import { datNhanHangLoat } from './dat-nhan';
+
+/**
+ * Repository root resolution:
+ * Resolves to process.cwd() when running 'next start' from repo root,
+ * or falls back to resolving relative to this module for standalone/Electron execution.
+ */
+const REPO_ROOT = process.env.AIBOSS_OFFICE_ROOT
+  ? path.resolve(process.env.AIBOSS_OFFICE_ROOT)
+  : path.resolve(process.cwd());
 
 export interface PhongBan {
   ma: string;
@@ -95,7 +105,7 @@ if (hasNewData) {
       ten: s.seat_id,
       nhan: s.name,
       ghim: s.seat_id === 'marketing-lead' || index === 0,
-      thu_muc: s.dir,
+      thu_muc: s.dir ? path.resolve(REPO_ROOT, s.dir) : undefined,
       phien_ghim: s.pinned_session ?? undefined,
       phong: s.department,
       ten_phong: tenPhong,
