@@ -31,6 +31,18 @@ AIBOSS Office is a standalone workspace platform providing org charts, multi-sea
    ```
    Access the dashboard at `http://127.0.0.1:4330`.
 
+5. **Run as a Service (macOS LaunchAgent):**
+   Install and run AIBOSS Office as a background daemon with auto-recovery on port 4330:
+   ```bash
+   ./operations/scripts/service-install.sh
+   ./operations/scripts/service-status.sh
+   ```
+   To uninstall:
+   ```bash
+   ./operations/scripts/service-uninstall.sh
+   ```
+   See [operations/README.md](file:///Users/erocathanh/Projects/aiboss-office-5a/operations/README.md) for detailed service and runner operations.
+
 ## Repository Structure
 
 - `config/` - Core office configuration (`office.json`).

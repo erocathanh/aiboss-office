@@ -87,6 +87,7 @@
  */
 import { bat as batBoNen, datNguonThamDo } from '@/lib/may-chay-nen';
 import { thamDoCuoiCua } from '@/lib/kho-danh-thuc';
+import { startOfficeRunner } from '@/lib/office-runner';
 
 /**
  * 🔴 HAI CỜ, KHÔNG PHẢI MỘT — `claude-phong-ban-pm` bắt 01/09.
@@ -132,6 +133,7 @@ export function batMotLan(): void {
     // «coi như có trình duyệt» và bộ nền đứng ngoài mãi mãi (an toàn, nhưng vô dụng).
     datNguonThamDo(thamDoCuoiCua);
     const bat = batBoNen();
+    startOfficeRunner();
     console.log(
       bat
         ? '[chay-nen] ĐÃ BẬT — máy chủ sẽ tự rút mẩu khỏi hàng đợi khi KHÔNG có trình duyệt lái.'

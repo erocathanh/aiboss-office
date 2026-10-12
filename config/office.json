@@ -13,8 +13,17 @@
     "incident": 4,
     "routine": 24
   },
+  "runner": {
+    "enabled": true,
+    "interval_s": 5,
+    "max_parallel": 2
+  },
+  "service": {
+    "port": 4330,
+    "host": "127.0.0.1"
+  },
   "last_edited": {
-    "at": "2026-10-12T10:19:00Z",
-    "by": "setup"
+    "at": "2026-10-12T14:09:00Z",
+    "by": "antigravity-aiboss-office-backend"
   }
 }
