@@ -10,6 +10,7 @@ import {
   Lock,
 } from '@phosphor-icons/react/dist/ssr';
 import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
+import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
 
 interface OfficeConfig {
   version: number;
@@ -139,6 +140,9 @@ export default function SettingsPage() {
         <div className="settings-grid">
           {/* Card 1: Display & Typography (Client Preferences) */}
           <DisplaySettingsCard />
+
+          {/* Card: Desktop Shell (Read-only System Indicator) */}
+          <DesktopSettingsCard />
 
           {/* Card 2: Office Schedule & Timezone */}
           <section className="settings-card">
