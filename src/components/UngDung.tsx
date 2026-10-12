@@ -167,6 +167,61 @@ export default function UngDung({
   }, []);
   const [tieuDiem, datTieuDiemThuan] = useState(0);
   const [nhacO1, datNhacO1] = useState('');
+
+  // 🪑 Seat ledger & terminal status (Pha 5A-1)
+  const [seatActiveMap, setSeatActiveMap] = useState<
+    Record<string, { is_terminal_held: boolean; resume_cmd: string | null; pid?: number | null; cwd?: string | null }>
+  >({});
+  const [copiedSeat, setCopiedSeat] = useState<string | null>(null);
+
+  const capNhatSeatActive = useCallback(async (seatTen: string) => {
+    if (!seatTen) return;
+    try {
+      const res = await fetch(`/api/seats/${seatTen}/active`);
+      if (res.ok) {
+        const data = await res.json();
+        setSeatActiveMap((prev) => ({
+          ...prev,
+          [seatTen]: {
+            is_terminal_held: !!data.is_terminal_held,
+            resume_cmd: data.resume_cmd || (data.active?.resume_cmd ?? null),
+            pid: data.active?.pid ?? null,
+            cwd: data.active?.cwd ?? null,
+          },
+        }));
+      }
+    } catch {}
+  }, []);
+
+  const chaoResumeTerminal = useCallback(
+    async (seatId: string, phong?: string, phien?: string | null) => {
+      const info = seatActiveMap[seatId];
+      const thuMuc = info?.cwd || (phong ? `departments/${phong}/seats/${seatId}` : '');
+      const cmd =
+        info?.resume_cmd ||
+        (phien
+          ? `cd '${thuMuc}' && claude --resume ${phien}`
+          : `cd '${thuMuc}' && claude`);
+      try {
+        await navigator.clipboard.writeText(cmd);
+        setCopiedSeat(seatId);
+        setTimeout(() => setCopiedSeat(null), 2000);
+      } catch {
+        window.prompt('Copy resume command:', cmd);
+      }
+    },
+    [seatActiveMap]
+  );
+
+  useEffect(() => {
+    const seats = Array.from(new Set(dsO.map((o) => o.ns?.ten).filter(Boolean))) as string[];
+    if (seats.length === 0) return;
+    for (const s of seats) void capNhatSeatActive(s);
+    const interval = setInterval(() => {
+      for (const s of seats) void capNhatSeatActive(s);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [dsO, capNhatSeatActive]);
   /**
    * Màn HẸP: khu trao đổi phủ kín màn hình (bản mẫu 09 quy định `.cot-3{display:none}`
    * và chỉ hiện khi có lớp `mo-khu`). ⛔ Thiếu cờ này thì trên màn hẹp khu chat BIẾN MẤT
@@ -2493,6 +2548,37 @@ export default function UngDung({
                         </b>
                         <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
                       </div>
+                      {seatActiveMap[o.ns.ten]?.is_terminal_held && (
+                        <span
+                          className="nhan-seat-terminal"
+                          title={`Seat is open in terminal (PID ${seatActiveMap[o.ns.ten]?.pid ?? ''})`}
+                        >
+                          Seat open in terminal
+                        </span>
+                      )}
+                      <button
+                        className={`nut-resume-terminal${copiedSeat === o.ns.ten ? ' da-chep' : ''}`}
+                        type="button"
+                        onClick={() => void chaoResumeTerminal(o.ns!.ten, o.ns!.phong, o.phienHienTai)}
+                        title="Copy command to resume this session in terminal"
+                        aria-label="Resume in terminal"
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <polyline points="4 17 10 11 4 5" />
+                          <line x1="12" y1="19" x2="20" y2="19" />
+                        </svg>
+                        <span>{copiedSeat === o.ns.ten ? 'Copied!' : 'Resume in terminal'}</span>
+                      </button>
                       <button
                         className={`so-o nut-so${o.moHoSo ? ' bat' : ''}`} type="button"
                         onClick={() => capNhat(i, { moHoSo: !o.moHoSo })}
@@ -2604,6 +2690,29 @@ export default function UngDung({
                               >
                                 <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
                                 Paste Resume Command
+                              </button>
+                              <button
+                                className="muc-menu" type="button" role="menuitem"
+                                onClick={() => {
+                                  capNhat(i, { moMenu: false });
+                                  if (o.ns) void chaoResumeTerminal(o.ns.ten, o.ns.phong, o.phienHienTai);
+                                }}
+                              >
+                                <svg
+                                  width="15"
+                                  height="15"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  aria-hidden="true"
+                                >
+                                  <polyline points="4 17 10 11 4 5" />
+                                  <line x1="12" y1="19" x2="20" y2="19" />
+                                </svg>
+                                Resume in Terminal
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"

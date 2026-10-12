@@ -1112,3 +1112,55 @@ html[data-co-chu="lon"] {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   SEAT LEDGER & TERMINAL RESUME UI (Pha 5A-1)
+   ═══════════════════════════════════════════════════════════════════ */
+.nhan-seat-terminal {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(200, 148, 37, 0.18);
+  border: 1px solid rgba(200, 148, 37, 0.45);
+  color: var(--vang-sang, #f1c768);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.nut-resume-terminal {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(250, 247, 240, 0.08);
+  border: 1px solid var(--vien, rgba(250, 247, 240, 0.15));
+  color: var(--kem, #faf7f0);
+  font-size: 11px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.nut-resume-terminal:hover {
+  background: rgba(200, 148, 37, 0.2);
+  border-color: rgba(200, 148, 37, 0.45);
+  color: var(--vang-sang, #f1c768);
+}
+
+.nut-resume-terminal.da-chep {
+  background: rgba(46, 125, 50, 0.25);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #81c784;
+}
+
+@media (max-width: 600px) {
+  .nut-resume-terminal span {
+    display: none;
+  }
+}
+
+

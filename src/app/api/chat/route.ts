@@ -9,6 +9,7 @@ import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
 import { batMotLan } from '@/lib/khoi-dong-nen';
+import { isSeatHeldByTerminal, claimSeat, updateSeatActivePid } from '@/lib/seat-active';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
 export const dynamic = 'force-dynamic';
@@ -87,6 +88,20 @@ export async function POST(req: NextRequest) {
        * ⇒ Giữ liên kết trong sổ: lượt này mở phiên mới, nhưng Owner vẫn NỐI LẠI được.
        */
     }
+  }
+
+  // ⛔ Check if seat is currently claimed and active in terminal (5A-1)
+  const { isHeld: giuTerminal, record: recTerminal } = isSeatHeldByTerminal(maNhanSu);
+  if (giuTerminal) {
+    return Response.json(
+      {
+        loi: `Seat '${maNhanSu}' is open in terminal (session: ${recTerminal?.session_id}). Turn skipped.`,
+        skipped: 'terminal',
+        tool: 'terminal',
+        resume_cmd: recTerminal?.resume_cmd,
+      },
+      { status: 409 }
+    );
   }
 
   // ⛔ LUẬT CỨNG: ⛔ TUYỆT ĐỐI KHÔNG resume phiên ĐANG CHẠY ở nơi khác.
@@ -345,6 +360,12 @@ export async function POST(req: NextRequest) {
             // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
             maPhienDaDung = mau.ma_phien;
             datO(maO, maNhanSu, mau.ma_phien);
+            claimSeat(maNhanSu, {
+              tool: 'app',
+              sessionId: mau.ma_phien,
+              pid: process.pid,
+              cwd: thuMucAgent(maNhanSu),
+            });
             dieu.enqueue(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
           } else if (mau.loai === 'chu') {
             dieu.enqueue(goi({ loai: 'chu', chu: mau.chu }));
@@ -405,6 +426,7 @@ export async function POST(req: NextRequest) {
             setTimeout(ghiLai, cho).unref?.();
           }
         }
+        updateSeatActivePid(maNhanSu, null);
         dongMotLan();
         try {
           dieu.close();

@@ -34,3 +34,5 @@ operations/data/**
 !operations/data/**/.gitkeep
 private/
 departments/*/seats/*/.claude/settings.local.json
+departments/*/seats/*/seat-active.json
+departments/*/seats/*/seat-log.jsonl

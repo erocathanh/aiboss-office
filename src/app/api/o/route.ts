@@ -3,6 +3,8 @@ import { layTatCa, datO } from '@/lib/kho-phien';
 import { coPhien } from '@/lib/doc-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { ghiVetGhiRong } from '@/lib/vet-mat-lien-ket';
+import { claimSeat, releaseSeat } from '@/lib/seat-active';
+import { thuMucAgent } from '@/lib/doc-phien';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,5 +67,21 @@ export async function POST(req: NextRequest) {
   }
 
   datO(maO, maNhanSu, maPhien);
+
+  if (maNhanSu && maPhien) {
+    try {
+      claimSeat(maNhanSu, {
+        tool: 'app',
+        sessionId: maPhien,
+        pid: null,
+        cwd: thuMucAgent(maNhanSu),
+      });
+    } catch {}
+  } else if (maNhanSu && !maPhien && xoaLienKet) {
+    try {
+      releaseSeat(maNhanSu, 'session_changed');
+    } catch {}
+  }
+
   return Response.json({ xong: true });
 }

@@ -48,6 +48,7 @@ import { dangKyViec, xoaViec } from '@/lib/kho-tien-trinh';
 import type { ChildProcess } from 'node:child_process';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
+import { isSeatHeldByTerminal, claimSeat, updateSeatActivePid } from '@/lib/seat-active';
 
 /** Sự kiện lõi bắn ra. Cùng HÌNH DẠNG với thứ `/api/chat` đang đẩy qua SSE. */
 export type SuKienLuot =
@@ -114,6 +115,17 @@ export async function chayMotLuot(
   const ns = timNhanSu(maNhanSu);
   if (!ns) return { maPhien: maPhienCu, pid_de_hien_thi: null, loi: `Không có nhân sự "${maNhanSu}".`, buocOThatBai: false };
 
+  // ⛔ Check if seat is currently claimed and active in terminal (5A-1)
+  const { isHeld: giuTerminal, record: recTerminal } = isSeatHeldByTerminal(maNhanSu);
+  if (giuTerminal) {
+    return {
+      maPhien: maPhienCu,
+      pid_de_hien_thi: null,
+      loi: `skipped: terminal (Seat '${maNhanSu}' is held by terminal PID ${recTerminal?.pid})`,
+      buocOThatBai: false,
+    };
+  }
+
   /**
    * 🖐 TAY CẦM để XOÁ SỔ (danh tính) — và 🔢 SỐ HIỆU để HIỆN, chụp NGAY LÚC SINH.
    *
@@ -174,6 +186,12 @@ export async function chayMotLuot(
       if (mau.loai === 'phien') {
         // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
         maPhien = mau.ma_phien;
+        claimSeat(maNhanSu, {
+          tool: 'app',
+          sessionId: mau.ma_phien,
+          pid: process.pid,
+          cwd: thuMucAgent(maNhanSu),
+        });
         /**
          * ← MẮT XÍCH ③: buộc lượt vào ĐÚNG ô.
          * 🔴 PHẢI ĐỌC GIÁ TRỊ TRẢ VỀ (hermes vòng 2, NGOÀI ĐỀ ②).
@@ -207,6 +225,7 @@ export async function chayMotLuot(
     nhan({ loai: 'loi', thong_diep: thongDiep });
     return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai };
   } finally {
+    updateSeatActivePid(maNhanSu, null);
     // Rút khỏi sổ tiến trình — CHỈ rút đúng TAY CẦM của mình (xem `xoaViec`).
     if (tienDangChay !== null) xoaViec(maO, tienDangChay);
   }
