@@ -23,7 +23,7 @@
 | `block_external_scan.py` | `51789bf06057701df01207a06dabfd74` | `51789bf06057701df01207a06dabfd74` | Giống 100% | Nguyên văn từ kho nguồn |
 | `block_mass_delete.py` | `32bc25c2412c5154d699d5d7b7c92a5f` | `8031c849bab81de4bb622a82ab92b769` | Khớp quy ước | Nhập `layout.py` để kiểm tra tệp nhật ký / `CHANNEL.md` |
 | `block_secret_leak.py` | `ea45309715d01ed3a90f0d4cd6cb174b` | `ea45309715d01ed3a90f0d4cd6cb174b` | Giống 100% | Nguyên văn từ kho nguồn |
-| `guard_bulk_send.py` | `211c4297cc7bc81898da3da3bed4e71c` | `c5ec6aede8ebbb15ae79f57bff7f47c4` | Khớp quy ước | Thêm ghi nhật ký duyệt `operations/data/approvals/<YYYY-MM-DD>.jsonl` |
+| `guard_bulk_send.py` | `211c4297cc7bc81898da3da3bed4e71c` | `6e8ee3d3cf0f5c4531349351c5e808cb` | Khớp quy ước | Chuyển thành CHẶN mã 2, bắt fetch_page_messages, che PII trong sổ duyệt approvals/<YYYY-MM-DD>.jsonl |
 | `guard_customer_pii.py` | `8b6c98631b6ccba2ff0290288029e94f` | `394cff5313b0e24cc9f24dc8e16d77ab` | Khớp quy ước | Nhập `layout.py`, `office_root.py`, nạp `pii_patterns` từ thư mục cục bộ |
 | `lock_raw_inputs.py` | `477f62ac7c9d57e275aa7eeb487a97b4` | `0505305584cfbaed9b53d7c8beb2c4fb` | Khớp quy ước | Nhập `layout.py`, tìm gốc kho qua `office_root.find_office_root` |
 | `protect_final_outputs.py` | `6921b0d5923176e71286f490a11b29ab` | `a95692895d4444045fa1e42a3a9e9d47` | Khớp quy ước | Nhập `layout.py`, `office_root.py`, hỗ trợ `CHANNEL.md` append-only |

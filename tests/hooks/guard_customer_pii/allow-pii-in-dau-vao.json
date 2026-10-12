@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/DAU-VAO/tin-nhan-khach/khach-hang-moi.md",
+    "content": "Khách hàng Nguyễn Văn A, SĐT: 0912345678, Email: khach@example.com"
+  }
+}

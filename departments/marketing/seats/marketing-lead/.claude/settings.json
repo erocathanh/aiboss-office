@@ -10,7 +10,9 @@
       "Read(./.env.*)",
       "Read(~/.config/aiboss-office/**)",
       "Bash(python3 tools/inbox-reader/save_token.py *)",
-      "Bash(/usr/bin/python3 tools/inbox-reader/save_token.py *)"
+      "Bash(/usr/bin/python3 tools/inbox-reader/save_token.py *)",
+      "Bash(python3 tools/inbox-reader/fetch_page_messages.py *)",
+      "Bash(/usr/bin/python3 tools/inbox-reader/fetch_page_messages.py *)"
     ]
   },
   "hooks": {

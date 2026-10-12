@@ -42,6 +42,17 @@ case "$ACTION" in
         echo "Thư mục hooks:    $HOOKS_DIR"
         echo "Tệp manifest:     $MANIFEST_FILE"
         echo "Kho nguồn OPC:    $SOURCE_REPO"
+        if [ -d "$SOURCE_REPO/.git" ]; then
+            source_commit="$(git -C "$SOURCE_REPO" rev-parse HEAD 2>/dev/null || echo "unknown")"
+            source_commit_short="$(git -C "$SOURCE_REPO" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+            echo "Commit nguồn OPC: $source_commit_short ($source_commit)"
+            manifest_commit="$(grep -E "HEAD tại commit" "$MANIFEST_FILE" 2>/dev/null | grep -o -E '[0-9a-f]{7,40}' | head -1 || echo "5f2148a")"
+            if [ "$source_commit_short" != "${manifest_commit:0:7}" ]; then
+                echo "[sync-harness: LƯU Ý] Kho nguồn OPC đã trôi ($source_commit_short != manifest $manifest_commit)"
+            else
+                echo "[sync-harness: OK] Kho nguồn OPC khớp hoàn toàn với commit manifest ($source_commit_short)"
+            fi
+        fi
         echo ""
 
         if [ ! -f "$MANIFEST_FILE" ]; then

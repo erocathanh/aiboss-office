@@ -4,7 +4,7 @@
  * gen-seat-files.mjs — Sinh tự động CLAUDE.md và .claude/settings.json cho từng ghế
  * và cả .claude/settings.json ở gốc kho từ data/seats.json và departments/marketing/department.json.
  *
- * Mở rộng từ gen-seat-claude-md.mjs theo yêu cầu đề PHA H1 (mục H1-3).
+ * Mở rộng từ gen-seat-claude-md.mjs theo yêu cầu đề PHA H1 (mục H1-3 và v02).
  */
 
 import fs from 'node:fs';
@@ -16,6 +16,25 @@ const deptPath = path.join(REPO_ROOT, 'departments', 'marketing', 'department.js
 
 const seats = JSON.parse(fs.readFileSync(seatsPath, 'utf-8'));
 const dept = JSON.parse(fs.readFileSync(deptPath, 'utf-8'));
+
+// Kiểm tra ghế trên đĩa: quét departments/*/seats/*
+const marketingSeatsDir = path.join(REPO_ROOT, 'departments', 'marketing', 'seats');
+if (fs.existsSync(marketingSeatsDir)) {
+  const diskSeats = fs.readdirSync(marketingSeatsDir).filter((name) => {
+    return fs.statSync(path.join(marketingSeatsDir, name)).isDirectory();
+  });
+  const knownSeatIds = new Set(seats.map((s) => s.seat_id));
+  const unlistedSeats = diskSeats.filter((s) => !knownSeatIds.has(s));
+
+  if (unlistedSeats.length > 0) {
+    if (process.argv.includes('--strict') || process.env.STRICT_SEATS === '1') {
+      console.error(`[gen-seat-files: ERROR] Ghế trên đĩa không có trong data/seats.json: ${unlistedSeats.join(', ')}`);
+      process.exit(1);
+    } else {
+      console.warn(`[gen-seat-files: WARN] Ghế trên đĩa không có trong data/seats.json: ${unlistedSeats.join(', ')} (chạy với --strict để dừng báo lỗi)`);
+    }
+  }
+}
 
 const gatesList = dept.gates || [];
 const gatesStr = gatesList.map((g) => `\`${g}\``).join(', ');
@@ -30,6 +49,8 @@ const DENY_RULES = [
   'Read(~/.config/aiboss-office/**)',
   'Bash(python3 tools/inbox-reader/save_token.py *)',
   'Bash(/usr/bin/python3 tools/inbox-reader/save_token.py *)',
+  'Bash(python3 tools/inbox-reader/fetch_page_messages.py *)',
+  'Bash(/usr/bin/python3 tools/inbox-reader/fetch_page_messages.py *)',
 ];
 
 function buildSettingsJson(hooksBasePath) {

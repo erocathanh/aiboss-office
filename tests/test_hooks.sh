@@ -110,7 +110,9 @@ sys.stdout.write(s)
 
     # Chạy hook bằng lệnh chuẩn như trong settings.json có || exit 2
     local hook_cmd
-    if [ "$hook_name" == "remind_cross_check" ]; then
+    if [ "${HOOKS_DISABLED:-0}" -eq 1 ]; then
+        hook_cmd="/usr/bin/true"
+    elif [ "$hook_name" == "remind_cross_check" ]; then
         hook_cmd="\"$PYTHON\" \"$hook_script\""
     else
         hook_cmd="\"$PYTHON\" \"$hook_script\" || exit 2"
@@ -207,16 +209,26 @@ for hook in "${HOOKS[@]}"; do
     done
 done
 
-# Kiểm tra đối chứng dương: khi TẮT hook, ca đối chứng phải FAIL nếu kỳ vọng chặn mã 2
+# Kiểm tra đối chứng dương: khi TẮT hook (thay bằng no-op true), ca block-* qua runner PHẢI báo FAIL.
+# Nếu runner báo FAIL khi hook bị câm/tắt, thì đối chứng dương ĐẠT (bộ kiểm thử không mù).
 echo "--- Kiểm tra đối chứng dương (Positive Control) ---"
+pos_script="$REPO_ROOT/operations/hooks/block_mass_delete.py"
 pos_file="$REPO_ROOT/tests/hooks/block_mass_delete/positive-control-rm-rf.json"
-pos_input="$(cat "$pos_file")"
-echo "$pos_input" | /bin/bash -c "cat >/dev/null"
-pos_exit=$?
-if [ "$pos_exit" -eq 0 ]; then
-    echo "  [PASS] Ca đối chứng dương: khi tắt hook, lệnh không bị chặn mã 2 (thoát mã 0). Thước biết nói KHÔNG!"
+
+saved_total=$TOTAL
+saved_passed=$PASSED
+saved_failed=$FAILED
+
+control_out=$(HOOKS_DISABLED=1 run_hook_test "$pos_script" "block_mass_delete" "$pos_file" 2>&1)
+
+TOTAL=$saved_total
+PASSED=$saved_passed
+FAILED=$saved_failed
+
+if [[ "$control_out" == *"[FAIL]"* ]]; then
+    echo "  [PASS] Ca đối chứng dương: khi tắt hook (thay bằng no-op true), runner phát hiện và báo FAIL. Bộ test không mù, thước biết nói KHÔNG!"
 else
-    echo "  [FAIL] Ca đối chứng dương: kỳ vọng thoát 0 khi tắt hook nhưng nhận $pos_exit"
+    echo "  [FAIL] Ca đối chứng dương: khi tắt hook, runner không báo FAIL: $control_out"
     FAILED=$((FAILED + 1))
 fi
 
