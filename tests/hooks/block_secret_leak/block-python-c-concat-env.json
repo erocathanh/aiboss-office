@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"print(open('.e' + 'nv').read())\""
+  },
+  "expected": "allow",
+  "comment": "Giới hạn đã biết: hook đọc chuỗi, lệnh tự ghép chuỗi vẫn lọt; chặn thật phải ở tầng hệ điều hành (chìa không nằm chỗ tiến trình ghế đọc được, hoặc sandbox)"
+}

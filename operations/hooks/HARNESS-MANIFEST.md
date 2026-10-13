@@ -22,7 +22,7 @@
 | `bash_parser.py` | `06b93823afc06fc47ea2c762462fb05c` | `fed7274ca012cc4ada39f817dd19799e` | Khớp quy ước | Nhập `layout.py` thay vì ghim cứng tên tiếng Việt |
 | `block_external_scan.py` | `51789bf06057701df01207a06dabfd74` | `51789bf06057701df01207a06dabfd74` | Giống 100% | Nguyên văn từ kho nguồn |
 | `block_mass_delete.py` | `32bc25c2412c5154d699d5d7b7c92a5f` | `8031c849bab81de4bb622a82ab92b769` | Khớp quy ước | Nhập `layout.py` để kiểm tra tệp nhật ký / `CHANNEL.md` |
-| `block_secret_leak.py` | `ea45309715d01ed3a90f0d4cd6cb174b` | `ea45309715d01ed3a90f0d4cd6cb174b` | Giống 100% | Nguyên văn từ kho nguồn |
+| `block_secret_leak.py` | `ea45309715d01ed3a90f0d4cd6cb174b` | `e3fddc8997c2dab4ed182b50fd3157d1` | Khớp quy ước | Vá v03: Chặn mọi lệnh Bash có đường dẫn .env (trừ example/sample), .config/aiboss-office mọi vị trí (-c, heredoc) |
 | `guard_bulk_send.py` | `211c4297cc7bc81898da3da3bed4e71c` | `6e8ee3d3cf0f5c4531349351c5e808cb` | Khớp quy ước | Chuyển thành CHẶN mã 2, bắt fetch_page_messages, che PII trong sổ duyệt approvals/<YYYY-MM-DD>.jsonl |
 | `guard_customer_pii.py` | `8b6c98631b6ccba2ff0290288029e94f` | `394cff5313b0e24cc9f24dc8e16d77ab` | Khớp quy ước | Nhập `layout.py`, `office_root.py`, nạp `pii_patterns` từ thư mục cục bộ |
 | `lock_raw_inputs.py` | `477f62ac7c9d57e275aa7eeb487a97b4` | `0505305584cfbaed9b53d7c8beb2c4fb` | Khớp quy ước | Nhập `layout.py`, tìm gốc kho qua `office_root.find_office_root` |
@@ -83,3 +83,18 @@
 7. **`remind_cross_check.py`:**
    - Nhập `layout.py`.
    - Nhận diện thư mục đang làm (`layout.WIP_DIR` / `layout.OPC_WIP_DIR`) và thư mục đầu ra (`layout.OUTPUTS_DIR` / `layout.OPC_OUTPUTS_DIR`).
+8. **`block_secret_leak.py` (Vá v03 theo phát hiện live test PCN):**
+   - Chặn toàn diện mọi lệnh Bash có đường dẫn tới `.env` / `.env.<x>` (trừ `.env.example` và `.env.sample`).
+   - Chặn mọi lệnh Bash có đường dẫn tới thư mục cấu hình bí mật: `~/.config/aiboss-office/`, `$HOME/.config/aiboss-office/`, `.config/aiboss-office/`.
+   - Áp dụng trên toàn bộ chương trình khởi chạy (python, python3, node, ruby, perl, cp, head, tail, less, base64, xxd, open, osascript, v.v.), ở mọi vị trí (sau &&, ;, |, trong cờ mã nguồn nội tuyến `-c`, `-e`, và trong nội dung heredoc `<<EOF`).
+   - Giữ nguyên tiền tố thông điệp lỗi: `[opc-harness:block_secret_leak]`.
+
+---
+
+## 5. Giới hạn đã biết (Known Limitations)
+
+- **Giới hạn kiểm tra chuỗi tĩnh:** Hook hoạt động bằng phân tích chuỗi và cú pháp lệnh tĩnh. Nếu lệnh trong script tự ghép chuỗi tại thời điểm chạy (ví dụ `python3 -c "print(open('.e' + 'nv').read())"` hoặc giải mã base64/hex động lúc chạy), chuỗi `.env` không xuất hiện tĩnh trong câu lệnh nên hook không thể nhận biết nếu không thực thi mã.
+- **Biện pháp phòng vệ thực sự:** Để triệt để ngăn chặn rò rỉ secret đối với các kỹ thuật ghép chuỗi/làm rối mã động, bảo vệ phải nằm ở tầng hệ điều hành:
+  1. Chìa khoá bí mật không được đặt ở đường dẫn mà tiến trình ghế AI có quyền đọc trên filesystem.
+  2. Cách ly tiến trình ghế AI thông qua sandbox hệ điều hành (chặn syscall open/read tới file secret).
+

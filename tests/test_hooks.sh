@@ -130,7 +130,22 @@ sys.stdout.write(s)
     err_content="$(cat "$stderr_file")"
     rm -f "$stdout_file" "$stderr_file"
 
-    if [[ "$filename" == block-* || "$filename" == "broken-input.txt" || "$filename" == positive-control-* ]]; then
+    local expected_decision=""
+    if grep -qE '"(expected|ky_vong)"[[:space:]]*:[[:space:]]*"allow"' "$test_file" 2>/dev/null; then
+        expected_decision="allow"
+    elif grep -qE '"(expected|ky_vong)"[[:space:]]*:[[:space:]]*"block"' "$test_file" 2>/dev/null; then
+        expected_decision="block"
+    elif [[ "$filename" == block-* || "$filename" == "broken-input.txt" || "$filename" == positive-control-* ]]; then
+        expected_decision="block"
+    elif [[ "$filename" == allow-* ]]; then
+        expected_decision="allow"
+    elif [[ "$filename" == ask-* ]]; then
+        expected_decision="ask"
+    elif [[ "$filename" == remind-* ]]; then
+        expected_decision="remind"
+    fi
+
+    if [ "$expected_decision" == "block" ]; then
         if [ "$exit_code" -eq 2 ]; then
             if [[ "$err_content" == "[opc-harness:$hook_name]"* ]]; then
                 record_pass "$hook_name / $filename (chặn đúng mã 2 và đúng tiền tố stderr)"
@@ -140,7 +155,7 @@ sys.stdout.write(s)
         else
             record_fail "$hook_name / $filename" "Kỳ vọng chặn mã 2, nhưng nhận mã $exit_code"
         fi
-    elif [[ "$filename" == allow-* ]]; then
+    elif [ "$expected_decision" == "allow" ]; then
         if [ "$exit_code" -eq 0 ]; then
             if [ -z "$out_content" ]; then
                 record_pass "$hook_name / $filename (cho qua mã 0, stdout rỗng)"

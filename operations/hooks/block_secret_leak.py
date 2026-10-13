@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hook 2: block_secret_leak.py
-Chặn rò rỉ secret / API token / khoá bí mật và các lệnh đọc tệp nhạy cảm (.env, meta-page-token, hash-salt).
-Tuân thủ đầy đủ kết quả rà soát an toàn chuyên sâu (review 30/09/2026).
+Chặn rò rỉ secret / API token / khoá bí mật và các lệnh đọc tệp nhạy cảm (.env, .config/aiboss-office, meta-page-token, hash-salt).
+Tuân thủ đầy đủ kết quả rà soát an toàn chuyên sâu (review 30/09/2026 và bản vá v03 ngày 13/10/2026).
 """
 
 import sys
@@ -31,17 +31,34 @@ SECRET_PATTERNS = [
     (re.compile(r'EAA[A-Za-z0-9]{40,}'), "Meta Graph API Access Token (EAA...)"),
 ]
 
-ENV_READER_COMMANDS = {
-    'cat', 'less', 'head', 'tail', 'more', 'bat', 'view',
-    'nano', 'vim', 'vi', 'nl', 'tac', 'xxd', 'strings',
-    'od', 'base64', 'sed', 'awk', 'source', '.', 'cp'
-}
+ENV_PATH_REGEX = re.compile(
+    r'(?:^|[\s\'"`\(\)\[\]\{\}<>;|&=:,])'  # Boundary
+    r'('
+    r'[\w~$\./-]*'                          # Optional directory path prefix (allows /, ., ~, $, alphanumeric, -, _)
+    r'\.env(?:\.[A-Za-z0-9_-]+)?'          # .env or .env.<suffix>
+    r')'
+    r'(?=$|[\s\'"`\(\)\[\]\{\}<>;|&=:,])'  # Boundary lookahead
+)
 
-SENSITIVE_READER_COMMANDS = {
-    'cat', 'less', 'head', 'tail', 'more', 'grep', 'cp', 'view',
-    'nano', 'vim', 'vi', 'nl', 'tac', 'bat', 'xxd', 'strings',
-    'od', 'base64', 'sed', 'awk'
-}
+def is_exempt_env_path(p: str) -> bool:
+    clean = p.strip().strip("'\"`")
+    base = os.path.basename(clean)
+    if base in ('.env.example', '.env.sample'):
+        return True
+    if base.startswith('.env.example.') or base.startswith('.env.sample.'):
+        return True
+    return False
+
+def extract_env_paths(text: str) -> list[str]:
+    paths = []
+    for m in ENV_PATH_REGEX.findall(text):
+        clean = m.strip().strip("'\"`")
+        if clean and not is_exempt_env_path(clean):
+            paths.append(clean)
+    return paths
+
+def has_config_path(text: str) -> bool:
+    return '.config/aiboss-office' in text
 
 def extract_strings(obj):
     """Trích xuất tất cả chuỗi từ cấu trúc JSON đệ quy."""
@@ -61,7 +78,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
             if pattern.search(s):
                 return f"Phát hiện chuỗi secret nhạy cảm ({label}). Không được đưa token vào mã nguồn, lệnh hoặc tài liệu."
 
-    # 2. Nếu là lệnh Bash, kiểm tra các lệnh đọc .env hoặc tệp chìa meta
+    # 2. Nếu là lệnh Bash, kiểm tra các lệnh đọc .env, .config/aiboss-office hoặc tệp chìa meta
     if tool_name == "Bash":
         cmd = tool_input.get("command", "")
         if not cmd or not cmd.strip():
@@ -69,29 +86,54 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
 
         commands, _ = bash_parser.parse_bash_script(cmd, cwd)
 
+        # Trích xuất heredoc contents nếu có
+        heredocs = []
+        lines = cmd.splitlines()
+        in_hd = False
+        delim = None
+        hd_lines = []
+        for line in lines:
+            if in_hd:
+                if line.strip() == delim:
+                    in_hd = False
+                    heredocs.append("\n".join(hd_lines))
+                    hd_lines = []
+                    delim = None
+                else:
+                    hd_lines.append(line)
+            else:
+                m = re.search(r'<<-?\s*[\'"]?([A-Za-z0-9_-]+)[\'"]?', line)
+                if m:
+                    in_hd = True
+                    delim = m.group(1)
+
+        # Kiểm tra heredocs
+        for hd in heredocs:
+            if has_config_path(hd):
+                return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
+            if extract_env_paths(hd):
+                return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
+            if 'meta-page-token' in hd or 'hash-salt' in hd:
+                return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
+
         for sc in commands:
             exe = sc.executable
             words = sc.words
 
-            # A. Kiểm tra đọc .env* qua commands
-            if exe in ENV_READER_COMMANDS:
-                for w in words[1:]:
-                    if w.startswith('-'):
-                        continue
-                    clean_w = w.strip("'\"")
-                    base_name = os.path.basename(clean_w)
-                    if base_name.startswith('.env'):
-                        return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
-
-            # Kiểm tra input redirection < .env*
+            # A. Kiểm tra redirection trên MỌI lệnh
             for op, target in sc.redirections:
-                if op in ('<', '0<'):
-                    clean_target = target.strip("'\"")
-                    base_name = os.path.basename(clean_target)
-                    if base_name.startswith('.env'):
-                        return "Lệnh đọc tệp .env qua chuyển hướng đầu vào bị chặn."
+                if has_config_path(target):
+                    return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
+                if extract_env_paths(target):
+                    return "Lệnh đọc tệp .env qua chuyển hướng đầu vào bị chặn."
+                if 'meta-page-token' in target or 'hash-salt' in target:
+                    return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
 
-            # B. Kiểm tra đọc tệp chìa meta-page-token hoặc hash-salt
+            # B. Bỏ qua lệnh echo / printf thuần (không redirection) để cho phép in văn bản hướng dẫn
+            if exe in ('echo', 'printf'):
+                continue
+
+            # C. Kiểm tra fetch_page_messages hợp lệ
             is_fetcher = False
             if sc.executable in ('python', 'python3') and len(words) > 1:
                 arg1 = os.path.basename(words[1].strip("'\""))
@@ -100,18 +142,36 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
             elif os.path.basename(sc.executable) == 'fetch_page_messages.py' or sc.raw_executable.endswith('fetch_page_messages.py'):
                 is_fetcher = True
 
+            # D. Kiểm tra tệp chìa meta-page-token hoặc hash-salt
             if not is_fetcher:
-                if exe in SENSITIVE_READER_COMMANDS:
-                    for w in words[1:]:
-                        clean_w = w.strip("'\"")
-                        if 'meta-page-token' in clean_w or 'hash-salt' in clean_w:
-                            return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
+                for w in words[1:]:
+                    clean_w = w.strip("'\"")
+                    if 'meta-page-token' in clean_w or 'hash-salt' in clean_w:
+                        return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
 
-                for op, target in sc.redirections:
-                    if op in ('<', '0<'):
-                        clean_target = target.strip("'\"")
-                        if 'meta-page-token' in clean_target or 'hash-salt' in clean_target:
-                            return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
+            # E. Kiểm tra đường dẫn .env và .config/aiboss-office trên các tham số
+            for w in words[1:]:
+                # Tham số dạng cờ có giá trị gán: --file=.env, -Dpath=.env
+                if w.startswith('-') and '=' in w:
+                    _, val = w.split('=', 1)
+                    if has_config_path(val):
+                        return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
+                    if extract_env_paths(val):
+                        return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
+                    continue
+                elif w.startswith('-'):
+                    continue
+
+                if has_config_path(w):
+                    return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
+                if extract_env_paths(w):
+                    return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
+
+            # F. Kiểm tra executable chính nó (ví dụ: .env làm script thực thi)
+            if extract_env_paths(sc.raw_executable):
+                return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
+            if has_config_path(sc.raw_executable):
+                return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
 
     return ""
 
