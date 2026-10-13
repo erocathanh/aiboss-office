@@ -1461,7 +1461,7 @@ try {
       attempt: 1,
     });
 
-    // Hold D: Has NO worker identity beyond maxAgeMs -> MUST EXPIRE (finite expiration policy)
+    // Hold D: Has NO worker identity beyond maxAgeMs -> MUST KEEP HOLD to avoid over-admission (Hermes Item 8)
     const holdNoWorkerId = 'hold-no-worker-proc-' + Date.now();
     const runNoWorkerId = 'run-no-worker-proc-' + Date.now();
     recordHold({
@@ -1479,6 +1479,33 @@ try {
       holdId: holdNoWorkerId,
       seatId: 'marketing-lead',
       status: 'running',
+      startedAt: oldTs,
+      attempt: 1,
+    });
+
+    // Hold E: Has worker identity with unverified liveness (missing processStartedAt) -> MUST KEEP HOLD (Hermes Item 8)
+    const holdUnverifiedId = 'hold-unverified-proc-' + Date.now();
+    const runUnverifiedId = 'run-unverified-proc-' + Date.now();
+    recordHold({
+      holdId: holdUnverifiedId,
+      wakeId: 'wake-unverified-proc',
+      seatId: 'marketing-lead',
+      amountNanodollars: '600000000',
+      basis: 'default',
+      overBudget: false,
+      worker: {
+        pid: currentPid,
+        instanceId: 'inst-unverified',
+      },
+      ts: oldTs,
+    });
+    recordRun({
+      runId: runUnverifiedId,
+      wakeId: 'wake-unverified-proc',
+      holdId: holdUnverifiedId,
+      seatId: 'marketing-lead',
+      status: 'running',
+      pid: currentPid,
       startedAt: oldTs,
       attempt: 1,
     });
@@ -1503,11 +1530,16 @@ try {
     );
     assert.equal(
       remainingActive.has(holdNoWorkerId),
-      false,
-      'Hold without verified worker PID must expire cleanly beyond maxAgeMs'
+      true,
+      'Hold without verified worker PID must be retained to avoid over-admission (Hermes Item 8)'
+    );
+    assert.equal(
+      remainingActive.has(holdUnverifiedId),
+      true,
+      'Hold with unverified worker liveness must be retained and NEVER expire by age alone (Hermes Item 8)'
     );
 
-    console.log('  [PASS] Case 22: live PID preservation, finite expiration for dead/missing PID, and PID reuse detection verified');
+    console.log('  [PASS] Case 22: live PID preservation, unverified hold retention, and dead/recycled PID expiration verified');
   }
 
   // Case 23: Route handler GET /api/budget verification (200, 404, 503 snapshot_not_ready)
@@ -1671,11 +1703,95 @@ try {
     assert.equal(reclaimedLock.acquired, true, 'Dead process instance lock must be safely reclaimed');
     assert.equal(reclaimedLock.pid, process.pid);
 
-    // 4. Release lock
-    releaseInstanceLock(testDataDir);
-    assert.equal(fs.existsSync(lockFilePath), false, 'Instance lock directory must be removed upon release');
+    // c) Hermes Condition (b): Reclaimer using stale metadata against live owner must fail
+    // Currently reclaimedLock is held by process.pid (live owner)
+    const staleReclaimerScript = `
+      import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
+      const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
+      if (!res.acquired) {
+        process.exit(10); // Rejection verified
+      }
+      process.exit(0);
+    `;
+    const staleRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', staleReclaimerScript], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir },
+    });
+    assert.equal(staleRes.status, 10, 'Reclaimer using stale metadata against live owner must fail (acquired: false)');
+    assert.ok(fs.existsSync(lockFilePath), 'Live owner lock must not be destroyed by reclaimer');
 
-    console.log('  [PASS] Case 25: single-instance startup lock rejection, unverified guard, and dead PID reclamation verified (Condition b)');
+    // d) Hermes Condition (b): Strict release verification (mismatched token cannot release lock)
+    const heldInfo = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+    fs.writeFileSync(
+      infoPath,
+      JSON.stringify({
+        ...heldInfo,
+        token: 'intruder-token-different',
+      }),
+      'utf-8'
+    );
+    // Attempt release with activeInstanceToken (which does not match intruder-token-different)
+    releaseInstanceLock(testDataDir);
+    assert.ok(
+      fs.existsSync(lockFilePath),
+      'releaseInstanceLock must NOT remove lock directory if held token does not match activeInstanceToken'
+    );
+
+    // Clean up directory
+    fs.rmSync(lockFilePath, { recursive: true, force: true });
+
+    // e) Hermes Condition (b): Atomic reclaim post-rename verification with rollback on mismatch
+    fs.mkdirSync(lockFilePath, { recursive: true });
+    fs.writeFileSync(
+      infoPath,
+      JSON.stringify({
+        pid: 999999,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: 'dead-token-to-race',
+        ts: '1970-01-01T00:00:00.000Z',
+      }),
+      'utf-8'
+    );
+
+    const origRenameSync = fs.renameSync;
+    try {
+      fs.renameSync = function (src, dst) {
+        origRenameSync.call(fs, src, dst);
+        if (typeof dst === 'string' && dst.includes('.instance-reclaim-')) {
+          const seizedInfoPath = path.join(dst, 'info.json');
+          if (fs.existsSync(seizedInfoPath)) {
+            fs.writeFileSync(
+              seizedInfoPath,
+              JSON.stringify({
+                pid: process.pid,
+                processStartedAt: getProcessStartTime(process.pid),
+                token: 'live-intruder-seized',
+                ts: new Date().toISOString(),
+              }),
+              'utf-8'
+            );
+          }
+        }
+      };
+
+      const raceReclaimAttempt = acquireInstanceLock(testDataDir);
+      assert.equal(
+        raceReclaimAttempt.acquired,
+        false,
+        'Post-rename ownership mismatch must refuse startup and rollback (Condition b)'
+      );
+      assert.ok(
+        fs.existsSync(lockFilePath),
+        'Lock directory must be rolled back and preserved after ownership mismatch'
+      );
+      const restoredMeta = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+      assert.equal(restoredMeta.token, 'live-intruder-seized');
+    } finally {
+      fs.renameSync = origRenameSync;
+      fs.rmSync(lockFilePath, { recursive: true, force: true });
+    }
+
+    console.log('  [PASS] Case 25: single-instance startup lock rejection, stale reclaimer guard, and atomic reclaim rollback verified (Condition b)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)
@@ -1816,13 +1932,39 @@ try {
     assert.equal(cpAfterSettle.filePositions[testLogFile], 2, 'File position advances to 2 after clean append');
     assert.equal(cpAfterSettle.holds['hold-tail-valid-1'], undefined, 'Hold was settled');
 
-    // 5. Corrupted JSON parse error at tail
+    // 5. Corrupted JSON parse error at tail (in-place truncation test)
+    const validBytesBeforeCorruption = fs.statSync(testLogPath).size;
     fs.appendFileSync(testLogPath, '{"type":"broken" garbage\n', 'utf-8');
+    const corruptedSize = fs.statSync(testLogPath).size;
+    assert.ok(corruptedSize > validBytesBeforeCorruption);
+
     const res2 = repairLogTail(testLogPath);
     assert.equal(res2.repaired, true);
     assert.equal(res2.validLines, 2);
+    // In-place truncation check: file size truncated back to exact byte length of valid lines
+    assert.equal(fs.statSync(testLogPath).size, validBytesBeforeCorruption, 'Tail must be truncated in-place');
 
-    console.log('  [PASS] Case 28: truncated/corrupted JSONL tail repair and uncommitted fragment guard verified (Item 6)');
+    // 6. Hermes Item 6: Corruption in MIDDLE of log must fail-closed (throw Error, never drop middle lines)
+    const middleCorruptLog = path.join(testDataDir, 'budget', 'middle-corrupt.jsonl');
+    const mLine1 = JSON.stringify({ type: 'hold', holdId: 'h-mid-1', ts: `${todayStr}T10:00:00Z` }) + '\n';
+    const mLine2Bad = '{"type":"broken" unparseable syntax in middle\n';
+    const mLine3 = JSON.stringify({ type: 'hold', holdId: 'h-mid-3', ts: `${todayStr}T10:05:00Z` }) + '\n';
+    fs.writeFileSync(middleCorruptLog, mLine1 + mLine2Bad + mLine3, 'utf-8');
+
+    assert.throws(
+      () => repairLogTail(middleCorruptLog),
+      /Corrupted budget record in middle of log/,
+      'Corrupted record in middle of log must fail-closed and throw Error'
+    );
+    // File content must be untouched
+    assert.equal(
+      fs.readFileSync(middleCorruptLog, 'utf-8'),
+      mLine1 + mLine2Bad + mLine3,
+      'File with middle corruption must NOT be modified or truncated'
+    );
+    fs.unlinkSync(middleCorruptLog);
+
+    console.log('  [PASS] Case 28: in-place tail truncation, uncommitted tail repair, and middle corruption fail-closed guard verified (Item 6)');
   }
 
   // Case 29: Checkpoint v1 -> v2 migration rebuilding holds and filePositions from SST (Finding M4)

@@ -218,7 +218,11 @@ export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?
   }
 
   const currentPid = process.pid;
-  const currentStartTime = getProcessStartTime(currentPid) || new Date().toISOString();
+  const currentStartTime = getProcessStartTime(currentPid);
+  if (!currentStartTime) {
+    // Hermes Condition (b): Cannot reliably verify own start time from OS -> fail closed!
+    return { acquired: false };
+  }
   const token = `${currentPid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const metadata: InstanceLockMetadata = {
     pid: currentPid,
@@ -263,7 +267,6 @@ export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?
     if (fs.existsSync(infoPath)) {
       held = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
     } else if (fs.existsSync(lockDir) && !fs.statSync(lockDir).isDirectory()) {
-      // Plain file fallback
       held = JSON.parse(fs.readFileSync(lockDir, 'utf-8'));
     }
 
@@ -278,34 +281,67 @@ export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?
         return { acquired: false, pid: held.pid };
       }
 
-      // liveness === 'dead': Reclaim safely via atomic rename (no check-then-unlink race!)
-      const reclaimDir = path.join(baseDir, `.instance-reclaim-${held.token || 'stale'}-${Date.now()}`);
+      // liveness === 'dead': Attempt safe reclaim
+      const reclaimDir = path.join(baseDir, `.instance-reclaim-${held.token || 'stale'}-${token}`);
       try {
         fs.renameSync(lockDir, reclaimDir);
+      } catch {
+        // Another concurrent process won the reclaim race or renamed lockDir
+        return { acquired: false };
+      }
+
+      // Reclaim rename succeeded! Now CRITICAL (Hermes Condition b):
+      // Read back metadata in the seized directory and verify ownership against the inspected dead owner!
+      let seizedMetadata: InstanceLockMetadata | null = null;
+      try {
+        const seizedInfoPath = path.join(reclaimDir, 'info.json');
+        if (fs.existsSync(seizedInfoPath)) {
+          seizedMetadata = JSON.parse(fs.readFileSync(seizedInfoPath, 'utf-8'));
+        } else if (!fs.statSync(reclaimDir).isDirectory()) {
+          seizedMetadata = JSON.parse(fs.readFileSync(reclaimDir, 'utf-8'));
+        }
+      } catch {
+        /* parse error */
+      }
+
+      const isExpectedDeadOwner =
+        seizedMetadata &&
+        seizedMetadata.token === held.token &&
+        seizedMetadata.pid === held.pid &&
+        seizedMetadata.processStartedAt === held.processStartedAt;
+
+      if (!isExpectedDeadOwner) {
+        // OWNERSHIP MISMATCH! Another process took over or updated the lock while we were preparing to reclaim!
+        // We MUST NOT delete reclaimDir; restore it immediately back to lockDir and refuse startup!
         try {
-          fs.rmSync(reclaimDir, { recursive: true, force: true });
+          fs.renameSync(reclaimDir, lockDir);
+        } catch {
+          // If lockDir was already recreated, preserve reclaimDir
+        }
+        return { acquired: false, pid: seizedMetadata?.pid };
+      }
+
+      // Strictly verified seized dead owner: safe to remove old lock metadata
+      try {
+        fs.rmSync(reclaimDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+
+      // Now attempt acquire
+      const reacquireTmp = path.join(baseDir, `.instance-init-${token}`);
+      try {
+        fs.mkdirSync(reacquireTmp, { recursive: true });
+        fs.writeFileSync(path.join(reacquireTmp, 'info.json'), JSON.stringify(metadata, null, 2), 'utf-8');
+        fs.renameSync(reacquireTmp, lockDir);
+        activeInstanceToken = token;
+        return { acquired: true, pid: currentPid, token };
+      } catch {
+        try {
+          fs.rmSync(reacquireTmp, { recursive: true, force: true });
         } catch {
           /* ignore */
         }
-
-        // Now attempt acquire
-        const reacquireTmp = path.join(baseDir, `.instance-init-${token}`);
-        fs.mkdirSync(reacquireTmp, { recursive: true });
-        fs.writeFileSync(path.join(reacquireTmp, 'info.json'), JSON.stringify(metadata, null, 2), 'utf-8');
-        try {
-          fs.renameSync(reacquireTmp, lockDir);
-          activeInstanceToken = token;
-          return { acquired: true, pid: currentPid, token };
-        } catch {
-          try {
-            fs.rmSync(reacquireTmp, { recursive: true, force: true });
-          } catch {
-            /* ignore */
-          }
-          return { acquired: false };
-        }
-      } catch {
-        // Another concurrent process won the reclaim race
         return { acquired: false };
       }
     }
@@ -319,6 +355,8 @@ export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?
 export function releaseInstanceLock(dataDir?: string): void {
   const lockDir = getInstanceLockFilePath(dataDir);
   const baseDir = path.dirname(lockDir);
+  if (!activeInstanceToken) return;
+
   try {
     if (!fs.existsSync(lockDir)) return;
 
@@ -330,20 +368,17 @@ export function releaseInstanceLock(dataDir?: string): void {
       held = JSON.parse(fs.readFileSync(lockDir, 'utf-8'));
     }
 
-    if (held && (held.token === activeInstanceToken || held.pid === process.pid)) {
+    // Hermes Condition (b): Strict ownership verification throughout release — only release if token matches activeInstanceToken!
+    if (held && held.token === activeInstanceToken) {
       const retireDir = path.join(
         baseDir,
-        `.instance-retired-${held.token || process.pid}-${Date.now()}`
+        `.instance-retired-${held.token}-${Date.now()}`
       );
       try {
         fs.renameSync(lockDir, retireDir);
         fs.rmSync(retireDir, { recursive: true, force: true });
       } catch {
-        try {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
+        /* ignore */
       }
       activeInstanceToken = null;
     }
@@ -688,64 +723,97 @@ export function repairLogTail(filePath: string): RepairLogTailResult {
     return { repaired: false, validLines: 0 };
   }
 
-  const raw = fs.readFileSync(filePath, 'utf-8');
-  const hasTrailingNewline = raw.endsWith('\n');
-
-  // Split lines
-  const rawLines = raw.split('\n');
-  if (hasTrailingNewline) {
-    rawLines.pop(); // Remove the empty string after the trailing newline
+  const buf = fs.readFileSync(filePath);
+  if (buf.length === 0) {
+    return { repaired: false, validLines: 0 };
   }
 
-  const validLinesList: string[] = [];
-  let needsRepair = !hasTrailingNewline;
-  let corruptStartIndex = -1;
+  // Scan line boundaries and newlines in buffer
+  const lines: { start: number; end: number; text: string; hasNewline: boolean }[] = [];
+  let lineStart = 0;
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] === 0x0a) {
+      lines.push({
+        start: lineStart,
+        end: i,
+        text: buf.toString('utf-8', lineStart, i),
+        hasNewline: true,
+      });
+      lineStart = i + 1;
+    }
+  }
+  if (lineStart < buf.length) {
+    lines.push({
+      start: lineStart,
+      end: buf.length,
+      text: buf.toString('utf-8', lineStart, buf.length),
+      hasNewline: false,
+    });
+  }
 
-  for (let i = 0; i < rawLines.length; i++) {
-    const rawLine = rawLines[i];
-    const trimmed = rawLine.trim();
-    if (!trimmed) {
-      if (i === rawLines.length - 1 && !hasTrailingNewline) {
-        needsRepair = true;
-        corruptStartIndex = i;
-        break;
+  let validCount = 0;
+  let lastValidByteOffset = 0;
+  let corruptLineIndex = -1;
+  let isCorruptionInMiddle = false;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const item = lines[idx];
+    const isLast = (idx === lines.length - 1);
+    const trimmed = item.text.trim();
+
+    if (!item.hasNewline) {
+      // Incomplete tail without trailing newline!
+      corruptLineIndex = idx;
+      if (!isLast) {
+        isCorruptionInMiddle = true;
       }
-      continue;
+      break;
     }
 
-    if (i === rawLines.length - 1 && !hasTrailingNewline) {
-      needsRepair = true;
-      corruptStartIndex = i;
-      break;
+    if (!trimmed) {
+      // Empty line with newline
+      lastValidByteOffset = item.end + 1;
+      continue;
     }
 
     try {
       JSON.parse(trimmed);
-      validLinesList.push(trimmed);
+      validCount++;
+      lastValidByteOffset = item.end + 1;
     } catch {
-      needsRepair = true;
-      corruptStartIndex = i;
+      corruptLineIndex = idx;
+      if (!isLast) {
+        isCorruptionInMiddle = true;
+      }
       break;
     }
   }
 
-  if (needsRepair) {
-    try {
-      const repairedContent = validLinesList.length > 0 ? validLinesList.join('\n') + '\n' : '';
-      fs.writeFileSync(filePath, repairedContent, 'utf-8');
-      console.warn(
-        `[budget-ledger] Repaired incomplete log tail in ${filePath}: trimmed uncommitted fragment from line ${
-          corruptStartIndex >= 0 ? corruptStartIndex + 1 : rawLines.length
-        }`
+  if (corruptLineIndex !== -1) {
+    if (isCorruptionInMiddle) {
+      // Hermes Item 6: "phát hiện hỏng GIỮA sổ => fail-closed, không tự sửa"
+      console.error(
+        `[budget-ledger] CRITICAL: Corrupted JSON record detected in MIDDLE of ${filePath} at line ${corruptLineIndex + 1}. Failing closed.`
       );
-      return { repaired: true, validLines: validLinesList.length };
+      throw new Error(
+        `Corrupted budget record in middle of log ${filePath} at line ${corruptLineIndex + 1}`
+      );
+    }
+
+    // Uncommitted fragment at tail: truncate in-place preserving all prior committed data!
+    try {
+      fs.truncateSync(filePath, lastValidByteOffset);
+      console.warn(
+        `[budget-ledger] Repaired incomplete log tail in ${filePath}: truncated uncommitted trailing fragment back to offset ${lastValidByteOffset}`
+      );
+      return { repaired: true, validLines: validCount };
     } catch (err) {
-      console.error(`[budget-ledger] FAILED to repair corrupted log tail in ${filePath}:`, err);
-      throw new Error(`Corrupted log tail in ${filePath} could not be safely repaired: ${String(err)}`);
+      console.error(`[budget-ledger] FAILED to truncate uncommitted tail in ${filePath}:`, err);
+      throw new Error(`Uncommitted tail in ${filePath} could not be safely truncated: ${String(err)}`);
     }
   }
 
-  return { repaired: false, validLines: validLinesList.length };
+  return { repaired: false, validLines: validCount };
 }
 
 function appendBudgetRecordDirect(record: BudgetRecord): void {
@@ -1765,15 +1833,8 @@ export function reconcileOpenHolds(options?: {
             continue;
           }
           if (liveness === 'unverified') {
-            // OS query status could not be verified; give grace period before expiry
-            if (holdAgeMs > maxAgeMs * 2) {
-              releaseHold({
-                holdId: hold.holdId,
-                reason: 'expired',
-                ts: nowTs,
-              });
-              released++;
-            }
+            // Hermes Item 8 (Vòng 6): Unverified worker identity MUST KEEP hold and NEVER expire by age alone!
+            // Retain hold to prevent budget over-admission when worker death cannot be verified.
             continue;
           }
           // Worker process is definitely dead (ESRCH or start time mismatch)
@@ -1786,15 +1847,8 @@ export function reconcileOpenHolds(options?: {
             released++;
           }
         } else {
-          // PID is missing / unverified
-          if (holdAgeMs > maxAgeMs) {
-            releaseHold({
-              holdId: hold.holdId,
-              reason: 'expired',
-              ts: nowTs,
-            });
-            released++;
-          }
+          // PID is missing / unverified: retain hold to protect budget until operator releases or run terminates
+          continue;
         }
         continue;
       }
