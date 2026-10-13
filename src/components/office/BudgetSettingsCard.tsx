@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { CurrencyDollar, ShieldWarning } from '@phosphor-icons/react';
-import { formatNanodollars } from '@/lib/money';
+import { formatNanodollars } from '@/lib/money-format';
 import type { BudgetStatus } from '@/lib/budget-ledger';
 
 export function BudgetSettingsCard() {
@@ -51,7 +51,7 @@ export function BudgetSettingsCard() {
 
   if (loading || !officeStatus) {
     return (
-      <section className="settings-card">
+      <section id="budget-today-card" className="settings-card">
         <div className="settings-card-header">
           <div className="settings-card-title">
             <CurrencyDollar size={20} weight="bold" className="settings-card-icon" />
@@ -66,7 +66,7 @@ export function BudgetSettingsCard() {
   }
 
   return (
-    <section className="settings-card">
+    <section id="budget-today-card" className="settings-card">
       <div className="settings-card-header">
         <div className="settings-card-title">
           <CurrencyDollar size={20} weight="bold" className="settings-card-icon" />

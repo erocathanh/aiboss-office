@@ -326,7 +326,7 @@ export async function tickRunner(): Promise<number> {
       // F1 / Findings A & B: Atomic checkAdmissionAndRecordHold inside recovery block
       // Any throw frees activeSeats and returns queue item
       try {
-        const admission = checkAdmissionAndRecordHold({
+        const { admission } = checkAdmissionAndRecordHold({
           seatId: y.ma_nhan_su,
           wakeId: confirmedWakeId,
           holdId,
@@ -339,20 +339,20 @@ export async function tickRunner(): Promise<number> {
             seat: y.ma_nhan_su,
             bell_id: y.ma,
             event: 'skipped',
-            skipped_reason: 'budget_exceeded',
+            skipped_reason: admission.reason || 'budget_exceeded',
           });
           if (claimed.y.wakeId) {
             try {
               updateWake(claimed.y.wakeId, {
                 status: 'skipped',
-                reason: 'budget_exceeded',
+                reason: admission.reason || 'budget_exceeded',
               });
             } catch {
               /* ignore */
             }
           }
           activeSeats.delete(y.ma_nhan_su);
-          boYeuCau(claimed.y.ma, 'budget_exceeded');
+          boYeuCau(claimed.y.ma, admission.reason || 'budget_exceeded');
           continue;
         }
 
@@ -504,7 +504,7 @@ export async function tickRunner(): Promise<number> {
             settleHold({
               holdId,
               runId,
-              actualNanodollars: totalActualBig > 0n ? totalActualBig.toString() : null,
+              actualNanodollars: isFullyPriced ? totalActualBig.toString() : null,
               priced: isFullyPriced,
               ts: endIso,
             });

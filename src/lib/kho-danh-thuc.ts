@@ -286,7 +286,8 @@ function boMau(y: YeuCauDanhThuc, lyDo: string, bayGio: number): void {
         lyDo.includes('busy') ||
         lyDo.includes('held') ||
         lyDo.includes('terminal') ||
-        lyDo.includes('budget')
+        lyDo.includes('budget') ||
+        lyDo.includes('config_error')
           ? 'skipped'
           : 'expired';
       updateWake(y.wakeId, {

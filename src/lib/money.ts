@@ -52,10 +52,3 @@ export function formatUsdExact(cents: MoneyInput): string {
   const rounded = (magnitude + MONEY_SCALE / 2n) / MONEY_SCALE;
   return `${units < 0n ? "-" : ""}$${rounded / 100n}.${String(rounded % 100n).padStart(2, "0")}`;
 }
-
-export function formatNanodollars(units: bigint | string | number): string {
-  const big = BigInt(units);
-  const cents = unitsToCents(big);
-  return formatUsdExact(cents);
-}
-

@@ -709,7 +709,7 @@ export function reconcilePendingCosts(): number {
             settleHold({
               holdId,
               runId: run.runId,
-              actualNanodollars: totalActualBig > 0n ? totalActualBig.toString() : null,
+              actualNanodollars: isFullyPriced ? totalActualBig.toString() : null,
               priced: isFullyPriced,
               ts: timestampIso,
             });
@@ -736,7 +736,7 @@ export function reconcilePendingCosts(): number {
             settleHold({
               holdId,
               runId: run.runId,
-              actualNanodollars: totalActualBig > 0n ? totalActualBig.toString() : null,
+              actualNanodollars: isFullyPriced ? totalActualBig.toString() : null,
               priced: isFullyPriced,
               ts: timestampIso,
             });

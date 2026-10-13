@@ -2,9 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import officeConfigRaw from '../../config/office.json';
 
+import { MAX_MONEY_UNITS } from './money';
+
 export interface SeatBudgetConfig {
   dailyCapNanodollars: string | null;
   hardStop?: boolean;
+  hasConfigError?: boolean;
+  configError?: string;
 }
 
 export interface OfficeBudgetConfig {
@@ -13,8 +17,11 @@ export interface OfficeBudgetConfig {
   office: {
     dailyCapNanodollars: string | null;
     hardStop: boolean;
+    hasConfigError?: boolean;
+    configError?: string;
   };
   seats: Record<string, SeatBudgetConfig>;
+  configErrors?: string[];
 }
 
 export interface OfficeConfig {
@@ -41,11 +48,19 @@ export interface OfficeConfig {
 
 /**
  * Checks if a value is a valid unsigned integer string representing nanodollars.
- * Must be a non-empty string consisting only of ASCII digits, without negative sign or decimals.
+ * Must be a non-empty string consisting only of ASCII digits, without negative sign or decimals,
+ * and within MAX_MONEY_UNITS.
  */
 export function isValidNanodollarsString(val: unknown): val is string {
   if (typeof val !== 'string') return false;
-  return /^(0|[1-9][0-9]*)$/.test(val.trim());
+  const s = val.trim();
+  if (!/^(0|[1-9][0-9]*)$/.test(s)) return false;
+  try {
+    const b = BigInt(s);
+    return b >= 0n && b <= MAX_MONEY_UNITS;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -57,8 +72,8 @@ export function isValidNanodollarsString(val: unknown): val is string {
  */
 export function validateDailyCap(val: unknown): string | null | undefined {
   if (val === null || val === undefined) return null;
-  if (isValidNanodollarsString(val)) return val.trim();
-  return undefined; // Invalid garbage
+  if (isValidNanodollarsString(val)) return (val as string).trim();
+  return undefined; // Invalid garbage or exceeds MAX_MONEY_UNITS
 }
 
 /**
@@ -66,25 +81,48 @@ export function validateDailyCap(val: unknown): string | null | undefined {
  * Returns string if valid unsigned integer string, or undefined if invalid.
  */
 export function validateRunEstimate(val: unknown): string | undefined {
-  if (isValidNanodollarsString(val)) return val.trim();
+  if (isValidNanodollarsString(val)) return (val as string).trim();
   return undefined;
 }
 
 /**
  * Sanitize and validate raw budget config from JSON.
- * Ensures numbers are valid nanodollars strings and distinguishes null (unlimited) from invalid garbage.
+ * Preserves validation errors so callers can fail closed instead of silently treating invalid caps as unlimited.
  */
 export function sanitizeBudgetConfig(raw?: unknown): OfficeBudgetConfig | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const b = raw as Record<string, unknown>;
+  const configErrors: string[] = [];
 
-  const defaultEstimate = validateRunEstimate(b.defaultRunEstimateNanodollars) ?? '700000000';
+  let defaultEstimate = '700000000';
+  if (b.defaultRunEstimateNanodollars !== undefined && b.defaultRunEstimateNanodollars !== null) {
+    if (isValidNanodollarsString(b.defaultRunEstimateNanodollars)) {
+      defaultEstimate = (b.defaultRunEstimateNanodollars as string).trim();
+    } else {
+      configErrors.push('Invalid defaultRunEstimateNanodollars: must be unsigned integer <= MAX_MONEY_UNITS');
+    }
+  }
 
   const officeRaw = (b.office && typeof b.office === 'object' ? b.office : {}) as Record<string, unknown>;
-  const officeCap = validateDailyCap(officeRaw.dailyCapNanodollars);
+  let officeCap: string | null = null;
+  let officeHasError = false;
+  let officeError: string | undefined;
+
+  if (officeRaw.dailyCapNanodollars !== undefined && officeRaw.dailyCapNanodollars !== null) {
+    const validated = validateDailyCap(officeRaw.dailyCapNanodollars);
+    if (validated !== undefined) {
+      officeCap = validated;
+    } else {
+      officeHasError = true;
+      officeError = 'Invalid office.dailyCapNanodollars: must be unsigned integer <= MAX_MONEY_UNITS';
+      configErrors.push(officeError);
+    }
+  }
+
   const officeConfig = {
-    dailyCapNanodollars: officeCap === undefined ? null : officeCap,
+    dailyCapNanodollars: officeCap,
     hardStop: typeof officeRaw.hardStop === 'boolean' ? officeRaw.hardStop : true,
+    ...(officeHasError ? { hasConfigError: true, configError: officeError } : {}),
   };
 
   const seats: Record<string, SeatBudgetConfig> = {};
@@ -92,10 +130,25 @@ export function sanitizeBudgetConfig(raw?: unknown): OfficeBudgetConfig | undefi
     for (const [seatSlug, seatRaw] of Object.entries(b.seats as Record<string, unknown>)) {
       if (seatRaw && typeof seatRaw === 'object') {
         const s = seatRaw as Record<string, unknown>;
-        const seatCap = validateDailyCap(s.dailyCapNanodollars);
+        let seatCap: string | null = null;
+        let seatHasError = false;
+        let seatError: string | undefined;
+
+        if (s.dailyCapNanodollars !== undefined && s.dailyCapNanodollars !== null) {
+          const validated = validateDailyCap(s.dailyCapNanodollars);
+          if (validated !== undefined) {
+            seatCap = validated;
+          } else {
+            seatHasError = true;
+            seatError = `Invalid seats.${seatSlug}.dailyCapNanodollars: must be unsigned integer <= MAX_MONEY_UNITS`;
+            configErrors.push(seatError);
+          }
+        }
+
         seats[seatSlug] = {
-          dailyCapNanodollars: seatCap === undefined ? null : seatCap,
+          dailyCapNanodollars: seatCap,
           hardStop: typeof s.hardStop === 'boolean' ? s.hardStop : true,
+          ...(seatHasError ? { hasConfigError: true, configError: seatError } : {}),
         };
       }
     }
@@ -106,6 +159,7 @@ export function sanitizeBudgetConfig(raw?: unknown): OfficeBudgetConfig | undefi
     defaultRunEstimateNanodollars: defaultEstimate,
     office: officeConfig,
     seats,
+    ...(configErrors.length > 0 ? { configErrors } : {}),
   };
 }
 
