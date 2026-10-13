@@ -69,6 +69,8 @@ export interface RunRecord {
   errorKind?: RunErrorKind;
   attempt?: number;
   pid?: number;
+  processStartedAt?: string;
+  instanceId?: string;
   costStatus?: 'recorded' | 'pending' | 'unpriced';
   rawUsage?: NormalizedUsage[] | null;
   updatedAt?: string;
@@ -169,6 +171,8 @@ export function sanitizeRun(run: MergedRunInfo): MergedRunInfo {
     ...(run.errorKind ? { errorKind: run.errorKind } : {}),
     ...(run.attempt !== undefined ? { attempt: run.attempt } : {}),
     ...(run.pid !== undefined ? { pid: run.pid } : {}),
+    ...(run.processStartedAt ? { processStartedAt: run.processStartedAt } : {}),
+    ...(run.instanceId ? { instanceId: run.instanceId } : {}),
     ...(run.costStatus ? { costStatus: run.costStatus } : {}),
     ...(run.updatedAt ? { updatedAt: run.updatedAt } : {}),
     ...(run.wake ? { wake: sanitizeWake(run.wake) } : {}),

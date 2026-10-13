@@ -73,6 +73,12 @@ import {
   getActiveHolds,
   sanitizeBudgetRecord,
   withBudgetLock,
+  initBudgetLedger,
+  loadOpenHoldsCheckpoint,
+  saveOpenHoldsCheckpoint,
+  replayAndGetCheckpoint,
+  getProcessStartTime,
+  isProcessAlive,
 } from '../src/lib/budget-ledger.ts';
 import {
   isValidNanodollarsString,
@@ -811,8 +817,12 @@ try {
       env: { ...process.env, AIBOSS_DATA_DIR: testDataDir, AIBOSS_CONFIG_DIR: testConfigDir }
     });
 
-    // Wait until child is actively holding lock
+    // Wait until child is actively holding lock with safe 5s deadline
+    const startWait = Date.now();
     while (!fs.existsSync(barrierFile) || fs.readFileSync(barrierFile, 'utf-8') !== 'holding') {
+      if (Date.now() - startWait > 5000) {
+        throw new Error('Timeout waiting for child process to acquire lock');
+      }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
 
@@ -832,7 +842,7 @@ try {
     const parentAcquired = withBudgetLock(() => 'acquired_after_child', 2000);
     assert.equal(parentAcquired, 'acquired_after_child');
 
-    // Test 2: Dead child process lock recovery
+    // Test 2: Dead child process lock recovery via atomic reclaim (lease expired >5000ms)
     const deadChild = spawnSync(process.execPath, [
       '--import', './tests/register.mjs',
       '-e',
@@ -843,7 +853,7 @@ try {
       fs.mkdirSync(lockDir, { recursive: true });
       fs.writeFileSync(
         path.join(lockDir, 'info.json'),
-        JSON.stringify({ pid: process.pid, token: 'dead-child-token', ts: Date.now() })
+        JSON.stringify({ pid: process.pid, processStartedAt: '2026-01-01T00:00:00.000Z', token: 'dead-child-token', ts: Date.now() - 6000 })
       );
       process.exit(0);
       `
@@ -852,11 +862,134 @@ try {
     });
     assert.equal(deadChild.status, 0);
 
-    // Parent sees lock left by dead process: MUST safely reclaim and proceed!
+    // Parent sees lock left by dead process with expired lease: MUST safely reclaim via atomic rename and proceed!
     const recovered = withBudgetLock(() => 'recovered_dead_lock', 2000);
     assert.equal(recovered, 'recovered_dead_lock', 'Lock left by dead PID must be safely reclaimed');
 
-    console.log('  [PASS] Case 16: real two-process barrier concurrency and dead-PID recovery verified');
+    // Test 3: REAL two-process concurrent admission race with barrier
+    writeTestConfig({
+      currency: 'USD',
+      defaultRunEstimateNanodollars: '700000000',
+      office: { dailyCapNanodollars: null, hardStop: true },
+      seats: {
+        'concurrent-racer': { dailyCapNanodollars: '1000000000', hardStop: true }, // $1.00 cap allows only ONE $0.70 run
+      },
+    });
+
+    const admissionBarrier = path.join(testDataDir, 'admission-barrier.txt');
+    const childResultFile = path.join(testDataDir, 'child-admission-result.json');
+    if (fs.existsSync(admissionBarrier)) fs.unlinkSync(admissionBarrier);
+    if (fs.existsSync(childResultFile)) fs.unlinkSync(childResultFile);
+
+    const childRacer = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `
+      import fs from 'node:fs';
+      import { checkAdmissionAndRecordHold } from './src/lib/budget-ledger.ts';
+      const [barrier, resultFile] = [process.argv[1], process.argv[2]];
+      // Wait for release signal
+      while (!fs.existsSync(barrier)) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      }
+      const res = checkAdmissionAndRecordHold({
+        seatId: 'concurrent-racer',
+        wakeId: 'wake-child-race',
+        holdId: 'hold-child-race',
+      });
+      fs.writeFileSync(resultFile, JSON.stringify({ allowed: res.allowed, reason: res.reason, holdId: res.hold ? res.hold.holdId : null }));
+      `,
+      admissionBarrier,
+      childResultFile,
+    ], {
+      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir, AIBOSS_CONFIG_DIR: testConfigDir }
+    });
+
+    // Give child 50ms to reach barrier loop
+    await new Promise((r) => setTimeout(r, 50));
+    // Trigger race by creating barrier
+    fs.writeFileSync(admissionBarrier, 'GO');
+
+    const parentRes = checkAdmissionAndRecordHold({
+      seatId: 'concurrent-racer',
+      wakeId: 'wake-parent-race',
+      holdId: 'hold-parent-race',
+    });
+
+    await new Promise((r) => childRacer.on('exit', r));
+    assert.ok(fs.existsSync(childResultFile), 'Child racer must produce result');
+    const childRes = JSON.parse(fs.readFileSync(childResultFile, 'utf-8'));
+
+    // Mutual exclusion: exactly one must be allowed, one must be rejected
+    assert.notEqual(parentRes.allowed, childRes.allowed, 'Exactly one concurrent racer must be allowed');
+    if (parentRes.allowed) {
+      assert.equal(childRes.allowed, false);
+      assert.equal(childRes.reason, 'budget_exceeded');
+    } else {
+      assert.equal(parentRes.allowed, false);
+      assert.equal(parentRes.reason, 'budget_exceeded');
+      assert.equal(childRes.allowed, true);
+    }
+
+    // Test 4: REAL two-process concurrent settle race
+    const settleHoldId = 'hold-concurrent-settle';
+    recordHold({
+      holdId: settleHoldId,
+      wakeId: 'wake-settle-conc',
+      seatId: 'concurrent-racer',
+      amountNanodollars: '500000000',
+      basis: 'default',
+      overBudget: false,
+      ts: new Date().toISOString(),
+    });
+
+    const settleBarrier = path.join(testDataDir, 'settle-barrier.txt');
+    const childSettleResultFile = path.join(testDataDir, 'child-settle-result.json');
+    if (fs.existsSync(settleBarrier)) fs.unlinkSync(settleBarrier);
+    if (fs.existsSync(childSettleResultFile)) fs.unlinkSync(childSettleResultFile);
+
+    const childSettler = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `
+      import fs from 'node:fs';
+      import { settleHold } from './src/lib/budget-ledger.ts';
+      const [barrier, resultFile] = [process.argv[1], process.argv[2]];
+      while (!fs.existsSync(barrier)) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      }
+      const s = settleHold({
+        holdId: 'hold-concurrent-settle',
+        runId: 'run-child-settler',
+        actualNanodollars: '500000000',
+        priced: true,
+      });
+      fs.writeFileSync(resultFile, JSON.stringify({ settled: s !== null }));
+      `,
+      settleBarrier,
+      childSettleResultFile,
+    ], {
+      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir, AIBOSS_CONFIG_DIR: testConfigDir }
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    fs.writeFileSync(settleBarrier, 'GO');
+
+    const parentSettle = settleHold({
+      holdId: settleHoldId,
+      runId: 'run-parent-settler',
+      actualNanodollars: '500000000',
+      priced: true,
+    });
+
+    await new Promise((r) => childSettler.on('exit', r));
+    assert.ok(fs.existsSync(childSettleResultFile), 'Child settler must produce result');
+    const childSettleRes = JSON.parse(fs.readFileSync(childSettleResultFile, 'utf-8'));
+
+    // Exactly one settle succeeded, the other returned null
+    assert.notEqual(parentSettle !== null, childSettleRes.settled, 'Exactly one concurrent settle must succeed');
+
+    console.log('  [PASS] Case 16: real two-process barrier concurrency, admission race, and dead-PID recovery verified');
   }
 
   // Case 17: Historical estimate: unpriced models discarded, only fully priced runs averaged (Hermes FAIL 2)
@@ -1011,7 +1144,339 @@ try {
     console.log('  [PASS] Case 19: formatNanodollars bounds checking against MAX_MONEY_UNITS verified');
   }
 
-  console.log('>>> ALL 19 A-3 BUDGET TEST CASES AND REVIEWS PASSED <<<');
+  // Case 20: Crash injection between JSONL write and checkpoint write (Hermes Item 1 & 9 / FAIL 6 & 9)
+  {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const budgetLogPath = path.join(testDataDir, 'budget', `${todayStr}.jsonl`);
+    const injectedHoldId = 'hold-crash-injected-' + Date.now();
+    const injectedWakeId = 'wake-crash-injected-' + Date.now();
+
+    // 1. Ensure existing checkpoint state is captured
+    initBudgetLedger();
+    const cpBefore = loadOpenHoldsCheckpoint();
+    assert.ok(cpBefore, 'Checkpoint must exist after initialization');
+    const lineCountBefore = cpBefore.lastLineCount;
+
+    // 2. Simulate process appending hold to JSONL SST then crashing before saving to open-holds.json
+    const unindexedHoldRecord = {
+      type: 'hold',
+      holdId: injectedHoldId,
+      wakeId: injectedWakeId,
+      seatId: 'marketing-lead',
+      amountNanodollars: '500000000',
+      basis: 'default',
+      overBudget: false,
+      ts: new Date().toISOString(),
+    };
+    fs.appendFileSync(budgetLogPath, JSON.stringify(unindexedHoldRecord) + '\n', 'utf-8');
+
+    // 3. Replay from SST via initBudgetLedger / replayAndGetCheckpoint
+    const cpRecovered = initBudgetLedger();
+    assert.ok(cpRecovered.holds[injectedHoldId], 'Checkpoint must recover unindexed hold from JSONL SST');
+    assert.equal(cpRecovered.lastLineCount, lineCountBefore + 1, 'Replay line counter must advance');
+    assert.equal(isHoldClosed(injectedHoldId), false, 'Recovered hold must be recognized as open');
+
+    // 4. Simulate process appending settle to JSONL then crashing before saving checkpoint
+    const unindexedSettleRecord = {
+      type: 'settle',
+      holdId: injectedHoldId,
+      runId: 'run-crash-settle-' + Date.now(),
+      actualNanodollars: '450000000',
+      priced: true,
+      ts: new Date().toISOString(),
+    };
+    fs.appendFileSync(budgetLogPath, JSON.stringify(unindexedSettleRecord) + '\n', 'utf-8');
+
+    // 5. Verify isHoldClosed and initBudgetLedger automatically replay and reconcile
+    assert.equal(isHoldClosed(injectedHoldId), true, 'Replayed settle must mark hold as closed');
+    const activeHolds = getActiveHolds();
+    assert.equal(activeHolds.has(injectedHoldId), false, 'Closed hold must be removed from active holds snapshot');
+
+    console.log('  [PASS] Case 20: crash injection between JSONL write and checkpoint write recovers cleanly via SST');
+  }
+
+  // Case 21: Pending run age preservation and receipt folding (Hermes Item 3 & 5 / FAIL 7 & 3)
+  {
+    const wakePendingId = 'wake-pending-' + Date.now();
+    const runPendingId = 'run-pending-' + Date.now();
+    const holdPendingId = 'hold-pending-' + Date.now();
+    const twoHoursAgoIso = new Date(Date.now() - 7200000).toISOString();
+
+    const holdPending = recordHold({
+      holdId: holdPendingId,
+      wakeId: wakePendingId,
+      seatId: 'marketing-lead',
+      amountNanodollars: '800000000',
+      basis: 'default',
+      overBudget: false,
+      ts: twoHoursAgoIso,
+    });
+
+    recordRun({
+      runId: runPendingId,
+      wakeId: wakePendingId,
+      holdId: holdPendingId,
+      seatId: 'marketing-lead',
+      status: 'failed',
+      costStatus: 'pending',
+      startedAt: twoHoursAgoIso,
+      attempt: 1,
+    });
+
+    // Record partial cost receipt for this run
+    recordCostReceipt({
+      ts: new Date().toISOString(),
+      seatId: 'marketing-lead',
+      runId: runPendingId,
+      model: 'model-a',
+      inputTokens: 100,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+      outputTokens: 50,
+      costNanodollars: '300000000',
+      priced: true,
+      source: 'claude-stream-json',
+    });
+
+    // Run reconciliation with maxAgeMs = 3600000 (1 hour).
+    // Because costStatus is 'pending', the hold MUST NOT be settled with partial receipts and MUST NOT be expired!
+    reconcileOpenHolds({ maxAgeMs: 3600000 });
+
+    const holdsMap1 = getActiveHolds();
+    assert.ok(
+      holdsMap1.has(holdPendingId),
+      'Hold for terminal run with costStatus=pending must be preserved even if hold is older than maxAgeMs'
+    );
+
+    // Now update run costStatus to 'reconciled'
+    updateRun(runPendingId, {
+      costStatus: 'reconciled',
+    });
+
+    // Next reconciliation must cleanly settle the hold using the full cost receipt ($0.30)
+    reconcileOpenHolds({ maxAgeMs: 3600000 });
+    const holdsMap2 = getActiveHolds();
+    assert.equal(
+      holdsMap2.has(holdPendingId),
+      false,
+      'Hold must be settled once costStatus transitions to reconciled'
+    );
+    assert.equal(isHoldClosed(holdPendingId), true);
+
+    console.log('  [PASS] Case 21: pending run age preservation and receipt folding verified');
+  }
+
+  // Case 22: PID liveness check, finite expiration for dead/missing PID, and PID reuse detection (Hermes Item 4 / FAIL 8 & Finding B)
+  {
+    // 1. Direct process liveness and start-time unit verification
+    const currentPid = process.pid;
+    const currentStartTime = getProcessStartTime(currentPid);
+    assert.ok(currentStartTime, 'Current process start time must be queryable via ps');
+    assert.equal(isProcessAlive(currentPid), true, 'Current process must be alive');
+    assert.equal(isProcessAlive(currentPid, currentStartTime), true, 'Current process must be alive with matching start time');
+
+    // PID reuse simulation: mismatched start time must report process dead
+    const fakeStartTime = '1970-01-01T00:00:00.000Z';
+    assert.equal(
+      isProcessAlive(currentPid, fakeStartTime),
+      false,
+      'Mismatched process start time must indicate PID was recycled'
+    );
+
+    // Non-existent PID must report dead
+    const deadPid = 999999;
+    assert.equal(isProcessAlive(deadPid), false, 'Non-existent PID must report dead');
+
+    // 2. Finite expiration in reconcileOpenHolds
+    const oldTs = new Date(Date.now() - 7200000).toISOString(); // 2 hours ago
+
+    // Hold A: Has LIVE running worker (current PID and start time) -> MUST NOT EXPIRE
+    const holdLiveId = 'hold-live-proc-' + Date.now();
+    const runLiveId = 'run-live-proc-' + Date.now();
+    recordHold({
+      holdId: holdLiveId,
+      wakeId: 'wake-live-proc',
+      seatId: 'marketing-lead',
+      amountNanodollars: '600000000',
+      basis: 'default',
+      overBudget: false,
+      worker: {
+        pid: currentPid,
+        processStartedAt: currentStartTime,
+        instanceId: 'inst-live',
+      },
+      ts: oldTs,
+    });
+    recordRun({
+      runId: runLiveId,
+      wakeId: 'wake-live-proc',
+      holdId: holdLiveId,
+      seatId: 'marketing-lead',
+      status: 'running',
+      pid: currentPid,
+      processStartedAt: currentStartTime,
+      instanceId: 'inst-live',
+      startedAt: oldTs,
+      attempt: 1,
+    });
+
+    // Hold B: Has DEAD worker PID -> MUST EXPIRE and be released
+    const holdDeadId = 'hold-dead-proc-' + Date.now();
+    const runDeadId = 'run-dead-proc-' + Date.now();
+    recordHold({
+      holdId: holdDeadId,
+      wakeId: 'wake-dead-proc',
+      seatId: 'marketing-lead',
+      amountNanodollars: '600000000',
+      basis: 'default',
+      overBudget: false,
+      worker: {
+        pid: deadPid,
+        processStartedAt: oldTs,
+        instanceId: 'inst-dead',
+      },
+      ts: oldTs,
+    });
+    recordRun({
+      runId: runDeadId,
+      wakeId: 'wake-dead-proc',
+      holdId: holdDeadId,
+      seatId: 'marketing-lead',
+      status: 'running',
+      pid: deadPid,
+      processStartedAt: oldTs,
+      instanceId: 'inst-dead',
+      startedAt: oldTs,
+      attempt: 1,
+    });
+
+    // Hold C: Has RECYCLED PID (current PID but mismatched start time) -> MUST EXPIRE
+    const holdRecycledId = 'hold-recycled-proc-' + Date.now();
+    const runRecycledId = 'run-recycled-proc-' + Date.now();
+    recordHold({
+      holdId: holdRecycledId,
+      wakeId: 'wake-recycled-proc',
+      seatId: 'marketing-lead',
+      amountNanodollars: '600000000',
+      basis: 'default',
+      overBudget: false,
+      worker: {
+        pid: currentPid,
+        processStartedAt: fakeStartTime,
+        instanceId: 'inst-recycled',
+      },
+      ts: oldTs,
+    });
+    recordRun({
+      runId: runRecycledId,
+      wakeId: 'wake-recycled-proc',
+      holdId: holdRecycledId,
+      seatId: 'marketing-lead',
+      status: 'running',
+      pid: currentPid,
+      processStartedAt: fakeStartTime,
+      instanceId: 'inst-recycled',
+      startedAt: oldTs,
+      attempt: 1,
+    });
+
+    // Hold D: Has NO worker identity beyond maxAgeMs -> MUST EXPIRE (finite expiration policy)
+    const holdNoWorkerId = 'hold-no-worker-proc-' + Date.now();
+    const runNoWorkerId = 'run-no-worker-proc-' + Date.now();
+    recordHold({
+      holdId: holdNoWorkerId,
+      wakeId: 'wake-no-worker-proc',
+      seatId: 'marketing-lead',
+      amountNanodollars: '600000000',
+      basis: 'default',
+      overBudget: false,
+      ts: oldTs,
+    });
+    recordRun({
+      runId: runNoWorkerId,
+      wakeId: 'wake-no-worker-proc',
+      holdId: holdNoWorkerId,
+      seatId: 'marketing-lead',
+      status: 'running',
+      startedAt: oldTs,
+      attempt: 1,
+    });
+
+    // Run reconciliation with maxAgeMs = 3600000 (1 hour)
+    reconcileOpenHolds({ maxAgeMs: 3600000 });
+
+    const remainingActive = getActiveHolds();
+    assert.ok(
+      remainingActive.has(holdLiveId),
+      'Hold with live worker must NOT be expired regardless of hold age'
+    );
+    assert.equal(
+      remainingActive.has(holdDeadId),
+      false,
+      'Hold with dead worker PID must be expired and released'
+    );
+    assert.equal(
+      remainingActive.has(holdRecycledId),
+      false,
+      'Hold with recycled PID (start time mismatch) must be expired and released'
+    );
+    assert.equal(
+      remainingActive.has(holdNoWorkerId),
+      false,
+      'Hold without verified worker PID must expire cleanly beyond maxAgeMs'
+    );
+
+    console.log('  [PASS] Case 22: live PID preservation, finite expiration for dead/missing PID, and PID reuse detection verified');
+  }
+
+  // Case 23: Route handler GET /api/budget verification (200, 404, 503 snapshot_not_ready)
+  {
+    // 1. Office status (no seat query param) -> 200 OK
+    const officeReq = new Request('http://127.0.0.1:4330/api/budget');
+    const officeRes = await getBudgetRoute(officeReq);
+    assert.equal(officeRes.status, 200, 'GET /api/budget must return 200 OK for office status');
+    const officeJson = await officeRes.json();
+    assert.equal(officeJson.seat, null);
+    assert.ok(typeof officeJson.spentNanodollars === 'string');
+
+    // 2. Known seat status -> 200 OK
+    const seatReq = new Request('http://127.0.0.1:4330/api/budget?seat=marketing-lead');
+    const seatRes = await getBudgetRoute(seatReq);
+    assert.equal(seatRes.status, 200, 'GET /api/budget?seat=marketing-lead must return 200 OK');
+    const seatJson = await seatRes.json();
+    assert.equal(seatJson.seat, 'marketing-lead');
+
+    // 3. Unknown seat -> 404 Not Found
+    const unknownReq = new Request('http://127.0.0.1:4330/api/budget?seat=non-existent-seat-xyz');
+    const unknownRes = await getBudgetRoute(unknownReq);
+    assert.equal(unknownRes.status, 404, 'GET /api/budget for unknown seat must return 404');
+    const unknownJson = await unknownRes.json();
+    assert.equal(unknownJson.error, 'unknown_seat');
+
+    // 4. Snapshot not ready -> 503 Service Unavailable
+    // Temporarily rename open-holds.json to simulate cold start prior to initBudgetLedger
+    const openHoldsPath = path.join(testDataDir, 'budget', 'open-holds.json');
+    const backupPath = path.join(testDataDir, 'budget', 'open-holds.json.bak');
+    let hasBackup = false;
+    if (fs.existsSync(openHoldsPath)) {
+      fs.renameSync(openHoldsPath, backupPath);
+      hasBackup = true;
+    }
+    try {
+      const unreadyRes = await getBudgetRoute(officeReq);
+      assert.equal(unreadyRes.status, 503, 'GET /api/budget when snapshot is not ready must return 503');
+      const unreadyJson = await unreadyRes.json();
+      assert.equal(unreadyJson.error, 'snapshot_not_ready');
+    } finally {
+      if (hasBackup && fs.existsSync(backupPath)) {
+        fs.renameSync(backupPath, openHoldsPath);
+      }
+    }
+
+    console.log('  [PASS] Case 23: GET /api/budget route returns 200, 404, and 503 snapshot_not_ready as expected');
+  }
+
+  console.log('>>> ALL 23 A-3 BUDGET TEST CASES AND REVIEWS PASSED <<<');
 } catch (err) {
   console.error('\nTest failed with error:', err);
   process.exit(1);

@@ -106,13 +106,32 @@ export function BudgetSettingsCard() {
               {officeStatus.unpricedRuns > 0 &&
                 ` · Pending: ${formatNanodollars(officeStatus.unpricedEstimateNanodollars)}`}
               {' · Cap: '}
-              {officeStatus.capNanodollars
+              {officeStatus.state === 'config_error'
+                ? 'Configuration error'
+                : officeStatus.capNanodollars
                 ? formatNanodollars(officeStatus.capNanodollars)
                 : 'No cap set'}
             </div>
           </div>
           <div>
-            {officeStatus.state === 'exceeded' ? (
+            {officeStatus.state === 'config_error' ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  color: '#f87171',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                }}
+              >
+                <ShieldWarning size={14} weight="bold" /> Configuration error
+              </span>
+            ) : officeStatus.state === 'exceeded' ? (
               <span
                 style={{
                   display: 'inline-flex',
@@ -162,9 +181,10 @@ export function BudgetSettingsCard() {
         {/* Per-Seat Budget Rows */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {seatStatuses.map((st) => {
+            const isConfigError = st.state === 'config_error';
             const isExceeded = st.state === 'exceeded';
             const isWarning = st.state === 'warning';
-            const isUnlimited = st.capNanodollars === null;
+            const isUnlimited = st.capNanodollars === null && !isConfigError;
 
             // Total committed matches API: spent + held + unpricedEstimate
             const committedBig = BigInt(
@@ -177,7 +197,7 @@ export function BudgetSettingsCard() {
             );
 
             let percent = 0;
-            if (!isUnlimited && st.capNanodollars) {
+            if (!isUnlimited && !isConfigError && st.capNanodollars) {
               const capBig = BigInt(st.capNanodollars);
               if (capBig > 0n) {
                 percent = Math.min(100, Math.round(Number((committedBig * 100n) / capBig)));
@@ -190,10 +210,10 @@ export function BudgetSettingsCard() {
                 style={{
                   padding: '12px 14px',
                   borderRadius: '6px',
-                  background: isExceeded
+                  background: (isExceeded || isConfigError)
                     ? 'rgba(239, 68, 68, 0.12)'
                     : 'rgba(255, 255, 255, 0.02)',
-                  border: isExceeded
+                  border: (isExceeded || isConfigError)
                     ? '1px solid rgba(239, 68, 68, 0.4)'
                     : '1px solid rgba(255, 255, 255, 0.06)',
                   transition: 'all 0.15s ease',
@@ -213,12 +233,27 @@ export function BudgetSettingsCard() {
                       style={{
                         fontWeight: 600,
                         fontSize: '13px',
-                        color: isExceeded ? '#fca5a5' : '#e2e8f0',
+                        color: (isExceeded || isConfigError) ? '#fca5a5' : '#e2e8f0',
                       }}
                     >
                       {st.seat}
                     </code>
-                    {isExceeded && (
+                    {isConfigError && (
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: 'rgba(239, 68, 68, 0.2)',
+                          color: '#f87171',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                        }}
+                      >
+                        CONFIGURATION ERROR
+                      </span>
+                    )}
+                    {isExceeded && !isConfigError && (
                       <span
                         style={{
                           fontSize: '11px',
@@ -232,7 +267,7 @@ export function BudgetSettingsCard() {
                         EXCEEDED
                       </span>
                     )}
-                    {isWarning && (
+                    {isWarning && !isConfigError && (
                       <span
                         style={{
                           fontSize: '11px',
@@ -252,7 +287,7 @@ export function BudgetSettingsCard() {
                   <div
                     style={{
                       fontSize: '12px',
-                      color: isExceeded ? '#fca5a5' : '#94a3b8',
+                      color: (isExceeded || isConfigError) ? '#fca5a5' : '#94a3b8',
                       fontFamily: 'monospace',
                     }}
                   >
@@ -266,8 +301,12 @@ export function BudgetSettingsCard() {
                       </>
                     )}
                     <span style={{ margin: '0 6px' }}>/</span>
-                    <span style={{ fontWeight: 600, color: isExceeded ? '#ef4444' : '#f8fafc' }}>
-                      {st.capNanodollars ? formatNanodollars(st.capNanodollars) : 'No cap set'}
+                    <span style={{ fontWeight: 600, color: (isExceeded || isConfigError) ? '#ef4444' : '#f8fafc' }}>
+                      {isConfigError
+                        ? 'Configuration error'
+                        : st.capNanodollars
+                        ? formatNanodollars(st.capNanodollars)
+                        : 'No cap set'}
                     </span>
                   </div>
                 </div>
@@ -284,10 +323,10 @@ export function BudgetSettingsCard() {
                 >
                   <div
                     style={{
-                      width: isUnlimited ? '0%' : `${percent}%`,
+                      width: isUnlimited ? '0%' : (isConfigError ? '100%' : `${percent}%`),
                       height: '100%',
                       borderRadius: '3px',
-                      background: isExceeded
+                      background: (isExceeded || isConfigError)
                         ? '#ef4444'
                         : isWarning
                         ? '#eab308'

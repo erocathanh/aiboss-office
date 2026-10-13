@@ -23,6 +23,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
   getOfficeConfig,
   isValidNanodollarsString,
@@ -34,7 +35,13 @@ import { readCostFile, getCostReceiptsForRun, type CostRecord } from './costs-le
 export type BudgetBasis = 'estimate:last5' | 'default';
 export type BudgetReleaseReason = 'orphaned' | 'failed_no_receipt' | 'expired';
 export type BudgetRejectScope = 'seat' | 'office';
-export type BudgetState = 'unlimited' | 'ok' | 'warning' | 'exceeded' | 'config_error';
+export type BudgetState = 'unlimited' | 'ok' | 'warning' | 'exceeded' | 'config_error' | 'snapshot_not_ready';
+
+export interface BudgetWorkerIdentity {
+  pid?: number;
+  processStartedAt?: string;
+  instanceId?: string;
+}
 
 export interface BudgetHoldRecord {
   type: 'hold';
@@ -44,7 +51,16 @@ export interface BudgetHoldRecord {
   amountNanodollars: string;
   basis: BudgetBasis;
   overBudget: boolean;
+  worker?: BudgetWorkerIdentity;
   ts: string;
+}
+
+export interface OpenHoldsCheckpoint {
+  version: 1;
+  updatedAt: string;
+  lastReplayedFile: string | null;
+  lastLineCount: number;
+  holds: Record<string, BudgetHoldRecord>;
 }
 
 export interface BudgetSettleRecord {
@@ -133,12 +149,53 @@ function getOpenHoldsFilePath(): string {
   return path.join(getBudgetDir(), 'open-holds.json');
 }
 
+export function getProcessStartTime(pid: number): string | null {
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return out ? new Date(out).toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isProcessAlive(pid: number, expectedStartedAt?: string): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (e: unknown) {
+    if ((e as { code?: string }).code === 'ESRCH') {
+      return false; // Process is dead
+    }
+  }
+  if (expectedStartedAt) {
+    const actual = getProcessStartTime(pid);
+    if (!actual || actual !== expectedStartedAt) {
+      return false; // Process died and PID was reused
+    }
+  }
+  return true;
+}
+
+export interface LockMetadata {
+  pid: number;
+  processStartedAt: string;
+  token: string;
+  ts: number;
+}
+
 let lockDepth = 0;
 
 /**
  * Cross-process locking helper for budget ledger writes and atomic transactions.
- * Uses atomic directory creation with lock token ownership verification,
- * dead process detection, and re-entrancy support.
+ * Features:
+ * - Atomic directory creation via rename from private tmp dir (lockDir NEVER exists without info.json).
+ * - Ownership verification via unique lock token and PID start-time check (immune to PID reuse).
+ * - Live processes are NEVER stolen from.
+ * - Reclaim only when lease expired (>5000ms) AND owner process is dead (ESRCH / start time mismatch).
+ * - Atomic reclaim via directory rename (no check-then-rm TOCTOU race).
+ * - Metadata write errors abort immediately without entering critical section.
  */
 export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
   if (lockDepth > 0) {
@@ -152,72 +209,89 @@ export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
 
   ensureBudgetDir();
   const lockDir = path.join(getBudgetDir(), '.budget.lock');
-  const infoFile = path.join(lockDir, 'info.json');
   const lockToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const startedAt = getProcessStartTime(process.pid) || new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString();
   const start = Date.now();
 
   while (true) {
+    const tmpDir = path.join(getBudgetDir(), `.lock-init-${lockToken}`);
+    let acquired = false;
+
     try {
-      fs.mkdirSync(lockDir);
+      fs.mkdirSync(tmpDir);
+      const info: LockMetadata = {
+        pid: process.pid,
+        processStartedAt: startedAt,
+        token: lockToken,
+        ts: Date.now(),
+      };
+      fs.writeFileSync(path.join(tmpDir, 'info.json'), JSON.stringify(info));
       try {
-        fs.writeFileSync(
-          infoFile,
-          JSON.stringify({ pid: process.pid, token: lockToken, ts: Date.now() })
-        );
+        fs.renameSync(tmpDir, lockDir);
+        acquired = true;
       } catch {
-        /* ignore write race */
-      }
-      break;
-    } catch (err: unknown) {
-      const errObj = err as { code?: string };
-      if (errObj.code === 'EEXIST') {
+        // lockDir already exists (EEXIST / ENOTEMPTY)
         try {
-          if (fs.existsSync(infoFile)) {
-            const raw = fs.readFileSync(infoFile, 'utf-8');
-            const info = JSON.parse(raw);
-            let isProcessDead = false;
-            try {
-              process.kill(info.pid, 0);
-            } catch (e: unknown) {
-              if ((e as { code?: string }).code === 'ESRCH') {
-                isProcessDead = true;
-              }
-            }
-
-            // CRITICAL (Hermes FAIL 6 & Finding B):
-            // NEVER steal lock of a live process!
-            // Only reclaim when owner PID is confirmed dead by OS AND token matches.
-            if (isProcessDead) {
-              try {
-                const checkInfo = JSON.parse(fs.readFileSync(infoFile, 'utf-8'));
-                if (checkInfo.token === info.token) {
-                  fs.rmSync(lockDir, { recursive: true, force: true });
-                  continue;
-                }
-              } catch {
-                /* race during recovery check */
-              }
-            }
-          } else {
-            // Lock dir exists but info.json is missing. Check if abandoned crash.
-            const stat = fs.statSync(lockDir);
-            if (Date.now() - stat.mtimeMs > 3000) {
-              fs.rmSync(lockDir, { recursive: true, force: true });
-              continue;
-            }
-          }
+          fs.rmSync(tmpDir, { recursive: true, force: true });
         } catch {
-          /* ignore error during recovery check */
+          /* ignore */
         }
-
-        if (Date.now() - start > timeoutMs) {
-          throw new Error(`Budget ledger lock timeout after ${timeoutMs}ms`);
-        }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
-      } else {
-        throw err;
       }
+    } catch (tmpErr) {
+      // Writing info or creating tmp dir failed: NEVER enter critical section!
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+      throw tmpErr;
     }
+
+    if (acquired) {
+      break;
+    }
+
+    // Inspect existing lock
+    const infoFile = path.join(lockDir, 'info.json');
+    try {
+      if (fs.existsSync(infoFile)) {
+        const raw = fs.readFileSync(infoFile, 'utf-8');
+        const held = JSON.parse(raw) as LockMetadata;
+        const isDead = !isProcessAlive(held.pid, held.processStartedAt);
+        const leaseExpired = Date.now() - held.ts > 5000;
+
+        // Reclaim ONLY when: lease expired AND owner process is dead AND token exists!
+        if (leaseExpired && isDead && held.token) {
+          const reclaimDir = path.join(getBudgetDir(), `.lock-reclaim-${held.token}-${Date.now()}`);
+          try {
+            // Atomic rename to reclaimDir (No check-then-rm!)
+            fs.renameSync(lockDir, reclaimDir);
+            try {
+              const recRaw = fs.readFileSync(path.join(reclaimDir, 'info.json'), 'utf-8');
+              const recInfo = JSON.parse(recRaw);
+              if (recInfo.token === held.token) {
+                fs.rmSync(reclaimDir, { recursive: true, force: true });
+                continue; // Reclaim successful, acquire next loop
+              } else {
+                // Token mismatch, restore lock
+                fs.renameSync(reclaimDir, lockDir);
+              }
+            } catch {
+              fs.rmSync(reclaimDir, { recursive: true, force: true });
+            }
+          } catch {
+            // Another process reclaimed or lock freed, continue loop
+          }
+        }
+      }
+    } catch {
+      /* ignore read race */
+    }
+
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`Budget ledger lock timeout after ${timeoutMs}ms`);
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
   }
 
   lockDepth = 1;
@@ -226,11 +300,18 @@ export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
   } finally {
     lockDepth = 0;
     try {
+      const infoFile = path.join(lockDir, 'info.json');
       if (fs.existsSync(infoFile)) {
         const info = JSON.parse(fs.readFileSync(infoFile, 'utf-8'));
-        // Only delete lock if it still belongs to THIS process and THIS token
+        // Only release lock if it still belongs to THIS process and THIS token
         if (info.token === lockToken && info.pid === process.pid) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
+          const relDir = path.join(getBudgetDir(), `.lock-rel-${lockToken}`);
+          try {
+            fs.renameSync(lockDir, relDir);
+            fs.rmSync(relDir, { recursive: true, force: true });
+          } catch {
+            fs.rmSync(lockDir, { recursive: true, force: true });
+          }
         }
       }
     } catch {
@@ -250,7 +331,16 @@ export function sanitizeHoldRecord(raw: unknown): BudgetHoldRecord | null {
   if (typeof r.holdId !== 'string' || typeof r.wakeId !== 'string' || typeof r.seatId !== 'string') return null;
   if (!isValidNanodollarsString(r.amountNanodollars)) return null;
   if (r.basis !== 'estimate:last5' && r.basis !== 'default') return null;
-  if (typeof r.ts !== 'string') return null;
+  const ts = typeof r.ts === 'string' && r.ts ? r.ts : new Date().toISOString();
+  let worker: BudgetWorkerIdentity | undefined = undefined;
+  if (r.worker && typeof r.worker === 'object') {
+    const w = r.worker as Record<string, unknown>;
+    worker = {
+      ...(typeof w.pid === 'number' ? { pid: w.pid } : {}),
+      ...(typeof w.processStartedAt === 'string' ? { processStartedAt: w.processStartedAt } : {}),
+      ...(typeof w.instanceId === 'string' ? { instanceId: w.instanceId } : {}),
+    };
+  }
 
   return {
     type: 'hold',
@@ -260,7 +350,8 @@ export function sanitizeHoldRecord(raw: unknown): BudgetHoldRecord | null {
     amountNanodollars: r.amountNanodollars,
     basis: r.basis,
     overBudget: Boolean(r.overBudget),
-    ts: r.ts,
+    ...(worker ? { worker } : {}),
+    ts,
   };
 }
 
@@ -414,81 +505,153 @@ export function appendBudgetRecord(record: BudgetRecord): void {
 }
 
 // -------------------------------------------------------------
-// Durable Open-Holds Index (open-holds.json)
+// Durable Open-Holds Checkpoint Index (open-holds.json)
 // -------------------------------------------------------------
 
-function loadOpenHoldsMap(): Record<string, BudgetHoldRecord> {
+export function loadOpenHoldsCheckpoint(): OpenHoldsCheckpoint | null {
   ensureBudgetDir();
   const openHoldsPath = getOpenHoldsFilePath();
-  if (fs.existsSync(openHoldsPath)) {
-    try {
-      const content = fs.readFileSync(openHoldsPath, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (parsed && typeof parsed === 'object') {
-        return parsed as Record<string, BudgetHoldRecord>;
-      }
-    } catch {
-      /* ignore read error and fall back to reconstruct */
-    }
-  }
-
-  // Reconstruct index from all budget files on disk
-  const allRecords = readAllBudgetRecords(() => true);
-  const map: Record<string, BudgetHoldRecord> = {};
-  for (const r of allRecords) {
-    if (r.type === 'hold') {
-      map[r.holdId] = r;
-    } else if (r.type === 'settle' || r.type === 'release') {
-      delete map[r.holdId];
-    }
-  }
-
+  if (!fs.existsSync(openHoldsPath)) return null;
   try {
-    saveOpenHoldsMap(map);
+    const content = fs.readFileSync(openHoldsPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    if (parsed && parsed.version === 1 && parsed.holds && typeof parsed.holds === 'object') {
+      return parsed as OpenHoldsCheckpoint;
+    }
   } catch {
-    /* ignore save race */
+    /* corrupt checkpoint */
   }
-  return map;
+  return null;
 }
 
-function saveOpenHoldsMap(map: Record<string, BudgetHoldRecord>): void {
+export function saveOpenHoldsCheckpoint(cp: OpenHoldsCheckpoint): void {
   ensureBudgetDir();
   const openHoldsPath = getOpenHoldsFilePath();
   const tmpPath = path.join(getBudgetDir(), `.open-holds.tmp.${process.pid}.${Date.now()}`);
-  fs.writeFileSync(tmpPath, JSON.stringify(map, null, 2), 'utf-8');
+  fs.writeFileSync(tmpPath, JSON.stringify(cp, null, 2), 'utf-8');
   fs.renameSync(tmpPath, openHoldsPath);
 }
 
 /**
+ * Replay unindexed budget records from date-partitioned JSONL files (the Single Source of Truth)
+ * into the durable open-holds checkpoint index.
+ * Guaranteed idempotent and crash-proof:
+ * If a transaction crashed after writing to JSONL but before updating the checkpoint,
+ * the replay resumes from lastLineCount of lastReplayedFile, reflecting all unindexed records.
+ * Must be called under withBudgetLock.
+ */
+export function replayAndGetCheckpoint(): OpenHoldsCheckpoint {
+  ensureBudgetDir();
+  const budgetDir = getBudgetDir();
+  let cp = loadOpenHoldsCheckpoint();
+
+  const allFiles = fs
+    .readdirSync(budgetDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .sort();
+
+  if (!cp) {
+    cp = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      lastReplayedFile: null,
+      lastLineCount: 0,
+      holds: {},
+    };
+  }
+
+  let filesToReplay: string[] = [];
+  if (!cp.lastReplayedFile) {
+    filesToReplay = allFiles;
+  } else {
+    const idx = allFiles.indexOf(cp.lastReplayedFile);
+    if (idx === -1) {
+      filesToReplay = allFiles.filter((f) => f >= cp.lastReplayedFile!);
+    } else {
+      filesToReplay = allFiles.slice(idx);
+    }
+  }
+
+  for (const file of filesToReplay) {
+    const filePath = path.join(budgetDir, file);
+    if (!fs.existsSync(filePath)) continue;
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n').filter((l) => l.trim().length > 0);
+    const startLineIndex = file === cp.lastReplayedFile ? cp.lastLineCount : 0;
+
+    if (startLineIndex < lines.length) {
+      for (let i = startLineIndex; i < lines.length; i++) {
+        const line = lines[i];
+        try {
+          const parsed = JSON.parse(line);
+          const sanitized = sanitizeBudgetRecord(parsed);
+          if (!sanitized) continue;
+
+          if (sanitized.type === 'hold') {
+            cp.holds[sanitized.holdId] = sanitized;
+          } else if (sanitized.type === 'settle' || sanitized.type === 'release') {
+            delete cp.holds[sanitized.holdId];
+          }
+        } catch {
+          /* skip corrupted line */
+        }
+      }
+    }
+
+    cp.lastReplayedFile = file;
+    cp.lastLineCount = lines.length;
+  }
+
+  if (allFiles.length === 0) {
+    cp.lastReplayedFile = null;
+    cp.lastLineCount = 0;
+  }
+
+  cp.updatedAt = new Date().toISOString();
+  saveOpenHoldsCheckpoint(cp);
+  return cp;
+}
+
+/**
+ * Initialize budget ledger checkpoint on server startup.
+ */
+export function initBudgetLedger(): OpenHoldsCheckpoint {
+  return withBudgetLock(() => replayAndGetCheckpoint());
+}
+
+/**
  * Check if a hold is already closed (settled or released).
- * Uses durable open-holds index: if not present in open-holds map, it is closed or does not exist.
+ * Under lock, replays unindexed log lines and verifies absence in checkpoint.
  */
 export function isHoldClosed(holdId: string): boolean {
   return withBudgetLock(() => {
-    const openHolds = loadOpenHoldsMap();
-    return !openHolds[holdId];
+    const cp = replayAndGetCheckpoint();
+    return !cp.holds[holdId];
   });
 }
 
 /**
  * Get map of currently active holds: holdId -> BudgetHoldRecord.
- * CRITICAL (Hermes FAIL 8 & 9): Reads from durable open-holds.json index so active holds
- * are preserved across server restarts regardless of time window.
+ * Reads directly from the validated checkpoint snapshot.
  */
 export function getActiveHolds(): Map<string, BudgetHoldRecord> {
-  return withBudgetLock(() => {
-    const openHolds = loadOpenHoldsMap();
-    const map = new Map<string, BudgetHoldRecord>();
-    for (const [k, v] of Object.entries(openHolds)) {
+  const cp = loadOpenHoldsCheckpoint();
+  const map = new Map<string, BudgetHoldRecord>();
+  if (cp && cp.holds) {
+    for (const [k, v] of Object.entries(cp.holds)) {
       map.set(k, v);
     }
-    return map;
-  });
+  }
+  return map;
 }
 
 /**
  * Record a budget hold prior to dispatch under lock.
- * Updates both the append-only ledger and the durable open-holds index.
+ * Single Source of Truth (SST) pattern:
+ * 1. Replays unindexed log lines into checkpoint.
+ * 2. Appends hold to JSONL first.
+ * 3. Updates and saves checkpoint index.
  */
 export function recordHold(hold: Omit<BudgetHoldRecord, 'type'>): BudgetHoldRecord {
   return withBudgetLock(() => {
@@ -500,16 +663,29 @@ export function recordHold(hold: Omit<BudgetHoldRecord, 'type'>): BudgetHoldReco
       amountNanodollars: hold.amountNanodollars,
       basis: hold.basis,
       overBudget: Boolean(hold.overBudget),
+      ...(hold.worker ? { worker: hold.worker } : {}),
       ts: hold.ts,
     });
     if (!record) {
       throw new Error('Invalid budget hold record');
     }
+
+    const cp = replayAndGetCheckpoint();
+
+    // 1. Append to SST JSONL first
     appendBudgetRecordDirect(record);
 
-    const openHolds = loadOpenHoldsMap();
-    openHolds[record.holdId] = record;
-    saveOpenHoldsMap(openHolds);
+    // 2. Update checkpoint
+    cp.holds[record.holdId] = record;
+    const logFile = path.basename(getBudgetLogPathForDate(record.ts));
+    if (cp.lastReplayedFile === logFile) {
+      cp.lastLineCount += 1;
+    } else {
+      cp.lastReplayedFile = logFile;
+      cp.lastLineCount = 1;
+    }
+    cp.updatedAt = new Date().toISOString();
+    saveOpenHoldsCheckpoint(cp);
 
     return record;
   });
@@ -518,8 +694,11 @@ export function recordHold(hold: Omit<BudgetHoldRecord, 'type'>): BudgetHoldReco
 /**
  * Settle a budget hold upon run completion.
  * IDEMPOTENT & CROSS-PROCESS SAFE:
- * Under budget lock, checks if hold is in open-holds index.
- * If already closed, returns null immediately without duplicate append.
+ * Under budget lock:
+ * 1. Replays unindexed log lines into checkpoint.
+ * 2. Checks if hold exists in checkpoint; if not, returns null immediately.
+ * 3. Appends settle record to JSONL first (SST).
+ * 4. Removes hold from checkpoint and saves.
  */
 export function settleHold(params: {
   holdId: string;
@@ -529,9 +708,9 @@ export function settleHold(params: {
   ts?: string;
 }): BudgetSettleRecord | null {
   return withBudgetLock(() => {
-    const openHolds = loadOpenHoldsMap();
-    if (!openHolds[params.holdId]) {
-      return null; // Already closed or non-existent
+    const cp = replayAndGetCheckpoint();
+    if (!cp.holds[params.holdId]) {
+      return null; // Already settled, released, or non-existent
     }
 
     const record = sanitizeSettleRecord({
@@ -544,10 +723,21 @@ export function settleHold(params: {
     });
     if (!record) return null;
 
-    delete openHolds[params.holdId];
-    saveOpenHoldsMap(openHolds);
-
+    // 1. Append to SST JSONL first
     appendBudgetRecordDirect(record);
+
+    // 2. Update checkpoint
+    delete cp.holds[params.holdId];
+    const logFile = path.basename(getBudgetLogPathForDate(record.ts));
+    if (cp.lastReplayedFile === logFile) {
+      cp.lastLineCount += 1;
+    } else {
+      cp.lastReplayedFile = logFile;
+      cp.lastLineCount = 1;
+    }
+    cp.updatedAt = new Date().toISOString();
+    saveOpenHoldsCheckpoint(cp);
+
     return record;
   });
 }
@@ -555,8 +745,11 @@ export function settleHold(params: {
 /**
  * Release a budget hold when a run fails without receipt, expires, or is orphaned.
  * IDEMPOTENT & CROSS-PROCESS SAFE:
- * Under budget lock, checks if hold is in open-holds index.
- * If already closed, returns null immediately without duplicate append.
+ * Under budget lock:
+ * 1. Replays unindexed log lines into checkpoint.
+ * 2. Checks if hold exists in checkpoint; if not, returns null immediately.
+ * 3. Appends release record to JSONL first (SST).
+ * 4. Removes hold from checkpoint and saves.
  */
 export function releaseHold(params: {
   holdId: string;
@@ -564,9 +757,9 @@ export function releaseHold(params: {
   ts?: string;
 }): BudgetReleaseRecord | null {
   return withBudgetLock(() => {
-    const openHolds = loadOpenHoldsMap();
-    if (!openHolds[params.holdId]) {
-      return null; // Already closed or non-existent
+    const cp = replayAndGetCheckpoint();
+    if (!cp.holds[params.holdId]) {
+      return null; // Already settled, released, or non-existent
     }
 
     const record = sanitizeReleaseRecord({
@@ -577,10 +770,21 @@ export function releaseHold(params: {
     });
     if (!record) return null;
 
-    delete openHolds[params.holdId];
-    saveOpenHoldsMap(openHolds);
-
+    // 1. Append to SST JSONL first
     appendBudgetRecordDirect(record);
+
+    // 2. Update checkpoint
+    delete cp.holds[params.holdId];
+    const logFile = path.basename(getBudgetLogPathForDate(record.ts));
+    if (cp.lastReplayedFile === logFile) {
+      cp.lastLineCount += 1;
+    } else {
+      cp.lastReplayedFile = logFile;
+      cp.lastLineCount = 1;
+    }
+    cp.updatedAt = new Date().toISOString();
+    saveOpenHoldsCheckpoint(cp);
+
     return record;
   });
 }
@@ -771,6 +975,24 @@ export function getBudgetStatus(seatId?: string, nowIso?: string): BudgetStatus 
     (config.budget?.configErrors && config.budget.configErrors.length > 0)
   );
 
+  const cp = loadOpenHoldsCheckpoint();
+  if (!cp) {
+    // Snapshot not ready: do not scan entire disk history in GET!
+    return {
+      seat: seatId ?? null,
+      capNanodollars,
+      spentNanodollars: '0',
+      heldNanodollars: '0',
+      unpricedRuns: 0,
+      unpricedEstimateNanodollars: '0',
+      committedNanodollars: '0',
+      remainingNanodollars: capNanodollars,
+      state: 'snapshot_not_ready',
+      hardStop,
+      configErrors: config.budget?.configErrors,
+    };
+  }
+
   // Read today's costs from costs ledger
   const baseDataDir = process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
   const todayCostFile = path.join(baseDataDir, 'costs', `${todayStr}.jsonl`);
@@ -781,9 +1003,12 @@ export function getBudgetStatus(seatId?: string, nowIso?: string): BudgetStatus 
     ? todayCosts.filter((c) => c.seatId === seatId)
     : todayCosts;
 
-  // De-duplicate / fold receipts by (runId, model) matching costs-ledger.ts
+  // De-duplicate / fold receipts by (runId, model) keeping NEWEST receipt matching costs-ledger.ts
+  const sortedCosts = [...filteredCosts].sort(
+    (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()
+  );
   const uniqueRecordsMap = new Map<string, CostRecord>();
-  for (const c of filteredCosts) {
+  for (const c of sortedCosts) {
     const key = `${c.runId}::${c.model}`;
     if (!uniqueRecordsMap.has(key)) {
       uniqueRecordsMap.set(key, c);
@@ -805,10 +1030,9 @@ export function getBudgetStatus(seatId?: string, nowIso?: string): BudgetStatus 
   const unpricedRuns = unpricedRunIds.size;
   const unpricedEstimateBig = BigInt(unpricedRuns) * BigInt(defaultEstimate);
 
-  // Calculate active holds from durable open-holds index
-  const activeHolds = getActiveHolds();
+  // Calculate active holds from durable open-holds checkpoint
   let heldBig = 0n;
-  for (const hold of activeHolds.values()) {
+  for (const hold of Object.values(cp.holds)) {
     if (!seatId || hold.seatId === seatId) {
       heldBig += BigInt(hold.amountNanodollars);
     }
@@ -998,6 +1222,7 @@ export function checkAdmissionAndRecordHold(params: {
   seatId: string;
   wakeId: string;
   holdId: string;
+  worker?: BudgetWorkerIdentity;
   nowIso?: string;
 }): {
   allowed: boolean;
@@ -1018,6 +1243,7 @@ export function checkAdmissionAndRecordHold(params: {
       amountNanodollars: admission.estimate.amountNanodollars,
       basis: admission.estimate.basis,
       overBudget: Boolean(admission.overBudget),
+      ...(params.worker ? { worker: params.worker } : {}),
       ts: params.nowIso || new Date().toISOString(),
     });
 
@@ -1031,8 +1257,9 @@ export function checkAdmissionAndRecordHold(params: {
 
 /**
  * Helper to fold run records for a hold from runs-ledger files.
- * Reads backwards across files, collects all updates for the run, and merges them
+ * Reads backwards across files, collects all updates grouped by runId, and merges them
  * in chronological order so the final terminal state (finished/failed/killed) is accurately reflected.
+ * Separates distinct runs sharing the same wakeId.
  */
 interface RawRunLine {
   type?: string;
@@ -1041,15 +1268,20 @@ interface RawRunLine {
   holdId?: string;
   status?: string;
   pid?: number;
+  processStartedAt?: string;
+  instanceId?: string;
   errorKind?: string;
   costStatus?: string;
+  startedAt?: string;
   [key: string]: unknown;
 }
 
-function findFoldedRunForHold(hold: BudgetHoldRecord): {
+export function findFoldedRunForHold(hold: BudgetHoldRecord): {
   status?: string;
   runId?: string;
   pid?: number;
+  processStartedAt?: string;
+  instanceId?: string;
   errorKind?: string;
   costStatus?: string;
 } | null {
@@ -1059,7 +1291,7 @@ function findFoldedRunForHold(hold: BudgetHoldRecord): {
     if (!fs.existsSync(runsDir)) return null;
 
     const files = fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl')).sort();
-    const matchingLines: RawRunLine[] = [];
+    const runsById = new Map<string, RawRunLine>();
 
     for (const f of files) {
       const content = fs.readFileSync(path.join(runsDir, f), 'utf-8');
@@ -1068,8 +1300,9 @@ function findFoldedRunForHold(hold: BudgetHoldRecord): {
         if (!line.trim()) continue;
         try {
           const p = JSON.parse(line) as RawRunLine;
-          if (p.type === 'run' && (p.holdId === hold.holdId || p.wakeId === hold.wakeId)) {
-            matchingLines.push(p);
+          if (p.type === 'run' && typeof p.runId === 'string') {
+            const existing = runsById.get(p.runId) || {};
+            runsById.set(p.runId, Object.assign(existing, p));
           }
         } catch {
           /* ignore json parse error */
@@ -1077,18 +1310,27 @@ function findFoldedRunForHold(hold: BudgetHoldRecord): {
       }
     }
 
-    if (matchingLines.length === 0) return null;
-
-    // Merge in chronological order to produce folded final state
-    let folded: RawRunLine | null = null;
-    for (const r of matchingLines) {
-      if (!folded) {
-        folded = Object.assign({}, r);
-      } else {
-        folded = Object.assign(folded, r);
+    // 1. Exact match by holdId
+    for (const r of runsById.values()) {
+      if (r.holdId === hold.holdId) {
+        return r;
       }
     }
-    return folded;
+
+    // 2. Fallback match by wakeId, choosing latest run by startedAt
+    let latestMatchingWake: RawRunLine | null = null;
+    for (const r of runsById.values()) {
+      if (r.wakeId === hold.wakeId) {
+        if (
+          !latestMatchingWake ||
+          (r.startedAt && String(r.startedAt) >= String(latestMatchingWake.startedAt))
+        ) {
+          latestMatchingWake = r;
+        }
+      }
+    }
+
+    return latestMatchingWake;
   } catch {
     return null;
   }
@@ -1096,10 +1338,11 @@ function findFoldedRunForHold(hold: BudgetHoldRecord): {
 
 /**
  * Reconcile open holds:
- * - Scans active holds from durable open-holds index.
- * - Folds run records to determine final run status.
- * - Checks PID liveness for running processes (never prematurely expires live workers).
+ * - Scans active holds from durable open-holds checkpoint index.
+ * - Folds run records by runId to determine final run status.
+ * - Checks PID liveness and start-time identity for running processes (never prematurely expires live workers).
  * - Settle holds when costs are recorded (preserving exact "0" actualNanodollars).
+ * - CRITICAL (Hermes FAIL 7): Never settles partial receipts while run.costStatus === 'pending'.
  * - Release holds when runs fail without receipts, expire, or are orphaned.
  */
 export function reconcileOpenHolds(options?: {
@@ -1107,6 +1350,8 @@ export function reconcileOpenHolds(options?: {
     status?: string;
     runId?: string;
     pid?: number;
+    processStartedAt?: string;
+    instanceId?: string;
     errorKind?: string;
     costStatus?: string;
   } | null;
@@ -1148,28 +1393,35 @@ export function reconcileOpenHolds(options?: {
 
       // 1. Process still running
       if (run.status === 'running') {
-        let isProcessDead = false;
         if (run.pid) {
-          try {
-            process.kill(run.pid, 0);
-          } catch (e: unknown) {
-            if ((e as { code?: string }).code === 'ESRCH') {
-              isProcessDead = true;
-            }
+          const isAlive = isProcessAlive(
+            run.pid,
+            run.processStartedAt || hold.worker?.processStartedAt
+          );
+          if (isAlive) {
+            // Worker is actively executing! Do NOT expire!
+            continue;
           }
-        }
-        if (!isProcessDead) {
-          // Process is still actively executing! Do NOT expire!
-          continue;
-        }
-        // Process is dead without updating terminal state
-        if (holdAgeMs > maxAgeMs) {
-          releaseHold({
-            holdId: hold.holdId,
-            reason: 'expired',
-            ts: nowTs,
-          });
-          released++;
+          // Worker process is dead without updating terminal state
+          if (holdAgeMs > maxAgeMs) {
+            releaseHold({
+              holdId: hold.holdId,
+              reason: 'expired',
+              ts: nowTs,
+            });
+            released++;
+          }
+        } else {
+          // PID is missing / unverified.
+          // Finite expiration policy: grace period up to maxAgeMs, then expire.
+          if (holdAgeMs > maxAgeMs) {
+            releaseHold({
+              holdId: hold.holdId,
+              reason: 'expired',
+              ts: nowTs,
+            });
+            released++;
+          }
         }
         continue;
       }
@@ -1187,10 +1439,10 @@ export function reconcileOpenHolds(options?: {
         }
 
         if (run.costStatus === 'pending') {
-          // Receipts pricing in progress; wait for reconcilePendingCosts unless timed out
-          if (holdAgeMs <= maxAgeMs) {
-            continue;
-          }
+          // CRITICAL (Hermes FAIL 7):
+          // Receipts pricing is still in progress across models.
+          // DO NOT settle based on hold age! Settle ONLY when reconcilePendingCosts completes pricing all expected models!
+          continue;
         }
 
         let receipts: Array<{ priced: boolean; costNanodollars: string | null }> = [];

@@ -59,6 +59,16 @@ export async function GET(req: NextRequest) {
     }
 
     const status = getBudgetStatus(seat);
+    if (status.state === 'snapshot_not_ready') {
+      return NextResponse.json(
+        {
+          error: 'snapshot_not_ready',
+          message: 'Budget snapshot is not ready. Replay is performed during server startup and write transactions.',
+          status,
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(status);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

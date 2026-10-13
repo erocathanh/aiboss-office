@@ -34,6 +34,8 @@ import {
   settleHold,
   releaseHold,
   reconcileOpenHolds,
+  initBudgetLedger,
+  getProcessStartTime,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -330,6 +332,11 @@ export async function tickRunner(): Promise<number> {
           seatId: y.ma_nhan_su,
           wakeId: confirmedWakeId,
           holdId,
+          worker: {
+            pid: process.pid,
+            processStartedAt: getProcessStartTime(process.pid) || undefined,
+            instanceId: `${process.pid}-${Date.now()}`,
+          },
           nowIso: startIso,
         });
 
@@ -424,7 +431,12 @@ export async function tickRunner(): Promise<number> {
               cauHoi: y.cau_hoi,
               maPhienCu: phienDung,
               khiSinh: (pid) => {
-                updateRun(runId, { pid });
+                const processStartedAt = getProcessStartTime(pid) || undefined;
+                updateRun(runId, {
+                  pid,
+                  processStartedAt,
+                  instanceId: `${pid}-${processStartedAt || Date.now()}`,
+                });
               },
             },
             () => {
@@ -653,6 +665,7 @@ export function startOfficeRunner(): boolean {
   // Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
   try {
     recoverOrphanedRuns();
+    initBudgetLedger();
     reconcileOpenHolds();
   } catch {
     /* ignore ledger recovery error */
