@@ -22,8 +22,22 @@
     "port": 4330,
     "host": "127.0.0.1"
   },
+  "budget": {
+    "currency": "USD",
+    "defaultRunEstimateNanodollars": "700000000",
+    "office": {
+      "dailyCapNanodollars": null,
+      "hardStop": true
+    },
+    "seats": {
+      "marketing-lead": {
+        "dailyCapNanodollars": null,
+        "hardStop": true
+      }
+    }
+  },
   "last_edited": {
-    "at": "2026-10-12T14:09:00Z",
+    "at": "2026-10-13T17:30:00Z",
     "by": "antigravity-aiboss-office-backend"
   }
 }

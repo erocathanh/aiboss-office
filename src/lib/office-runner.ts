@@ -29,6 +29,12 @@ import {
   type NormalizedUsage,
 } from '@/lib/usage-receipt';
 import { recordCostReceipts, recordCostReceipt } from '@/lib/costs-ledger';
+import {
+  checkBudgetAdmission,
+  recordHold,
+  settleHold,
+  releaseHold,
+} from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
 const BASE_DATA_DIR = process.env.AIBOSS_DATA_DIR || path.join(REPO_ROOT, 'operations', 'data');
@@ -66,6 +72,7 @@ interface InFlightTurn {
   bell_id: string;
   wakeId: string;
   runId: string;
+  holdId: string;
   startIso: string;
   startTime: number;
 }
@@ -99,6 +106,17 @@ export function flushInFlightTurns(reason: string): void {
         });
       } catch {
         /* ignore ledger write error during shutdown */
+      }
+    }
+    if (turn.holdId) {
+      try {
+        releaseHold({
+          holdId: turn.holdId,
+          reason: 'orphaned',
+          ts: endIso,
+        });
+      } catch {
+        /* ignore */
       }
     }
     inFlightTurns.delete(seat);
@@ -283,6 +301,31 @@ export async function tickRunner(): Promise<number> {
         continue;
       }
 
+      // Check budget admission (A-3)
+      const candidateWakeId = y.wakeId ?? y.ma;
+      const admission = checkBudgetAdmission(y.ma_nhan_su, candidateWakeId);
+      if (!admission.allowed) {
+        logRunnerEvent({
+          timestamp: new Date().toISOString(),
+          seat: y.ma_nhan_su,
+          bell_id: y.ma,
+          event: 'skipped',
+          skipped_reason: 'budget_exceeded',
+        });
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'budget_exceeded',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        boYeuCau(y.ma, 'budget_exceeded');
+        continue;
+      }
+
       // Atomic claim from queue
       const claimed = nhanYeuCau(y.ma_o, y.ma_nhan_su, 'office-runner');
       if (!claimed.y) {
@@ -299,12 +342,24 @@ export async function tickRunner(): Promise<number> {
 
       const startIso = new Date().toISOString();
       const startTime = Date.now();
-      const wakeId = claimed.y.wakeId ?? claimed.y.ma;
+      const confirmedWakeId = claimed.y.wakeId ?? claimed.y.ma;
       const runId = generateRunOrWakeId('run');
+      const holdId = generateRunOrWakeId('hold');
+
+      // Create budget hold (A-3)
+      recordHold({
+        holdId,
+        wakeId: confirmedWakeId,
+        seatId: y.ma_nhan_su,
+        amountNanodollars: admission.estimate.amountNanodollars,
+        basis: admission.estimate.basis,
+        overBudget: Boolean(admission.overBudget),
+        ts: startIso,
+      });
 
       // F1: Wrap ledger writes in try/catch to recover queue item and free activeSeats on throw
       try {
-        updateWake(wakeId, {
+        updateWake(confirmedWakeId, {
           status: 'claimed',
           claimedAt: startIso,
           runId,
@@ -312,14 +367,20 @@ export async function tickRunner(): Promise<number> {
 
         recordRun({
           runId,
-          wakeId,
+          wakeId: confirmedWakeId,
+          holdId,
           seatId: y.ma_nhan_su,
           startedAt: startIso,
           status: 'running',
           attempt: 1,
         });
       } catch (err) {
-        console.error(`[office-runner] Failed to write ledger for claimed wake ${wakeId}:`, err);
+        console.error(`[office-runner] Failed to write ledger for claimed wake ${confirmedWakeId}:`, err);
+        releaseHold({
+          holdId,
+          reason: 'failed_no_receipt',
+          ts: new Date().toISOString(),
+        });
         activeSeats.delete(y.ma_nhan_su);
         traVeHangDoi(claimed.y.ma);
         continue;
@@ -328,8 +389,9 @@ export async function tickRunner(): Promise<number> {
       inFlightTurns.set(y.ma_nhan_su, {
         seat: y.ma_nhan_su,
         bell_id: y.ma,
-        wakeId,
+        wakeId: confirmedWakeId,
         runId,
+        holdId,
         startIso,
         startTime,
       });
@@ -423,6 +485,29 @@ export async function tickRunner(): Promise<number> {
               costStatus = 'pending';
               pendingRawUsage = sanitizedUsage;
             }
+          }
+
+          // Settle budget hold (A-3)
+          if (costStatus === 'recorded') {
+            const totalActualBig = extractedReceipts.reduce(
+              (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+              0n
+            );
+            settleHold({
+              holdId,
+              runId,
+              actualNanodollars: totalActualBig.toString(),
+              priced: true,
+              ts: endIso,
+            });
+          } else if (costStatus === 'unpriced') {
+            settleHold({
+              holdId,
+              runId,
+              actualNanodollars: null,
+              priced: false,
+              ts: endIso,
+            });
           }
 
           // 2. Map failure to finite RunErrorKind codes (Item 10: sigkill, timeout, exit_nonzero, result_error, spawn_failed, orphaned)
@@ -520,6 +605,13 @@ export async function tickRunner(): Promise<number> {
             exitCode: null,
             errorKind: 'result_error',
             costStatus: fallbackCostStatus,
+          });
+          settleHold({
+            holdId,
+            runId,
+            actualNanodollars: null,
+            priced: false,
+            ts: endIso,
           });
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);

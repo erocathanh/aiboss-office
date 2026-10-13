@@ -23,6 +23,11 @@ import {
   getRecordedModelsForRun,
   recordCostReceipt,
 } from '@/lib/costs-ledger';
+import {
+  settleHold,
+  releaseHold,
+  findHoldIdForRun,
+} from '@/lib/budget-ledger';
 
 export type RunErrorKind =
   | 'sigkill'
@@ -51,6 +56,7 @@ export interface RunRecord {
   type: 'run';
   runId: string;
   wakeId?: string;
+  holdId?: string;
   seatId: string;
   sessionId?: string;
   startedAt: string; // ISO
@@ -83,7 +89,7 @@ function ensureRunsDir(): void {
 /**
  * Generate an ID in the format prefix-YYYYMMDD-HHMMSS-<6 hex>.
  */
-export function generateRunOrWakeId(prefix: 'wake' | 'run'): string {
+export function generateRunOrWakeId(prefix: 'wake' | 'run' | 'hold'): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
@@ -153,6 +159,7 @@ export function sanitizeRun(run: MergedRunInfo): MergedRunInfo {
     startedAt: run.startedAt,
     status: run.status,
     ...(run.wakeId ? { wakeId: run.wakeId } : {}),
+    ...(run.holdId ? { holdId: run.holdId } : {}),
     ...(run.sessionId ? { sessionId: run.sessionId } : {}),
     ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
     ...(run.exitCode !== undefined ? { exitCode: run.exitCode } : {}),
@@ -691,6 +698,20 @@ export function reconcilePendingCosts(): number {
         if (allModelsRecorded && expectedReceipts.every((r) => recordedModels.has(r.model))) {
           // Tombstone rawUsage with null to wipe it from ledger and readers
           updateRun(run.runId, { costStatus: 'recorded', rawUsage: null });
+          const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+          if (holdId) {
+            const totalActualBig = expectedReceipts.reduce(
+              (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+              0n
+            );
+            settleHold({
+              holdId,
+              runId: run.runId,
+              actualNanodollars: totalActualBig.toString(),
+              priced: true,
+              ts: timestampIso,
+            });
+          }
           reconciledCount++;
         }
       } else {
@@ -699,6 +720,16 @@ export function reconcilePendingCosts(): number {
         if (recordedModels.size > 0) {
           const hasPriced = hasPricedCostReceiptsForRun(run.runId);
           updateRun(run.runId, { costStatus: hasPriced ? 'recorded' : 'unpriced', rawUsage: null });
+          const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+          if (holdId) {
+            settleHold({
+              holdId,
+              runId: run.runId,
+              actualNanodollars: null,
+              priced: false,
+              ts: timestampIso,
+            });
+          }
           reconciledCount++;
         } else {
           try {
@@ -716,6 +747,16 @@ export function reconcilePendingCosts(): number {
               source: 'claude-stream-json',
             });
             updateRun(run.runId, { costStatus: 'unpriced', rawUsage: null });
+            const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+            if (holdId) {
+              settleHold({
+                holdId,
+                runId: run.runId,
+                actualNanodollars: null,
+                priced: false,
+                ts: timestampIso,
+              });
+            }
             reconciledCount++;
           } catch (err: unknown) {
             console.error(`[runs-ledger] Fallback unpriced cost failed for run ${run.runId}:`, err);
@@ -805,6 +846,14 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
           rawUsage: orphanCostStatus === 'pending' ? (sanitizeRawUsage(run.rawUsage) ?? null) : null,
           updatedAt: orphanTime,
         });
+        const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+        if (holdId) {
+          releaseHold({
+            holdId,
+            reason: 'orphaned',
+            ts: orphanTime,
+          });
+        }
         orphanedRuns++;
       }
     }
