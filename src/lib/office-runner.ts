@@ -8,16 +8,33 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chayMotLuot } from '@/lib/chay-mot-luot';
-import { nhanYeuCau, xacNhanDaGiao, xemSo, conDung } from '@/lib/kho-danh-thuc';
+import { nhanYeuCau, xacNhanDaGiao, xemSo, conDung, traVeHangDoi, boYeuCau } from '@/lib/kho-danh-thuc';
 import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
 import { isSeatHeldByTerminal } from '@/lib/seat-active';
 import { dsViec } from '@/lib/kho-tien-trinh';
+import {
+  generateRunOrWakeId,
+  recordRun,
+  updateRun,
+  updateWake,
+  recoverOrphanedRuns,
+  reconcilePendingCosts,
+  type RunErrorKind,
+} from '@/lib/runs-ledger';
+import {
+  extractUsageReceipts,
+  sanitizeUsageReceipts,
+  type StreamJsonEvent,
+  type NormalizedUsage,
+} from '@/lib/usage-receipt';
+import { recordCostReceipts, recordCostReceipt } from '@/lib/costs-ledger';
 
 const REPO_ROOT = process.cwd();
-const RUNNER_OFF_FILE = path.join(REPO_ROOT, 'operations/data/runner.off');
-const CONFIG_FILE = path.join(REPO_ROOT, 'config/office.json');
-const LOG_FILE = path.join(REPO_ROOT, 'operations/data/runner.log.jsonl');
+const BASE_DATA_DIR = process.env.AIBOSS_DATA_DIR || path.join(REPO_ROOT, 'operations', 'data');
+const RUNNER_OFF_FILE = path.join(BASE_DATA_DIR, 'runner.off');
+const CONFIG_FILE = path.join(REPO_ROOT, 'config', 'office.json');
+const LOG_FILE = path.join(BASE_DATA_DIR, 'runner.log.jsonl');
 
 export interface RunnerConfig {
   enabled: boolean;
@@ -47,6 +64,8 @@ const activeSeats = new Set<string>();
 interface InFlightTurn {
   seat: string;
   bell_id: string;
+  wakeId: string;
+  runId: string;
   startIso: string;
   startTime: number;
 }
@@ -70,6 +89,18 @@ export function flushInFlightTurns(reason: string): void {
       exit: null,
       error: reason,
     });
+    if (turn.runId) {
+      try {
+        updateRun(turn.runId, {
+          status: 'killed',
+          finishedAt: endIso,
+          exitCode: null,
+          errorKind: 'sigkill',
+        });
+      } catch {
+        /* ignore ledger write error during shutdown */
+      }
+    }
     inFlightTurns.delete(seat);
   }
 }
@@ -154,6 +185,13 @@ export async function tickRunner(): Promise<number> {
       return 0;
     }
 
+    // Periodically reconcile any pending costs from previous runs
+    try {
+      reconcilePendingCosts();
+    } catch {
+      /* ignore */
+    }
+
     const config = readRunnerConfig();
     const bayGio = Date.now();
     const { hang_doi } = xemSo();
@@ -175,6 +213,24 @@ export async function tickRunner(): Promise<number> {
 
       // One turn per seat at a time
       if (activeSeats.has(y.ma_nhan_su) || liveProcessSeats.has(y.ma_nhan_su)) {
+        logRunnerEvent({
+          timestamp: new Date().toISOString(),
+          seat: y.ma_nhan_su,
+          bell_id: y.ma,
+          event: 'skipped',
+          skipped_reason: 'seat_busy_in_process',
+        });
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'seat_busy_in_process',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        boYeuCau(y.ma, 'seat_busy_in_process');
         continue;
       }
 
@@ -188,6 +244,17 @@ export async function tickRunner(): Promise<number> {
           event: 'skipped',
           skipped_reason: 'terminal',
         });
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'seat_held_by_terminal',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        boYeuCau(y.ma, 'seat_held_by_terminal');
         continue;
       }
 
@@ -195,6 +262,24 @@ export async function tickRunner(): Promise<number> {
       const o = layO(y.ma_o);
       const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
       if (maPhienCu && dangChayNoiKhac(y.ma_nhan_su, maPhienCu, o?.moc_ket_thuc ?? null)) {
+        logRunnerEvent({
+          timestamp: new Date().toISOString(),
+          seat: y.ma_nhan_su,
+          bell_id: y.ma,
+          event: 'skipped',
+          skipped_reason: 'running_elsewhere',
+        });
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'seat_busy_running_elsewhere',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        boYeuCau(y.ma, 'seat_busy_running_elsewhere');
         continue;
       }
 
@@ -214,10 +299,37 @@ export async function tickRunner(): Promise<number> {
 
       const startIso = new Date().toISOString();
       const startTime = Date.now();
+      const wakeId = claimed.y.wakeId ?? claimed.y.ma;
+      const runId = generateRunOrWakeId('run');
+
+      // F1: Wrap ledger writes in try/catch to recover queue item and free activeSeats on throw
+      try {
+        updateWake(wakeId, {
+          status: 'claimed',
+          claimedAt: startIso,
+          runId,
+        });
+
+        recordRun({
+          runId,
+          wakeId,
+          seatId: y.ma_nhan_su,
+          startedAt: startIso,
+          status: 'running',
+          attempt: 1,
+        });
+      } catch (err) {
+        console.error(`[office-runner] Failed to write ledger for claimed wake ${wakeId}:`, err);
+        activeSeats.delete(y.ma_nhan_su);
+        traVeHangDoi(claimed.y.ma);
+        continue;
+      }
 
       inFlightTurns.set(y.ma_nhan_su, {
         seat: y.ma_nhan_su,
         bell_id: y.ma,
+        wakeId,
+        runId,
         startIso,
         startTime,
       });
@@ -244,6 +356,9 @@ export async function tickRunner(): Promise<number> {
               maNhanSu: y.ma_nhan_su,
               cauHoi: y.cau_hoi,
               maPhienCu: phienDung,
+              khiSinh: (pid) => {
+                updateRun(runId, { pid });
+              },
             },
             () => {
               /* output streams to Claude Code session file directly */
@@ -252,33 +367,108 @@ export async function tickRunner(): Promise<number> {
 
           const endIso = new Date().toISOString();
           const durationMs = Date.now() - startTime;
+          const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
 
-          if (result.loi?.startsWith('skipped: terminal')) {
-            logRunnerEvent({
-              timestamp: endIso,
-              seat: y.ma_nhan_su,
-              bell_id: y.ma,
-              event: 'end',
-              start: startIso,
-              end: endIso,
-              duration_ms: durationMs,
-              exit: null,
-              error: result.loi,
-            });
+          // 1. Process cost receipts FIRST (Finding B: record costs before finished, durable costStatus)
+          let costStatus: 'recorded' | 'pending' | 'unpriced' = 'pending';
+          let pendingRawUsage: NormalizedUsage[] | undefined = undefined;
+
+          const rawEvents = result.rawResult ? [result.rawResult as StreamJsonEvent] : [];
+          const extractedReceipts = extractUsageReceipts(rawEvents);
+          const sanitizedUsage = sanitizeUsageReceipts(
+            extractedReceipts.length > 0
+              ? extractedReceipts
+              : [
+                  {
+                    model: 'unknown',
+                    inputTokens: 0,
+                    cachedInputTokens: 0,
+                    cacheCreationTokens: 0,
+                    outputTokens: 0,
+                    costNanodollars: null,
+                    priced: false,
+                  },
+                ]
+          );
+
+          if (extractedReceipts.length > 0) {
+            try {
+              recordCostReceipts(y.ma_nhan_su, runId, extractedReceipts, endIso);
+              costStatus = 'recorded';
+            } catch (err: unknown) {
+              console.error(`[office-runner] Failed to record cost receipts for run ${runId}:`, err);
+              costStatus = 'pending';
+              // CRITICAL (Hermes Item 10 / H1): NEVER save rawResult (which contains prompt/result/errors text).
+              // Save ONLY sanitized usage receipts containing numbers/model.
+              pendingRawUsage = sanitizedUsage;
+            }
           } else {
-            logRunnerEvent({
-              timestamp: endIso,
-              seat: y.ma_nhan_su,
-              bell_id: y.ma,
-              event: 'end',
-              start: startIso,
-              end: endIso,
-              duration_ms: durationMs,
-              exit: result.loi ? 1 : 0,
-              session_id: result.maPhien ?? undefined,
-              error: result.loi ?? undefined,
-            });
+            try {
+              recordCostReceipt({
+                ts: endIso,
+                seatId: y.ma_nhan_su,
+                runId,
+                model: 'unknown',
+                inputTokens: 0,
+                cachedInputTokens: 0,
+                cacheCreationTokens: 0,
+                outputTokens: 0,
+                costNanodollars: null,
+                priced: false,
+                source: 'claude-stream-json',
+              });
+              costStatus = 'unpriced';
+            } catch (err: unknown) {
+              console.error(`[office-runner] Failed to record fallback unpriced cost receipt for run ${runId}:`, err);
+              costStatus = 'pending';
+              pendingRawUsage = sanitizedUsage;
+            }
           }
+
+          // 2. Map failure to finite RunErrorKind codes (Item 10: sigkill, timeout, exit_nonzero, result_error, spawn_failed, orphaned)
+          let finalStatus: 'finished' | 'failed' | 'timeout' | 'killed' = 'finished';
+          let errorKind: RunErrorKind | undefined = undefined;
+
+          if (result.exitSignal === 'SIGKILL' || result.loi?.includes('bị dừng bởi tín hiệu SIGKILL')) {
+            finalStatus = 'killed';
+            errorKind = 'sigkill';
+          } else if (result.loi?.includes('khoảng lặng đã quá ngưỡng') || result.loi?.includes('timeout')) {
+            finalStatus = 'timeout';
+            errorKind = 'timeout';
+          } else if (result.exitCode !== 0 && result.exitCode !== null) {
+            finalStatus = 'failed';
+            errorKind = 'exit_nonzero';
+          } else if (result.loi?.startsWith('skipped: terminal')) {
+            finalStatus = 'failed';
+            errorKind = 'spawn_failed';
+          } else if (result.loi) {
+            finalStatus = 'failed';
+            errorKind = 'result_error';
+          }
+
+          logRunnerEvent({
+            timestamp: endIso,
+            seat: y.ma_nhan_su,
+            bell_id: y.ma,
+            event: 'end',
+            start: startIso,
+            end: endIso,
+            duration_ms: durationMs,
+            exit: exitCode,
+            error: errorKind,
+            session_id: result.maPhien ?? undefined,
+          });
+
+          updateRun(runId, {
+            status: finalStatus,
+            finishedAt: endIso,
+            exitCode: finalStatus === 'finished' ? 0 : exitCode,
+            errorKind,
+            costStatus,
+            ...(pendingRawUsage !== undefined ? { rawUsage: pendingRawUsage } : {}),
+            sessionId: result.maPhien ?? undefined,
+            pid: result.pid_de_hien_thi ?? undefined,
+          });
 
           if (result.maPhien) {
             const maP = result.maPhien;
@@ -293,9 +483,26 @@ export async function tickRunner(): Promise<number> {
               setTimeout(ghiLai, delay).unref?.();
             }
           }
-        } catch (err: unknown) {
+        } catch {
           const endIso = new Date().toISOString();
-          const errMsg = err instanceof Error ? err.message : String(err);
+          let fallbackCostStatus: 'unpriced' | 'pending' = 'unpriced';
+          try {
+            recordCostReceipt({
+              ts: endIso,
+              seatId: y.ma_nhan_su,
+              runId,
+              model: 'unknown',
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              cacheCreationTokens: 0,
+              outputTokens: 0,
+              costNanodollars: null,
+              priced: false,
+              source: 'claude-stream-json',
+            });
+          } catch {
+            fallbackCostStatus = 'pending';
+          }
           logRunnerEvent({
             timestamp: endIso,
             seat: y.ma_nhan_su,
@@ -305,7 +512,14 @@ export async function tickRunner(): Promise<number> {
             end: endIso,
             duration_ms: Date.now() - startTime,
             exit: null,
-            error: errMsg,
+            error: 'result_error',
+          });
+          updateRun(runId, {
+            status: 'failed',
+            finishedAt: endIso,
+            exitCode: null,
+            errorKind: 'result_error',
+            costStatus: fallbackCostStatus,
           });
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);
@@ -328,6 +542,13 @@ export function startOfficeRunner(): boolean {
     return false;
   }
 
+  // Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
+  try {
+    recoverOrphanedRuns();
+  } catch {
+    /* ignore ledger recovery error */
+  }
+
   isRunning = true;
   const config = readRunnerConfig();
   const intervalMs = config.interval_s * 1000;
@@ -338,6 +559,7 @@ export function startOfficeRunner(): boolean {
   runnerTimer = setInterval(() => {
     void tickRunner().catch(() => {});
   }, intervalMs);
+  runnerTimer.unref?.();
 
   return true;
 }

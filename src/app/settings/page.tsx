@@ -11,6 +11,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
+import { CostSettingsCard } from '@/components/office/CostSettingsCard';
 
 interface OfficeConfig {
   version: number;
@@ -143,6 +144,9 @@ export default function SettingsPage() {
 
           {/* Card: Desktop Shell (Read-only System Indicator) */}
           <DesktopSettingsCard />
+
+          {/* Card: Cost Today / This Month Per Seat (A-2) */}
+          <CostSettingsCard />
 
           {/* Card 2: Office Schedule & Timezone */}
           <section className="settings-card">

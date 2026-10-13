@@ -174,6 +174,15 @@ export default function UngDung({
   >({});
   const [copiedSeat, setCopiedSeat] = useState<string | null>(null);
 
+  // 🏃 Runs ledger status (A-1)
+  interface SeatLastRun {
+    status: 'queued' | 'claimed' | 'running' | 'finished' | 'failed' | 'timeout' | 'killed';
+    startedAt: string;
+    finishedAt?: string;
+    exitCode?: number | null;
+  }
+  const [seatRunMap, setSeatRunMap] = useState<Record<string, SeatLastRun>>({});
+
   const capNhatSeatActive = useCallback(async (seatTen: string) => {
     if (!seatTen) return;
     try {
@@ -189,6 +198,25 @@ export default function UngDung({
             cwd: data.active?.cwd ?? null,
           },
         }));
+      }
+    } catch {}
+
+    try {
+      const resRuns = await fetch(`/api/runs?seat=${encodeURIComponent(seatTen)}&limit=1`);
+      if (resRuns.ok) {
+        const dataRuns = await resRuns.json();
+        if (dataRuns.runs && dataRuns.runs.length > 0) {
+          const r = dataRuns.runs[0];
+          setSeatRunMap((prev) => ({
+            ...prev,
+            [seatTen]: {
+              status: r.status,
+              startedAt: r.startedAt,
+              finishedAt: r.finishedAt,
+              exitCode: r.exitCode,
+            },
+          }));
+        }
       }
     } catch {}
   }, []);
@@ -2547,6 +2575,34 @@ export default function UngDung({
                           {o.ns.nhan}
                         </b>
                         <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
+                        {seatRunMap[o.ns.ten] && (
+                          <div className="last-run-status" title={`Run status: ${seatRunMap[o.ns.ten].status}`}>
+                            <span className={`run-dot dot-${seatRunMap[o.ns.ten].status}`} />
+                            <span className="run-text">
+                              {(() => {
+                                const r = seatRunMap[o.ns.ten];
+                                const dateObj = new Date(r.finishedAt || r.startedAt);
+                                const timeStr = dateObj.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+                                if (r.status === 'finished') {
+                                  let dur = '';
+                                  if (r.startedAt && r.finishedAt) {
+                                    const diffSec = Math.max(0.1, (new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000);
+                                    dur = ` · ${diffSec.toFixed(1)}s`;
+                                  }
+                                  return `Last run: finished ${timeStr}${dur} · exit ${r.exitCode ?? 0}`;
+                                }
+                                if (r.status === 'running') return `Last run: running ${timeStr}`;
+                                if (r.status === 'claimed') return `Last run: claimed ${timeStr}`;
+                                if (r.status === 'queued') return `Last run: queued ${timeStr}`;
+                                if (r.status === 'failed' || r.status === 'killed' || r.status === 'timeout') {
+                                  const code = r.exitCode !== null && r.exitCode !== undefined ? ` · exit ${r.exitCode}` : '';
+                                  return `Last run: ${r.status} ${timeStr}${code}`;
+                                }
+                                return `Last run: ${r.status} ${timeStr}`;
+                              })()}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       {seatActiveMap[o.ns.ten]?.is_terminal_held && (
                         <span

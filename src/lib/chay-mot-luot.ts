@@ -59,7 +59,7 @@ export type SuKienLuot =
   | { loai: 'loi'; thong_diep: string }
   // ⚠️ `null` chứ KHÔNG phải `undefined`: `chayAgent` trả `number | null` khi Claude
   //    không khai chi phí. Khai `?: number` ở đây làm tsc chặn — và nó chặn ĐÚNG.
-  | { loai: 'xong'; chi_phi_usd: number | null; token: number | null };
+  | { loai: 'xong'; chi_phi_usd: number | null; token: number | null; rawResult?: Record<string, unknown> };
 
 export interface DauVaoLuot {
   maO: string;
@@ -69,6 +69,8 @@ export interface DauVaoLuot {
   maPhienCu: string | null;
   /** Cho phép người gọi dừng lượt (nút Dừng dùng đường khác — `gietViec`). */
   tinHieuHuy?: AbortSignal;
+  /** Báo pid ngay khi tiến trình con vừa sinh ra để ghi sổ */
+  khiSinh?: (pid: number) => void;
 }
 
 export interface KetQuaLuot {
@@ -91,6 +93,9 @@ export interface KetQuaLuot {
    * Người gọi PHẢI xử — đây đúng ca «lượt vô hình»: tốn tiền mà app KHÔNG gán vào đâu.
    */
   buocOThatBai: boolean;
+  exitCode?: number | null;
+  exitSignal?: string | null;
+  rawResult?: Record<string, unknown> | null;
 }
 
 /**
@@ -140,6 +145,10 @@ export async function chayMotLuot(
   let pidDeHienThi: number | null = null;
   let maPhien: string | null = maPhienCu;
   let buocOThatBai = false;
+  let exitCode: number | null = null;
+  let rawResult: Record<string, unknown> | null = null;
+  let loi: string | null = null;
+  let exitSignal: string | null = null;
 
   nhan({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) });
 
@@ -183,10 +192,17 @@ export async function chayMotLuot(
         tienDangChay = t;
         pidDeHienThi = t.pid ?? null;
         dangKyViec(maO, t, maNhanSu); // ← MẮT XÍCH ①: nút Dừng phải thấy được lượt này
+        if (t.pid) {
+          vao.khiSinh?.(t.pid);
+        }
       },
       // ⚰️ Đường này KHÔNG có người xem để rời đi, nên `finally` bên dưới vốn đã đúng.
       //    Nối `khiChet` cho ĐỒNG NHẤT với đường SSE: một luật xoá sổ, KHÔNG phải hai.
-      khiChet: (t) => xoaViec(maO, t),
+      khiChet: (t, ma, signal) => {
+        exitCode = ma;
+        exitSignal = signal ?? null;
+        xoaViec(maO, t);
+      },
     })) {
       if (mau.loai === 'phien') {
         // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
@@ -219,16 +235,23 @@ export async function chayMotLuot(
       } else if (mau.loai === 'chu') {
         nhan({ loai: 'chu', chu: mau.chu });
       } else if (mau.loai === 'loi') {
+        loi = mau.thong_diep;
         nhan({ loai: 'loi', thong_diep: mau.thong_diep });
       } else if (mau.loai === 'xong') {
-        nhan({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token });
+        rawResult = mau.rawResult ?? null;
+        nhan({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token, rawResult: rawResult ?? undefined });
       }
     }
-    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: null, buocOThatBai };
+    if (!loi && exitCode !== 0 && exitCode !== null) {
+      loi = `Process exited with code ${exitCode}`;
+    } else if (!loi && exitCode === null && !rawResult) {
+      loi = `Process terminated unexpectedly without exit code`;
+    }
+    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi, buocOThatBai, exitCode, exitSignal, rawResult };
   } catch (e) {
     const thongDiep = e instanceof Error ? e.message : 'Lỗi không rõ.';
     nhan({ loai: 'loi', thong_diep: thongDiep });
-    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai };
+    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai, exitCode: exitCode ?? 1, exitSignal, rawResult };
   } finally {
     updateSeatActivePid(maNhanSu, null);
     // Rút khỏi sổ tiến trình — CHỈ rút đúng TAY CẦM của mình (xem `xoaViec`).
