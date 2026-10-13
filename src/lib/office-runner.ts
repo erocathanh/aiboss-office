@@ -41,6 +41,8 @@ import {
   verifyInstanceLockActive,
   renewInstanceLock,
   hasActiveInstanceToken,
+  fenceInstance,
+  isFenced,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -70,6 +72,7 @@ export interface RunnerLogEvent {
 }
 
 let runnerTimer: ReturnType<typeof setInterval> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
 let isTickInProgress = false;
 const activeSeats = new Set<string>();
@@ -115,7 +118,7 @@ export function flushInFlightTurns(reason: string): void {
         /* ignore ledger write error during shutdown */
       }
     }
-    if (turn.holdId) {
+    if (turn.holdId && !isFenced()) {
       try {
         releaseHold({
           holdId: turn.holdId,
@@ -210,14 +213,26 @@ export async function tickRunner(): Promise<number> {
       return 0;
     }
 
+    // Hermes Condition (b) & Khe ①: Sticky fencing check
+    if (isFenced()) {
+      stopOfficeRunner();
+      return 0;
+    }
+
     // Hermes Condition (b): Verify lock ownership if runner holds active instance token
     if (hasActiveInstanceToken()) {
       if (!verifyInstanceLockActive()) {
         console.warn('[office-runner] Lost instance lock ownership. Stopping runner immediately.');
+        fenceInstance();
         stopOfficeRunner();
         return 0;
       }
-      renewInstanceLock();
+      if (!renewInstanceLock()) {
+        console.warn('[office-runner] Failed to renew instance lease. Stopping runner immediately.');
+        fenceInstance();
+        stopOfficeRunner();
+        return 0;
+      }
     }
 
     // Periodically reconcile any pending costs from previous runs
@@ -636,7 +651,9 @@ export async function tickRunner(): Promise<number> {
             errorKind: 'result_error',
             costStatus: fallbackCostStatus,
           });
-          if (fallbackCostStatus === 'unpriced') {
+          if (isFenced()) {
+            console.warn('[office-runner] Instance fenced: barring late budget mutations for runId', runId);
+          } else if (fallbackCostStatus === 'unpriced') {
             settleHold({
               holdId,
               runId,
@@ -701,6 +718,18 @@ export function startOfficeRunner(): boolean {
   const config = readRunnerConfig();
   const intervalMs = config.interval_s * 1000;
 
+  // Hermes Condition (b) & Khe ④: Independent 2s lease heartbeat timer for verification & renewal
+  heartbeatTimer = setInterval(() => {
+    if (hasActiveInstanceToken()) {
+      if (!verifyInstanceLockActive() || !renewInstanceLock()) {
+        console.warn('[office-runner] Heartbeat failed to verify or renew instance lock. Fencing and stopping runner.');
+        fenceInstance();
+        stopOfficeRunner();
+      }
+    }
+  }, 2000);
+  heartbeatTimer.unref?.();
+
   // Run initial tick immediately
   void tickRunner().catch(() => {});
 
@@ -716,6 +745,10 @@ export function startOfficeRunner(): boolean {
  * Stop the server runner interval loop.
  */
 export function stopOfficeRunner(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
   if (runnerTimer) {
     clearInterval(runnerTimer);
     runnerTimer = null;

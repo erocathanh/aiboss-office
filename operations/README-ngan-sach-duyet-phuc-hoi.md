@@ -54,6 +54,8 @@ Tài liệu kỹ thuật giải pháp A-3 (Budget Hold & Daily Caps) cho hệ th
 
 ---
 
+---
+
 ## 3. Khóa Khởi Động Đơn Instance Dạng Tệp Nguyên Tử (File-Based Atomic Instance Lock)
 
 - Để bảo vệ tính toàn vẹn dữ liệu trong môi trường một máy chủ, hệ thống sử dụng tệp khoá khởi động `.instance.lock` (dạng **tệp duy nhất**, không dùng thư mục) trong thư mục dữ liệu (`AIBOSS_DATA_DIR`).
@@ -62,9 +64,13 @@ Tài liệu kỹ thuật giải pháp A-3 (Budget Hold & Daily Caps) cho hệ th
 - **Phát hiện xung đột & Từ chối máy chủ thứ hai:** Nếu một tiến trình máy chủ khác đang chạy trên cùng thư mục dữ liệu (`liveness === 'alive'`), tiến trình mới sẽ bị từ chối khởi động với thông báo lỗi rõ ràng:
   `Another office runner instance (PID <pid>) is already running on AIBOSS_DATA_DIR. Running multiple server instances against the same data directory is not supported.`
 - **Từ chối khởi động khi chủ khoá chưa xác minh (`unverified`):** Nếu khoá đang được giữ bởi một PID mà OS query trả về `unverified`, tiến trình mới từ chối khởi động để tránh xung đột dữ liệu với một máy chủ có thể đang chạy.
-- **Thu hồi nguyên tử qua POSIX `rename` đè tệp (Atomic Overwrite Reclaim):**
-  - Khi khoá cũ thuộc về một PID đã chết (`liveness === 'dead'`), tiến trình mới ghi metadata ứng viên vào tệp tạm `.instance-candidate-<token>` và thực hiện `fs.renameSync(candidateFile, lockPath)`.
-  - **Không bao giờ bỏ trống đường dẫn khoá:** Vì cả hai đối tượng là tệp, POSIX đảm bảo thao tác rename đè diễn ra nguyên tử trong đúng một syscall. Đường dẫn `.instance.lock` không bao giờ bị biến mất hay để trống, triệt tiêu hoàn toàn khoảng trống để một contender thứ ba chen vào qua `open(O_EXCL)`.
-  - **Xác minh hậu rename & Không cần rollback:** Sau khi rename, tiến trình đọc lại tệp `.instance.lock`. Nếu `token` khớp với token của mình, tiến trình đã chiếm khoá thành công. Nếu `token` khác mình (do một tiến trình thu hồi khác đã thắng sau), tiến trình từ chối khởi động (`acquired: false`) mà không cần rollback, vì tệp khoá đã thuộc về người chiến thắng hợp lệ.
-- **Nhịp Lease định kỳ & Dừng ghi tức thì:** Chủ đang chạy kiểm tra quyền sở hữu khoá theo nhịp lease (mỗi 2s). Nếu phát hiện token trên tệp khoá không còn là của mình, tiến trình lập tức dừng ghi và dừng runner ngay lập tức.
-- **Giải phóng khoá nghiêm ngặt (Strict Token Release):** Khi dừng server, `releaseInstanceLock()` chỉ xoá tệp khoá nếu `held.token === activeInstanceToken`. Không sử dụng số PID làm fallback lỏng lẻo và không `unlinkSync` mù quáng nếu khoá đã thuộc về một instance khác.
+- **Khe ① — Hàng rào sau mất quyền dính vĩnh viễn (Sticky Fencing):** Khi phát hiện token trên tệp khoá bị mất hoặc bị thay thế bởi instance khác, cờ `isInstanceFenced = true` được kích hoạt và giữ trạng thái dính vĩnh viễn (sticky). Dù tiến trình sau đó có gọi `stopOfficeRunner()` và xoá `activeInstanceToken = null`, trạng thái fenced vẫn duy trì. Mọi đường ghi (`flush` khi dừng, `releaseHold`, `settleHold`, `reconcileOpenHolds`, và `withBudgetLock`) đều kiểm tra trạng thái fenced và từ chối vĩnh viễn; giá trị `null` của token không được hiểu là "chưa kiểm" để mở lại đường ghi cho các callback muộn.
+- **Khe ② — Thu hồi khoá mồ côi do crash khởi động giữa `open` và `write`:** Khi khởi tạo tệp khoá mới, nếu tiến trình bị sập ngay sau `open(O_EXCL)` trước khi kịp ghi metadata:
+  + Tệp rỗng / không parse được có tuổi đời dưới 10 giây (`< UNINITIALIZED_LOCK_TIMEOUT_MS = 10s`) sẽ khiến tiến trình sau từ chối khởi động (`fail-closed`), dành thời gian cho tiến trình tạo khoá hoàn tất ghi.
+  + Tệp rỗng / không parse được có tuổi đời từ 10 giây trở lên sẽ được xác định là khoá mồ côi do crash khởi động. Tiến trình mới ghi metadata ứng viên hoàn chỉnh vào candidate file trước khi thực hiện `rename` đè nguyên tử, giải phóng trạng thái kẹt khởi động mà không bao giờ để lại tệp rỗng mới.
+- **Khe ③ — Bảo vệ an toàn cho máy chủ v07 dạng thư mục cũ:** Khi phát hiện `.instance.lock` là thư mục từ các phiên bản v06/v07 cũ, tiến trình không `rmSync` mù quáng. Hệ thống đọc `info.json` bên trong; nếu chủ cũ còn sống (`liveness === 'alive'` hoặc `unverified`), tiến trình mới từ chối khởi động và giữ nguyên thư mục cùng tệp `info.json` của phiên bản cũ. Chỉ khi chủ cũ đã chết thật sự (`liveness === 'dead'`), thư mục cũ mới được dọn dẹp để nâng cấp lên tệp đơn lẻ.
+- **Khe ④ — Cơ chế loại trừ thống nhất acquire / reclaim / renew / release:**
+  + **Renew:** Kiểm tra token trên đĩa khớp `activeInstanceToken`, ghi candidate renew và rename đè nguyên tử. Kiểm hậu rename: nếu token lệch, tiến trình lập tức bị fenced và dừng ghi. Runner duy trì timer heartbeat 2s độc lập để liên tục xác minh và gia hạn lease.
+  + **Release:** Chỉ giải phóng khi token trên đĩa khớp `activeInstanceToken`. Thực hiện rename đè tệp ứng viên `released` rồi mới `unlinkSync` sau khi xác minh post-rename, không bao giờ `unlink` mù quáng tệp khoá đã bị thay thế bởi instance khác.
+  + **Reclaim:** Chỉ cho phép thu hồi khi thoả mãn đồng thời 2 điều kiện: PID chủ cũ đã chết thật sự (`liveness === 'dead'`) VÀ thời hạn lease đã hết (`now >= leaseExpiresAt`), hoặc tệp khoá mồ côi theo Khe ②.
+  + **Thu hồi nguyên tử qua POSIX `rename` đè tệp (Atomic Overwrite Reclaim):** Đường dẫn `.instance.lock` không bao giờ bị biến mất hay để trống, triệt tiêu hoàn toàn khoảng trống để một contender thứ ba chen vào qua `open(O_EXCL)`. Sau rename, tiến trình đọc lại tệp `.instance.lock`; nếu token khác mình, tiến trình từ chối khởi động (`acquired: false`) mà không rollback, vì tệp khoá đã thuộc về người chiến thắng hợp lệ.

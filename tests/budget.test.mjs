@@ -85,7 +85,12 @@ import {
   verifyInstanceLockActive,
   renewInstanceLock,
   repairLogTail,
+  fenceInstance,
+  isFenced,
+  resetFencingForTest,
+  UNINITIALIZED_LOCK_TIMEOUT_MS,
 } from '../src/lib/budget-ledger.ts';
+import { stopOfficeRunner } from '../src/lib/office-runner.ts';
 import {
   isValidNanodollarsString,
   validateDailyCap,
@@ -1637,11 +1642,16 @@ try {
     console.log('  [PASS] Case 24: multi-partition checkpoint positions & cross-midnight replay verified (Finding M2)');
   }
 
-  // Case 25: Single-instance startup lock: single-file atomic creation, atomic rename overwrite, and lease heartbeat (Condition b)
+  // Case 25: Single-instance startup lock: 4 gaps of Condition (b) (Hermes Vòng 8 & PM v09)
   {
     const lockFilePath = path.join(testDataDir, '.instance.lock');
 
-    // 1. Acquire instance lock: must create a SINGLE FILE via open(O_EXCL)
+    // 0. Base setup: Acquire instance lock: must create a SINGLE FILE via open(O_EXCL)
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) {
+      if (fs.statSync(lockFilePath).isDirectory()) fs.rmSync(lockFilePath, { recursive: true, force: true });
+      else fs.unlinkSync(lockFilePath);
+    }
     const lock1 = acquireInstanceLock(testDataDir);
     assert.equal(lock1.acquired, true, 'Acquiring instance lock must succeed for first runner');
     assert.equal(lock1.pid, process.pid);
@@ -1652,7 +1662,7 @@ try {
       '.instance.lock must be a FILE, not a directory (Hermes Condition b)'
     );
 
-    // 2. Reject second concurrent runner via open(O_EXCL) EEXIST
+    // Reject second concurrent runner via open(O_EXCL) EEXIST
     const childLockScript = `
       import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
       const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
@@ -1663,149 +1673,188 @@ try {
     `;
     const childLockRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', childLockScript], {
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        AIBOSS_DATA_DIR: testDataDir,
-      },
+      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir },
     });
     assert.equal(childLockRes.status, 42, 'Second server runner process must be rejected by instance lock (acquired: false)');
-
-    // 3. Stale lock inspection:
-    // a) Unverified owner (missing processStartedAt): startup MUST be refused and lock NOT deleted (Condition b)
-    fs.writeFileSync(
-      lockFilePath,
-      JSON.stringify({
-        pid: process.pid,
-        // missing processStartedAt -> unverified!
-        token: 'unverified-token',
-        ts: new Date().toISOString(),
-      }),
-      'utf-8'
-    );
-    const unverifiedAttempt = acquireInstanceLock(testDataDir);
-    assert.equal(
-      unverifiedAttempt.acquired,
-      false,
-      'Instance lock with unverified owner must refuse startup and NOT delete/steal lock (Condition b)'
-    );
-    assert.ok(fs.existsSync(lockFilePath), 'Unverified lock must remain on disk without being deleted');
-
-    // b) Dead process owner (PID 999999) -> reclaimed safely via atomic POSIX rename overwrite
-    fs.writeFileSync(
-      lockFilePath,
-      JSON.stringify({
-        pid: 999999,
-        processStartedAt: '1970-01-01T00:00:00.000Z',
-        token: 'dead-token',
-        ts: '1970-01-01T00:00:00.000Z',
-      }),
-      'utf-8'
-    );
-
-    const reclaimedLock = acquireInstanceLock(testDataDir);
-    assert.equal(reclaimedLock.acquired, true, 'Dead process instance lock must be safely reclaimed');
-    assert.equal(reclaimedLock.pid, process.pid);
-
-    // c) Strict release verification (mismatched token cannot release lock)
-    const heldInfo = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
-    fs.writeFileSync(
-      lockFilePath,
-      JSON.stringify({
-        ...heldInfo,
-        token: 'intruder-token-different',
-      }),
-      'utf-8'
-    );
-    // Attempt release with activeInstanceToken (which does not match intruder-token-different)
     releaseInstanceLock(testDataDir);
-    assert.ok(
-      fs.existsSync(lockFilePath),
-      'releaseInstanceLock must NOT remove lock file if held token does not match activeInstanceToken'
+
+    // -------------------------------------------------------------
+    // Khe ①: Sticky fencing — late writes after stop/release are barred permanently
+    // -------------------------------------------------------------
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
+    const lockA = acquireInstanceLock(testDataDir);
+    assert.equal(lockA.acquired, true);
+    assert.equal(isFenced(), false, 'Instance initially not fenced');
+
+    // Simulate loss of lock ownership: fenceInstance() is triggered
+    fenceInstance();
+    assert.equal(isFenced(), true, 'isFenced() must be true after revocation/fence');
+
+    // stopOfficeRunner / releaseInstanceLock sets activeInstanceToken = null
+    releaseInstanceLock(testDataDir);
+
+    // Assert that activeInstanceToken is now null, but isFenced() is STILL true (sticky)!
+    assert.equal(isFenced(), true, 'isFenced() must remain sticky true even after releaseInstanceLock clears activeInstanceToken');
+
+    // Attempt a late write transaction (e.g. from an asynchronous callback)
+    assert.throws(
+      () => withBudgetLock(() => 'late_write_payload'),
+      /Instance has been fenced/,
+      'withBudgetLock must permanently refuse writes when instance has been fenced (Khe ①)'
     );
 
-    // Clean up
-    fs.unlinkSync(lockFilePath);
-    releaseInstanceLock(testDataDir); // Resets activeInstanceToken to null
+    // Counterproof for Khe ①: If fencing were not sticky (reset to false), withBudgetLock would pass
+    resetFencingForTest();
+    const allowedAfterReset = withBudgetLock(() => 'unfenced_ok');
+    assert.equal(allowedAfterReset, 'unfenced_ok', 'Counterproof: withBudgetLock proceeds only when unfenced');
 
-    // 4. Hermes Condition (b) Vòng 8:
-    // (i) A sống + R thu hồi sai + C chen => tối đa một tiến trình được ghi sau cửa sổ lease
-    // Step A: Process A acquires lock
-    const lockA = acquireInstanceLock(testDataDir, 1500);
-    assert.equal(lockA.acquired, true, 'Process A acquires instance lock');
-    assert.ok(verifyInstanceLockActive(testDataDir), 'Process A verifies lock ownership as active');
+    // -------------------------------------------------------------
+    // Khe ②: Crash between open(O_EXCL) and write metadata does NOT block startup indefinitely
+    // -------------------------------------------------------------
+    resetFencingForTest();
+    // Simulate crash right after open(O_EXCL): empty 0-byte file
+    fs.writeFileSync(lockFilePath, '', 'utf-8');
 
-    // Step R: Faulty/split-brain Reclaimer R forcefully renames candidate over lockPath with tokenR
-    const tokenR = `reclaimer-token-${Date.now()}`;
-    const candidateR = path.join(testDataDir, `.instance-candidate-${tokenR}`);
+    // Subtest 2.1: Recent crash (< 10s): acquireInstanceLock must fail closed to protect ongoing write
+    const recentAttempt = acquireInstanceLock(testDataDir);
+    assert.equal(recentAttempt.acquired, false, 'Uninitialized lock <10s must fail closed (give writer time)');
+
+    // Subtest 2.2: Orphaned crash (> 10s): simulate file older than 10s via utimesSync
+    const oldTime = (Date.now() - 15000) / 1000;
+    fs.utimesSync(lockFilePath, oldTime, oldTime);
+
+    // Now acquireInstanceLock must detect orphaned empty lock, reclaim via atomic rename, and succeed!
+    const orphanedReclaim = acquireInstanceLock(testDataDir);
+    assert.equal(orphanedReclaim.acquired, true, 'Orphaned empty lock from startup crash must be safely reclaimed (Khe ②)');
+    assert.equal(orphanedReclaim.pid, process.pid);
+    const validMetadata = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(validMetadata.pid, process.pid, 'Lock file must contain valid JSON metadata after reclaim');
+    releaseInstanceLock(testDataDir);
+
+    // -------------------------------------------------------------
+    // Khe ③: Safe handling of legacy v06/v07 directory lock: Live owner protected, dead owner cleaned
+    // -------------------------------------------------------------
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
+    fs.mkdirSync(lockFilePath, { recursive: true });
+
+    // Subtest 3.1: Live v07 owner in info.json: DO NOT DELETE, REFUSE STARTUP!
+    const legacyInfoPath = path.join(lockFilePath, 'info.json');
     fs.writeFileSync(
-      candidateR,
+      legacyInfoPath,
       JSON.stringify({
         pid: process.pid,
         processStartedAt: getProcessStartTime(process.pid),
-        token: tokenR,
-        leaseExpiresAt: new Date(Date.now() + 5000).toISOString(),
-        heartbeatAt: new Date().toISOString(),
+        token: 'live-v07-token',
+        ts: Date.now(),
+      }),
+      'utf-8'
+    );
+
+    const liveLegacyAttempt = acquireInstanceLock(testDataDir);
+    assert.equal(liveLegacyAttempt.acquired, false, 'Live v07 instance lock must refuse startup (Khe ③)');
+    assert.equal(liveLegacyAttempt.pid, process.pid);
+    assert.ok(fs.existsSync(lockFilePath) && fs.statSync(lockFilePath).isDirectory(), 'Live legacy directory MUST NOT be deleted');
+    assert.ok(fs.existsSync(legacyInfoPath), 'Live legacy info.json MUST remain intact');
+
+    // Subtest 3.2: Dead v07 owner in info.json: Clean up directory and acquire single-file lock
+    fs.writeFileSync(
+      legacyInfoPath,
+      JSON.stringify({
+        pid: 999999,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: 'dead-v07-token',
+        ts: 0,
+      }),
+      'utf-8'
+    );
+    const deadLegacyAttempt = acquireInstanceLock(testDataDir);
+    assert.equal(deadLegacyAttempt.acquired, true, 'Dead v07 legacy lock must be cleaned up and single-file lock acquired');
+    assert.equal(fs.statSync(lockFilePath).isDirectory(), false, 'Legacy directory converted to single file');
+    releaseInstanceLock(testDataDir);
+
+    // -------------------------------------------------------------
+    // Khe ④: Unified acquire/reclaim/renew/release and lease enforcement
+    // -------------------------------------------------------------
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
+
+    // Subtest 4.1: Renew fails and fences if token on disk was replaced by another process
+    const lockToRenew = acquireInstanceLock(testDataDir, 5000);
+    assert.equal(lockToRenew.acquired, true);
+
+    // Tamper with lock file on disk (simulate intruder taking over)
+    const intruderToken = `intruder-${Date.now()}`;
+    fs.writeFileSync(
+      lockFilePath,
+      JSON.stringify({
+        pid: 999998,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: intruderToken,
+        leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
         ts: new Date().toISOString(),
       }),
       'utf-8'
     );
-    fs.renameSync(candidateR, lockFilePath); // Atomic POSIX file rename: lockFilePath is NEVER empty/vacant!
 
-    // Step C: Contender C attempts to acquire via open(O_EXCL) while lockPath is held by R
-    const contenderCScript = `
-      import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
-      const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
-      if (!res.acquired) {
-        process.exit(77); // Contender C successfully rejected
-      }
-      process.exit(0);
-    `;
-    const contenderCRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', contenderCScript], {
-      cwd: process.cwd(),
-      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir },
-    });
-    assert.equal(contenderCRes.status, 77, 'Contender C must be rejected because lock file is NEVER vacant during rename');
+    // Attempt renew: MUST return false, trigger fence, and NOT overwrite intruder
+    const renewResult = renewInstanceLock(testDataDir);
+    assert.equal(renewResult, false, 'renewInstanceLock must return false when token on disk is replaced (Khe ④)');
+    assert.equal(isFenced(), true, 'renewInstanceLock must fence instance on token mismatch');
+    const diskAfterRenew = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(diskAfterRenew.token, intruderToken, 'Intruder lock file must NOT be overwritten by renew');
+    resetFencingForTest();
 
-    // Step A lease check: Process A notices token mismatch after lease check and immediately stops writing
-    assert.equal(
-      verifyInstanceLockActive(testDataDir),
-      false,
-      'Process A must lose ownership when token on disk is replaced'
-    );
-    // withBudgetLock must immediately refuse writes from Process A
-    assert.throws(
-      () => withBudgetLock(() => {}),
-      /Instance lock token lost or replaced/,
-      'Process A must be barred from writing once lock token is lost'
-    );
-    // Conclusion for (i): Contender C was rejected, Process A stopped writing, at most one process (R) can write.
+    // Subtest 4.2: Release with condition: foreign lock file must NOT be unlinked
+    // (lockFilePath currently holds intruderToken, while process has no token / different token)
+    releaseInstanceLock(testDataDir);
+    assert.ok(fs.existsSync(lockFilePath), 'releaseInstanceLock must NOT delete lock file belonging to another token (Khe ④)');
+    fs.unlinkSync(lockFilePath); // Manual cleanup of intruder lock
 
-    // 5. Hermes Condition (b) Vòng 8:
-    // (ii) R chết giữa chừng => không có khoá mồ côi chặn vĩnh viễn (lease hết + chủ chết => thu hồi được)
-    // Setup lockPath representing a crashed reclaimer R (dead PID 999999 and expired lease)
+    // Subtest 4.3: Reclaim enforces BOTH dead process AND expired lease!
+    // Setup lock held by dead PID 999999 BUT with leaseExpiresAt in the FUTURE (+5000ms)
     fs.writeFileSync(
       lockFilePath,
       JSON.stringify({
         pid: 999999,
         processStartedAt: '1970-01-01T00:00:00.000Z',
-        token: 'crashed-reclaimer-token',
-        leaseExpiresAt: '1970-01-01T00:00:00.000Z',
-        heartbeatAt: '1970-01-01T00:00:00.000Z',
-        ts: '1970-01-01T00:00:00.000Z',
+        token: 'unexpired-lease-token',
+        leaseExpiresAt: new Date(Date.now() + 5000).toISOString(),
+        ts: new Date().toISOString(),
       }),
       'utf-8'
     );
+    const unexpiredReclaim = acquireInstanceLock(testDataDir);
+    assert.equal(
+      unexpiredReclaim.acquired,
+      false,
+      'Reclaim MUST be rejected if lease is still active even though process is dead (Khe ④ lease enforcement)'
+    );
 
-    // New runner S arrives: must detect dead owner, atomically rename candidate, and succeed
-    const lockS = acquireInstanceLock(testDataDir);
-    assert.equal(lockS.acquired, true, 'Runner S must safely reclaim lock from crashed reclaimer (no orphaned lock)');
-    assert.equal(lockS.pid, process.pid);
-
-    // Clean up
+    // Now set leaseExpiresAt in the PAST (-5000ms): dead process + expired lease -> reclaim succeeds!
+    fs.writeFileSync(
+      lockFilePath,
+      JSON.stringify({
+        pid: 999999,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: 'expired-lease-token',
+        leaseExpiresAt: new Date(Date.now() - 5000).toISOString(),
+        ts: new Date().toISOString(),
+      }),
+      'utf-8'
+    );
+    const expiredReclaim = acquireInstanceLock(testDataDir);
+    assert.equal(
+      expiredReclaim.acquired,
+      true,
+      'Reclaim MUST succeed when process is dead AND lease has expired'
+    );
     releaseInstanceLock(testDataDir);
-    assert.equal(fs.existsSync(lockFilePath), false, 'Lock file must be removed upon final release');
+    assert.equal(fs.existsSync(lockFilePath), false, 'Lock file cleaned up');
+    resetFencingForTest();
 
-    console.log('  [PASS] Case 25: file-based atomic lock, contender exclusion during rename, lease cease-write, and crashed reclaimer recovery verified (Condition b)');
+    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)
