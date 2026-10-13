@@ -93,6 +93,11 @@ const inFlightTurns = new Map<string, InFlightTurn>();
  * Ensures every logged start event has a matching end event even during abrupt stops.
  */
 export function flushInFlightTurns(reason: string): void {
+  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+    console.warn('[office-runner] Instance fenced: skipping all flush mutations');
+    inFlightTurns.clear();
+    return;
+  }
   for (const [seat, turn] of inFlightTurns.entries()) {
     const endIso = new Date().toISOString();
     logRunnerEvent({
@@ -131,6 +136,22 @@ export function flushInFlightTurns(reason: string): void {
     }
     inFlightTurns.delete(seat);
   }
+}
+
+export function registerInFlightTurnForTest(turn: {
+  seat: string;
+  bell_id: string;
+  wakeId: string;
+  runId: string;
+  holdId: string;
+  startIso: string;
+  startTime: number;
+}): void {
+  inFlightTurns.set(turn.seat, turn);
+}
+
+export function getInFlightTurnCountForTest(): number {
+  return inFlightTurns.size;
 }
 
 if (typeof process !== 'undefined') {
@@ -456,6 +477,9 @@ export async function tickRunner(): Promise<number> {
               cauHoi: y.cau_hoi,
               maPhienCu: phienDung,
               khiSinh: (pid) => {
+                if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+                  return;
+                }
                 const processStartedAt = getProcessStartTime(pid) || undefined;
                 updateRun(runId, {
                   pid,
@@ -472,6 +496,12 @@ export async function tickRunner(): Promise<number> {
           const endIso = new Date().toISOString();
           const durationMs = Date.now() - startTime;
           const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
+
+          // Khe ①: Bar ALL writer callbacks if instance is fenced
+          if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+            console.warn('[office-runner] Instance fenced: barring all late completion writes for runId', runId);
+            return;
+          }
 
           // 1. Process cost receipts FIRST (Finding B: record costs before finished, durable costStatus)
           let costStatus: 'recorded' | 'pending' | 'unpriced' = 'pending';
@@ -576,6 +606,11 @@ export async function tickRunner(): Promise<number> {
             errorKind = 'result_error';
           }
 
+          if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+            console.warn('[office-runner] Instance fenced: barring all late completion writes for runId', runId);
+            return;
+          }
+
           logRunnerEvent({
             timestamp: endIso,
             seat: y.ma_nhan_su,
@@ -614,6 +649,10 @@ export async function tickRunner(): Promise<number> {
             }
           }
         } catch {
+          if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+            console.warn('[office-runner] Instance fenced: barring error path writes for runId', runId);
+            return;
+          }
           const endIso = new Date().toISOString();
           let fallbackCostStatus: 'unpriced' | 'pending' = 'unpriced';
           try {

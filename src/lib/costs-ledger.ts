@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { formatNanodollars } from './money-format';
 import type { ModelReceipt } from './usage-receipt';
+import { isFenced } from './budget-ledger';
 
 export interface CostRecord {
   ts: string; // ISO
@@ -200,6 +201,9 @@ export function getRecordedModelsForRun(runId: string): Set<string> {
  * Throws if disk write fails.
  */
 export function recordCostReceipt(record: CostRecord): CostRecord {
+  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+    throw new Error('[costs-ledger] Instance is fenced. Writes are barred.');
+  }
   if (
     process.env.AIBOSS_TEST_FAIL_COST_APPEND === '1' ||
     (process.env.AIBOSS_TEST_FAIL_COST_MODEL &&

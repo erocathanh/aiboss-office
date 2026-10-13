@@ -208,6 +208,10 @@ export interface InstanceLockMetadata {
 export const DEFAULT_INSTANCE_LEASE_MS = 6000;
 export const UNINITIALIZED_LOCK_TIMEOUT_MS = 10000;
 
+export const __testHooks: {
+  beforeReplace?: () => void;
+} = {};
+
 let activeInstanceToken: string | null = null;
 let isInstanceLockRevoked = false;
 let isInstanceFenced = false;
@@ -232,106 +236,181 @@ export function getInstanceLockFilePath(dataDir?: string): string {
   return path.join(baseDir, '.instance.lock');
 }
 
-export function acquireInstanceLock(
-  dataDir?: string,
-  leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
-): { acquired: boolean; pid?: number; token?: string } {
-  const lockPath = getInstanceLockFilePath(dataDir);
-  const baseDir = path.dirname(lockPath);
+export function getInstanceLockMutexPath(dataDir?: string): string {
+  const baseDir = dataDir || process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
+  return path.join(baseDir, '.instance.lock.mutex');
+}
+
+/**
+ * Short mutex ensuring mutually exclusive state transitions for all instance lock operations:
+ * acquire, reclaim, renew, and release.
+ */
+export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, timeoutMs = 3000): T {
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX === '1'
+  ) {
+    return fn();
+  }
+
+  const mutexPath = getInstanceLockMutexPath(dataDir);
+  const baseDir = path.dirname(mutexPath);
   if (!fs.existsSync(baseDir)) {
     fs.mkdirSync(baseDir, { recursive: true });
   }
 
-  const now = Date.now();
+  const start = Date.now();
+  let fd: number | null = null;
 
-  // Khe ③: Safe handling of legacy directory from v06/v07
-  if (fs.existsSync(lockPath) && fs.statSync(lockPath).isDirectory()) {
-    const legacyInfoPath = path.join(lockPath, 'info.json');
-    let canCleanLegacy = false;
-    let legacyPid: number | undefined;
-
-    if (fs.existsSync(legacyInfoPath)) {
-      try {
-        const legacy = JSON.parse(fs.readFileSync(legacyInfoPath, 'utf-8'));
-        legacyPid = legacy?.pid;
-        if (typeof legacy?.pid === 'number') {
-          const liveness = checkProcessLiveness(legacy.pid, legacy.processStartedAt);
-          if (liveness === 'alive' || liveness === 'unverified') {
-            // Live v07 instance running or unverified: DO NOT DELETE, REFUSE STARTUP!
-            return { acquired: false, pid: legacy.pid };
+  while (true) {
+    try {
+      fd = fs.openSync(
+        mutexPath,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+        0o644
+      );
+      break;
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === 'EEXIST') {
+        // Reclaim orphaned mutex if older than 5s
+        try {
+          const stat = fs.statSync(mutexPath);
+          if (Date.now() - stat.mtimeMs > 5000) {
+            try { fs.unlinkSync(mutexPath); } catch {}
           }
-          if (liveness === 'dead') {
+        } catch {}
+
+        if (Date.now() - start > timeoutMs) {
+          throw new Error(`[budget-ledger] Timeout waiting for instance lock mutex (${timeoutMs}ms)`);
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+      try { fs.unlinkSync(mutexPath); } catch {}
+    }
+  }
+}
+
+export function acquireInstanceLock(
+  dataDir?: string,
+  leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
+): { acquired: boolean; pid?: number; token?: string } {
+  // Khe ①: Once fenced, permanently refuse acquire in the same process
+  if (isInstanceFenced && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+    throw new Error('[budget-ledger] Instance is fenced. Acquiring instance lock is permanently barred.');
+  }
+
+  return withInstanceMutex(dataDir, () => {
+    if (isInstanceFenced && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+      throw new Error('[budget-ledger] Instance is fenced. Acquiring instance lock is permanently barred.');
+    }
+
+    const lockPath = getInstanceLockFilePath(dataDir);
+    const baseDir = path.dirname(lockPath);
+    if (!fs.existsSync(baseDir)) {
+      fs.mkdirSync(baseDir, { recursive: true });
+    }
+
+    const now = Date.now();
+
+    // Khe ③: Safe handling of legacy directory from v06/v07
+    if (fs.existsSync(lockPath) && fs.statSync(lockPath).isDirectory()) {
+      const legacyInfoPath = path.join(lockPath, 'info.json');
+      let canCleanLegacy = false;
+      let legacyPid: number | undefined;
+
+      if (fs.existsSync(legacyInfoPath)) {
+        try {
+          const legacy = JSON.parse(fs.readFileSync(legacyInfoPath, 'utf-8'));
+          legacyPid = legacy?.pid;
+          if (typeof legacy?.pid === 'number') {
+            const liveness = checkProcessLiveness(legacy.pid, legacy.processStartedAt);
+            if (liveness === 'alive' || liveness === 'unverified') {
+              // Live v07 instance running or unverified: DO NOT DELETE, REFUSE STARTUP!
+              return { acquired: false, pid: legacy.pid };
+            }
+            if (liveness === 'dead') {
+              canCleanLegacy = true;
+            }
+          }
+        } catch {
+          // Corrupt legacy info.json: check dir age
+          const dirStat = fs.statSync(lockPath);
+          if (now - dirStat.mtimeMs >= UNINITIALIZED_LOCK_TIMEOUT_MS) {
             canCleanLegacy = true;
           }
         }
-      } catch {
-        // Corrupt legacy info.json: check dir age
+      } else {
+        // Legacy dir with no info.json: check dir age
         const dirStat = fs.statSync(lockPath);
         if (now - dirStat.mtimeMs >= UNINITIALIZED_LOCK_TIMEOUT_MS) {
           canCleanLegacy = true;
         }
       }
-    } else {
-      // Legacy dir with no info.json: check dir age
-      const dirStat = fs.statSync(lockPath);
-      if (now - dirStat.mtimeMs >= UNINITIALIZED_LOCK_TIMEOUT_MS) {
-        canCleanLegacy = true;
-      }
-    }
 
-    if (canCleanLegacy) {
-      try {
-        fs.rmSync(lockPath, { recursive: true, force: true });
-      } catch {
+      if (canCleanLegacy) {
+        try {
+          fs.rmSync(lockPath, { recursive: true, force: true });
+        } catch {
+          return { acquired: false, pid: legacyPid };
+        }
+      } else {
         return { acquired: false, pid: legacyPid };
       }
-    } else {
-      return { acquired: false, pid: legacyPid };
     }
-  }
 
-  const currentPid = process.pid;
-  const currentStartTime = getProcessStartTime(currentPid);
-  if (!currentStartTime) {
-    // Hermes Condition (b): Cannot reliably verify own start time from OS -> fail closed!
-    return { acquired: false };
-  }
-
-  const token = `${currentPid}-${now}-${Math.random().toString(36).slice(2)}`;
-  const metadata: InstanceLockMetadata = {
-    pid: currentPid,
-    processStartedAt: currentStartTime,
-    token,
-    leaseExpiresAt: new Date(now + leaseMs).toISOString(),
-    heartbeatAt: new Date(now).toISOString(),
-    ts: new Date(now).toISOString(),
-  };
-  const metadataStr = JSON.stringify(metadata, null, 2);
-
-  // 1. Attempt atomic file creation via open(O_EXCL): lock is a single file!
-  try {
-    const fd = fs.openSync(
-      lockPath,
-      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
-      0o644
-    );
-    try {
-      fs.writeSync(fd, metadataStr, 0, 'utf-8');
-    } finally {
-      fs.closeSync(fd);
+    const currentPid = process.pid;
+    const currentStartTime = getProcessStartTime(currentPid);
+    if (!currentStartTime) {
+      // Hermes Condition (b): Cannot reliably verify own start time from OS -> fail closed!
+      return { acquired: false };
     }
-    activeInstanceToken = token;
-    isInstanceLockRevoked = false;
-    isInstanceFenced = false;
-    return { acquired: true, pid: currentPid, token };
-  } catch (err: unknown) {
-    if ((err as { code?: string }).code !== 'EEXIST') {
-      throw err;
-    }
-  }
 
-  // 2. Lock file already exists: inspect existing lock
-  try {
+    const token = `${currentPid}-${now}-${Math.random().toString(36).slice(2)}`;
+    const metadata: InstanceLockMetadata = {
+      pid: currentPid,
+      processStartedAt: currentStartTime,
+      token,
+      leaseExpiresAt: new Date(now + leaseMs).toISOString(),
+      heartbeatAt: new Date(now).toISOString(),
+      ts: new Date(now).toISOString(),
+    };
+    const metadataStr = JSON.stringify(metadata, null, 2);
+
+    // 1. If lockPath does NOT exist, attempt atomic creation
+    if (!fs.existsSync(lockPath)) {
+      try {
+        const fd = fs.openSync(
+          lockPath,
+          fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+          0o644
+        );
+        try {
+          fs.writeSync(fd, metadataStr, 0, 'utf-8');
+        } finally {
+          fs.closeSync(fd);
+        }
+        activeInstanceToken = token;
+        isInstanceLockRevoked = false;
+        // Khe ①: DO NOT set isInstanceFenced = false
+        return { acquired: true, pid: currentPid, token };
+      } catch (err: unknown) {
+        if ((err as { code?: string }).code !== 'EEXIST') {
+          throw err;
+        }
+      }
+    }
+
+    // 2. Lock file exists: inspect current lock inside mutex
     const stat = fs.statSync(lockPath);
     let held: InstanceLockMetadata | null = null;
     let isCorruptOrEmpty = false;
@@ -351,38 +430,38 @@ export function acquireInstanceLock(
     if (isCorruptOrEmpty) {
       const fileAgeMs = now - stat.mtimeMs;
       if (fileAgeMs < UNINITIALIZED_LOCK_TIMEOUT_MS) {
-        // Crash or concurrent write in progress within 10s: fail closed
         return { acquired: false };
       }
       // Older than 10s without valid metadata: orphaned lock from crashed startup!
-      // Reclaim via atomic POSIX rename with valid candidate
       const candidateFile = path.join(baseDir, `.instance-candidate-${token}`);
       try {
         fs.writeFileSync(candidateFile, metadataStr, 'utf-8');
+
+        __testHooks.beforeReplace?.();
+
+        if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+          const currentContent = fs.readFileSync(lockPath, 'utf-8');
+          if (currentContent.trim()) {
+            try { fs.unlinkSync(candidateFile); } catch {}
+            return { acquired: false };
+          }
+        }
+
         fs.renameSync(candidateFile, lockPath);
       } catch {
         try { fs.unlinkSync(candidateFile); } catch {}
         return { acquired: false };
       }
 
-      // Post-rename check
-      try {
-        const current: InstanceLockMetadata = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-        if (current && current.token === token) {
-          activeInstanceToken = token;
-          isInstanceLockRevoked = false;
-          isInstanceFenced = false;
-          return { acquired: true, pid: currentPid, token };
-        }
-      } catch {}
-      return { acquired: false };
+      activeInstanceToken = token;
+      isInstanceLockRevoked = false;
+      return { acquired: true, pid: currentPid, token };
     }
 
     // Lock has valid metadata:
     if (held && typeof held.pid === 'number') {
       const liveness = checkProcessLiveness(held.pid, held.processStartedAt);
       if (liveness === 'alive' || liveness === 'unverified') {
-        // Active instance is running or unverified -> fail closed
         return { acquired: false, pid: held.pid };
       }
 
@@ -391,7 +470,6 @@ export function acquireInstanceLock(
       if (held.leaseExpiresAt) {
         const leaseExpiryTime = new Date(held.leaseExpiresAt).getTime();
         if (!isNaN(leaseExpiryTime) && now < leaseExpiryTime) {
-          // Lease is still valid even if PID appears dead (within lease window) -> refuse reclaim until expired!
           return { acquired: false, pid: held.pid };
         }
       }
@@ -400,32 +478,36 @@ export function acquireInstanceLock(
       const candidateFile = path.join(baseDir, `.instance-candidate-${token}`);
       try {
         fs.writeFileSync(candidateFile, metadataStr, 'utf-8');
+
+        // Khe ④: Test hook before replace
+        __testHooks.beforeReplace?.();
+
+        // In mutex: recheck lockPath to verify lock still matches the exact checked dead owner!
+        if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+          let recheck: InstanceLockMetadata | null = null;
+          try {
+            recheck = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+          } catch {}
+          if (!recheck || recheck.token !== held.token || recheck.pid !== held.pid) {
+            // Lock was replaced by another contender! Refuse reclaim, do not overwrite!
+            try { fs.unlinkSync(candidateFile); } catch {}
+            return { acquired: false, pid: recheck?.pid };
+          }
+        }
+
         fs.renameSync(candidateFile, lockPath);
       } catch {
         try { fs.unlinkSync(candidateFile); } catch {}
         return { acquired: false };
       }
 
-      // 3. Post-rename Verification:
-      try {
-        const current: InstanceLockMetadata = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-        if (current && current.token === token) {
-          activeInstanceToken = token;
-          isInstanceLockRevoked = false;
-          isInstanceFenced = false;
-          return { acquired: true, pid: currentPid, token };
-        } else {
-          return { acquired: false, pid: current?.pid };
-        }
-      } catch {
-        return { acquired: false };
-      }
+      activeInstanceToken = token;
+      isInstanceLockRevoked = false;
+      return { acquired: true, pid: currentPid, token };
     }
-  } catch {
-    /* error inspecting lock */
-  }
 
-  return { acquired: false };
+    return { acquired: false };
+  });
 }
 
 export function hasActiveInstanceToken(): boolean {
@@ -458,52 +540,61 @@ export function renewInstanceLock(
   leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
 ): boolean {
   if (isInstanceFenced || isInstanceLockRevoked || !activeInstanceToken) return false;
-  const lockPath = getInstanceLockFilePath(dataDir);
-  const baseDir = path.dirname(lockPath);
-  try {
-    if (!fs.existsSync(lockPath) || fs.statSync(lockPath).isDirectory()) {
-      fenceInstance();
-      return false;
-    }
-    let held: InstanceLockMetadata | null = null;
-    try {
-      held = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-    } catch {
-      fenceInstance();
-      return false;
-    }
-    // Khe ④: Token must match our activeInstanceToken before renewing
-    if (!held || held.token !== activeInstanceToken) {
-      fenceInstance();
-      return false;
-    }
-    const now = Date.now();
-    const updated: InstanceLockMetadata = {
-      ...held,
-      heartbeatAt: new Date(now).toISOString(),
-      leaseExpiresAt: new Date(now + leaseMs).toISOString(),
-    };
-    const tmpCandidate = path.join(baseDir, `.instance-renew-${activeInstanceToken}`);
-    fs.writeFileSync(tmpCandidate, JSON.stringify(updated, null, 2), 'utf-8');
-    fs.renameSync(tmpCandidate, lockPath);
 
-    // Khe ④: Post-rename verification
+  return withInstanceMutex(dataDir, () => {
+    if (isInstanceFenced || isInstanceLockRevoked || !activeInstanceToken) return false;
+
+    const lockPath = getInstanceLockFilePath(dataDir);
+    const baseDir = path.dirname(lockPath);
     try {
-      const current: InstanceLockMetadata = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-      if (!current || current.token !== activeInstanceToken) {
+      if (!fs.existsSync(lockPath) || fs.statSync(lockPath).isDirectory()) {
         fenceInstance();
         return false;
       }
+      let held: InstanceLockMetadata | null = null;
+      try {
+        held = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      } catch {
+        fenceInstance();
+        return false;
+      }
+      // Khe ④: Token must match our activeInstanceToken before renewing
+      if (!held || held.token !== activeInstanceToken) {
+        fenceInstance();
+        return false;
+      }
+      const now = Date.now();
+      const updated: InstanceLockMetadata = {
+        ...held,
+        heartbeatAt: new Date(now).toISOString(),
+        leaseExpiresAt: new Date(now + leaseMs).toISOString(),
+      };
+      const tmpCandidate = path.join(baseDir, `.instance-renew-${activeInstanceToken}`);
+      fs.writeFileSync(tmpCandidate, JSON.stringify(updated, null, 2), 'utf-8');
+
+      // Test hook before replace
+      __testHooks.beforeReplace?.();
+
+      // In mutex: recheck lockPath before rename!
+      if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+        let recheck: InstanceLockMetadata | null = null;
+        try {
+          recheck = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+        } catch {}
+        if (!recheck || recheck.token !== activeInstanceToken) {
+          try { fs.unlinkSync(tmpCandidate); } catch {}
+          fenceInstance();
+          return false;
+        }
+      }
+
+      fs.renameSync(tmpCandidate, lockPath);
+      return true;
     } catch {
       fenceInstance();
       return false;
     }
-
-    return true;
-  } catch {
-    fenceInstance();
-    return false;
-  }
+  });
 }
 
 export function releaseInstanceLock(dataDir?: string): void {
@@ -511,44 +602,44 @@ export function releaseInstanceLock(dataDir?: string): void {
   activeInstanceToken = null; // Clear active token
   if (!tokenToRelease) return;
 
-  const lockPath = getInstanceLockFilePath(dataDir);
-  const baseDir = path.dirname(lockPath);
-
-  try {
-    if (!fs.existsSync(lockPath) || fs.statSync(lockPath).isDirectory()) {
-      return;
-    }
-
-    let held: InstanceLockMetadata | null = null;
+  withInstanceMutex(dataDir, () => {
+    const lockPath = getInstanceLockFilePath(dataDir);
     try {
-      held = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-    } catch {
-      return;
-    }
-
-    // Khe ④: Only release if token matches our active token!
-    if (held && held.token === tokenToRelease) {
-      // Atomic release: rename over with a released marker candidate, then unlink
-      const releaseCandidate = path.join(baseDir, `.instance-released-${tokenToRelease}`);
-      fs.writeFileSync(
-        releaseCandidate,
-        JSON.stringify({ released: true, token: tokenToRelease, pid: process.pid, ts: new Date().toISOString() }),
-        'utf-8'
-      );
-      try {
-        fs.renameSync(releaseCandidate, lockPath);
-        // Verify post-rename that the lock file still belongs to our release candidate before unlinking
-        const postRename = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-        if (postRename && postRename.token === tokenToRelease && postRename.released === true) {
-          fs.unlinkSync(lockPath);
-        }
-      } catch {
-        try { fs.unlinkSync(releaseCandidate); } catch {}
+      if (!fs.existsSync(lockPath) || fs.statSync(lockPath).isDirectory()) {
+        return;
       }
+
+      let held: InstanceLockMetadata | null = null;
+      try {
+        held = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      } catch {
+        return;
+      }
+
+      // Khe ④: Only release if token matches our active token!
+      if (!held || held.token !== tokenToRelease) {
+        return; // Lock no longer belongs to tokenToRelease! DO NOT UNLINK!
+      }
+
+      // Test hook before replace
+      __testHooks.beforeReplace?.();
+
+      // In mutex: recheck lockPath before unlink!
+      if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+        let recheck: InstanceLockMetadata | null = null;
+        try {
+          recheck = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+        } catch {}
+        if (!recheck || recheck.token !== tokenToRelease) {
+          return; // Owner changed! DO NOT UNLINK!
+        }
+      }
+
+      fs.unlinkSync(lockPath);
+    } catch {
+      /* ignore release errors */
     }
-  } catch {
-    /* ignore release errors */
-  }
+  });
   // DO NOT reset isInstanceFenced or isInstanceLockRevoked to false!
   // Fencing is sticky: if fenced, it stays fenced.
 }
@@ -591,12 +682,14 @@ export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
   }
 
   // Hermes Condition (b) & Khe ①: Sticky fencing check — permanently bar writes once fenced
-  if (isInstanceFenced || isInstanceLockRevoked) {
+  if ((isInstanceFenced || isInstanceLockRevoked) && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
     throw new Error('[budget-ledger] Instance has been fenced (lock revoked or lost). Stopping writes permanently.');
   }
   if (activeInstanceToken && !verifyInstanceLockActive()) {
     fenceInstance();
-    throw new Error('[budget-ledger] Instance lock token lost or replaced. Stopping writes permanently.');
+    if (process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+      throw new Error('[budget-ledger] Instance lock token lost or replaced. Stopping writes permanently.');
+    }
   }
 
   ensureBudgetDir();

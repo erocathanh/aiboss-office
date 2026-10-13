@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 
 // 1. ISOLATE DATA AND CONFIG DIRS: Tests must NEVER touch operations/data or config/office.json
@@ -89,8 +90,15 @@ import {
   isFenced,
   resetFencingForTest,
   UNINITIALIZED_LOCK_TIMEOUT_MS,
+  hasActiveInstanceToken,
+  __testHooks,
 } from '../src/lib/budget-ledger.ts';
-import { stopOfficeRunner } from '../src/lib/office-runner.ts';
+import {
+  stopOfficeRunner,
+  flushInFlightTurns,
+  registerInFlightTurnForTest,
+  getInFlightTurnCountForTest,
+} from '../src/lib/office-runner.ts';
 import {
   isValidNanodollarsString,
   validateDailyCap,
@@ -1679,7 +1687,7 @@ try {
     releaseInstanceLock(testDataDir);
 
     // -------------------------------------------------------------
-    // Khe ①: Sticky fencing — late writes after stop/release are barred permanently
+    // Khe ①: Sticky fencing — bars ALL writers across process lifetime
     // -------------------------------------------------------------
     resetFencingForTest();
     if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
@@ -1697,17 +1705,91 @@ try {
     // Assert that activeInstanceToken is now null, but isFenced() is STILL true (sticky)!
     assert.equal(isFenced(), true, 'isFenced() must remain sticky true even after releaseInstanceLock clears activeInstanceToken');
 
-    // Attempt a late write transaction (e.g. from an asynchronous callback)
+    // Subtest 1.1: Calling acquireInstanceLock again while fenced MUST be permanently refused and remain fenced
+    assert.throws(
+      () => acquireInstanceLock(testDataDir),
+      /Instance is fenced/,
+      'acquireInstanceLock must throw and permanently refuse to acquire when instance has been fenced'
+    );
+    assert.equal(isFenced(), true, 'Instance must remain fenced after refused acquire attempt');
+    assert.equal(hasActiveInstanceToken(), false, 'Instance must not obtain token after refused acquire');
+
+    // Subtest 1.2: Calling flushInFlightTurns with an active in-flight turn leaves runs/*.jsonl and costs/*.jsonl byte-for-byte identical (MD5 unchanged)
+    const runsDir = path.join(testDataDir, 'runs');
+    const costsDir = path.join(testDataDir, 'costs');
+    fs.mkdirSync(runsDir, { recursive: true });
+    fs.mkdirSync(costsDir, { recursive: true });
+
+    const todayDate = new Date().toISOString().split('T')[0];
+    const runFile = path.join(runsDir, `${todayDate}.jsonl`);
+    const costFile = path.join(costsDir, `${todayDate}.jsonl`);
+    if (!fs.existsSync(runFile)) fs.writeFileSync(runFile, '{"type":"seed_run"}\n', 'utf-8');
+    if (!fs.existsSync(costFile)) fs.writeFileSync(costFile, '{"type":"seed_cost"}\n', 'utf-8');
+
+    const runMd5Before = crypto.createHash('md5').update(fs.readFileSync(runFile)).digest('hex');
+    const costMd5Before = crypto.createHash('md5').update(fs.readFileSync(costFile)).digest('hex');
+
+    // Register an active in-flight turn
+    registerInFlightTurnForTest({
+      seat: 'marketing-lead',
+      bell_id: 'bell-fenced-test',
+      wakeId: 'wake-fenced-test',
+      runId: 'run-fenced-test',
+      holdId: 'hold-fenced-test',
+      startIso: new Date().toISOString(),
+      startTime: Date.now(),
+    });
+    assert.equal(getInFlightTurnCountForTest(), 1, 'In-flight turn registered');
+
+    // Call flushInFlightTurns while fenced
+    flushInFlightTurns('server shutdown while fenced');
+
+    // Assert: In-flight map is cleared, but disk files are 100% byte-for-byte identical
+    const runMd5After = crypto.createHash('md5').update(fs.readFileSync(runFile)).digest('hex');
+    const costMd5After = crypto.createHash('md5').update(fs.readFileSync(costFile)).digest('hex');
+    assert.equal(runMd5After, runMd5Before, 'runs/*.jsonl MD5 must remain byte-for-byte identical after fenced flush');
+    assert.equal(costMd5After, costMd5Before, 'costs/*.jsonl MD5 must remain byte-for-byte identical after fenced flush');
+    assert.equal(getInFlightTurnCountForTest(), 0, 'In-flight turns cleared without writing to disk');
+
+    // Subtest 1.3: Fenced process firing late turn completion callbacks (receipt & updateRun) is barred from writing
+    assert.throws(
+      () => recordCostReceipt({
+        ts: new Date().toISOString(),
+        seatId: 'marketing-lead',
+        runId: 'run-late-callback',
+        model: 'model-x',
+        inputTokens: 100,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        outputTokens: 50,
+        costNanodollars: '100000000',
+        priced: true,
+        source: 'claude-stream-json',
+      }),
+      /Instance is fenced/,
+      'recordCostReceipt must throw when instance is fenced (barring late receipts)'
+    );
+
+    assert.throws(
+      () => updateRun('run-late-callback', {
+        status: 'finished',
+        finishedAt: new Date().toISOString(),
+      }),
+      /Instance is fenced/,
+      'updateRun must throw when instance is fenced (barring late updates)'
+    );
+
     assert.throws(
       () => withBudgetLock(() => 'late_write_payload'),
       /Instance has been fenced/,
       'withBudgetLock must permanently refuse writes when instance has been fenced (Khe ①)'
     );
 
-    // Counterproof for Khe ①: If fencing were not sticky (reset to false), withBudgetLock would pass
-    resetFencingForTest();
-    const allowedAfterReset = withBudgetLock(() => 'unfenced_ok');
-    assert.equal(allowedAfterReset, 'unfenced_ok', 'Counterproof: withBudgetLock proceeds only when unfenced');
+    // Verify disk files STILL byte-for-byte unchanged
+    const runMd5Final = crypto.createHash('md5').update(fs.readFileSync(runFile)).digest('hex');
+    const costMd5Final = crypto.createHash('md5').update(fs.readFileSync(costFile)).digest('hex');
+    assert.equal(runMd5Final, runMd5Before, 'runs/*.jsonl MD5 unchanged after late callback attempts');
+    assert.equal(costMd5Final, costMd5Before, 'costs/*.jsonl MD5 unchanged after late callback attempts');
 
     // -------------------------------------------------------------
     // Khe ②: Crash between open(O_EXCL) and write metadata does NOT block startup indefinitely
@@ -1780,39 +1862,106 @@ try {
     resetFencingForTest();
     if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
 
-    // Subtest 4.1: Renew fails and fences if token on disk was replaced by another process
-    const lockToRenew = acquireInstanceLock(testDataDir, 5000);
-    assert.equal(lockToRenew.acquired, true);
-
-    // Tamper with lock file on disk (simulate intruder taking over)
-    const intruderToken = `intruder-${Date.now()}`;
+    // Subtest 4.1: Two reclaimers on a dead owner: exactly ONE succeeds, contender slipping in between check and rename is preserved!
+    const deadOrigToken = `dead-orig-${Date.now()}`;
     fs.writeFileSync(
       lockFilePath,
       JSON.stringify({
-        pid: 999998,
+        pid: 999999,
         processStartedAt: '1970-01-01T00:00:00.000Z',
-        token: intruderToken,
-        leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+        token: deadOrigToken,
+        leaseExpiresAt: new Date(Date.now() - 10000).toISOString(),
         ts: new Date().toISOString(),
       }),
       'utf-8'
     );
 
+    // Setup hook: between checking the dead lock and renaming candidate, Contender B claims the lock!
+    const contenderToken = `contender-${Date.now()}`;
+    __testHooks.beforeReplace = () => {
+      fs.writeFileSync(
+        lockFilePath,
+        JSON.stringify({
+          pid: process.pid,
+          processStartedAt: getProcessStartTime(process.pid),
+          token: contenderToken,
+          leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+          heartbeatAt: new Date().toISOString(),
+          ts: new Date().toISOString(),
+        }),
+        'utf-8'
+      );
+    };
+
+    // Reclaimer A attempts to reclaim
+    const reclaimA = acquireInstanceLock(testDataDir);
+    __testHooks.beforeReplace = undefined; // Clean up hook
+
+    // Reclaimer A must detect owner changed inside mutex, abort reclaim, and NOT overwrite Contender B!
+    assert.equal(reclaimA.acquired, false, 'Reclaimer A must lose and not overwrite contender slipping in');
+    const diskAfterReclaimA = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(diskAfterReclaimA.token, contenderToken, 'Contender B lock must remain intact and not overwritten');
+    fs.unlinkSync(lockFilePath); // Clean up contender lock
+    resetFencingForTest();
+
+    // Subtest 4.2: Renew fails and fences if token on disk was replaced by another process before rename
+    const lockToRenew = acquireInstanceLock(testDataDir, 5000);
+    assert.equal(lockToRenew.acquired, true);
+
+    const intruderRenewToken = `intruder-renew-${Date.now()}`;
+    __testHooks.beforeReplace = () => {
+      fs.writeFileSync(
+        lockFilePath,
+        JSON.stringify({
+          pid: 999998,
+          processStartedAt: '1970-01-01T00:00:00.000Z',
+          token: intruderRenewToken,
+          leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+          ts: new Date().toISOString(),
+        }),
+        'utf-8'
+      );
+    };
+
     // Attempt renew: MUST return false, trigger fence, and NOT overwrite intruder
     const renewResult = renewInstanceLock(testDataDir);
+    __testHooks.beforeReplace = undefined; // Clean up hook
     assert.equal(renewResult, false, 'renewInstanceLock must return false when token on disk is replaced (Khe ④)');
     assert.equal(isFenced(), true, 'renewInstanceLock must fence instance on token mismatch');
     const diskAfterRenew = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
-    assert.equal(diskAfterRenew.token, intruderToken, 'Intruder lock file must NOT be overwritten by renew');
+    assert.equal(diskAfterRenew.token, intruderRenewToken, 'Intruder lock file must NOT be overwritten by renew');
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
+
+    // Subtest 4.3: Release with condition: foreign lock file must NOT be unlinked
+    // Acquire lock first
+    const lockToRelease = acquireInstanceLock(testDataDir, 5000);
+    assert.equal(lockToRelease.acquired, true);
+
+    const intruderRelToken = `intruder-rel-${Date.now()}`;
+    __testHooks.beforeReplace = () => {
+      fs.writeFileSync(
+        lockFilePath,
+        JSON.stringify({
+          pid: 999997,
+          processStartedAt: '1970-01-01T00:00:00.000Z',
+          token: intruderRelToken,
+          leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+          ts: new Date().toISOString(),
+        }),
+        'utf-8'
+      );
+    };
+
+    releaseInstanceLock(testDataDir);
+    __testHooks.beforeReplace = undefined;
+    assert.ok(fs.existsSync(lockFilePath), 'releaseInstanceLock must NOT delete lock file belonging to another token (Khe ④)');
+    const diskAfterRel = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(diskAfterRel.token, intruderRelToken, 'Intruder lock must remain intact');
+    fs.unlinkSync(lockFilePath); // Manual cleanup of intruder lock
     resetFencingForTest();
 
-    // Subtest 4.2: Release with condition: foreign lock file must NOT be unlinked
-    // (lockFilePath currently holds intruderToken, while process has no token / different token)
-    releaseInstanceLock(testDataDir);
-    assert.ok(fs.existsSync(lockFilePath), 'releaseInstanceLock must NOT delete lock file belonging to another token (Khe ④)');
-    fs.unlinkSync(lockFilePath); // Manual cleanup of intruder lock
-
-    // Subtest 4.3: Reclaim enforces BOTH dead process AND expired lease!
+    // Subtest 4.4: Reclaim enforces BOTH dead process AND expired lease!
     // Setup lock held by dead PID 999999 BUT with leaseExpiresAt in the FUTURE (+5000ms)
     fs.writeFileSync(
       lockFilePath,
