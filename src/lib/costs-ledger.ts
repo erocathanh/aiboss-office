@@ -166,6 +166,14 @@ export function hasPricedCostReceiptsForRun(runId: string): boolean {
 }
 
 /**
+ * Return all cost receipts for the specified runId.
+ */
+export function getCostReceiptsForRun(runId: string): CostRecord[] {
+  const records = readAllCostRecords();
+  return records.filter((r) => r.runId === runId);
+}
+
+/**
  * Return all model names that have cost receipts recorded for the specified runId.
  */
 export function getRecordedModelsForRun(runId: string): Set<string> {

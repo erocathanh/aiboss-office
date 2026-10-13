@@ -10,23 +10,36 @@
 ### 1.1. Mục đích & Nguyên lý
 Nhằm ngăn chặn tình trạng một ghế AI hoặc toàn thể văn phòng tiêu tốn ngân sách ngoài tầm kiểm soát, hệ thống áp dụng cơ chế **giữ chỗ trước khi chạy (budget hold)**:
 - **Ước lượng trước lượt (Pre-run estimate)**:
-  - Tính trung bình `costNanodollars` của tối đa 5 lượt chạy gần nhất đã định giá (`priced: true`) của ghế đó trong vòng 7 ngày qua.
+  - Tính trung bình `costNanodollars` của tối đa 5 lượt chạy gần nhất đã định giá (`priced: true`) của ghế đó trong vòng 7 ngày qua. Quét giới hạn theo ngày (không quét toàn bộ lịch sử).
   - Nếu ghế chưa có lượt chạy nào trong 7 ngày, sử dụng giá trị mặc định cấu hình tại `config/office.json` (`defaultRunEstimateNanodollars`, mặc định `"700000000"` = 0.70 USD).
 - **So sánh trần chi (Cap check)**:
   - Tổng cam kết = `spentToday` (đã tiêu hôm nay) + `unpricedEstimate` (ước lượng lượt chưa có giá) + `holdsActive` (các lượt đang chạy giữ chỗ) + `estimate` (lượt sắp chạy).
+  - Hợp nhất (fold) receipt theo cặp `(runId, model)` giống `costs-ledger.ts`, giữ lượt chạy ở trạng thái `unpriced` khi có bất kỳ model nào chưa có giá để bảo toàn phần dự phòng chi phí.
   - So sánh lần lượt với trần ghế (`seats.<slug>.dailyCapNanodollars`) và trần văn phòng (`office.dailyCapNanodollars`).
   - Nếu thiếu trần (`null` hoặc không cấu hình): coi là **không giới hạn (`unlimited`)**, không chặn và giao diện hiển thị «No cap set».
-  - Nếu vượt trần và `hardStop: true`: yêu cầu chuyển sang trạng thái `skipped` với lý do `budget_exceeded`, ghi một dòng `reject` vào sổ ngân sách và không kích hoạt chạy.
+  - Xác thực nghiêm ngặt giá trị cấu hình: chỉ chấp nhận chuỗi số nguyên không âm (`/^[0-9]+$/`), phân biệt rõ `null` với dữ liệu rác. Dữ liệu rác tự động rơi về fallback an toàn.
+  - Nếu vượt trần và `hardStop: true`: yêu cầu chuyển sang trạng thái `skipped` với lý do `budget_exceeded` (thông qua `boYeuCau` được ánh xạ tường minh sang `skipped`, không bị gán nhầm thành `expired`), ghi một dòng `reject` vào sổ ngân sách và không kích hoạt chạy.
   - Nếu vượt trần và `hardStop: false` (soft stop): vẫn cho phép chạy nhưng đánh dấu `overBudget: true` trên bản ghi hold và hiển thị cảnh báo.
 
 ---
 
-### 1.2. Cấu trúc Sổ Ngân Sách: `operations/data/budget/<YYYY-MM-DD>.jsonl`
+### 1.2. Khóa Liên Tiến Trình & Giao Dịch Giữ Chỗ Nguyên Tử
 
-Tệp được lưu trữ dạng JSON Lines nối đuôi (append-only), phân vùng theo ngày UTC. Gồm 4 loại bản ghi:
+Nhằm bảo đảm tính toàn vẹn khi nhiều tiến trình runner cùng hoạt động:
+- **Khóa liên tiến trình (`withBudgetLock`)**: Sử dụng cơ chế tạo thư mục nguyên tử `operations/data/budget/.budget.lock` ở cấp hệ điều hành, hỗ trợ re-entrancy trong cùng tiến trình và tự động dọn dẹp khóa cũ (stale lock) nếu tiến trình nắm giữ gặp sự cố.
+- **Giao dịch kiểm trần + tạo hold nguyên tử (`checkAdmissionAndRecordHold`)**:
+  Việc kiểm tra hạn mức ngân sách và ghi dòng `hold` được thực hiện trọn vẹn trong một phiên khóa chung. Hai tiến trình runner đồng thời không thể cùng vượt trần do cùng thấy số dư cũ.
+- **Phục hồi sự cố claim (F1)**:
+  Lệnh `checkAdmissionAndRecordHold` được đặt bên trong khối phục hồi `try / catch` của runner. Nếu ghi hold thất bại hoặc phát sinh lỗi khởi tạo, ghế lập tức được dọn sạch khỏi `activeSeats` và yêu cầu được trả về hàng đợi an toàn (`traVeHangDoi`), triệt tiêu rủi ro kẹt ghế (`seat_busy`).
+
+---
+
+### 1.3. Cấu trúc Sổ Ngân Sách: `operations/data/budget/<YYYY-MM-DD>.jsonl`
+
+Tệp được lưu trữ dạng JSON Lines nối đuôi (append-only), phân vùng theo ngày UTC.
+**Nguyên tắc Whitelist Schema**: Mọi bản ghi trước khi ghi xuống đĩa đều được dựng lại tường minh theo whitelist schema tương ứng, tuyệt đối không spread object và không rò rỉ prompt, result hoặc PII.
 
 #### 1. Bản ghi Giữ chỗ (`hold`):
-Ghi ngay khi runner nhận việc (claim) và chuẩn bị chạy.
 ```json
 {
   "type": "hold",
@@ -41,7 +54,6 @@ Ghi ngay khi runner nhận việc (claim) và chuẩn bị chạy.
 ```
 
 #### 2. Bản ghi Quyết toán (`settle`):
-Ghi khi lượt chạy hoàn tất và chi phí thực tế đã được xác định (hoặc được bù trong nhịp đối soát chi phí pending).
 ```json
 {
   "type": "settle",
@@ -52,10 +64,10 @@ Ghi khi lượt chạy hoàn tất và chi phí thực tế đã được xác �
   "ts": "2026-10-13T18:30:06.456Z"
 }
 ```
-*Lưu ý tính bất biến (Idempotency)*: Mỗi `holdId` chỉ được settle hoặc release đúng một lần. Gọi `settleHold` nhiều lần sẽ không sinh thêm dòng trên đĩa.
+*Lưu ý*: `priced` chỉ mang giá trị `true` khi toàn bộ receipts của lượt chạy đã được định giá và có `costNanodollars` hợp lệ; nếu còn receipt unpriced, `priced` được ghi nhận là `false`. Mỗi `holdId` chỉ được settle hoặc release đúng một lần (idempotent dưới khóa liên tiến trình).
 
 #### 3. Bản ghi Giải phóng (`release`):
-Ghi khi một lượt chạy bị lỗi không sinh receipt, lượt bị mồ côi (`orphaned`), hoặc yêu cầu hết hạn trong hàng đợi (`expired`).
+Ghi khi lượt chạy bị lỗi không sinh receipt (`failed_no_receipt`), lượt bị mồ côi (`orphaned`), hoặc yêu cầu giữ chỗ quá hạn không có lượt chạy tương ứng (`expired`).
 ```json
 {
   "type": "release",
@@ -77,16 +89,26 @@ Ghi khi lượt chạy bị từ chối do vượt trần ngân sách.
   "spentNanodollars": "450000000",
   "heldNanodollars": "0",
   "estimateNanodollars": "600000000",
+  "reason": "budget_exceeded",
   "ts": "2026-10-13T18:30:00.050Z"
 }
 ```
 
 ---
 
-### 1.3. Giao diện Lập trình API: `GET /api/budget`
+### 1.4. Đối Soát Vòng Đời Giữ Chỗ Mở (`reconcileOpenHolds`)
+Quy trình đối soát vòng đời hold mở được tích hợp tự động vào chu kỳ dọn dẹp runner (`startOfficeRunner`, `recoverOrphanedRuns`, `reconcilePendingCosts`):
+1. **Lượt chạy đã hoàn tất (finished) có receipt**: Tự động settle hold với chi phí thực tế và trạng thái định giá chính xác, tách rời khỏi cờ `costStatus: pending`.
+2. **Lượt chạy thất bại hoặc kết thúc không có receipt**: Tự động giải phóng hold với lý do `failed_no_receipt`.
+3. **Lượt chạy mồ côi (orphaned)**: Giải phóng hold với lý do `orphaned`.
+4. **Hold mở quá thời hạn (mặc định 10 phút) không có lượt chạy**: Tự động giải phóng với lý do `expired`.
+
+---
+
+### 1.5. Giao diện Lập trình API: `GET /api/budget`
 
 - **Endpoint**: `GET /api/budget?seat=<slug>`
-  - Nếu truyền `seat=<slug>`: Trả về trạng thái ngân sách của ghế tương ứng.
+  - Nếu truyền `seat=<slug>`: Kiểm tra danh mục ghế hợp lệ trong văn phòng (`data/seats.json` và `config.budget.seats`). Nếu ghế không tồn tại, trả về HTTP 404 `{ error: "unknown_seat", seat }`.
   - Nếu không truyền tham số: Trả về trạng thái ngân sách tổng hợp toàn bộ văn phòng (`office`).
 - **Phản hồi mẫu**:
 ```json
@@ -95,8 +117,10 @@ Ghi khi lượt chạy bị từ chối do vượt trần ngân sách.
   "capNanodollars": "10000000000",
   "spentNanodollars": "1450000000",
   "heldNanodollars": "700000000",
-  "unpricedRuns": 0,
-  "remainingNanodollars": "7850000000",
+  "unpricedRuns": 1,
+  "unpricedEstimateNanodollars": "700000000",
+  "committedNanodollars": "2850000000",
+  "remainingNanodollars": "7150000000",
   "state": "ok",
   "hardStop": true
 }
@@ -104,14 +128,14 @@ Ghi khi lượt chạy bị từ chối do vượt trần ngân sách.
 - **Các trạng thái (`state`)**:
   - `unlimited`: Không cấu hình trần chi (`capNanodollars: null`).
   - `ok`: Tổng cam kết $\le 80\%$ trần chi.
-  - `warning`: Tổng cam kết $> 80\%$ trần chi.
+  - `warning`: Tổng cam kết $> 80\%$ trần chi (biên nghiêm ngặt $>80\%$).
   - `exceeded`: Tổng cam kết $> 100\%$ trần chi.
 
 ---
 
-### 1.4. Giao diện Quản trị: Khối «Budget Today» trên `/settings`
+### 1.6. Giao diện Quản trị: Khối «Budget Today» trên `/settings`
 - Khối hiển thị tại trang `/settings` bao gồm:
-  - Banner tổng hợp trần văn phòng và số dư còn lại (`Office Total Capacity`).
-  - Mỗi ghế một dòng hiển thị thanh phần trăm và số đo (`Spent` · `Held` / `Cap`).
+  - Banner tổng hợp trần văn phòng và số dư còn lại (`Office Total Capacity`), có số chi tiêu (`Spent`), giữ chỗ (`Held`), và ước lượng đang chờ (`Pending`).
+  - Mỗi ghế một dòng hiển thị thanh phần trăm và số đo đồng bộ với `committedNanodollars` từ API (`Spent` · `Held` · `Pending` / `Cap`).
   - Khi ghế hoặc văn phòng ở trạng thái `exceeded`, thanh tiến trình và nhãn được tô đỏ cảnh báo rõ ràng.
 - Giao diện 100% tiếng Anh, tuân thủ nghiêm ngặt quy định không dùng từ cấm và không chứa chữ tiếng Việt trên HTML phục vụ.

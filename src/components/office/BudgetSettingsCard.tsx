@@ -1,62 +1,90 @@
-import React from 'react';
-import fs from 'node:fs';
-import path from 'node:path';
-import { Vault, ShieldWarning } from '@phosphor-icons/react/dist/ssr';
-import { getBudgetStatus } from '@/lib/budget-ledger';
-import { formatNanodollars } from '@/lib/costs-ledger';
+'use client';
 
-interface DepartmentConfig {
-  id: string;
-  name: string;
-  seats: string[];
-}
-
-function loadSeats(): string[] {
-  try {
-    const deptPath = path.join(process.cwd(), 'departments', 'marketing', 'department.json');
-    const content = fs.readFileSync(deptPath, 'utf-8');
-    const dept = JSON.parse(content) as DepartmentConfig;
-    return dept.seats || [];
-  } catch {
-    return [
-      'marketing-lead',
-      'content-writer',
-      'social-community',
-      'email-crm',
-      'paid-media',
-      'video-creative',
-      'funnel-offer',
-      'reviewer',
-    ];
-  }
-}
+import React, { useEffect, useState } from 'react';
+import { CurrencyDollar, ShieldWarning } from '@phosphor-icons/react';
+import { formatNanodollars } from '@/lib/money';
+import type { BudgetStatus } from '@/lib/budget-ledger';
 
 export function BudgetSettingsCard() {
-  const seats = loadSeats();
-  const officeStatus = getBudgetStatus();
-  const seatStatuses = seats.map((seatId) => getBudgetStatus(seatId));
+  const [officeStatus, setOfficeStatus] = useState<BudgetStatus | null>(null);
+  const [seatStatuses, setSeatStatuses] = useState<BudgetStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadBudget() {
+      try {
+        const offRes = await fetch('/api/budget');
+        if (offRes.ok) {
+          const offData: BudgetStatus = await offRes.json();
+          setOfficeStatus(offData);
+        }
+
+        const seats = [
+          'marketing-lead',
+          'content-writer',
+          'social-community',
+          'email-crm',
+          'paid-media',
+          'video-creative',
+          'funnel-offer',
+          'reviewer',
+        ];
+
+        const seatResults: BudgetStatus[] = [];
+        for (const seat of seats) {
+          const sRes = await fetch(`/api/budget?seat=${seat}`);
+          if (sRes.ok) {
+            const sData: BudgetStatus = await sRes.json();
+            seatResults.push(sData);
+          }
+        }
+        setSeatStatuses(seatResults);
+      } catch {
+        /* ignore fetch errors */
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadBudget();
+  }, []);
+
+  if (loading || !officeStatus) {
+    return (
+      <section className="settings-card">
+        <div className="settings-card-header">
+          <div className="settings-card-title">
+            <CurrencyDollar size={20} weight="bold" className="settings-card-icon" />
+            Budget Today
+          </div>
+        </div>
+        <div style={{ padding: '16px', color: '#94a3b8', fontSize: '13px' }}>
+          Loading budget status...
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="settings-card settings-card-wide" id="budget-today-card">
+    <section className="settings-card">
       <div className="settings-card-header">
-        <Vault size={20} weight="bold" className="settings-card-icon" />
-        <div>
-          <h2>Budget Today</h2>
-          <p className="settings-card-subtitle">
-            Pre-execution budget reservations (holds), daily spend caps, and hard-stop enforcement per seat.
-          </p>
+        <div className="settings-card-title">
+          <CurrencyDollar size={20} weight="bold" className="settings-card-icon" />
+          Budget Today
+        </div>
+        <div className="settings-card-subtitle">
+          Real-time daily budget caps, pre-dispatch holds, and spent tracking
         </div>
       </div>
 
-      <div className="settings-card-body">
-        {/* Office Summary Banner */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '14px' }}>
+        {/* Office Overall Banner */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '12px 16px',
-            marginBottom: '16px',
             borderRadius: '8px',
             background:
               officeStatus.state === 'exceeded'
@@ -74,7 +102,10 @@ export function BudgetSettingsCard() {
             </div>
             <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
               Spent: {formatNanodollars(officeStatus.spentNanodollars)} · Held:{' '}
-              {formatNanodollars(officeStatus.heldNanodollars)} · Cap:{' '}
+              {formatNanodollars(officeStatus.heldNanodollars)}
+              {officeStatus.unpricedRuns > 0 &&
+                ` · Pending: ${formatNanodollars(officeStatus.unpricedEstimateNanodollars)}`}
+              {' · Cap: '}
               {officeStatus.capNanodollars
                 ? formatNanodollars(officeStatus.capNanodollars)
                 : 'No cap set'}
@@ -135,15 +166,21 @@ export function BudgetSettingsCard() {
             const isWarning = st.state === 'warning';
             const isUnlimited = st.capNanodollars === null;
 
-            const spentBig = BigInt(st.spentNanodollars);
-            const heldBig = BigInt(st.heldNanodollars);
-            const usedBig = spentBig + heldBig;
+            // Total committed matches API: spent + held + unpricedEstimate
+            const committedBig = BigInt(
+              st.committedNanodollars ??
+                (
+                  BigInt(st.spentNanodollars) +
+                  BigInt(st.heldNanodollars) +
+                  BigInt(st.unpricedEstimateNanodollars ?? '0')
+                ).toString()
+            );
 
             let percent = 0;
             if (!isUnlimited && st.capNanodollars) {
               const capBig = BigInt(st.capNanodollars);
               if (capBig > 0n) {
-                percent = Math.min(100, Math.round(Number((usedBig * 100n) / capBig)));
+                percent = Math.min(100, Math.round(Number((committedBig * 100n) / capBig)));
               }
             }
 
@@ -222,6 +259,12 @@ export function BudgetSettingsCard() {
                     <span>Spent: {formatNanodollars(st.spentNanodollars)}</span>
                     <span style={{ margin: '0 6px' }}>·</span>
                     <span>Held: {formatNanodollars(st.heldNanodollars)}</span>
+                    {st.unpricedRuns > 0 && (
+                      <>
+                        <span style={{ margin: '0 6px' }}>·</span>
+                        <span>Pending: {formatNanodollars(st.unpricedEstimateNanodollars)}</span>
+                      </>
+                    )}
                     <span style={{ margin: '0 6px' }}>/</span>
                     <span style={{ fontWeight: 600, color: isExceeded ? '#ef4444' : '#f8fafc' }}>
                       {st.capNanodollars ? formatNanodollars(st.capNanodollars) : 'No cap set'}

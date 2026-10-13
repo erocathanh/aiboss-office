@@ -20,6 +20,7 @@ import {
 } from '@/lib/usage-receipt';
 import {
   hasPricedCostReceiptsForRun,
+  getCostReceiptsForRun,
   getRecordedModelsForRun,
   recordCostReceipt,
 } from '@/lib/costs-ledger';
@@ -27,6 +28,7 @@ import {
   settleHold,
   releaseHold,
   findHoldIdForRun,
+  reconcileOpenHolds,
 } from '@/lib/budget-ledger';
 
 export type RunErrorKind =
@@ -696,40 +698,51 @@ export function reconcilePendingCosts(): number {
         // CRITICAL (Hermes Finding B & Item 2):
         // Only mark recorded if ALL expected models have been successfully recorded!
         if (allModelsRecorded && expectedReceipts.every((r) => recordedModels.has(r.model))) {
-          // Tombstone rawUsage with null to wipe it from ledger and readers
-          updateRun(run.runId, { costStatus: 'recorded', rawUsage: null });
+          const isFullyPriced = expectedReceipts.length > 0 && expectedReceipts.every((r) => r.priced && r.costNanodollars !== null);
+          const totalActualBig = expectedReceipts.reduce(
+            (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+            0n
+          );
+
           const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
           if (holdId) {
-            const totalActualBig = expectedReceipts.reduce(
-              (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
-              0n
-            );
             settleHold({
               holdId,
               runId: run.runId,
-              actualNanodollars: totalActualBig.toString(),
-              priced: true,
+              actualNanodollars: totalActualBig > 0n ? totalActualBig.toString() : null,
+              priced: isFullyPriced,
               ts: timestampIso,
             });
           }
+
+          // Tombstone rawUsage with null to wipe it from ledger and readers
+          updateRun(run.runId, { costStatus: isFullyPriced ? 'recorded' : 'unpriced', rawUsage: null });
           reconciledCount++;
         }
       } else {
         // No rawUsage available to price (e.g. unknown model or fallback)
         // Check if any cost receipt exists for runId
         if (recordedModels.size > 0) {
+          const receipts = getCostReceiptsForRun(run.runId);
+          const isFullyPriced = receipts.length > 0 && receipts.every((r) => r.priced && r.costNanodollars !== null);
+          const totalActualBig = receipts.reduce(
+            (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+            0n
+          );
           const hasPriced = hasPricedCostReceiptsForRun(run.runId);
-          updateRun(run.runId, { costStatus: hasPriced ? 'recorded' : 'unpriced', rawUsage: null });
+
           const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
           if (holdId) {
             settleHold({
               holdId,
               runId: run.runId,
-              actualNanodollars: null,
-              priced: false,
+              actualNanodollars: totalActualBig > 0n ? totalActualBig.toString() : null,
+              priced: isFullyPriced,
               ts: timestampIso,
             });
           }
+
+          updateRun(run.runId, { costStatus: hasPriced ? 'recorded' : 'unpriced', rawUsage: null });
           reconciledCount++;
         } else {
           try {
@@ -746,7 +759,6 @@ export function reconcilePendingCosts(): number {
               priced: false,
               source: 'claude-stream-json',
             });
-            updateRun(run.runId, { costStatus: 'unpriced', rawUsage: null });
             const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
             if (holdId) {
               settleHold({
@@ -757,6 +769,7 @@ export function reconcilePendingCosts(): number {
                 ts: timestampIso,
               });
             }
+            updateRun(run.runId, { costStatus: 'unpriced', rawUsage: null });
             reconciledCount++;
           } catch (err: unknown) {
             console.error(`[runs-ledger] Fallback unpriced cost failed for run ${run.runId}:`, err);
@@ -765,6 +778,13 @@ export function reconcilePendingCosts(): number {
         }
       }
     }
+  }
+
+  // Also reconcile any open holds whose runs or receipts have settled
+  try {
+    reconcileOpenHolds();
+  } catch {
+    /* ignore hold reconciler error */
   }
 
   return reconciledCount;
@@ -874,6 +894,13 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
         expiredWakes++;
       }
     }
+  }
+
+  // 3. Reconcile open budget holds (release expired/orphaned holds without runs)
+  try {
+    reconcileOpenHolds({ nowIso: new Date(nowMs).toISOString() });
+  } catch {
+    /* ignore hold reconciler error */
   }
 
   return { orphanedRuns, expiredWakes };

@@ -30,10 +30,10 @@ import {
 } from '@/lib/usage-receipt';
 import { recordCostReceipts, recordCostReceipt } from '@/lib/costs-ledger';
 import {
-  checkBudgetAdmission,
-  recordHold,
+  checkAdmissionAndRecordHold,
   settleHold,
   releaseHold,
+  reconcileOpenHolds,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -301,31 +301,6 @@ export async function tickRunner(): Promise<number> {
         continue;
       }
 
-      // Check budget admission (A-3)
-      const candidateWakeId = y.wakeId ?? y.ma;
-      const admission = checkBudgetAdmission(y.ma_nhan_su, candidateWakeId);
-      if (!admission.allowed) {
-        logRunnerEvent({
-          timestamp: new Date().toISOString(),
-          seat: y.ma_nhan_su,
-          bell_id: y.ma,
-          event: 'skipped',
-          skipped_reason: 'budget_exceeded',
-        });
-        if (y.wakeId) {
-          try {
-            updateWake(y.wakeId, {
-              status: 'skipped',
-              reason: 'budget_exceeded',
-            });
-          } catch {
-            /* ignore */
-          }
-        }
-        boYeuCau(y.ma, 'budget_exceeded');
-        continue;
-      }
-
       // Atomic claim from queue
       const claimed = nhanYeuCau(y.ma_o, y.ma_nhan_su, 'office-runner');
       if (!claimed.y) {
@@ -346,19 +321,43 @@ export async function tickRunner(): Promise<number> {
       const runId = generateRunOrWakeId('run');
       const holdId = generateRunOrWakeId('hold');
 
-      // Create budget hold (A-3)
-      recordHold({
-        holdId,
-        wakeId: confirmedWakeId,
-        seatId: y.ma_nhan_su,
-        amountNanodollars: admission.estimate.amountNanodollars,
-        basis: admission.estimate.basis,
-        overBudget: Boolean(admission.overBudget),
-        ts: startIso,
-      });
+      let holdCreated = false;
 
-      // F1: Wrap ledger writes in try/catch to recover queue item and free activeSeats on throw
+      // F1 / Findings A & B: Atomic checkAdmissionAndRecordHold inside recovery block
+      // Any throw frees activeSeats and returns queue item
       try {
+        const admission = checkAdmissionAndRecordHold({
+          seatId: y.ma_nhan_su,
+          wakeId: confirmedWakeId,
+          holdId,
+          nowIso: startIso,
+        });
+
+        if (!admission.allowed) {
+          logRunnerEvent({
+            timestamp: startIso,
+            seat: y.ma_nhan_su,
+            bell_id: y.ma,
+            event: 'skipped',
+            skipped_reason: 'budget_exceeded',
+          });
+          if (claimed.y.wakeId) {
+            try {
+              updateWake(claimed.y.wakeId, {
+                status: 'skipped',
+                reason: 'budget_exceeded',
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+          activeSeats.delete(y.ma_nhan_su);
+          boYeuCau(claimed.y.ma, 'budget_exceeded');
+          continue;
+        }
+
+        holdCreated = true;
+
         updateWake(confirmedWakeId, {
           status: 'claimed',
           claimedAt: startIso,
@@ -375,12 +374,18 @@ export async function tickRunner(): Promise<number> {
           attempt: 1,
         });
       } catch (err) {
-        console.error(`[office-runner] Failed to write ledger for claimed wake ${confirmedWakeId}:`, err);
-        releaseHold({
-          holdId,
-          reason: 'failed_no_receipt',
-          ts: new Date().toISOString(),
-        });
+        console.error(`[office-runner] Failed to initialize turn for claimed wake ${confirmedWakeId}:`, err);
+        if (holdCreated) {
+          try {
+            releaseHold({
+              holdId,
+              reason: 'failed_no_receipt',
+              ts: new Date().toISOString(),
+            });
+          } catch {
+            /* ignore release failure to ensure cleanup proceeds */
+          }
+        }
         activeSeats.delete(y.ma_nhan_su);
         traVeHangDoi(claimed.y.ma);
         continue;
@@ -489,6 +494,9 @@ export async function tickRunner(): Promise<number> {
 
           // Settle budget hold (A-3)
           if (costStatus === 'recorded') {
+            const isFullyPriced =
+              extractedReceipts.length > 0 &&
+              extractedReceipts.every((r) => r.priced && r.costNanodollars !== null);
             const totalActualBig = extractedReceipts.reduce(
               (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
               0n
@@ -496,8 +504,8 @@ export async function tickRunner(): Promise<number> {
             settleHold({
               holdId,
               runId,
-              actualNanodollars: totalActualBig.toString(),
-              priced: true,
+              actualNanodollars: totalActualBig > 0n ? totalActualBig.toString() : null,
+              priced: isFullyPriced,
               ts: endIso,
             });
           } else if (costStatus === 'unpriced') {
@@ -606,13 +614,21 @@ export async function tickRunner(): Promise<number> {
             errorKind: 'result_error',
             costStatus: fallbackCostStatus,
           });
-          settleHold({
-            holdId,
-            runId,
-            actualNanodollars: null,
-            priced: false,
-            ts: endIso,
-          });
+          if (fallbackCostStatus === 'unpriced') {
+            settleHold({
+              holdId,
+              runId,
+              actualNanodollars: null,
+              priced: false,
+              ts: endIso,
+            });
+          } else {
+            releaseHold({
+              holdId,
+              reason: 'failed_no_receipt',
+              ts: endIso,
+            });
+          }
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);
           activeSeats.delete(y.ma_nhan_su);
@@ -637,6 +653,7 @@ export function startOfficeRunner(): boolean {
   // Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
   try {
     recoverOrphanedRuns();
+    reconcileOpenHolds();
   } catch {
     /* ignore ledger recovery error */
   }
