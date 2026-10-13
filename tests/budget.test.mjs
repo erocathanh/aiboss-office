@@ -79,6 +79,9 @@ import {
   replayAndGetCheckpoint,
   getProcessStartTime,
   isProcessAlive,
+  checkProcessLiveness,
+  acquireInstanceLock,
+  releaseInstanceLock,
 } from '../src/lib/budget-ledger.ts';
 import {
   isValidNanodollarsString,
@@ -1144,55 +1147,128 @@ try {
     console.log('  [PASS] Case 19: formatNanodollars bounds checking against MAX_MONEY_UNITS verified');
   }
 
-  // Case 20: Crash injection between JSONL write and checkpoint write (Hermes Item 1 & 9 / FAIL 6 & 9)
+  // Case 20: Real crash injection via SIGKILL right after JSONL append and admission recovery (Item 6 & 11)
   {
     const todayStr = new Date().toISOString().split('T')[0];
     const budgetLogPath = path.join(testDataDir, 'budget', `${todayStr}.jsonl`);
-    const injectedHoldId = 'hold-crash-injected-' + Date.now();
-    const injectedWakeId = 'wake-crash-injected-' + Date.now();
+    const crashedHoldId = 'hold-crash-sigkill-' + Date.now();
+    const crashedWakeId = 'wake-crash-sigkill-' + Date.now();
 
-    // 1. Ensure existing checkpoint state is captured
+    // Baseline: make sure checkpoint is initialized and clean
     initBudgetLedger();
     const cpBefore = loadOpenHoldsCheckpoint();
-    assert.ok(cpBefore, 'Checkpoint must exist after initialization');
-    const lineCountBefore = cpBefore.lastLineCount;
+    assert.ok(cpBefore, 'Checkpoint must exist');
+    assert.equal(cpBefore.holds[crashedHoldId], undefined);
 
-    // 2. Simulate process appending hold to JSONL SST then crashing before saving to open-holds.json
-    const unindexedHoldRecord = {
-      type: 'hold',
-      holdId: injectedHoldId,
-      wakeId: injectedWakeId,
+    // 1. Configure baseline config first so default estimate and state are consistent
+    writeTestConfig({
+      currency: 'USD',
+      defaultRunEstimateNanodollars: '500000000',
+      office: { dailyCapNanodollars: null, hardStop: true },
+      seats: {
+        'marketing-lead': { dailyCapNanodollars: null, hardStop: true },
+      },
+    });
+
+    const currentStatus = getBudgetStatus('marketing-lead');
+    const baseCommitted = BigInt(currentStatus.committedNanodollars);
+    const est = calculateRunEstimate('marketing-lead');
+    const estBig = BigInt(est.amountNanodollars);
+    const crashedHoldAmount = 600000000n;
+    // Set cap just below (baseCommitted + crashedHold + estBig) so crashed hold tips it over the cap
+    const capNanodollars = (baseCommitted + crashedHoldAmount + estBig - 1000n).toString();
+    writeTestConfig({
+      currency: 'USD',
+      defaultRunEstimateNanodollars: '500000000',
+      office: { dailyCapNanodollars: null, hardStop: true },
+      seats: {
+        'marketing-lead': { dailyCapNanodollars: capNanodollars, hardStop: true },
+      },
+    });
+
+    // 2. Spawn child process that executes real recordHold with AIBOSS_TEST_CRASH_AFTER_JSONL_APPEND=1
+    // The child must be terminated by SIGKILL immediately after writing to the JSONL SST
+    const childScript = `
+      import { recordHold } from './src/lib/budget-ledger.ts';
+      recordHold({
+        holdId: '${crashedHoldId}',
+        wakeId: '${crashedWakeId}',
+        seatId: 'marketing-lead',
+        amountNanodollars: '600000000',
+        basis: 'default',
+        overBudget: false,
+        ts: new Date().toISOString(),
+      });
+    `;
+
+    const childRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', childScript], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AIBOSS_DATA_DIR: testDataDir,
+        AIBOSS_CONFIG_DIR: testConfigDir,
+        AIBOSS_TEST_CRASH_AFTER_JSONL_APPEND: '1',
+      },
+    });
+
+    // Assert that child process was abruptly terminated by SIGKILL
+    assert.equal(childRes.signal, 'SIGKILL', 'Process calling recordHold must be killed by SIGKILL immediately after JSONL append');
+
+    // 3. Verify on-disk invariant:
+    // - SST file on disk MUST contain the crashed hold record
+    // - Checkpoint on disk (open-holds.json) must NOT yet contain the crashed hold (proves crash preceded checkpoint write)
+    const logLines = fs.readFileSync(budgetLogPath, 'utf-8').trim().split('\n');
+    const hasRecordInLog = logLines.some((l) => l.includes(crashedHoldId));
+    assert.ok(hasRecordInLog, 'SST JSONL log file must contain the durable hold appended before SIGKILL');
+
+    const cpAfterCrash = loadOpenHoldsCheckpoint();
+    assert.equal(
+      cpAfterCrash.holds[crashedHoldId],
+      undefined,
+      'Checkpoint on disk must NOT contain crashed hold before replay (write was interrupted)'
+    );
+
+    // 4. Admission recovery (Hermes Item 6 & 11):
+    // Admission transaction calls replayAndGetCheckpoint() FIRST under the lock before cap checks.
+    // Seat cap is $1.00. The crashed hold is $0.60.
+    const subsequentWakeId = 'wake-after-crash-' + Date.now();
+    const subsequentHoldId = 'hold-after-crash-' + Date.now();
+    const admissionRes = checkAdmissionAndRecordHold({
       seatId: 'marketing-lead',
-      amountNanodollars: '500000000',
-      basis: 'default',
-      overBudget: false,
-      ts: new Date().toISOString(),
-    };
-    fs.appendFileSync(budgetLogPath, JSON.stringify(unindexedHoldRecord) + '\n', 'utf-8');
+      wakeId: subsequentWakeId,
+      holdId: subsequentHoldId,
+    });
 
-    // 3. Replay from SST via initBudgetLedger / replayAndGetCheckpoint
-    const cpRecovered = initBudgetLedger();
-    assert.ok(cpRecovered.holds[injectedHoldId], 'Checkpoint must recover unindexed hold from JSONL SST');
-    assert.equal(cpRecovered.lastLineCount, lineCountBefore + 1, 'Replay line counter must advance');
-    assert.equal(isHoldClosed(injectedHoldId), false, 'Recovered hold must be recognized as open');
+    assert.equal(admissionRes.allowed, false, 'Admission must reject because recovered crashed hold counts against daily cap');
+    assert.equal(admissionRes.reason, 'budget_exceeded');
+    assert.equal(admissionRes.admission.scope, 'seat');
 
-    // 4. Simulate process appending settle to JSONL then crashing before saving checkpoint
-    const unindexedSettleRecord = {
-      type: 'settle',
-      holdId: injectedHoldId,
-      runId: 'run-crash-settle-' + Date.now(),
-      actualNanodollars: '450000000',
-      priced: true,
-      ts: new Date().toISOString(),
-    };
-    fs.appendFileSync(budgetLogPath, JSON.stringify(unindexedSettleRecord) + '\n', 'utf-8');
+    // Checkpoint has now been durably updated by the admission replay
+    const cpRecovered = loadOpenHoldsCheckpoint();
+    assert.ok(cpRecovered.holds[crashedHoldId], 'Checkpoint must now contain the recovered crashed hold');
+    assert.equal(isHoldClosed(crashedHoldId), false, 'Recovered hold must be recognized as active');
 
-    // 5. Verify isHoldClosed and initBudgetLedger automatically replay and reconcile
-    assert.equal(isHoldClosed(injectedHoldId), true, 'Replayed settle must mark hold as closed');
-    const activeHolds = getActiveHolds();
-    assert.equal(activeHolds.has(injectedHoldId), false, 'Closed hold must be removed from active holds snapshot');
+    // 5. Clean up recovered hold by releasing it
+    const releaseRes = releaseHold({
+      holdId: crashedHoldId,
+      reason: 'failed_no_receipt',
+    });
+    assert.ok(releaseRes, 'Releasing recovered hold must succeed');
+    assert.equal(isHoldClosed(crashedHoldId), true, 'Released hold must now be closed');
 
-    console.log('  [PASS] Case 20: crash injection between JSONL write and checkpoint write recovers cleanly via SST');
+    // Now crashed hold is released, committed spend returns to baseCommitted.
+    // baseCommitted + estBig <= capNanodollars, so subsequent admission must admit!
+    const allowedWakeId = 'wake-allowed-' + Date.now();
+    const allowedHoldId = 'hold-allowed-' + Date.now();
+    const admissionRes2 = checkAdmissionAndRecordHold({
+      seatId: 'marketing-lead',
+      wakeId: allowedWakeId,
+      holdId: allowedHoldId,
+    });
+    assert.equal(admissionRes2.allowed, true, 'Subsequent admission must succeed once recovered hold is cleared');
+    assert.ok(admissionRes2.hold, 'Hold must be created for admitted run');
+
+    console.log('  [PASS] Case 20: real SIGKILL crash injection during recordHold recovers via admission replay and enforces cap');
   }
 
   // Case 21: Pending run age preservation and receipt folding (Hermes Item 3 & 5 / FAIL 7 & 3)
@@ -1476,7 +1552,189 @@ try {
     console.log('  [PASS] Case 23: GET /api/budget route returns 200, 404, and 503 snapshot_not_ready as expected');
   }
 
-  console.log('>>> ALL 23 A-3 BUDGET TEST CASES AND REVIEWS PASSED <<<');
+  // Case 24: Multi-partition checkpoint positions & cross-midnight replay (Finding M2)
+  {
+    const olderDate = '2026-09-01';
+    const olderFile = `${olderDate}.jsonl`;
+    const olderLogPath = path.join(testDataDir, 'budget', olderFile);
+    const holdOldId = 'hold-older-partition-' + Date.now();
+
+    // 1. Write a hold to an older partition (simulate yesterday or 3 days ago)
+    const oldHoldRecord = {
+      type: 'hold',
+      holdId: holdOldId,
+      wakeId: 'wake-old-part',
+      seatId: 'marketing-lead',
+      amountNanodollars: '350000000',
+      basis: 'default',
+      overBudget: false,
+      ts: `${olderDate}T12:00:00.000Z`,
+    };
+    fs.appendFileSync(olderLogPath, JSON.stringify(oldHoldRecord) + '\n', 'utf-8');
+
+    // Replay: checkpoint should index older partition at 1 and track holdOldId
+    const cp1 = replayAndGetCheckpoint();
+    assert.equal(cp1.filePositions[olderFile], 1, 'Older partition line position must be tracked in checkpoint');
+    assert.ok(cp1.holds[holdOldId], 'Hold from older partition must be active in checkpoint');
+    assert.equal(isHoldClosed(holdOldId), false);
+
+    // 2. Cross-midnight settle: settle record written back to older partition
+    const oldSettleRecord = {
+      type: 'settle',
+      holdId: holdOldId,
+      runId: 'run-settle-cross-midnight',
+      actualNanodollars: '300000000',
+      priced: true,
+      ts: `${olderDate}T14:00:00.000Z`,
+    };
+    fs.appendFileSync(olderLogPath, JSON.stringify(oldSettleRecord) + '\n', 'utf-8');
+
+    // Replay: checkpoint should detect delta in older partition (advancing to 2) and delete hold
+    const cp2 = replayAndGetCheckpoint();
+    assert.equal(cp2.filePositions[olderFile], 2, 'Delta in older partition must be detected and position updated');
+    assert.equal(cp2.holds[holdOldId], undefined, 'Settled hold from older partition must be removed from checkpoint');
+    assert.equal(isHoldClosed(holdOldId), true, 'Hold must be reported as closed');
+
+    console.log('  [PASS] Case 24: multi-partition checkpoint positions & cross-midnight replay verified (Finding M2)');
+  }
+
+  // Case 25: Single-instance startup lock rejecting concurrent server runners & reclaiming dead locks (Condition b)
+  {
+    // 1. Acquire instance lock
+    const lock1 = acquireInstanceLock(testDataDir);
+    assert.equal(lock1.acquired, true, 'Acquiring instance lock must succeed for first runner');
+    assert.equal(lock1.pid, process.pid);
+
+    const lockFilePath = path.join(testDataDir, '.instance.lock');
+    assert.ok(fs.existsSync(lockFilePath), '.instance.lock file must exist on disk');
+
+    // 2. Reject second concurrent runner
+    const childLockScript = `
+      import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
+      const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
+      if (!res.acquired) {
+        process.exit(42);
+      }
+      process.exit(0);
+    `;
+    const childLockRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', childLockScript], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AIBOSS_DATA_DIR: testDataDir,
+      },
+    });
+    assert.equal(childLockRes.status, 42, 'Second server runner process must be rejected by instance lock (acquired: false)');
+
+    // 3. Stale lock reclamation from dead process
+    // Overwrite lock with a dead PID (e.g. 999999)
+    fs.writeFileSync(
+      lockFilePath,
+      JSON.stringify({
+        pid: 999999,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        createdAt: '1970-01-01T00:00:00.000Z',
+      }),
+      'utf-8'
+    );
+
+    const reclaimedLock = acquireInstanceLock(testDataDir);
+    assert.equal(reclaimedLock.acquired, true, 'Dead process instance lock must be safely reclaimed');
+    assert.equal(reclaimedLock.pid, process.pid);
+
+    // 4. Release lock
+    releaseInstanceLock(testDataDir);
+    assert.equal(fs.existsSync(lockFilePath), false, 'Instance lock file must be removed upon release');
+
+    console.log('  [PASS] Case 25: single-instance startup lock rejection and dead PID reclamation verified (Condition b)');
+  }
+
+  // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)
+  {
+    const statuses = ['timeout', 'failed', 'killed', 'finished'];
+    const holdIds = [];
+    const twoHoursAgoIso = new Date(Date.now() - 7200000).toISOString();
+
+    for (const status of statuses) {
+      const holdId = `hold-terminal-${status}-${Date.now()}`;
+      const wakeId = `wake-terminal-${status}-${Date.now()}`;
+      const runId = `run-terminal-${status}-${Date.now()}`;
+      holdIds.push(holdId);
+
+      recordHold({
+        holdId,
+        wakeId,
+        seatId: 'marketing-lead',
+        amountNanodollars: '400000000',
+        basis: 'default',
+        overBudget: false,
+        ts: twoHoursAgoIso,
+      });
+
+      recordRun({
+        runId,
+        wakeId,
+        holdId,
+        seatId: 'marketing-lead',
+        status,
+        costStatus: 'pending', // Pending costs must be guarded across ALL terminal statuses!
+        startedAt: twoHoursAgoIso,
+        attempt: 1,
+      });
+    }
+
+    // Reconcile with maxAgeMs = 1 hour (holds are 2 hours old)
+    reconcileOpenHolds({ maxAgeMs: 3600000 });
+
+    const activeHoldsMap = getActiveHolds();
+    for (const holdId of holdIds) {
+      assert.ok(
+        activeHoldsMap.has(holdId),
+        `Hold ${holdId} with costStatus=pending must NEVER be settled or expired prematurely`
+      );
+    }
+
+    // Test checkProcessLiveness tri-state (Hermes Item 8)
+    const currentStartTime = getProcessStartTime(process.pid);
+    assert.equal(checkProcessLiveness(process.pid, currentStartTime), 'alive');
+    assert.equal(checkProcessLiveness(process.pid, '1970-01-01T00:00:00.000Z'), 'dead');
+    assert.equal(checkProcessLiveness(999999, undefined), 'dead');
+    assert.equal(checkProcessLiveness(undefined, undefined), 'unverified');
+    assert.equal(checkProcessLiveness(0, undefined), 'unverified');
+
+    console.log('  [PASS] Case 26: universal terminal pending guard and checkProcessLiveness tri-state verified (Item 7 & 8)');
+  }
+
+  // Case 27: Pure read-only GET /api/budget without disk mutation (Item 9)
+  {
+    const pristineNonExistentDir = path.join(testBaseDir, 'pristine-nonexistent-data-' + Date.now());
+    assert.equal(fs.existsSync(pristineNonExistentDir), false);
+
+    const savedDataDir = process.env.AIBOSS_DATA_DIR;
+    process.env.AIBOSS_DATA_DIR = pristineNonExistentDir;
+
+    try {
+      const req = new Request('http://127.0.0.1:4330/api/budget');
+      const res = await getBudgetRoute(req);
+
+      assert.equal(res.status, 503, 'GET /api/budget on empty uninitialized data dir must return 503');
+      const data = await res.json();
+      assert.equal(data.error, 'snapshot_not_ready');
+
+      // CRITICAL: Disk must remain completely untouched! No directory created!
+      assert.equal(
+        fs.existsSync(pristineNonExistentDir),
+        false,
+        'GET /api/budget must be pure read-only and never create directories or files on disk'
+      );
+    } finally {
+      process.env.AIBOSS_DATA_DIR = savedDataDir;
+    }
+
+    console.log('  [PASS] Case 27: pure read-only GET /api/budget without disk mutation verified (Item 9)');
+  }
+
+  console.log('>>> ALL 27 A-3 BUDGET TEST CASES AND REVIEWS PASSED <<<');
 } catch (err) {
   console.error('\nTest failed with error:', err);
   process.exit(1);

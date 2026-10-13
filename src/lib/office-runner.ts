@@ -36,6 +36,8 @@ import {
   reconcileOpenHolds,
   initBudgetLedger,
   getProcessStartTime,
+  acquireInstanceLock,
+  releaseInstanceLock,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -332,11 +334,6 @@ export async function tickRunner(): Promise<number> {
           seatId: y.ma_nhan_su,
           wakeId: confirmedWakeId,
           holdId,
-          worker: {
-            pid: process.pid,
-            processStartedAt: getProcessStartTime(process.pid) || undefined,
-            instanceId: `${process.pid}-${Date.now()}`,
-          },
           nowIso: startIso,
         });
 
@@ -662,13 +659,29 @@ export function startOfficeRunner(): boolean {
     return false;
   }
 
-  // Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
+  // 1. Single-instance startup lock (Condition b):
+  const lock = acquireInstanceLock();
+  if (!lock.acquired) {
+    throw new Error(
+      `Another office runner instance (PID ${lock.pid ?? 'unknown'}) is already running on AIBOSS_DATA_DIR. Running multiple server instances against the same data directory is not supported.`
+    );
+  }
+
+  // 2. Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
   try {
     recoverOrphanedRuns();
+  } catch (err) {
+    console.error('[office-runner] Failed to recover orphaned runs on startup:', err);
+  }
+
+  // 3. Mandatory Precondition (Hermes Item 6): initialize budget ledger checkpoint
+  try {
     initBudgetLedger();
     reconcileOpenHolds();
-  } catch {
-    /* ignore ledger recovery error */
+  } catch (err) {
+    releaseInstanceLock();
+    console.error('[office-runner] Critical: failed to initialize budget ledger on startup:', err);
+    throw err; // Do not start runner without budget ledger!
   }
 
   isRunning = true;
@@ -697,6 +710,7 @@ export function stopOfficeRunner(): void {
   flushInFlightTurns('runner stopped');
   isRunning = false;
   activeSeats.clear();
+  releaseInstanceLock();
 }
 
 /**

@@ -56,10 +56,9 @@ export interface BudgetHoldRecord {
 }
 
 export interface OpenHoldsCheckpoint {
-  version: 1;
+  version: 2;
   updatedAt: string;
-  lastReplayedFile: string | null;
-  lastLineCount: number;
+  filePositions: Record<string, number>;
   holds: Record<string, BudgetHoldRecord>;
 }
 
@@ -144,8 +143,7 @@ function getBudgetLogPathForDate(isoDateString?: string): string {
   return path.join(getBudgetDir(), `${dateStr}.jsonl`);
 }
 
-function getOpenHoldsFilePath(): string {
-  ensureBudgetDir();
+export function getOpenHoldsFilePath(): string {
   return path.join(getBudgetDir(), 'open-holds.json');
 }
 
@@ -161,21 +159,116 @@ export function getProcessStartTime(pid: number): string | null {
   }
 }
 
-export function isProcessAlive(pid: number, expectedStartedAt?: string): boolean {
+export type ProcessLiveness = 'alive' | 'dead' | 'unverified';
+
+export function checkProcessLiveness(pid: number, expectedStartedAt?: string): ProcessLiveness {
+  if (!pid || pid <= 0 || !Number.isInteger(pid)) {
+    return 'unverified';
+  }
   try {
     process.kill(pid, 0);
   } catch (e: unknown) {
     if ((e as { code?: string }).code === 'ESRCH') {
-      return false; // Process is dead
+      return 'dead'; // Process does not exist
     }
+    return 'unverified';
   }
   if (expectedStartedAt) {
     const actual = getProcessStartTime(pid);
-    if (!actual || actual !== expectedStartedAt) {
-      return false; // Process died and PID was reused
+    if (!actual) {
+      // ps query failed but process signal succeeded -> unverified
+      return 'unverified';
+    }
+    if (actual !== expectedStartedAt) {
+      return 'dead'; // Start time mismatch indicates PID was reused
     }
   }
-  return true;
+  return 'alive';
+}
+
+export function isProcessAlive(pid: number, expectedStartedAt?: string): boolean {
+  return checkProcessLiveness(pid, expectedStartedAt) === 'alive';
+}
+
+// -------------------------------------------------------------
+// Single-Instance Startup Lock on AIBOSS_DATA_DIR (Condition b)
+// -------------------------------------------------------------
+
+export function getInstanceLockFilePath(dataDir?: string): string {
+  const baseDir = dataDir || process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
+  return path.join(baseDir, '.instance.lock');
+}
+
+export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?: number } {
+  const lockPath = getInstanceLockFilePath(dataDir);
+  const baseDir = path.dirname(lockPath);
+  if (!fs.existsSync(baseDir)) {
+    fs.mkdirSync(baseDir, { recursive: true });
+  }
+
+  const currentPid = process.pid;
+  const currentStartTime = getProcessStartTime(currentPid) || new Date().toISOString();
+  const metadata = {
+    pid: currentPid,
+    processStartedAt: currentStartTime,
+    ts: new Date().toISOString(),
+  };
+
+  try {
+    const fd = fs.openSync(lockPath, 'wx');
+    fs.writeFileSync(fd, JSON.stringify(metadata, null, 2), 'utf-8');
+    fs.closeSync(fd);
+    return { acquired: true, pid: currentPid };
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code === 'EEXIST') {
+      // Lock file already exists. Inspect owner liveness.
+      try {
+        const content = fs.readFileSync(lockPath, 'utf-8');
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed.pid === 'number') {
+          const liveness = checkProcessLiveness(parsed.pid, parsed.processStartedAt);
+          if (liveness === 'alive') {
+            // Existing instance is active!
+            return { acquired: false, pid: parsed.pid };
+          }
+        }
+      } catch {
+        /* corrupted lock file or read error */
+      }
+
+      // Reclaim stale lock of dead or unverified process
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        /* ignore */
+      }
+
+      try {
+        const fd = fs.openSync(lockPath, 'wx');
+        fs.writeFileSync(fd, JSON.stringify(metadata, null, 2), 'utf-8');
+        fs.closeSync(fd);
+        return { acquired: true, pid: currentPid };
+      } catch {
+        return { acquired: false };
+      }
+    }
+    throw err;
+  }
+}
+
+export function releaseInstanceLock(dataDir?: string): void {
+  const lockPath = getInstanceLockFilePath(dataDir);
+  try {
+    if (fs.existsSync(lockPath)) {
+      const content = fs.readFileSync(lockPath, 'utf-8');
+      const parsed = JSON.parse(content);
+      if (parsed.pid === process.pid) {
+        fs.unlinkSync(lockPath);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 export interface LockMetadata {
@@ -509,13 +602,21 @@ export function appendBudgetRecord(record: BudgetRecord): void {
 // -------------------------------------------------------------
 
 export function loadOpenHoldsCheckpoint(): OpenHoldsCheckpoint | null {
-  ensureBudgetDir();
+  const budgetDir = getBudgetDir();
+  if (!fs.existsSync(budgetDir)) return null;
   const openHoldsPath = getOpenHoldsFilePath();
   if (!fs.existsSync(openHoldsPath)) return null;
   try {
     const content = fs.readFileSync(openHoldsPath, 'utf-8');
     const parsed = JSON.parse(content);
-    if (parsed && parsed.version === 1 && parsed.holds && typeof parsed.holds === 'object') {
+    if (parsed && (parsed.version === 1 || parsed.version === 2) && parsed.holds && typeof parsed.holds === 'object') {
+      if (parsed.version === 1 || !parsed.filePositions) {
+        parsed.version = 2;
+        parsed.filePositions = parsed.filePositions || {};
+        if (parsed.lastReplayedFile && typeof parsed.lastLineCount === 'number') {
+          parsed.filePositions[parsed.lastReplayedFile] = parsed.lastLineCount;
+        }
+      }
       return parsed as OpenHoldsCheckpoint;
     }
   } catch {
@@ -535,9 +636,9 @@ export function saveOpenHoldsCheckpoint(cp: OpenHoldsCheckpoint): void {
 /**
  * Replay unindexed budget records from date-partitioned JSONL files (the Single Source of Truth)
  * into the durable open-holds checkpoint index.
- * Guaranteed idempotent and crash-proof:
- * If a transaction crashed after writing to JSONL but before updating the checkpoint,
- * the replay resumes from lastLineCount of lastReplayedFile, reflecting all unindexed records.
+ * Multi-partition tracking (Hermes Item M2):
+ * Tracks line counts per file in cp.filePositions[file]. Any append to an older partition
+ * (e.g. cross-midnight settles) is detected and replayed cleanly.
  * Must be called under withBudgetLock.
  */
 export function replayAndGetCheckpoint(): OpenHoldsCheckpoint {
@@ -545,40 +646,27 @@ export function replayAndGetCheckpoint(): OpenHoldsCheckpoint {
   const budgetDir = getBudgetDir();
   let cp = loadOpenHoldsCheckpoint();
 
+  if (!cp) {
+    cp = {
+      version: 2,
+      updatedAt: new Date().toISOString(),
+      filePositions: {},
+      holds: {},
+    };
+  }
+
   const allFiles = fs
     .readdirSync(budgetDir)
     .filter((f) => f.endsWith('.jsonl'))
     .sort();
 
-  if (!cp) {
-    cp = {
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      lastReplayedFile: null,
-      lastLineCount: 0,
-      holds: {},
-    };
-  }
-
-  let filesToReplay: string[] = [];
-  if (!cp.lastReplayedFile) {
-    filesToReplay = allFiles;
-  } else {
-    const idx = allFiles.indexOf(cp.lastReplayedFile);
-    if (idx === -1) {
-      filesToReplay = allFiles.filter((f) => f >= cp.lastReplayedFile!);
-    } else {
-      filesToReplay = allFiles.slice(idx);
-    }
-  }
-
-  for (const file of filesToReplay) {
+  for (const file of allFiles) {
     const filePath = path.join(budgetDir, file);
     if (!fs.existsSync(filePath)) continue;
 
     const content = fs.readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
-    const startLineIndex = file === cp.lastReplayedFile ? cp.lastLineCount : 0;
+    const startLineIndex = cp.filePositions[file] ?? 0;
 
     if (startLineIndex < lines.length) {
       for (let i = startLineIndex; i < lines.length; i++) {
@@ -599,13 +687,7 @@ export function replayAndGetCheckpoint(): OpenHoldsCheckpoint {
       }
     }
 
-    cp.lastReplayedFile = file;
-    cp.lastLineCount = lines.length;
-  }
-
-  if (allFiles.length === 0) {
-    cp.lastReplayedFile = null;
-    cp.lastLineCount = 0;
+    cp.filePositions[file] = lines.length;
   }
 
   cp.updatedAt = new Date().toISOString();
@@ -675,15 +757,18 @@ export function recordHold(hold: Omit<BudgetHoldRecord, 'type'>): BudgetHoldReco
     // 1. Append to SST JSONL first
     appendBudgetRecordDirect(record);
 
+    // Test hook for crash injection (Hermes Item 11)
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      process.env.AIBOSS_TEST_CRASH_AFTER_JSONL_APPEND === '1'
+    ) {
+      process.kill(process.pid, 'SIGKILL');
+    }
+
     // 2. Update checkpoint
     cp.holds[record.holdId] = record;
     const logFile = path.basename(getBudgetLogPathForDate(record.ts));
-    if (cp.lastReplayedFile === logFile) {
-      cp.lastLineCount += 1;
-    } else {
-      cp.lastReplayedFile = logFile;
-      cp.lastLineCount = 1;
-    }
+    cp.filePositions[logFile] = (cp.filePositions[logFile] ?? 0) + 1;
     cp.updatedAt = new Date().toISOString();
     saveOpenHoldsCheckpoint(cp);
 
@@ -729,12 +814,7 @@ export function settleHold(params: {
     // 2. Update checkpoint
     delete cp.holds[params.holdId];
     const logFile = path.basename(getBudgetLogPathForDate(record.ts));
-    if (cp.lastReplayedFile === logFile) {
-      cp.lastLineCount += 1;
-    } else {
-      cp.lastReplayedFile = logFile;
-      cp.lastLineCount = 1;
-    }
+    cp.filePositions[logFile] = (cp.filePositions[logFile] ?? 0) + 1;
     cp.updatedAt = new Date().toISOString();
     saveOpenHoldsCheckpoint(cp);
 
@@ -776,12 +856,7 @@ export function releaseHold(params: {
     // 2. Update checkpoint
     delete cp.holds[params.holdId];
     const logFile = path.basename(getBudgetLogPathForDate(record.ts));
-    if (cp.lastReplayedFile === logFile) {
-      cp.lastLineCount += 1;
-    } else {
-      cp.lastReplayedFile = logFile;
-      cp.lastLineCount = 1;
-    }
+    cp.filePositions[logFile] = (cp.filePositions[logFile] ?? 0) + 1;
     cp.updatedAt = new Date().toISOString();
     saveOpenHoldsCheckpoint(cp);
 
@@ -1109,26 +1184,43 @@ export function checkBudgetAdmission(
     validateRunEstimate(config.budget?.defaultRunEstimateNanodollars) || '700000000';
   const nowTs = nowIso || new Date().toISOString();
 
-  // Fail closed on configuration errors
-  const seatStatus = getBudgetStatus(seatId, nowIso);
-  const officeStatus = getBudgetStatus(undefined, nowIso);
+  // Fail closed on configuration errors or unready snapshot (Hermes Item 6)
+  let seatStatus = getBudgetStatus(seatId, nowIso);
+  let officeStatus = getBudgetStatus(undefined, nowIso);
 
-  if (seatStatus.state === 'config_error' || officeStatus.state === 'config_error') {
+  if (seatStatus.state === 'snapshot_not_ready' || officeStatus.state === 'snapshot_not_ready') {
+    try {
+      withBudgetLock(() => replayAndGetCheckpoint());
+      seatStatus = getBudgetStatus(seatId, nowIso);
+      officeStatus = getBudgetStatus(undefined, nowIso);
+    } catch {
+      /* replay failed */
+    }
+  }
+
+  if (
+    seatStatus.state === 'config_error' ||
+    officeStatus.state === 'config_error' ||
+    seatStatus.state === 'snapshot_not_ready' ||
+    officeStatus.state === 'snapshot_not_ready'
+  ) {
+    const isSnapshotNotReady =
+      seatStatus.state === 'snapshot_not_ready' || officeStatus.state === 'snapshot_not_ready';
     recordReject({
       wakeId,
       seatId,
-      scope: seatStatus.state === 'config_error' ? 'seat' : 'office',
+      scope: (seatStatus.state === 'config_error' || seatStatus.state === 'snapshot_not_ready') ? 'seat' : 'office',
       capNanodollars: seatStatus.capNanodollars ?? '0',
       spentNanodollars: seatStatus.spentNanodollars,
       heldNanodollars: seatStatus.heldNanodollars,
       estimateNanodollars: estimate.amountNanodollars,
-      reason: 'config_error',
+      reason: isSnapshotNotReady ? 'snapshot_not_ready' : 'config_error',
       ts: nowTs,
     });
     return {
       allowed: false,
       reason: 'config_error',
-      scope: seatStatus.state === 'config_error' ? 'seat' : 'office',
+      scope: (seatStatus.state === 'config_error' || seatStatus.state === 'snapshot_not_ready') ? 'seat' : 'office',
       remainingNanodollars: '0',
       estimate,
     };
@@ -1231,6 +1323,38 @@ export function checkAdmissionAndRecordHold(params: {
   hold: BudgetHoldRecord | null;
 } {
   return withBudgetLock(() => {
+    // 1. Mandatory Precondition (Hermes Item 6):
+    // Replay checkpoint index BEFORE evaluating caps and admission!
+    // If replay fails or checkpoint is missing/unready, fail closed and never dispatch.
+    try {
+      replayAndGetCheckpoint();
+    } catch {
+      const estimate = calculateRunEstimate(params.seatId, params.nowIso);
+      recordReject({
+        wakeId: params.wakeId,
+        seatId: params.seatId,
+        scope: 'office',
+        capNanodollars: '0',
+        spentNanodollars: '0',
+        heldNanodollars: '0',
+        estimateNanodollars: estimate.amountNanodollars,
+        reason: 'snapshot_not_ready',
+        ts: params.nowIso || new Date().toISOString(),
+      });
+      return {
+        allowed: false,
+        reason: 'config_error',
+        admission: {
+          allowed: false,
+          reason: 'config_error',
+          scope: 'office',
+          remainingNanodollars: '0',
+          estimate,
+        },
+        hold: null,
+      };
+    }
+
     const admission = checkBudgetAdmission(params.seatId, params.wakeId, params.nowIso);
     if (!admission.allowed) {
       return { allowed: false, reason: admission.reason, admission, hold: null };
@@ -1394,15 +1518,24 @@ export function reconcileOpenHolds(options?: {
       // 1. Process still running
       if (run.status === 'running') {
         if (run.pid) {
-          const isAlive = isProcessAlive(
-            run.pid,
-            run.processStartedAt || hold.worker?.processStartedAt
-          );
-          if (isAlive) {
-            // Worker is actively executing! Do NOT expire!
+          const liveness = checkProcessLiveness(run.pid, run.processStartedAt);
+          if (liveness === 'alive') {
+            // Worker is actively executing! NEVER expire!
             continue;
           }
-          // Worker process is dead without updating terminal state
+          if (liveness === 'unverified') {
+            // OS query status could not be verified; give grace period before expiry
+            if (holdAgeMs > maxAgeMs * 2) {
+              releaseHold({
+                holdId: hold.holdId,
+                reason: 'expired',
+                ts: nowTs,
+              });
+              released++;
+            }
+            continue;
+          }
+          // Worker process is definitely dead (ESRCH or start time mismatch)
           if (holdAgeMs > maxAgeMs) {
             releaseHold({
               holdId: hold.holdId,
@@ -1412,8 +1545,7 @@ export function reconcileOpenHolds(options?: {
             released++;
           }
         } else {
-          // PID is missing / unverified.
-          // Finite expiration policy: grace period up to maxAgeMs, then expire.
+          // PID is missing / unverified
           if (holdAgeMs > maxAgeMs) {
             releaseHold({
               holdId: hold.holdId,
@@ -1426,8 +1558,14 @@ export function reconcileOpenHolds(options?: {
         continue;
       }
 
-      // 2. Terminal runs: finished, failed, killed
-      if (run.status === 'finished' || run.status === 'failed' || run.status === 'killed') {
+      // 2. Terminal runs: finished, failed, killed, timeout (Hermes Item 7 / FAIL 7)
+      const isTerminal =
+        run.status === 'finished' ||
+        run.status === 'failed' ||
+        run.status === 'killed' ||
+        run.status === 'timeout';
+
+      if (isTerminal) {
         if (run.errorKind === 'orphaned' || (run as { status?: string }).status === 'orphaned') {
           releaseHold({
             holdId: hold.holdId,
@@ -1439,12 +1577,11 @@ export function reconcileOpenHolds(options?: {
         }
 
         if (run.costStatus === 'pending') {
-          // CRITICAL (Hermes FAIL 7):
-          // Receipts pricing is still in progress across models.
-          // DO NOT settle based on hold age! Settle ONLY when reconcilePendingCosts completes pricing all expected models!
+          // CRITICAL (Hermes Item 7 / FAIL 7):
+          // Receipts pricing is still in progress across models for terminal states including timeout.
+          // NEVER settle partially or expire based on hold age! Settle ONLY when reconcilePendingCosts completes!
           continue;
         }
-
         let receipts: Array<{ priced: boolean; costNanodollars: string | null }> = [];
         if (options?.getReceiptsFn) {
           receipts = options.getReceiptsFn(runId);
@@ -1468,7 +1605,7 @@ export function reconcileOpenHolds(options?: {
           });
           settled++;
         } else {
-          // Finished or failed without any cost receipts ever recorded
+          // Finished, failed, or timed out without any cost receipts ever recorded
           releaseHold({
             holdId: hold.holdId,
             reason: 'failed_no_receipt',

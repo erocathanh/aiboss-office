@@ -5,12 +5,21 @@ import { CurrencyDollar, ShieldWarning } from '@phosphor-icons/react';
 import { formatNanodollars } from '@/lib/money-format';
 import type { BudgetStatus } from '@/lib/budget-ledger';
 
-export function BudgetSettingsCard() {
-  const [officeStatus, setOfficeStatus] = useState<BudgetStatus | null>(null);
-  const [seatStatuses, setSeatStatuses] = useState<BudgetStatus[]>([]);
-  const [loading, setLoading] = useState(true);
+export interface BudgetSettingsCardProps {
+  initialOfficeStatus?: BudgetStatus | null;
+  initialSeatStatuses?: BudgetStatus[];
+}
+
+export function BudgetSettingsCard({
+  initialOfficeStatus,
+  initialSeatStatuses,
+}: BudgetSettingsCardProps = {}) {
+  const [officeStatus, setOfficeStatus] = useState<BudgetStatus | null>(initialOfficeStatus ?? null);
+  const [seatStatuses, setSeatStatuses] = useState<BudgetStatus[]>(initialSeatStatuses ?? []);
+  const [loading, setLoading] = useState(!initialOfficeStatus);
 
   useEffect(() => {
+    if (initialOfficeStatus) return;
     async function loadBudget() {
       try {
         const offRes = await fetch('/api/budget');
