@@ -82,6 +82,8 @@ import {
   checkProcessLiveness,
   acquireInstanceLock,
   releaseInstanceLock,
+  verifyInstanceLockActive,
+  renewInstanceLock,
   repairLogTail,
 } from '../src/lib/budget-ledger.ts';
 import {
@@ -1635,17 +1637,22 @@ try {
     console.log('  [PASS] Case 24: multi-partition checkpoint positions & cross-midnight replay verified (Finding M2)');
   }
 
-  // Case 25: Single-instance startup lock rejecting concurrent server runners & reclaiming dead locks (Condition b)
+  // Case 25: Single-instance startup lock: single-file atomic creation, atomic rename overwrite, and lease heartbeat (Condition b)
   {
-    // 1. Acquire instance lock
+    const lockFilePath = path.join(testDataDir, '.instance.lock');
+
+    // 1. Acquire instance lock: must create a SINGLE FILE via open(O_EXCL)
     const lock1 = acquireInstanceLock(testDataDir);
     assert.equal(lock1.acquired, true, 'Acquiring instance lock must succeed for first runner');
     assert.equal(lock1.pid, process.pid);
-
-    const lockFilePath = path.join(testDataDir, '.instance.lock');
     assert.ok(fs.existsSync(lockFilePath), '.instance.lock file must exist on disk');
+    assert.equal(
+      fs.statSync(lockFilePath).isDirectory(),
+      false,
+      '.instance.lock must be a FILE, not a directory (Hermes Condition b)'
+    );
 
-    // 2. Reject second concurrent runner
+    // 2. Reject second concurrent runner via open(O_EXCL) EEXIST
     const childLockScript = `
       import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
       const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
@@ -1665,12 +1672,8 @@ try {
 
     // 3. Stale lock inspection:
     // a) Unverified owner (missing processStartedAt): startup MUST be refused and lock NOT deleted (Condition b)
-    const infoPath = fs.statSync(lockFilePath).isDirectory()
-      ? path.join(lockFilePath, 'info.json')
-      : lockFilePath;
-
     fs.writeFileSync(
-      infoPath,
+      lockFilePath,
       JSON.stringify({
         pid: process.pid,
         // missing processStartedAt -> unverified!
@@ -1687,9 +1690,9 @@ try {
     );
     assert.ok(fs.existsSync(lockFilePath), 'Unverified lock must remain on disk without being deleted');
 
-    // b) Dead process owner (PID 999999) -> reclaimed safely via atomic rename
+    // b) Dead process owner (PID 999999) -> reclaimed safely via atomic POSIX rename overwrite
     fs.writeFileSync(
-      infoPath,
+      lockFilePath,
       JSON.stringify({
         pid: 999999,
         processStartedAt: '1970-01-01T00:00:00.000Z',
@@ -1703,27 +1706,10 @@ try {
     assert.equal(reclaimedLock.acquired, true, 'Dead process instance lock must be safely reclaimed');
     assert.equal(reclaimedLock.pid, process.pid);
 
-    // c) Hermes Condition (b): Reclaimer using stale metadata against live owner must fail
-    // Currently reclaimedLock is held by process.pid (live owner)
-    const staleReclaimerScript = `
-      import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
-      const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
-      if (!res.acquired) {
-        process.exit(10); // Rejection verified
-      }
-      process.exit(0);
-    `;
-    const staleRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', staleReclaimerScript], {
-      cwd: process.cwd(),
-      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir },
-    });
-    assert.equal(staleRes.status, 10, 'Reclaimer using stale metadata against live owner must fail (acquired: false)');
-    assert.ok(fs.existsSync(lockFilePath), 'Live owner lock must not be destroyed by reclaimer');
-
-    // d) Hermes Condition (b): Strict release verification (mismatched token cannot release lock)
-    const heldInfo = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+    // c) Strict release verification (mismatched token cannot release lock)
+    const heldInfo = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
     fs.writeFileSync(
-      infoPath,
+      lockFilePath,
       JSON.stringify({
         ...heldInfo,
         token: 'intruder-token-different',
@@ -1734,64 +1720,92 @@ try {
     releaseInstanceLock(testDataDir);
     assert.ok(
       fs.existsSync(lockFilePath),
-      'releaseInstanceLock must NOT remove lock directory if held token does not match activeInstanceToken'
+      'releaseInstanceLock must NOT remove lock file if held token does not match activeInstanceToken'
     );
 
-    // Clean up directory
-    fs.rmSync(lockFilePath, { recursive: true, force: true });
+    // Clean up
+    fs.unlinkSync(lockFilePath);
+    releaseInstanceLock(testDataDir); // Resets activeInstanceToken to null
 
-    // e) Hermes Condition (b): Atomic reclaim post-rename verification with rollback on mismatch
-    fs.mkdirSync(lockFilePath, { recursive: true });
+    // 4. Hermes Condition (b) Vòng 8:
+    // (i) A sống + R thu hồi sai + C chen => tối đa một tiến trình được ghi sau cửa sổ lease
+    // Step A: Process A acquires lock
+    const lockA = acquireInstanceLock(testDataDir, 1500);
+    assert.equal(lockA.acquired, true, 'Process A acquires instance lock');
+    assert.ok(verifyInstanceLockActive(testDataDir), 'Process A verifies lock ownership as active');
+
+    // Step R: Faulty/split-brain Reclaimer R forcefully renames candidate over lockPath with tokenR
+    const tokenR = `reclaimer-token-${Date.now()}`;
+    const candidateR = path.join(testDataDir, `.instance-candidate-${tokenR}`);
     fs.writeFileSync(
-      infoPath,
+      candidateR,
+      JSON.stringify({
+        pid: process.pid,
+        processStartedAt: getProcessStartTime(process.pid),
+        token: tokenR,
+        leaseExpiresAt: new Date(Date.now() + 5000).toISOString(),
+        heartbeatAt: new Date().toISOString(),
+        ts: new Date().toISOString(),
+      }),
+      'utf-8'
+    );
+    fs.renameSync(candidateR, lockFilePath); // Atomic POSIX file rename: lockFilePath is NEVER empty/vacant!
+
+    // Step C: Contender C attempts to acquire via open(O_EXCL) while lockPath is held by R
+    const contenderCScript = `
+      import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
+      const res = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
+      if (!res.acquired) {
+        process.exit(77); // Contender C successfully rejected
+      }
+      process.exit(0);
+    `;
+    const contenderCRes = spawnSync(process.execPath, ['--import', './tests/register.mjs', '-e', contenderCScript], {
+      cwd: process.cwd(),
+      env: { ...process.env, AIBOSS_DATA_DIR: testDataDir },
+    });
+    assert.equal(contenderCRes.status, 77, 'Contender C must be rejected because lock file is NEVER vacant during rename');
+
+    // Step A lease check: Process A notices token mismatch after lease check and immediately stops writing
+    assert.equal(
+      verifyInstanceLockActive(testDataDir),
+      false,
+      'Process A must lose ownership when token on disk is replaced'
+    );
+    // withBudgetLock must immediately refuse writes from Process A
+    assert.throws(
+      () => withBudgetLock(() => {}),
+      /Instance lock token lost or replaced/,
+      'Process A must be barred from writing once lock token is lost'
+    );
+    // Conclusion for (i): Contender C was rejected, Process A stopped writing, at most one process (R) can write.
+
+    // 5. Hermes Condition (b) Vòng 8:
+    // (ii) R chết giữa chừng => không có khoá mồ côi chặn vĩnh viễn (lease hết + chủ chết => thu hồi được)
+    // Setup lockPath representing a crashed reclaimer R (dead PID 999999 and expired lease)
+    fs.writeFileSync(
+      lockFilePath,
       JSON.stringify({
         pid: 999999,
         processStartedAt: '1970-01-01T00:00:00.000Z',
-        token: 'dead-token-to-race',
+        token: 'crashed-reclaimer-token',
+        leaseExpiresAt: '1970-01-01T00:00:00.000Z',
+        heartbeatAt: '1970-01-01T00:00:00.000Z',
         ts: '1970-01-01T00:00:00.000Z',
       }),
       'utf-8'
     );
 
-    const origRenameSync = fs.renameSync;
-    try {
-      fs.renameSync = function (src, dst) {
-        origRenameSync.call(fs, src, dst);
-        if (typeof dst === 'string' && dst.includes('.instance-reclaim-')) {
-          const seizedInfoPath = path.join(dst, 'info.json');
-          if (fs.existsSync(seizedInfoPath)) {
-            fs.writeFileSync(
-              seizedInfoPath,
-              JSON.stringify({
-                pid: process.pid,
-                processStartedAt: getProcessStartTime(process.pid),
-                token: 'live-intruder-seized',
-                ts: new Date().toISOString(),
-              }),
-              'utf-8'
-            );
-          }
-        }
-      };
+    // New runner S arrives: must detect dead owner, atomically rename candidate, and succeed
+    const lockS = acquireInstanceLock(testDataDir);
+    assert.equal(lockS.acquired, true, 'Runner S must safely reclaim lock from crashed reclaimer (no orphaned lock)');
+    assert.equal(lockS.pid, process.pid);
 
-      const raceReclaimAttempt = acquireInstanceLock(testDataDir);
-      assert.equal(
-        raceReclaimAttempt.acquired,
-        false,
-        'Post-rename ownership mismatch must refuse startup and rollback (Condition b)'
-      );
-      assert.ok(
-        fs.existsSync(lockFilePath),
-        'Lock directory must be rolled back and preserved after ownership mismatch'
-      );
-      const restoredMeta = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
-      assert.equal(restoredMeta.token, 'live-intruder-seized');
-    } finally {
-      fs.renameSync = origRenameSync;
-      fs.rmSync(lockFilePath, { recursive: true, force: true });
-    }
+    // Clean up
+    releaseInstanceLock(testDataDir);
+    assert.equal(fs.existsSync(lockFilePath), false, 'Lock file must be removed upon final release');
 
-    console.log('  [PASS] Case 25: single-instance startup lock rejection, stale reclaimer guard, and atomic reclaim rollback verified (Condition b)');
+    console.log('  [PASS] Case 25: file-based atomic lock, contender exclusion during rename, lease cease-write, and crashed reclaimer recovery verified (Condition b)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)

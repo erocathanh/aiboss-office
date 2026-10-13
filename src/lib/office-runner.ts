@@ -38,6 +38,9 @@ import {
   getProcessStartTime,
   acquireInstanceLock,
   releaseInstanceLock,
+  verifyInstanceLockActive,
+  renewInstanceLock,
+  hasActiveInstanceToken,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -205,6 +208,16 @@ export async function tickRunner(): Promise<number> {
   try {
     if (!isRunnerEnabled()) {
       return 0;
+    }
+
+    // Hermes Condition (b): Verify lock ownership if runner holds active instance token
+    if (hasActiveInstanceToken()) {
+      if (!verifyInstanceLockActive()) {
+        console.warn('[office-runner] Lost instance lock ownership. Stopping runner immediately.');
+        stopOfficeRunner();
+        return 0;
+      }
+      renewInstanceLock();
     }
 
     // Periodically reconcile any pending costs from previous runs

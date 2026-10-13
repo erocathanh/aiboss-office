@@ -35,25 +35,36 @@ Tài liệu kỹ thuật giải pháp A-3 (Budget Hold & Daily Caps) cho hệ th
 
 4. **Quy trình Người Vận Hành Dọn Dẹp Thủ Công (Operator Manual Cleanup Procedure):**
    - Khi một worker bị treo hoặc unverified kéo dài và operator đã kiểm tra chắc chắn tiến trình worker không còn chạy trên máy chủ:
-     1. **Kiểm tra hold đang kẹt:** Đọc tệp chỉ mục `operations/data/budget/open-holds.json` hoặc gọi `GET /api/budget` để xác định `holdId`, `runId`, số tiền `amountUsd` đang bị giữ.
-     2. **Kiểm tra tiến trình trên OS:** Chạy lệnh `ps -ef | grep <pid>` để đảm bảo không còn tiến trình con nào của worker đang tiêu thụ tài nguyên.
-     3. **Ghi bản ghi giải phóng vào SST:** Để bảo toàn nguyên lý append-only của Single Source of Truth, operator thêm trực tiếp một bản ghi giải phóng (release record) vào cuối tệp log ngày hiện tại `operations/data/budget/<YYYY-MM-DD>.jsonl`:
-        ```json
-        {"type":"release","holdId":"<holdId>","runId":"<runId>","amountUsd":0,"reason":"operator_manual_cleanup","ts":"<ISO_TIMESTAMP>"}
+     1. **Dừng máy chủ:** Dừng tiến trình `office-runner` (hoặc server web) để đảm bảo không có giao dịch admission hay writer nào đang cạnh tranh.
+     2. **Kiểm tra hold đang kẹt:** Chạy lệnh kiểm tra qua đúng đường logic của hệ thống:
+        ```bash
+        node --import ./tests/register.mjs operations/scripts/budget-reconcile.mjs --check
         ```
-     4. **Cập nhật Checkpoint:** Ngay khi có giao dịch admission tiếp theo hoặc khi khởi động lại server, hệ thống sẽ replay dòng giải phóng trên từ SST và tự động xoá hold khỏi `open-holds.json`, phục hồi dung lượng ngân sách an toàn.
+        Lệnh sẽ replay SST và liệt kê các hold đang mở kèm `holdId`, `seatId`, `amountNanodollars`.
+     3. **Giải phóng hold bằng lệnh hợp lệ:** Chạy lệnh giải phóng đi qua đúng đường ghi có khoá của hệ thống (`releaseHold`), sử dụng giá trị `reason` hợp lệ thuộc enum hiện hành (`'expired'`, `'orphaned'`, hoặc `'failed_no_receipt'`):
+        ```bash
+        node --import ./tests/register.mjs operations/scripts/budget-reconcile.mjs --release <holdId> --reason expired
+        ```
+     4. **Xác nhận hold đã biến mất:** Chạy lại lệnh `--check`:
+        ```bash
+        node --import ./tests/register.mjs operations/scripts/budget-reconcile.mjs --check
+        ```
+        Xác nhận hold đã được gỡ bỏ khỏi checkpoint `open-holds.json` sau khi replay từ SST.
+     5. **Khởi động lại máy chủ:** Khởi động lại `office-runner`.
 
 ---
 
-## 3. Khóa Khởi Động Đơn Instance (Single-Instance Startup Lock)
+## 3. Khóa Khởi Động Đơn Instance Dạng Tệp Nguyên Tử (File-Based Atomic Instance Lock)
 
-- Để bảo vệ tính toàn vẹn dữ liệu trong môi trường một máy chủ, `startOfficeRunner()` tạo tệp khoá khởi động `.instance.lock` trong thư mục dữ liệu (`AIBOSS_DATA_DIR`).
+- Để bảo vệ tính toàn vẹn dữ liệu trong môi trường một máy chủ, hệ thống sử dụng tệp khoá khởi động `.instance.lock` (dạng **tệp duy nhất**, không dùng thư mục) trong thư mục dữ liệu (`AIBOSS_DATA_DIR`).
+- **Khởi tạo nguyên tử qua `open(O_EXCL)`:** Khi khởi động, tiến trình tạo tệp khoá bằng cờ `O_CREAT | O_EXCL`. Nếu tệp đã tồn tại, kernel trả về `EEXIST` ngay lập tức, ngăn chặn hoàn toàn việc ghi đè hoặc xung đột khởi động ban đầu.
 - **Fail-Closed khi không xác minh được thời gian tiến trình:** Khi tiến trình máy chủ khởi động, hệ thống truy vấn `processStartedAt` của chính nó từ hệ điều hành (`ps -p <pid> -o lstart=`). Nếu hệ điều hành không trả về được thời gian bắt đầu thực tế, lock sẽ từ chối cấp phát ngay lập tức (fail-closed) thay vì ước tính bằng `Date.now()`.
 - **Phát hiện xung đột & Từ chối máy chủ thứ hai:** Nếu một tiến trình máy chủ khác đang chạy trên cùng thư mục dữ liệu (`liveness === 'alive'`), tiến trình mới sẽ bị từ chối khởi động với thông báo lỗi rõ ràng:
   `Another office runner instance (PID <pid>) is already running on AIBOSS_DATA_DIR. Running multiple server instances against the same data directory is not supported.`
 - **Từ chối khởi động khi chủ khoá chưa xác minh (`unverified`):** Nếu khoá đang được giữ bởi một PID mà OS query trả về `unverified`, tiến trình mới từ chối khởi động để tránh xung đột dữ liệu với một máy chủ có thể đang chạy.
-- **Thu hồi khoá nguyên tử & Xác minh sở hữu sau Rename (Atomic Reclaim with Post-Rename Verification):**
-  - Khi khoá cũ thuộc về một PID đã chết (`liveness === 'dead'`), tiến trình mới di chuyển `.instance.lock` sang thư mục tạm `.instance-reclaim-<token>-...` bằng `fs.renameSync`.
-  - **Kiểm tra hậu rename (Post-rename ownership check):** Sau khi rename thành công, tiến trình đọc lại `info.json` từ thư mục tạm và đối chiếu `token`, `pid`, `processStartedAt` với thông tin dead owner đã phát hiện trước đó.
-  - **Phòng chống TOCTOU Race:** Nếu thông tin không khớp (ví dụ một tiến trình sống khác đã tranh chấp hoặc cập nhật khoá ngay trước thời điểm rename), tiến trình sẽ rollback bằng cách rename trả lại thư mục khoá về `.instance.lock` và từ chối khởi động (`acquired: false`), không xoá đè dữ liệu khoá của tiến trình sống.
-- **Giải phóng khoá nghiêm ngặt (Strict Token Release):** Khi dừng server, `releaseInstanceLock()` chỉ giải phóng khoá nếu `held.token === activeInstanceToken`. Không sử dụng số PID làm fallback lỏng lẻo và không `rmSync` mù quáng nếu khoá đã thuộc về một instance khác.
+- **Thu hồi nguyên tử qua POSIX `rename` đè tệp (Atomic Overwrite Reclaim):**
+  - Khi khoá cũ thuộc về một PID đã chết (`liveness === 'dead'`), tiến trình mới ghi metadata ứng viên vào tệp tạm `.instance-candidate-<token>` và thực hiện `fs.renameSync(candidateFile, lockPath)`.
+  - **Không bao giờ bỏ trống đường dẫn khoá:** Vì cả hai đối tượng là tệp, POSIX đảm bảo thao tác rename đè diễn ra nguyên tử trong đúng một syscall. Đường dẫn `.instance.lock` không bao giờ bị biến mất hay để trống, triệt tiêu hoàn toàn khoảng trống để một contender thứ ba chen vào qua `open(O_EXCL)`.
+  - **Xác minh hậu rename & Không cần rollback:** Sau khi rename, tiến trình đọc lại tệp `.instance.lock`. Nếu `token` khớp với token của mình, tiến trình đã chiếm khoá thành công. Nếu `token` khác mình (do một tiến trình thu hồi khác đã thắng sau), tiến trình từ chối khởi động (`acquired: false`) mà không cần rollback, vì tệp khoá đã thuộc về người chiến thắng hợp lệ.
+- **Nhịp Lease định kỳ & Dừng ghi tức thì:** Chủ đang chạy kiểm tra quyền sở hữu khoá theo nhịp lease (mỗi 2s). Nếu phát hiện token trên tệp khoá không còn là của mình, tiến trình lập tức dừng ghi và dừng runner ngay lập tức.
+- **Giải phóng khoá nghiêm ngặt (Strict Token Release):** Khi dừng server, `releaseInstanceLock()` chỉ xoá tệp khoá nếu `held.token === activeInstanceToken`. Không sử dụng số PID làm fallback lỏng lẻo và không `unlinkSync` mù quáng nếu khoá đã thuộc về một instance khác.

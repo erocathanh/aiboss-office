@@ -200,21 +200,38 @@ export interface InstanceLockMetadata {
   pid: number;
   processStartedAt: string;
   token: string;
+  leaseExpiresAt?: string;
+  heartbeatAt?: string;
   ts: string;
 }
 
+export const DEFAULT_INSTANCE_LEASE_MS = 2000;
+
 let activeInstanceToken: string | null = null;
+let isInstanceLockRevoked = false;
 
 export function getInstanceLockFilePath(dataDir?: string): string {
   const baseDir = dataDir || process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
   return path.join(baseDir, '.instance.lock');
 }
 
-export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?: number; token?: string } {
-  const lockDir = getInstanceLockFilePath(dataDir);
-  const baseDir = path.dirname(lockDir);
+export function acquireInstanceLock(
+  dataDir?: string,
+  leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
+): { acquired: boolean; pid?: number; token?: string } {
+  const lockPath = getInstanceLockFilePath(dataDir);
+  const baseDir = path.dirname(lockPath);
   if (!fs.existsSync(baseDir)) {
     fs.mkdirSync(baseDir, { recursive: true });
+  }
+
+  // Handle legacy directory from v06/v07 if present
+  if (fs.existsSync(lockPath) && fs.statSync(lockPath).isDirectory()) {
+    try {
+      fs.rmSync(lockPath, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 
   const currentPid = process.pid;
@@ -223,167 +240,180 @@ export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?
     // Hermes Condition (b): Cannot reliably verify own start time from OS -> fail closed!
     return { acquired: false };
   }
-  const token = `${currentPid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const now = Date.now();
+  const token = `${currentPid}-${now}-${Math.random().toString(36).slice(2)}`;
   const metadata: InstanceLockMetadata = {
     pid: currentPid,
     processStartedAt: currentStartTime,
     token,
-    ts: new Date().toISOString(),
+    leaseExpiresAt: new Date(now + leaseMs).toISOString(),
+    heartbeatAt: new Date(now).toISOString(),
+    ts: new Date(now).toISOString(),
   };
+  const metadataStr = JSON.stringify(metadata, null, 2);
 
-  // 1. Write metadata inside private tmp directory before atomic publication
-  const tmpDir = path.join(baseDir, `.instance-init-${token}`);
+  // 1. Attempt atomic file creation via open(O_EXCL): lock is a single file!
   try {
-    fs.mkdirSync(tmpDir, { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, 'info.json'), JSON.stringify(metadata, null, 2), 'utf-8');
-
-    // 2. Atomic publish via renameSync
-    try {
-      fs.renameSync(tmpDir, lockDir);
-      activeInstanceToken = token;
-      return { acquired: true, pid: currentPid, token };
-    } catch {
-      // lockDir already exists (EEXIST / ENOTEMPTY)
-      try {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
+    const fd = fs.openSync(
+      lockPath,
+      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      0o644
+    );
+    fs.writeSync(fd, metadataStr, 0, 'utf-8');
+    fs.closeSync(fd);
+    activeInstanceToken = token;
+    isInstanceLockRevoked = false;
+    return { acquired: true, pid: currentPid, token };
+  } catch (err: unknown) {
+    if ((err as { code?: string }).code !== 'EEXIST') {
+      throw err;
     }
-  } catch (err) {
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-    throw err;
   }
 
-  // 3. Inspect existing lock
+  // 2. Lock file already exists: inspect existing lock
   try {
     let held: InstanceLockMetadata | null = null;
-    const infoPath = path.join(lockDir, 'info.json');
-
-    if (fs.existsSync(infoPath)) {
-      held = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
-    } else if (fs.existsSync(lockDir) && !fs.statSync(lockDir).isDirectory()) {
-      held = JSON.parse(fs.readFileSync(lockDir, 'utf-8'));
+    try {
+      held = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    } catch {
+      // Corrupt or unparseable lock file: cannot safely determine owner -> fail closed
+      return { acquired: false };
     }
 
     if (held && typeof held.pid === 'number') {
       const liveness = checkProcessLiveness(held.pid, held.processStartedAt);
       if (liveness === 'alive') {
-        // Active instance is running
+        // Active instance is running and verified alive
         return { acquired: false, pid: held.pid };
       }
       if (liveness === 'unverified') {
-        // Hermes Condition (b): Chưa xác minh được chủ thì TỪ CHỐI khởi động, không xoá khoá!
+        // Hermes Condition (b): Chưa xác minh được chủ thì TỪ CHỐI khởi động, không xoá/cướp khoá!
         return { acquired: false, pid: held.pid };
       }
 
-      // liveness === 'dead': Attempt safe reclaim
-      const reclaimDir = path.join(baseDir, `.instance-reclaim-${held.token || 'stale'}-${token}`);
+      // liveness === 'dead':
+      // Hermes Condition (b) Vòng 8: Thu hồi bằng POSIX rename(candidateFile, lockPath).
+      // Rename đè nguyên tử trên tệp => đường khoá KHÔNG BAO GIỜ BỊ TRỐNG!
+      const candidateFile = path.join(baseDir, `.instance-candidate-${token}`);
       try {
-        fs.renameSync(lockDir, reclaimDir);
-      } catch {
-        // Another concurrent process won the reclaim race or renamed lockDir
-        return { acquired: false };
-      }
-
-      // Reclaim rename succeeded! Now CRITICAL (Hermes Condition b):
-      // Read back metadata in the seized directory and verify ownership against the inspected dead owner!
-      let seizedMetadata: InstanceLockMetadata | null = null;
-      try {
-        const seizedInfoPath = path.join(reclaimDir, 'info.json');
-        if (fs.existsSync(seizedInfoPath)) {
-          seizedMetadata = JSON.parse(fs.readFileSync(seizedInfoPath, 'utf-8'));
-        } else if (!fs.statSync(reclaimDir).isDirectory()) {
-          seizedMetadata = JSON.parse(fs.readFileSync(reclaimDir, 'utf-8'));
-        }
-      } catch {
-        /* parse error */
-      }
-
-      const isExpectedDeadOwner =
-        seizedMetadata &&
-        seizedMetadata.token === held.token &&
-        seizedMetadata.pid === held.pid &&
-        seizedMetadata.processStartedAt === held.processStartedAt;
-
-      if (!isExpectedDeadOwner) {
-        // OWNERSHIP MISMATCH! Another process took over or updated the lock while we were preparing to reclaim!
-        // We MUST NOT delete reclaimDir; restore it immediately back to lockDir and refuse startup!
-        try {
-          fs.renameSync(reclaimDir, lockDir);
-        } catch {
-          // If lockDir was already recreated, preserve reclaimDir
-        }
-        return { acquired: false, pid: seizedMetadata?.pid };
-      }
-
-      // Strictly verified seized dead owner: safe to remove old lock metadata
-      try {
-        fs.rmSync(reclaimDir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-
-      // Now attempt acquire
-      const reacquireTmp = path.join(baseDir, `.instance-init-${token}`);
-      try {
-        fs.mkdirSync(reacquireTmp, { recursive: true });
-        fs.writeFileSync(path.join(reacquireTmp, 'info.json'), JSON.stringify(metadata, null, 2), 'utf-8');
-        fs.renameSync(reacquireTmp, lockDir);
-        activeInstanceToken = token;
-        return { acquired: true, pid: currentPid, token };
+        fs.writeFileSync(candidateFile, metadataStr, 'utf-8');
+        fs.renameSync(candidateFile, lockPath);
       } catch {
         try {
-          fs.rmSync(reacquireTmp, { recursive: true, force: true });
+          fs.unlinkSync(candidateFile);
         } catch {
           /* ignore */
         }
         return { acquired: false };
       }
+
+      // 3. Post-rename Verification:
+      // ĐỌC LẠI tệp: token khác mình => có người thay sau mình => TỪ CHỐI khởi động (KHÔNG ROLLBACK!)
+      try {
+        const current: InstanceLockMetadata = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+        if (current && current.token === token) {
+          // WE WON THE RECLAIM!
+          activeInstanceToken = token;
+          isInstanceLockRevoked = false;
+          return { acquired: true, pid: currentPid, token };
+        } else {
+          return { acquired: false, pid: current?.pid };
+        }
+      } catch {
+        return { acquired: false };
+      }
     }
   } catch {
-    /* error reading or parsing existing lock */
+    /* error inspecting lock */
   }
 
   return { acquired: false };
 }
 
+export function hasActiveInstanceToken(): boolean {
+  return activeInstanceToken !== null;
+}
+
+export function verifyInstanceLockActive(dataDir?: string): boolean {
+  if (!activeInstanceToken || isInstanceLockRevoked) return false;
+  const lockPath = getInstanceLockFilePath(dataDir);
+  try {
+    if (!fs.existsSync(lockPath)) {
+      isInstanceLockRevoked = true;
+      return false;
+    }
+    const held: InstanceLockMetadata = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    if (held.token !== activeInstanceToken) {
+      isInstanceLockRevoked = true;
+      return false;
+    }
+    return true;
+  } catch {
+    isInstanceLockRevoked = true;
+    return false;
+  }
+}
+
+export function renewInstanceLock(
+  dataDir?: string,
+  leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
+): boolean {
+  if (!activeInstanceToken || isInstanceLockRevoked) return false;
+  const lockPath = getInstanceLockFilePath(dataDir);
+  const baseDir = path.dirname(lockPath);
+  try {
+    if (!fs.existsSync(lockPath)) {
+      isInstanceLockRevoked = true;
+      return false;
+    }
+    const held: InstanceLockMetadata = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    if (held.token !== activeInstanceToken) {
+      isInstanceLockRevoked = true;
+      return false;
+    }
+    const now = Date.now();
+    const updated: InstanceLockMetadata = {
+      ...held,
+      heartbeatAt: new Date(now).toISOString(),
+      leaseExpiresAt: new Date(now + leaseMs).toISOString(),
+    };
+    const tmpCandidate = path.join(baseDir, `.instance-renew-${activeInstanceToken}`);
+    fs.writeFileSync(tmpCandidate, JSON.stringify(updated, null, 2), 'utf-8');
+    fs.renameSync(tmpCandidate, lockPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function releaseInstanceLock(dataDir?: string): void {
-  const lockDir = getInstanceLockFilePath(dataDir);
-  const baseDir = path.dirname(lockDir);
+  const lockPath = getInstanceLockFilePath(dataDir);
   if (!activeInstanceToken) return;
 
   try {
-    if (!fs.existsSync(lockDir)) return;
+    if (!fs.existsSync(lockPath)) {
+      return;
+    }
 
     let held: InstanceLockMetadata | null = null;
-    const infoPath = path.join(lockDir, 'info.json');
-    if (fs.existsSync(infoPath)) {
-      held = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
-    } else if (!fs.statSync(lockDir).isDirectory()) {
-      held = JSON.parse(fs.readFileSync(lockDir, 'utf-8'));
+    if (!fs.statSync(lockPath).isDirectory()) {
+      held = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
     }
 
     // Hermes Condition (b): Strict ownership verification throughout release — only release if token matches activeInstanceToken!
     if (held && held.token === activeInstanceToken) {
-      const retireDir = path.join(
-        baseDir,
-        `.instance-retired-${held.token}-${Date.now()}`
-      );
       try {
-        fs.renameSync(lockDir, retireDir);
-        fs.rmSync(retireDir, { recursive: true, force: true });
+        fs.unlinkSync(lockPath);
       } catch {
         /* ignore */
       }
-      activeInstanceToken = null;
     }
   } catch {
     /* ignore release errors */
+  } finally {
+    activeInstanceToken = null;
+    isInstanceLockRevoked = false;
   }
 }
 
@@ -422,6 +452,11 @@ export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
     } finally {
       lockDepth--;
     }
+  }
+
+  // Hermes Condition (b): Running process verifies lock ownership before write transactions
+  if (activeInstanceToken && (isInstanceLockRevoked || !verifyInstanceLockActive())) {
+    throw new Error('[budget-ledger] Instance lock token lost or replaced. Stopping writes immediately.');
   }
 
   ensureBudgetDir();
