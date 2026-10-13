@@ -107,15 +107,47 @@ Theo dõi chi tiết usage token và chi phí theo từng model của mỗi lư�
 ## 3. Các API tra cứu & Vận hành
 
 ### 3.1. `GET /api/runs`
-- Tham số: `seat=<slug>`, `from=<ISO>`, `to=<ISO>`, `limit=50`.
-- Kết quả: Danh sách lượt chạy mới nhất, tự động gộp (merge) thông tin `wake` tương ứng.
+- **Tham số**: `seat=<slug>`, `from=<ISO>`, `to=<ISO>`, `limit=50` (1–500, mặc định 50).
+- **Kết quả**:
+  - `runs`: Danh sách lượt chạy mới nhất xếp theo `startedAt` giảm dần, tự động gộp (merge) thông tin `wake` tương ứng.
+  - `total`: Số lượng runs trả về trong trang.
+  - `partial`: Cờ boolean cho biết truy vấn có dừng sớm do đạt `limit` hay đã quét toàn bộ phạm vi lịch sử.
+  - `scannedFrom`, `scannedTo`: Phạm vi các tệp ngày UTC thực tế đã được mở và quét.
+- **Bảo mật & Chuẩn hoá**: Mọi khoá `idempotencyKey` kế thừa bắt đầu bằng `custom:` đều được băm thành mã SHA-256 hex 32 ký tự trước khi xuất ra API, tuyệt đối không lộ nội dung chữ thô.
+- **Đệm phục hồi xuyên ngày (3-day buffer)**: Khi truy vấn có `from`/`to`, hệ thống quét tệp trong khoảng `[from - 3 ngày, to + 3 ngày]` để đón các sự kiện hoàn tất hoặc phục hồi muộn (orphaned recovery) nếu máy chủ tạm dừng nhiều ngày.
 
 ### 3.2. `GET /api/wakes/<wakeId>`
-- Kiểm tra trạng thái của một yêu cầu đánh thức. Trả về `200` kèm `{ wake: { ... } }` nếu tìm thấy, `404` (`{ error: "Wake not found", wakeId }`) nếu không tồn tại.
+- Kiểm tra trạng thái của một yêu cầu đánh thức. Trả về `200` kèm `{ wake: { ... } }` nếu tìm thấy, `404` (`{ error: "Wake not found", wakeId }`) nếu không tồn tại. Mọi khoá idempotency đều được chuẩn hoá sạch.
 
 ### 3.3. `GET /api/costs`
-- Tham số: `seat=<slug>`, `from=<ISO>`, `to=<ISO>`.
-- Kết quả: Tổng hợp token, chi phí nanodollar, định dạng USD theo ghế và theo ngày, số lượt unpriced.
+- **Tham số**: `seat=<slug>`, `from=<ISO>`, `to=<ISO>`, `limit=50`.
+- **Kết quả**:
+  - `summary`: Tổng hợp token, chi phí nanodollar, định dạng USD theo chuẩn Paperclip.
+  - `bySeat`: Thống kê chi tiết theo từng ghế.
+  - `byDay`: Thống kê chi tiết theo từng ngày UTC.
+  - `records`: Danh sách chi tiết các biên lai chi phí mới nhất (được cắt theo `limit`).
+  - `partial`: Cờ boolean cho biết bảng tổng hợp được tính trên cửa sổ quét dừng sớm (khi không truyền `from`) hay tính trên toàn bộ kỳ được chỉ định.
+  - `scannedFrom`, `scannedTo`: Khoảng ngày thực tế nằm trong tập tính toán.
+
+---
+
+## 4. Cơ chế bù chi phí chờ (Pending Cost Reconciliation — Finding B)
+
+Khi một lượt chạy hoàn tất nhưng việc ghi biên lai vào `costs-ledger` gặp lỗi (do đĩa đầy, lỗi I/O tạm thời):
+1. **Lưu vết bền vững**: Lượt chạy được đánh dấu `costStatus: 'pending'` và lưu kèm dữ liệu thô `rawUsage` vào `RunRecord` trong sổ `runs`.
+2. **Tiến trình bù tự động (Consumer)**:
+   - Được kích hoạt tự động ở mỗi nhịp `tickRunner()` của máy chủ và khi khởi động (`recoverOrphanedRuns()`).
+   - Hàm `reconcilePendingCosts()` quét các run có `costStatus === 'pending'`, trích xuất lại usage từ `rawUsage`, ghi nhận vào `costs-ledger`, và chuyển trạng thái thành `costStatus: 'recorded'`.
+   - Nếu run không có dữ liệu token để tính giá, hệ thống ghi bản ghi unpriced và chuyển thành `costStatus: 'unpriced'`.
+3. **Tính luỹ thừa (Idempotency)**: Bộ bù kiểm tra khoá `(runId, model)` trước khi ghi, đảm bảo không bao giờ sinh ra dòng chi phí trùng lặp.
+
+---
+
+## 5. An toàn hàng đợi & Thu hồi mẩu (traVeHangDoi Safety — G3)
+
+- Hàm `traVeHangDoi(ma: string)` bảo vệ bất biến trạng thái: **CHỈ** cho phép thu hồi mẩu đang ở trạng thái `dang_giu` hoặc `da_giao` về lại `cho`.
+- Tuyệt đối **KHÔNG** hồi sinh các mẩu đã bị hủy (`trang_thai: 'bo'`) hoặc mẩu đang chờ (`cho`).
+- Khi thu hồi, các metadata giữ chỗ (`giu_boi`, `giu_han`, `xu_luc`) được xoá sạch và đồng bộ lại `wake` về `queued`.
 
 ---
 

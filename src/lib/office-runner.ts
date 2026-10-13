@@ -19,6 +19,7 @@ import {
   updateRun,
   updateWake,
   recoverOrphanedRuns,
+  reconcilePendingCosts,
   type RunErrorKind,
 } from '@/lib/runs-ledger';
 import { extractUsageReceipts, type StreamJsonEvent } from '@/lib/usage-receipt';
@@ -177,6 +178,13 @@ export async function tickRunner(): Promise<number> {
   try {
     if (!isRunnerEnabled()) {
       return 0;
+    }
+
+    // Periodically reconcile any pending costs from previous runs
+    try {
+      reconcilePendingCosts();
+    } catch {
+      /* ignore */
     }
 
     const config = readRunnerConfig();
@@ -358,6 +366,7 @@ export async function tickRunner(): Promise<number> {
 
           // 1. Process cost receipts FIRST (Finding B: record costs before finished, durable costStatus)
           let costStatus: 'recorded' | 'pending' | 'unpriced' = 'pending';
+          let pendingRawUsage: unknown = undefined;
           if (result.rawResult) {
             try {
               const receipts = extractUsageReceipts([result.rawResult as StreamJsonEvent]);
@@ -383,6 +392,7 @@ export async function tickRunner(): Promise<number> {
             } catch (err: unknown) {
               console.error(`[office-runner] Failed to record cost receipts for run ${runId}:`, err);
               costStatus = 'pending';
+              pendingRawUsage = result.rawResult;
             }
           } else {
             try {
@@ -446,6 +456,7 @@ export async function tickRunner(): Promise<number> {
             exitCode: finalStatus === 'finished' ? 0 : exitCode,
             errorKind,
             costStatus,
+            ...(pendingRawUsage !== undefined ? { rawUsage: pendingRawUsage } : {}),
             sessionId: result.maPhien ?? undefined,
             pid: result.pid_de_hien_thi ?? undefined,
           });
@@ -465,6 +476,7 @@ export async function tickRunner(): Promise<number> {
           }
         } catch {
           const endIso = new Date().toISOString();
+          let fallbackCostStatus: 'unpriced' | 'pending' = 'unpriced';
           try {
             recordCostReceipt({
               ts: endIso,
@@ -480,7 +492,7 @@ export async function tickRunner(): Promise<number> {
               source: 'claude-stream-json',
             });
           } catch {
-            /* ignore fallback unpriced marker */
+            fallbackCostStatus = 'pending';
           }
           logRunnerEvent({
             timestamp: endIso,
@@ -498,7 +510,7 @@ export async function tickRunner(): Promise<number> {
             finishedAt: endIso,
             exitCode: null,
             errorKind: 'result_error',
-            costStatus: 'unpriced',
+            costStatus: fallbackCostStatus,
           });
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);
@@ -538,6 +550,7 @@ export function startOfficeRunner(): boolean {
   runnerTimer = setInterval(() => {
     void tickRunner().catch(() => {});
   }, intervalMs);
+  runnerTimer.unref?.();
 
   return true;
 }

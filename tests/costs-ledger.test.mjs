@@ -152,13 +152,24 @@ try {
     assert.equal(aggLimit1.records.length, 1);
     assert.equal(aggLimit1.records[0].runId, 'run-day-3', 'Must fetch newest record from day 3 first');
     assert.equal(aggLimit1.summary.totalRuns, 1);
+    assert.equal(aggLimit1.partial, true, 'Early stopping without from must flag partial: true');
+    assert.ok(aggLimit1.scannedTo, 'scannedTo must be defined');
+    assert.ok(aggLimit1.scannedFrom, 'scannedFrom must be defined');
 
     // Query limit=2: must return newest two records (day 3 and day 2)
     const aggLimit2 = getCostsAggregation({ seat: 'reverse-seat', limit: 2 });
     assert.equal(aggLimit2.records.length, 2);
     assert.equal(aggLimit2.records[0].runId, 'run-day-3');
     assert.equal(aggLimit2.records[1].runId, 'run-day-2');
-    console.log('  [PASS] Case 7: reverse scan with limit accumulates newest records and stops early');
+
+    // Full range query: must flag partial: false
+    const fullAgg = getCostsAggregation({
+      seat: 'reverse-seat',
+      from: '2026-10-01T00:00:00.000Z',
+      to: '2026-10-03T23:59:59.999Z',
+    });
+    assert.equal(fullAgg.partial, false, 'Full range query must flag partial: false');
+    console.log('  [PASS] Case 7: reverse scan with limit accumulates newest records, tracks partial, and stops early');
   }
 
   // 8. Missing directory handling returns clean empty aggregation

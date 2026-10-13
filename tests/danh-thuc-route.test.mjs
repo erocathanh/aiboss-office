@@ -13,13 +13,16 @@ process.env.AIBOSS_DATA_DIR = testDataDir;
 
 import { GET, POST } from '../src/app/api/danh-thuc/route.ts';
 import { GET as getWakeRoute } from '../src/app/api/wakes/[wakeId]/route.ts';
-import { getWake } from '../src/lib/runs-ledger.ts';
+import { GET as getRunsRoute } from '../src/app/api/runs/route.ts';
+import { getWake, recordWake, recordRun } from '../src/lib/runs-ledger.ts';
 import { datO } from '../src/lib/kho-phien.ts';
+import { stopOfficeRunner, getOfficeRunnerStatus } from '../src/lib/office-runner.ts';
+import { traVeHangDoi, boYeuCau, xemSo } from '../src/lib/kho-danh-thuc.ts';
 
 console.log('--- Testing /api/danh-thuc and /api/wakes/[wakeId] routes ---');
 
 try {
-  // Case 1: GET /api/danh-thuc returns status 200 with queue inspection shape
+  // Case 1: GET /api/danh-thuc returns status 200 with queue inspection shape and calls batMotLan
   {
     const res = await GET();
     assert.equal(res.status, 200, 'GET /api/danh-thuc must return HTTP 200');
@@ -28,7 +31,12 @@ try {
     assert.ok(typeof body.con_lai === 'number', 'con_lai must be a number');
     assert.ok(typeof body.tran_moi_phut === 'number', 'tran_moi_phut must be a number');
     assert.ok(typeof body.han_yeu_cau_ms === 'number', 'han_yeu_cau_ms must be a number');
-    console.log('  [PASS] Case 1: GET /api/danh-thuc export restored and returns queue status');
+
+    // batMotLan executes on setImmediate
+    await new Promise((r) => setImmediate(r));
+    const runnerStatus = getOfficeRunnerStatus();
+    assert.equal(runnerStatus.running, true, 'GET /api/danh-thuc must trigger runner startup via batMotLan');
+    console.log('  [PASS] Case 1: GET /api/danh-thuc export restored and triggers batMotLan runner startup');
   }
 
   // Case 2: POST /api/danh-thuc with unallocated seat returns HTTP 404 (not 409)
@@ -87,8 +95,11 @@ try {
     console.log('  [PASS] Case 3: valid wake queued with 32-char hash idempotencyKey and queueId recorded');
   }
 
-  // Case 4: Semantic duplicate within 60s preserves original ma_yeu_cau
+  // Case 4: Semantic duplicate within 60s preserves original ma_yeu_cau and ma_o of old item even if seat moved
   {
+    // Simulate seat moving to a different slot in UI during retry window
+    datO('o-2', testSeat, null);
+
     const reqDup = new NextRequest('http://127.0.0.1:4330/api/danh-thuc', {
       method: 'POST',
       body: JSON.stringify({
@@ -106,11 +117,16 @@ try {
     assert.equal(bodyDup.status, 'skipped');
     assert.equal(bodyDup.reason, 'idempotent_duplicate_within_60s');
     assert.equal(
+      bodyDup.ma_o,
+      'o-1',
+      'Duplicate wake must return original item ma_o (o-1), NOT current slot (o-2)'
+    );
+    assert.equal(
       bodyDup.ma_yeu_cau,
       initialQueueId,
       'Duplicate wake must return real queueId, not wakeId fallback'
     );
-    console.log('  [PASS] Case 4: semantic retry within 60s returns status: skipped and real ma_yeu_cau');
+    console.log('  [PASS] Case 4: semantic retry within 60s returns status: skipped, original ma_o, and real ma_yeu_cau');
   }
 
   // Case 5: Custom key duplicate (caller-provided khoa) stores hash, returns original ma_yeu_cau
@@ -179,12 +195,61 @@ try {
     console.log('  [PASS] Case 6: GET /api/wakes/[wakeId] returns 200 for existing wake and 404 for missing');
   }
 
+  // Case 7: traVeHangDoi does not resurrect discarded ('bo') or already pending ('cho') items
+  {
+    const discardedId = initialQueueId;
+    boYeuCau(discardedId, 'test_cancelled');
+    const queueAfterBo = xemSo().hang_doi.find((x) => x.ma === discardedId);
+    assert.equal(queueAfterBo?.trang_thai, 'bo');
+
+    // Attempt to return 'bo' item to queue
+    const reverted = traVeHangDoi(discardedId);
+    assert.equal(reverted, false, 'traVeHangDoi must return false when attempting to revert item in bo status');
+
+    const queueFinal = xemSo().hang_doi.find((x) => x.ma === discardedId);
+    assert.equal(queueFinal?.trang_thai, 'bo', 'Item status must remain bo');
+    console.log('  [PASS] Case 7: traVeHangDoi safely refuses to resurrect discarded (bo) items');
+  }
+
+  // Case 8: Embedded wake in /api/runs sanitizes legacy custom: keys
+  {
+    const legacyWakeId = 'wake-legacy-custom-test';
+    const legacyRunId = 'run-legacy-custom-test';
+    recordWake({
+      wakeId: legacyWakeId,
+      seatId: 'test-seat',
+      source: 'app',
+      requestedAt: new Date().toISOString(),
+      idempotencyKey: 'custom:secret-user-prompt-data',
+      status: 'claimed',
+      runId: legacyRunId,
+    });
+    recordRun({
+      runId: legacyRunId,
+      wakeId: legacyWakeId,
+      seatId: 'test-seat',
+      startedAt: new Date().toISOString(),
+      status: 'finished',
+    });
+
+    const runsReq = new NextRequest('http://127.0.0.1:4330/api/runs?seat=test-seat');
+    const runsRes = await getRunsRoute(runsReq);
+    assert.equal(runsRes.status, 200);
+    const runsBody = await runsRes.json();
+    const foundRun = runsBody.runs.find((r) => r.runId === legacyRunId);
+    assert.ok(foundRun);
+    assert.ok(foundRun.wake);
+    assert.match(foundRun.wake.idempotencyKey, /^[a-f0-9]{32}$/, 'Embedded wake idempotencyKey must be 32-char hex hash');
+    assert.ok(!foundRun.wake.idempotencyKey.includes('custom:'), 'Must never leak custom: prefix');
+    console.log('  [PASS] Case 8: embedded wake in /api/runs sanitizes legacy custom: key to 32-char SHA-256');
+  }
+
   console.log('>>> ALL DANH-THUC ROUTE TEST CASES PASSED <<<');
 } finally {
+  stopOfficeRunner();
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true });
   } catch {
     /* ignore cleanup */
   }
-  process.exit(0);
 }

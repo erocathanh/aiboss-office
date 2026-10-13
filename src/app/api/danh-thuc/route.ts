@@ -19,8 +19,10 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/danh-thuc
  * Returns queue overview and timeout configuration for inspection and health checking.
+ * Triggers background runner activation via batMotLan on server startup / health check.
  */
 export async function GET() {
+  batMotLan();
   return Response.json({ ...xemSo(), han_yeu_cau_ms: HAN_YEU_CAU_MS });
 }
 
@@ -108,8 +110,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const soHienTai = layTatCa();
-    const maOHienTai = Object.keys(soHienTai).sort().find((k) => soHienTai[k]?.ma_nhan_su === maNhanSu) ?? null;
     const existingQueueItem = xemSo().hang_doi.find(
       (y) => y.ma_nhan_su === maNhanSu && (y.wakeId === recentWake.wakeId || y.ma === recentWake.queueId)
     );
@@ -117,9 +117,9 @@ export async function POST(req: NextRequest) {
     return Response.json({
       xong: true,
       trung_khoa: true,
-      ma_o: maOHienTai,
+      ma_o: existingQueueItem?.ma_o ?? null,
       ma_nhan_su: maNhanSu,
-      ma_yeu_cau: existingQueueItem?.ma ?? recentWake.queueId ?? recentWake.wakeId,
+      ma_yeu_cau: existingQueueItem?.ma ?? recentWake.queueId ?? null,
       wakeId: duplicateWakeId,
       existingWakeId: recentWake.wakeId,
       status: 'skipped',
@@ -257,8 +257,8 @@ export async function POST(req: NextRequest) {
   // Record queueId in wake ledger for exact duplicate retry tracking
   try {
     updateWake(wakeRecord.wakeId, { queueId: yeuCau.ma });
-  } catch {
-    /* ignore */
+  } catch (err: unknown) {
+    console.error('[danh-thuc] Failed to record queueId in wake ledger:', err);
   }
 
   return Response.json({

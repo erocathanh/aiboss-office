@@ -58,6 +58,9 @@ export interface CostsAggregation {
   bySeat: Record<string, SeatCostSummary>;
   byDay: Record<string, DayCostSummary>;
   records: CostRecord[];
+  partial: boolean;
+  scannedFrom?: string;
+  scannedTo?: string;
 }
 
 export function getCostsDir(): string {
@@ -144,6 +147,22 @@ export function readAllCostRecords(fileFilter?: (fileName: string) => boolean): 
 export function isCostRecorded(runId: string, model: string): boolean {
   const records = readAllCostRecords();
   return records.some((r) => r.runId === runId && r.model === model);
+}
+
+/**
+ * Check if any cost receipt exists for runId.
+ */
+export function hasCostReceiptsForRun(runId: string): boolean {
+  const records = readAllCostRecords();
+  return records.some((r) => r.runId === runId);
+}
+
+/**
+ * Check if priced cost receipt exists for runId.
+ */
+export function hasPricedCostReceiptsForRun(runId: string): boolean {
+  const records = readAllCostRecords();
+  return records.some((r) => r.runId === runId && r.priced);
 }
 
 /**
@@ -244,13 +263,13 @@ export function getCostsAggregation(options?: {
   let fromUtcDateStr: string | undefined = undefined;
   if (options?.from) {
     const fromDate = new Date(options.from);
-    fromDate.setUTCDate(fromDate.getUTCDate() - 1);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 3); // 3-day recovery buffer
     fromUtcDateStr = fromDate.toISOString().split('T')[0];
   }
   let toUtcDateStr: string | undefined = undefined;
   if (options?.to) {
     const toDate = new Date(options.to);
-    toDate.setUTCDate(toDate.getUTCDate() + 1);
+    toDate.setUTCDate(toDate.getUTCDate() + 3); // 3-day recovery buffer
     toUtcDateStr = toDate.toISOString().split('T')[0];
   }
 
@@ -261,6 +280,7 @@ export function getCostsAggregation(options?: {
       bySeat: {},
       byDay: {},
       records: [],
+      partial: false,
     };
   }
 
@@ -271,12 +291,15 @@ export function getCostsAggregation(options?: {
     .reverse(); // Newest dates first
 
   const uniqueRecordsMap = new Map<string, CostRecord>();
+  let stoppedEarly = false;
+  const scannedFileDates: string[] = [];
 
   for (const file of allFiles) {
     const fileDateStr = file.replace('.jsonl', '');
     if (toUtcDateStr && fileDateStr > toUtcDateStr) continue;
     if (fromUtcDateStr && fileDateStr < fromUtcDateStr) break;
 
+    scannedFileDates.push(fileDateStr);
     const fileRecords = readCostFile(path.join(costsDir, file));
     // Sort descending by timestamp within the file
     fileRecords.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
@@ -294,6 +317,7 @@ export function getCostsAggregation(options?: {
     }
 
     if (uniqueRecordsMap.size >= limit && !options?.from) {
+      stoppedEarly = true;
       break;
     }
   }
@@ -424,11 +448,17 @@ export function getCostsAggregation(options?: {
     };
   }
 
+  const scannedTo = scannedFileDates.length > 0 ? scannedFileDates[0] : undefined;
+  const scannedFrom = scannedFileDates.length > 0 ? scannedFileDates[scannedFileDates.length - 1] : undefined;
+
   return {
     summary,
     bySeat,
     byDay,
     records: records.slice(0, limit),
+    partial: stoppedEarly,
+    scannedFrom,
+    scannedTo,
   };
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuns } from '@/lib/runs-ledger';
+import { getRunsWithMetadata } from '@/lib/runs-ledger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,11 +48,14 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const runs = getRuns({ seat, from, to, limit });
+    const result = getRunsWithMetadata({ seat, from, to, limit });
 
     return NextResponse.json({
-      runs,
-      total: runs.length,
+      runs: result.runs,
+      total: result.total,
+      partial: result.partial,
+      scannedFrom: result.scannedFrom,
+      scannedTo: result.scannedTo,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

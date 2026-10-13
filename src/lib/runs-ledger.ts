@@ -14,6 +14,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { extractUsageReceipts, type StreamJsonEvent } from '@/lib/usage-receipt';
+import {
+  hasPricedCostReceiptsForRun,
+  recordCostReceipts,
+  recordCostReceipt,
+} from '@/lib/costs-ledger';
 
 export type RunErrorKind =
   | 'sigkill'
@@ -53,6 +59,7 @@ export interface RunRecord {
   attempt?: number;
   pid?: number;
   costStatus?: 'recorded' | 'pending' | 'unpriced';
+  rawUsage?: unknown;
   updatedAt?: string;
 }
 
@@ -102,6 +109,22 @@ export function computeIdempotencyKey(seatId: string, content: string): string {
 export function computeCustomIdempotencyKey(seatId: string, khoa: string): string {
   const raw = `custom::${seatId.trim()}::${khoa.trim()}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
+}
+
+/**
+ * Sanitize a wake record for external exposure.
+ * Ensures any legacy custom: plaintext key is converted to a 32-char SHA-256 hash.
+ */
+export function sanitizeWake(wake: WakeRecord): WakeRecord {
+  if (!wake) return wake;
+  let key = wake.idempotencyKey;
+  if (key && key.startsWith('custom:')) {
+    key = computeCustomIdempotencyKey(wake.seatId, key.slice(7));
+  }
+  return {
+    ...wake,
+    idempotencyKey: key,
+  };
 }
 
 function getLogPathForDate(isoDateString?: string): string {
@@ -282,7 +305,7 @@ export function getWake(wakeId: string): WakeRecord | null {
       }
     }
   }
-  return found;
+  return found ? sanitizeWake(found) : null;
 }
 
 /**
@@ -307,40 +330,49 @@ export interface MergedRunInfo extends RunRecord {
   wake?: WakeRecord;
 }
 
+export interface GetRunsResult {
+  runs: MergedRunInfo[];
+  total: number;
+  partial: boolean;
+  scannedFrom?: string;
+  scannedTo?: string;
+}
+
 /**
- * Query runs merged with corresponding wake data.
+ * Query runs merged with corresponding wake data and query metadata.
  * Features:
  * - Scans in reverse chronological order (newest dates first).
  * - Folds multi-day runs preserving the latest event by timestamp (never overwrites newer with older).
- * - Correctly normalizes ISO date bounds to UTC dates for file partitioning.
- * - Includes next-day updates for runs started on the `to` date boundary.
- * - Stops early once limit matching runs have been gathered.
+ * - Correctly normalizes ISO date bounds to UTC dates for file partitioning with 3-day recovery buffer.
+ * - Sanitizes legacy custom: keys in embedded wakes to 32-char SHA-256 hashes.
+ * - Safely stops early once limit matching runs have been gathered without violating startedAt ordering.
  */
-export function getRuns(options?: {
+export function getRunsWithMetadata(options?: {
   seat?: string;
   from?: string;
   to?: string;
   limit?: number;
-}): MergedRunInfo[] {
+}): GetRunsResult {
   const limit = Math.max(1, Math.min(500, options?.limit ?? 50));
   const runsDir = getRunsDir();
-  if (!fs.existsSync(runsDir)) return [];
+  if (!fs.existsSync(runsDir)) {
+    return { runs: [], total: 0, partial: false };
+  }
 
   const fromTime = options?.from ? new Date(options.from).getTime() : undefined;
   const toTime = options?.to ? new Date(options.to).getTime() : undefined;
 
-  // Align dates to UTC YYYY-MM-DD
+  // Align dates to UTC YYYY-MM-DD with 3-day recovery buffer
   let fromUtcDateStr: string | undefined = undefined;
   if (options?.from) {
     const fromDate = new Date(options.from);
-    fromDate.setUTCDate(fromDate.getUTCDate() - 1);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 3);
     fromUtcDateStr = fromDate.toISOString().split('T')[0];
   }
   let toUtcDateStr: string | undefined = undefined;
   if (options?.to) {
-    // Include next UTC day to catch finish/recovery events spilling past UTC midnight
     const toDate = new Date(options.to);
-    toDate.setUTCDate(toDate.getUTCDate() + 1);
+    toDate.setUTCDate(toDate.getUTCDate() + 3);
     toUtcDateStr = toDate.toISOString().split('T')[0];
   }
 
@@ -352,12 +384,16 @@ export function getRuns(options?: {
 
   const wakesById = new Map<string, WakeRecord>();
   const runsById = new Map<string, RunRecord>();
+  let stoppedEarly = false;
+  const scannedFileDates: string[] = [];
 
-  for (const file of allFiles) {
+  for (let i = 0; i < allFiles.length; i++) {
+    const file = allFiles[i];
     const fileDateStr = file.replace('.jsonl', '');
     if (toUtcDateStr && fileDateStr > toUtcDateStr) continue;
     if (fromUtcDateStr && fileDateStr < fromUtcDateStr) break;
 
+    scannedFileDates.push(fileDateStr);
     const records = readRunFiles((f) => f === file);
     for (const r of records) {
       if (r.type === 'wake') {
@@ -391,17 +427,30 @@ export function getRuns(options?: {
       }
     }
 
-    // Check how many valid matching runs we have accumulated
-    const currentMatchingRuns = Array.from(runsById.values()).filter((r) => {
-      if (options?.seat && r.seatId !== options.seat) return false;
-      const started = new Date(r.startedAt).getTime();
-      if (fromTime !== undefined && started < fromTime) return false;
-      if (toTime !== undefined && started > toTime) return false;
-      return true;
-    });
+    // Check if we can safely stop early based on startedAt ordering
+    if (!options?.from) {
+      const candidateMatchingRuns = Array.from(runsById.values()).filter((r) => {
+        if (options?.seat && r.seatId !== options.seat) return false;
+        const started = new Date(r.startedAt).getTime();
+        if (fromTime !== undefined && started < fromTime) return false;
+        if (toTime !== undefined && started > toTime) return false;
+        return true;
+      });
+      candidateMatchingRuns.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
-    if (currentMatchingRuns.length >= limit && !options?.from) {
-      break;
+      if (candidateMatchingRuns.length >= limit) {
+        const nextFile = allFiles[i + 1];
+        if (!nextFile) {
+          break;
+        }
+        const nextFileDateStr = nextFile.replace('.jsonl', '');
+        const nextFileEndMs = new Date(nextFileDateStr + 'T23:59:59.999Z').getTime();
+        const kthStartedAtMs = new Date(candidateMatchingRuns[limit - 1].startedAt).getTime();
+        if (kthStartedAtMs > nextFileEndMs) {
+          stoppedEarly = true;
+          break;
+        }
+      }
     }
   }
 
@@ -420,13 +469,38 @@ export function getRuns(options?: {
   // Sort descending by startedAt
   runs.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
-  return runs.slice(0, limit).map((run) => {
-    const wake = run.wakeId ? wakesById.get(run.wakeId) : undefined;
+  const slicedRuns = runs.slice(0, limit).map((run) => {
+    const rawWake = run.wakeId ? wakesById.get(run.wakeId) : undefined;
+    const wake = rawWake ? sanitizeWake(rawWake) : undefined;
     return {
       ...run,
       ...(wake ? { wake } : {}),
     };
   });
+
+  const scannedTo = scannedFileDates.length > 0 ? scannedFileDates[0] : undefined;
+  const scannedFrom = scannedFileDates.length > 0 ? scannedFileDates[scannedFileDates.length - 1] : undefined;
+
+  return {
+    runs: slicedRuns,
+    total: slicedRuns.length,
+    partial: stoppedEarly,
+    scannedFrom,
+    scannedTo,
+  };
+}
+
+/**
+ * Query runs merged with corresponding wake data.
+ * Backwards compatible helper returning MergedRunInfo[] array.
+ */
+export function getRuns(options?: {
+  seat?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}): MergedRunInfo[] {
+  return getRunsWithMetadata(options).runs;
 }
 
 /**
@@ -444,10 +518,107 @@ export function isProcessAlive(pid: number | undefined | null): boolean {
 }
 
 /**
- * On runner startup: recover orphaned running runs and expire old queued wakes.
+ * Reconcile runs with costStatus === 'pending'.
+ * Scans all runs, attempts to record pending costs into costs-ledger using stored rawUsage,
+ * and updates run's costStatus to 'recorded' or 'unpriced'.
+ * Returns count of reconciled runs.
+ */
+export function reconcilePendingCosts(): number {
+  const records = readRunFiles();
+  const runsById = new Map<string, RunRecord>();
+
+  for (const r of records) {
+    if (r.type === 'run') {
+      const existing = runsById.get(r.runId);
+      if (!existing || getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
+        runsById.set(r.runId, { ...existing, ...r });
+      }
+    }
+  }
+
+  let reconciledCount = 0;
+
+  for (const run of runsById.values()) {
+    // Only reconcile finished/failed runs, not runs currently in-flight
+    if (run.status === 'running') continue;
+
+    if (run.costStatus === 'pending') {
+      // 1. Check if priced receipts already exist in costs-ledger
+      if (hasPricedCostReceiptsForRun(run.runId)) {
+        updateRun(run.runId, { costStatus: 'recorded', rawUsage: undefined });
+        reconciledCount++;
+        continue;
+      }
+
+      // 2. If rawUsage exists, attempt to extract and record receipts
+      const timestampIso = run.finishedAt || run.updatedAt || new Date().toISOString();
+      if (run.rawUsage) {
+        try {
+          const receipts = extractUsageReceipts([run.rawUsage as StreamJsonEvent]);
+          if (receipts.length > 0) {
+            recordCostReceipts(run.seatId, run.runId, receipts, timestampIso);
+            updateRun(run.runId, { costStatus: 'recorded', rawUsage: undefined });
+            reconciledCount++;
+          } else {
+            recordCostReceipt({
+              ts: timestampIso,
+              seatId: run.seatId,
+              runId: run.runId,
+              model: 'unknown',
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              cacheCreationTokens: 0,
+              outputTokens: 0,
+              costNanodollars: null,
+              priced: false,
+              source: 'claude-stream-json',
+            });
+            updateRun(run.runId, { costStatus: 'unpriced', rawUsage: undefined });
+            reconciledCount++;
+          }
+        } catch (err: unknown) {
+          console.error(`[runs-ledger] Reconcile cost failed for run ${run.runId}:`, err);
+        }
+      } else {
+        // No rawUsage available to price — fallback to unpriced
+        try {
+          recordCostReceipt({
+            ts: timestampIso,
+            seatId: run.seatId,
+            runId: run.runId,
+            model: 'unknown',
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            cacheCreationTokens: 0,
+            outputTokens: 0,
+            costNanodollars: null,
+            priced: false,
+            source: 'claude-stream-json',
+          });
+          updateRun(run.runId, { costStatus: 'unpriced' });
+          reconciledCount++;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  return reconciledCount;
+}
+
+/**
+ * On runner startup: recover orphaned running runs, expire old queued wakes, and reconcile pending costs.
  * Only marks running runs as orphaned if their PID is no longer alive.
  */
 export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number; expiredWakes: number } {
+  // Reconcile pending costs before evaluating orphans
+  try {
+    reconcilePendingCosts();
+  } catch {
+    /* ignore */
+  }
+
   const records = readRunFiles();
 
   const wakesById = new Map<string, WakeRecord>();
@@ -476,11 +647,31 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
       const alive = isProcessAlive(run.pid);
       if (!alive) {
         const orphanTime = new Date(nowMs).toISOString();
+        const hasPriced = hasPricedCostReceiptsForRun(run.runId);
+        if (!hasPriced) {
+          try {
+            recordCostReceipt({
+              ts: orphanTime,
+              seatId: run.seatId,
+              runId: run.runId,
+              model: 'unknown',
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              cacheCreationTokens: 0,
+              outputTokens: 0,
+              costNanodollars: null,
+              priced: false,
+              source: 'claude-stream-json',
+            });
+          } catch {
+            /* ignore fallback receipt write failure */
+          }
+        }
         updateRun(run.runId, {
           status: 'failed',
           finishedAt: orphanTime,
           errorKind: 'orphaned',
-          costStatus: 'unpriced',
+          costStatus: hasPriced ? 'recorded' : 'unpriced',
           updatedAt: orphanTime,
         });
         orphanedRuns++;

@@ -318,15 +318,30 @@ export function boYeuCau(ma: string, lyDo: string): boolean {
 /**
  * Return a claimed/assigned item back to pending ('cho') queue.
  * Used for recovery when downstream ledger append throws, preventing work loss and seat leaks.
+ * Condition: ONLY reverts if state is 'dang_giu' or 'da_giao'. Refuses to mutate if already 'bo' or 'cho'.
  */
 export function traVeHangDoi(ma: string): boolean {
   const s = doc();
   const y = s.hang_doi.find((x) => x.ma === ma);
   if (!y) return false;
+  const curr = trangThai(y);
+  if (curr !== 'dang_giu' && curr !== 'da_giao') {
+    return false;
+  }
   datTrangThai(y, 'cho');
   delete y.giu_boi;
   delete y.giu_han;
   y.xu_luc = null;
+  delete y.bo_luc;
+  delete y.ly_do;
+  delete y.truoc_do;
+  if (y.wakeId) {
+    try {
+      updateWake(y.wakeId, { status: 'queued' });
+    } catch {
+      /* ignore */
+    }
+  }
   ghi(s);
   return true;
 }
