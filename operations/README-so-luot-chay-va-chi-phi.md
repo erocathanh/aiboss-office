@@ -107,7 +107,7 @@ Theo dõi chi tiết usage token và chi phí theo từng model của mỗi lư�
 - Kết quả: Danh sách lượt chạy mới nhất, tự động gộp (merge) thông tin `wake` tương ứng.
 
 ### 3.2. `GET /api/wakes/<wakeId>`
-- Kiểm tra trạng thái của một yêu cầu đánh thức. Trả về `200` nếu tìm thấy, `404` nếu không tồn tại.
+- Kiểm tra trạng thái của một yêu cầu đánh thức. Trả về `200` kèm `{ wake: { ... } }` nếu tìm thấy, `404` (`{ error: "Wake not found", wakeId }`) nếu không tồn tại.
 
 ### 3.3. `GET /api/costs`
 - Tham số: `seat=<slug>`, `from=<ISO>`, `to=<ISO>`.
