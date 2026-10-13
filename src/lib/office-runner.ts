@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chayMotLuot } from '@/lib/chay-mot-luot';
-import { nhanYeuCau, xacNhanDaGiao, xemSo, conDung } from '@/lib/kho-danh-thuc';
+import { nhanYeuCau, xacNhanDaGiao, xemSo, conDung, traVeHangDoi, boYeuCau } from '@/lib/kho-danh-thuc';
 import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
 import { isSeatHeldByTerminal } from '@/lib/seat-active';
@@ -200,6 +200,24 @@ export async function tickRunner(): Promise<number> {
 
       // One turn per seat at a time
       if (activeSeats.has(y.ma_nhan_su) || liveProcessSeats.has(y.ma_nhan_su)) {
+        logRunnerEvent({
+          timestamp: new Date().toISOString(),
+          seat: y.ma_nhan_su,
+          bell_id: y.ma,
+          event: 'skipped',
+          skipped_reason: 'seat_busy_in_process',
+        });
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'seat_busy_in_process',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+        boYeuCau(y.ma, 'seat_busy_in_process');
         continue;
       }
 
@@ -223,6 +241,7 @@ export async function tickRunner(): Promise<number> {
             /* ignore */
           }
         }
+        boYeuCau(y.ma, 'seat_held_by_terminal');
         continue;
       }
 
@@ -230,6 +249,13 @@ export async function tickRunner(): Promise<number> {
       const o = layO(y.ma_o);
       const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
       if (maPhienCu && dangChayNoiKhac(y.ma_nhan_su, maPhienCu, o?.moc_ket_thuc ?? null)) {
+        logRunnerEvent({
+          timestamp: new Date().toISOString(),
+          seat: y.ma_nhan_su,
+          bell_id: y.ma,
+          event: 'skipped',
+          skipped_reason: 'running_elsewhere',
+        });
         if (y.wakeId) {
           try {
             updateWake(y.wakeId, {
@@ -240,6 +266,7 @@ export async function tickRunner(): Promise<number> {
             /* ignore */
           }
         }
+        boYeuCau(y.ma, 'seat_busy_running_elsewhere');
         continue;
       }
 
@@ -262,20 +289,28 @@ export async function tickRunner(): Promise<number> {
       const wakeId = claimed.y.wakeId ?? claimed.y.ma;
       const runId = generateRunOrWakeId('run');
 
-      updateWake(wakeId, {
-        status: 'claimed',
-        claimedAt: startIso,
-        runId,
-      });
+      // F1: Wrap ledger writes in try/catch to recover queue item and free activeSeats on throw
+      try {
+        updateWake(wakeId, {
+          status: 'claimed',
+          claimedAt: startIso,
+          runId,
+        });
 
-      recordRun({
-        runId,
-        wakeId,
-        seatId: y.ma_nhan_su,
-        startedAt: startIso,
-        status: 'running',
-        attempt: 1,
-      });
+        recordRun({
+          runId,
+          wakeId,
+          seatId: y.ma_nhan_su,
+          startedAt: startIso,
+          status: 'running',
+          attempt: 1,
+        });
+      } catch (err) {
+        console.error(`[office-runner] Failed to write ledger for claimed wake ${wakeId}:`, err);
+        activeSeats.delete(y.ma_nhan_su);
+        traVeHangDoi(claimed.y.ma);
+        continue;
+      }
 
       inFlightTurns.set(y.ma_nhan_su, {
         seat: y.ma_nhan_su,
@@ -321,12 +356,14 @@ export async function tickRunner(): Promise<number> {
           const durationMs = Date.now() - startTime;
           const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
 
-          // 1. Process cost receipts FIRST (Finding B: record costs before finished, include errored runs with usage, unpriced marker if none)
+          // 1. Process cost receipts FIRST (Finding B: record costs before finished, durable costStatus)
+          let costStatus: 'recorded' | 'pending' | 'unpriced' = 'pending';
           if (result.rawResult) {
             try {
               const receipts = extractUsageReceipts([result.rawResult as StreamJsonEvent]);
               if (receipts.length > 0) {
                 recordCostReceipts(y.ma_nhan_su, runId, receipts, endIso);
+                costStatus = 'recorded';
               } else {
                 recordCostReceipt({
                   ts: endIso,
@@ -341,9 +378,11 @@ export async function tickRunner(): Promise<number> {
                   priced: false,
                   source: 'claude-stream-json',
                 });
+                costStatus = 'unpriced';
               }
             } catch (err: unknown) {
               console.error(`[office-runner] Failed to record cost receipts for run ${runId}:`, err);
+              costStatus = 'pending';
             }
           } else {
             try {
@@ -360,8 +399,10 @@ export async function tickRunner(): Promise<number> {
                 priced: false,
                 source: 'claude-stream-json',
               });
+              costStatus = 'unpriced';
             } catch (err: unknown) {
               console.error(`[office-runner] Failed to record fallback unpriced cost receipt for run ${runId}:`, err);
+              costStatus = 'pending';
             }
           }
 
@@ -404,6 +445,7 @@ export async function tickRunner(): Promise<number> {
             finishedAt: endIso,
             exitCode: finalStatus === 'finished' ? 0 : exitCode,
             errorKind,
+            costStatus,
             sessionId: result.maPhien ?? undefined,
             pid: result.pid_de_hien_thi ?? undefined,
           });
@@ -456,6 +498,7 @@ export async function tickRunner(): Promise<number> {
             finishedAt: endIso,
             exitCode: null,
             errorKind: 'result_error',
+            costStatus: 'unpriced',
           });
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);

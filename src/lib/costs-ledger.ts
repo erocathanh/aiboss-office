@@ -81,6 +81,39 @@ function getLogPathForDate(isoDateString?: string): string {
 }
 
 /**
+ * Read cost records from a single file, gracefully skipping corrupted lines.
+ */
+export function readCostFile(filePath: string): CostRecord[] {
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    const records: CostRecord[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as CostRecord;
+        if (parsed && parsed.runId && parsed.model) {
+          records.push({
+            ...parsed,
+            costNanodollars:
+              parsed.costNanodollars !== null && parsed.costNanodollars !== undefined
+                ? String(parsed.costNanodollars)
+                : null,
+          });
+        }
+      } catch {
+        /* ignore corrupted lines */
+      }
+    }
+    return records;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Read cost records, gracefully skipping unparseable or corrupted lines.
  */
 export function readAllCostRecords(fileFilter?: (fileName: string) => boolean): CostRecord[] {
@@ -100,29 +133,7 @@ export function readAllCostRecords(fileFilter?: (fileName: string) => boolean): 
   const records: CostRecord[] = [];
   for (const file of files) {
     const filePath = path.join(costsDir, file);
-    try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const lines = content.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed) as CostRecord;
-          if (parsed && parsed.runId && parsed.model) {
-            records.push({
-              ...parsed,
-              costNanodollars: parsed.costNanodollars !== null && parsed.costNanodollars !== undefined
-                ? String(parsed.costNanodollars)
-                : null,
-            });
-          }
-        } catch {
-          /* ignore corrupted lines */
-        }
-      }
-    } catch {
-      /* ignore read errors */
-    }
+    records.push(...readCostFile(filePath));
   }
   return records;
 }
@@ -228,37 +239,66 @@ export function getCostsAggregation(options?: {
 }): CostsAggregation {
   const fromTime = options?.from ? new Date(options.from).getTime() : undefined;
   const toTime = options?.to ? new Date(options.to).getTime() : undefined;
-  const fromDateStr = options?.from ? options.from.split('T')[0] : undefined;
-  const toDateStr = options?.to ? options.to.split('T')[0] : undefined;
   const limit = Math.max(1, Math.min(500, options?.limit ?? 50));
 
-  const allRecords = readAllCostRecords((file) => {
-    const fileDateStr = file.replace('.jsonl', '');
-    if (toDateStr && fileDateStr > toDateStr) return false;
-    if (fromDateStr && fileDateStr < fromDateStr) return false;
-    return true;
-  });
+  let fromUtcDateStr: string | undefined = undefined;
+  if (options?.from) {
+    const fromDate = new Date(options.from);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 1);
+    fromUtcDateStr = fromDate.toISOString().split('T')[0];
+  }
+  let toUtcDateStr: string | undefined = undefined;
+  if (options?.to) {
+    const toDate = new Date(options.to);
+    toDate.setUTCDate(toDate.getUTCDate() + 1);
+    toUtcDateStr = toDate.toISOString().split('T')[0];
+  }
 
-  // Deduplicate by (runId, model) keeping the latest record
+  const costsDir = getCostsDir();
+  if (!fs.existsSync(costsDir)) {
+    return {
+      summary: makeTotals(),
+      bySeat: {},
+      byDay: {},
+      records: [],
+    };
+  }
+
+  const allFiles = fs
+    .readdirSync(costsDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .sort()
+    .reverse(); // Newest dates first
+
   const uniqueRecordsMap = new Map<string, CostRecord>();
-  for (const r of allRecords) {
-    const key = `${r.runId}::${r.model}`;
-    uniqueRecordsMap.set(key, r);
+
+  for (const file of allFiles) {
+    const fileDateStr = file.replace('.jsonl', '');
+    if (toUtcDateStr && fileDateStr > toUtcDateStr) continue;
+    if (fromUtcDateStr && fileDateStr < fromUtcDateStr) break;
+
+    const fileRecords = readCostFile(path.join(costsDir, file));
+    // Sort descending by timestamp within the file
+    fileRecords.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+
+    for (const r of fileRecords) {
+      if (options?.seat && r.seatId !== options.seat) continue;
+      const rTime = new Date(r.ts).getTime();
+      if (fromTime !== undefined && rTime < fromTime) continue;
+      if (toTime !== undefined && rTime > toTime) continue;
+
+      const key = `${r.runId}::${r.model}`;
+      if (!uniqueRecordsMap.has(key)) {
+        uniqueRecordsMap.set(key, r);
+      }
+    }
+
+    if (uniqueRecordsMap.size >= limit && !options?.from) {
+      break;
+    }
   }
 
-  let records = Array.from(uniqueRecordsMap.values());
-
-  if (options?.seat) {
-    records = records.filter((r) => r.seatId === options.seat);
-  }
-  if (fromTime !== undefined) {
-    records = records.filter((r) => new Date(r.ts).getTime() >= fromTime);
-  }
-  if (toTime !== undefined) {
-    records = records.filter((r) => new Date(r.ts).getTime() <= toTime);
-  }
-
-  // Sort descending by timestamp
+  const records = Array.from(uniqueRecordsMap.values());
   records.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 
   const summary = makeTotals();
@@ -407,7 +447,7 @@ export function getSeatPeriodCosts(seatList?: string[]): SeatPeriodCost[] {
   const todayStr = now.toISOString().split('T')[0];
   const thisMonthPrefix = todayStr.slice(0, 7);
 
-  const allRecords = readAllCostRecords();
+  const allRecords = readAllCostRecords((file) => file.startsWith(thisMonthPrefix));
   const uniqueRecordsMap = new Map<string, CostRecord>();
   for (const r of allRecords) {
     uniqueRecordsMap.set(`${r.runId}::${r.model}`, r);

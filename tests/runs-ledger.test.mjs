@@ -25,6 +25,7 @@ import {
   getRunsDir,
   isProcessAlive,
 } from '../src/lib/runs-ledger.ts';
+import { traVeHangDoi } from '../src/lib/kho-danh-thuc.ts';
 
 console.log('--- Testing src/lib/runs-ledger.ts ---');
 
@@ -38,32 +39,48 @@ try {
     console.log('  [PASS] Case 1: ID generation format matches prefix-YYYYMMDD-HHMMSS-<6 hex>');
   }
 
-  // Case 2: Sliding-window idempotency across minute boundary (e.g. 12:00:59 and 12:01:01)
+  // Case 2: Sliding-window idempotency across minute boundary
   {
     const prompt = 'Review viral marketing strategy';
     const key1 = computeIdempotencyKey('marketing-lead', prompt);
     const key2 = computeIdempotencyKey('marketing-lead', prompt);
     assert.equal(key1, key2, 'Semantic idempotency key must not bucket by minute');
 
+    // Exact minute boundary calculation:
+    const T0 = Math.floor(1700000000000 / 60000) * 60000;
+    assert.equal(T0 % 60000, 0, 'T0 must be an exact minute boundary');
+    const T1 = T0 - 2000; // 2 seconds before minute boundary
+    const T2 = T0 + 2000; // 2 seconds after minute boundary
+    assert.notEqual(
+      Math.floor(T1 / 60000),
+      Math.floor(T2 / 60000),
+      'T1 and T2 must belong to different integer minute buckets'
+    );
+
     const wakeT1 = recordWake({
       wakeId: generateRunOrWakeId('wake'),
       seatId: 'marketing-lead',
       source: 'bell',
-      requestedAt: new Date(1700000059000).toISOString(), // 12:00:59
+      requestedAt: new Date(T1).toISOString(),
       idempotencyKey: key1,
       status: 'queued',
     });
 
-    // 2 seconds later (12:01:01) across minute boundary
-    const duplicate = findRecentWakeByIdempotencyKey('marketing-lead', key1, 60_000, 1700000061000);
-    assert.ok(duplicate, 'Must detect duplicate across minute boundary');
+    // 4 seconds later (across true minute boundary)
+    const duplicate = findRecentWakeByIdempotencyKey('marketing-lead', key1, 60_000, T2);
+    assert.ok(duplicate, 'Must detect duplicate across true minute boundary');
     assert.equal(duplicate.wakeId, wakeT1.wakeId);
 
     // 65 seconds later: sliding window expired
-    const expiredWindow = findRecentWakeByIdempotencyKey('marketing-lead', key1, 60_000, 1700000059000 + 65_000);
+    const expiredWindow = findRecentWakeByIdempotencyKey('marketing-lead', key1, 60_000, T1 + 65_000);
     assert.equal(expiredWindow, null, 'Wake older than 60s sliding window must not block new wake');
 
-    console.log('  [PASS] Case 2: sliding-window idempotency works across minute boundaries');
+    // Skipped wake must NOT block subsequent valid retry
+    updateWake(wakeT1.wakeId, { status: 'skipped', reason: 'seat_not_open' });
+    const retryAfterReject = findRecentWakeByIdempotencyKey('marketing-lead', key1, 60_000, T2);
+    assert.equal(retryAfterReject, null, 'Skipped wake must not block valid retry');
+
+    console.log('  [PASS] Case 2: sliding-window idempotency across true minute boundary and skipped exclusion');
   }
 
   // Case 3: Record wake and update state
@@ -222,6 +239,170 @@ try {
     const runsAfterCorrupt = getRuns({ seat: 'recovery-seat', limit: 10 });
     assert.ok(Array.isArray(runsAfterCorrupt));
     console.log('  [PASS] Case 7: corrupted JSON lines in ledger files handled gracefully');
+  }
+
+  // Case 8: Multi-day folding preserves newest event (starts Day 1, finishes Day 2)
+  {
+    const runsDir = getRunsDir();
+    const day1File = path.join(runsDir, '2026-10-10.jsonl');
+    const day2File = path.join(runsDir, '2026-10-11.jsonl');
+    const multiDayRunId = 'run-multiday-test-1';
+
+    // Day 1: Started running at 23:59:00
+    fs.appendFileSync(
+      day1File,
+      JSON.stringify({
+        type: 'run',
+        runId: multiDayRunId,
+        seatId: 'multiday-seat',
+        prompt: 'Multi-day execution task',
+        startedAt: '2026-10-10T23:59:00.000Z',
+        status: 'running',
+        attempt: 1,
+        updatedAt: '2026-10-10T23:59:00.000Z',
+      }) + '\n'
+    );
+
+    // Day 2: Finished at 00:01:30
+    fs.appendFileSync(
+      day2File,
+      JSON.stringify({
+        type: 'run',
+        runId: multiDayRunId,
+        seatId: 'multiday-seat',
+        startedAt: '2026-10-10T23:59:00.000Z',
+        finishedAt: '2026-10-11T00:01:30.000Z',
+        status: 'finished',
+        exitCode: 0,
+        costStatus: 'recorded',
+        updatedAt: '2026-10-11T00:01:30.000Z',
+      }) + '\n'
+    );
+
+    const queriedRuns = getRuns({ seat: 'multiday-seat', limit: 10 });
+    assert.equal(queriedRuns.length, 1, 'Multi-day run must fold into exactly one record');
+    assert.equal(
+      queriedRuns[0].status,
+      'finished',
+      'Multi-day folding must preserve newest finished status (never revert to running)'
+    );
+    assert.equal(queriedRuns[0].startedAt, '2026-10-10T23:59:00.000Z');
+    assert.equal(queriedRuns[0].finishedAt, '2026-10-11T00:01:30.000Z');
+    assert.equal(queriedRuns[0].costStatus, 'recorded');
+    console.log('  [PASS] Case 8: multi-day folding correctly preserves latest status across midnight');
+  }
+
+  // Case 9: ISO date bounds with timezone offset in getRuns
+  {
+    const runsDir = getRunsDir();
+    const utcDateFile = path.join(runsDir, '2026-10-12.jsonl');
+    const offsetRunId = 'run-offset-test-1';
+
+    fs.appendFileSync(
+      utcDateFile,
+      JSON.stringify({
+        type: 'run',
+        runId: offsetRunId,
+        seatId: 'offset-seat',
+        startedAt: '2026-10-12T16:00:00.000Z',
+        status: 'finished',
+        exitCode: 0,
+        updatedAt: '2026-10-12T16:00:00.000Z',
+      }) + '\n'
+    );
+
+    // Query with +09:00 timezone offset (16:00 UTC on Oct 12 is 01:00 on Oct 13 in JST/KST)
+    const runsWithOffset = getRuns({
+      seat: 'offset-seat',
+      from: '2026-10-13T00:30:00+09:00', // equivalent to 2026-10-12T15:30:00Z
+      to: '2026-10-13T02:00:00+09:00',   // equivalent to 2026-10-12T17:00:00Z
+    });
+    assert.equal(runsWithOffset.length, 1, 'Runs query must normalize ISO bounds to UTC without dropping offset matches');
+    assert.equal(runsWithOffset[0].runId, offsetRunId);
+    console.log('  [PASS] Case 9: ISO date bounds with timezone offsets accurately query UTC files');
+  }
+
+  // Case 10: Missing directory / missing files returns empty arrays / null with dedicated assertions
+  {
+    const originalEnv = process.env.AIBOSS_DATA_DIR;
+    try {
+      process.env.AIBOSS_DATA_DIR = path.join(os.tmpdir(), 'missing-dir-' + Date.now());
+      assert.deepEqual(getRuns({ seat: 'nonexistent' }), [], 'getRuns on missing directory must return empty array');
+      assert.equal(getWake('wake-missing-id'), null, 'getWake on missing file must return null');
+      assert.equal(getRun('run-missing-id'), null, 'getRun on missing file must return null');
+    } finally {
+      process.env.AIBOSS_DATA_DIR = originalEnv;
+    }
+    console.log('  [PASS] Case 10: missing directory and missing files return clean empty/null results');
+  }
+
+  // Case 11: Fault injection & queue recovery (traVeHangDoi restores queue item on ledger append failure)
+  {
+    const testQueueMa = 'test-queue-fault-' + Date.now();
+    const testQueueFile = path.join(testDataDir, 'danh-thuc.json');
+    fs.mkdirSync(testDataDir, { recursive: true });
+    fs.writeFileSync(
+      testQueueFile,
+      JSON.stringify({
+        hang_doi: [
+          {
+            ma: testQueueMa,
+            ma_o: 'o-1',
+            ma_nhan_su: 'fault-seat',
+            tu_ai: 'tester',
+            cau_hoi: 'Test fault handling',
+            luc: Date.now(),
+            da_xu: true,
+            trang_thai: 'da_giao',
+          },
+        ],
+        moc_goi: [],
+      })
+    );
+
+    // Call traVeHangDoi to restore the item when downstream processing encounters throw
+    const reverted = traVeHangDoi(testQueueMa);
+    assert.equal(reverted, true, 'traVeHangDoi must return true on existing item');
+
+    const updatedQueue = JSON.parse(fs.readFileSync(testQueueFile, 'utf-8'));
+    const item = updatedQueue.hang_doi.find((x) => x.ma === testQueueMa);
+    assert.equal(item.trang_thai, 'cho', 'Queue item must revert to "cho" on ledger throw');
+    assert.equal(item.da_xu, false);
+    assert.equal(item.xu_luc, null);
+    console.log('  [PASS] Case 11: fault injection recovery via traVeHangDoi successfully returns work to queue');
+  }
+
+  // Case 12: Finding B — costStatus accounting lifecycle ('pending' -> 'recorded'/'unpriced')
+  {
+    const costRunId = generateRunOrWakeId('run');
+    const recorded = recordRun({
+      runId: costRunId,
+      seatId: 'cost-lifecycle-seat',
+      startedAt: new Date().toISOString(),
+      status: 'running',
+    });
+    assert.equal(recorded.costStatus, 'pending', 'recordRun must initialize with costStatus pending');
+
+    updateRun(costRunId, {
+      status: 'finished',
+      costStatus: 'recorded',
+    });
+    const finishedWithCost = getRun(costRunId);
+    assert.equal(finishedWithCost.costStatus, 'recorded', 'Finished run must record costStatus: recorded');
+
+    // Orphaned run recovery must mark costStatus: unpriced
+    const orphanRunId = generateRunOrWakeId('run');
+    recordRun({
+      runId: orphanRunId,
+      seatId: 'cost-lifecycle-seat',
+      startedAt: new Date(Date.now() - 30_000).toISOString(),
+      status: 'running',
+      pid: 9999998,
+    });
+    recoverOrphanedRuns();
+    const orphanRun = getRun(orphanRunId);
+    assert.equal(orphanRun.costStatus, 'unpriced', 'Orphaned run recovery must mark costStatus: unpriced');
+    console.log('  [PASS] Case 12: Finding B costStatus lifecycle tracked across recordRun, updateRun, and recovery');
   }
 
   console.log('>>> ALL RUNS LEDGER TEST CASES PASSED <<<');

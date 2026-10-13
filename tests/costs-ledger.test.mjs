@@ -122,6 +122,93 @@ try {
   assert.equal(aggAfterCorrupt.summary.totalRuns, 2);
   console.log('  [PASS] Case 6: corrupted lines in costs ledger skipped gracefully');
 
+  // 7. Reverse scan without from stops early when limit is reached
+  {
+    const costsDir = getCostsDir();
+    // Write 3 consecutive day files with distinct records
+    for (let day = 1; day <= 3; day++) {
+      const dateStr = `2026-10-0${day}`;
+      const dayPath = path.join(costsDir, `${dateStr}.jsonl`);
+      fs.writeFileSync(
+        dayPath,
+        JSON.stringify({
+          ts: `${dateStr}T12:00:00.000Z`,
+          seatId: 'reverse-seat',
+          runId: `run-day-${day}`,
+          model: 'claude-3-7-sonnet-20250219',
+          inputTokens: 100,
+          cachedInputTokens: 0,
+          cacheCreationTokens: 0,
+          outputTokens: 10,
+          costNanodollars: '10000000',
+          priced: true,
+          source: 'claude-stream-json',
+        }) + '\n'
+      );
+    }
+
+    // Query limit=1: must return only the newest record (2026-10-03)
+    const aggLimit1 = getCostsAggregation({ seat: 'reverse-seat', limit: 1 });
+    assert.equal(aggLimit1.records.length, 1);
+    assert.equal(aggLimit1.records[0].runId, 'run-day-3', 'Must fetch newest record from day 3 first');
+    assert.equal(aggLimit1.summary.totalRuns, 1);
+
+    // Query limit=2: must return newest two records (day 3 and day 2)
+    const aggLimit2 = getCostsAggregation({ seat: 'reverse-seat', limit: 2 });
+    assert.equal(aggLimit2.records.length, 2);
+    assert.equal(aggLimit2.records[0].runId, 'run-day-3');
+    assert.equal(aggLimit2.records[1].runId, 'run-day-2');
+    console.log('  [PASS] Case 7: reverse scan with limit accumulates newest records and stops early');
+  }
+
+  // 8. Missing directory handling returns clean empty aggregation
+  {
+    const originalEnv = process.env.AIBOSS_DATA_DIR;
+    try {
+      process.env.AIBOSS_DATA_DIR = path.join(os.tmpdir(), 'missing-costs-' + Date.now());
+      const emptyAgg = getCostsAggregation({ seat: 'any' });
+      assert.deepEqual(emptyAgg.records, []);
+      assert.equal(emptyAgg.summary.totalRuns, 0);
+      assert.equal(emptyAgg.summary.costNanodollars, '0');
+    } finally {
+      process.env.AIBOSS_DATA_DIR = originalEnv;
+    }
+    console.log('  [PASS] Case 8: missing costs directory returns clean empty aggregation without throwing');
+  }
+
+  // 9. ISO date bounds with timezone offset
+  {
+    const costsDir = getCostsDir();
+    const utcDateStr = '2026-10-08';
+    const dayPath = path.join(costsDir, `${utcDateStr}.jsonl`);
+    fs.writeFileSync(
+      dayPath,
+      JSON.stringify({
+        ts: '2026-10-08T22:30:00.000Z',
+        seatId: 'offset-cost-seat',
+        runId: 'run-cost-offset-1',
+        model: 'claude-3-7-sonnet-20250219',
+        inputTokens: 500,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        outputTokens: 50,
+        costNanodollars: '50000000',
+        priced: true,
+        source: 'claude-stream-json',
+      }) + '\n'
+    );
+
+    // 22:30 UTC on Oct 08 is 07:30 on Oct 09 in +09:00
+    const aggOffset = getCostsAggregation({
+      seat: 'offset-cost-seat',
+      from: '2026-10-09T07:00:00+09:00',
+      to: '2026-10-09T08:00:00+09:00',
+    });
+    assert.equal(aggOffset.records.length, 1);
+    assert.equal(aggOffset.records[0].runId, 'run-cost-offset-1');
+    console.log('  [PASS] Case 9: ISO date bounds with timezone offsets correctly match UTC files');
+  }
+
   console.log('>>> ALL COSTS LEDGER TEST CASES PASSED <<<');
 } finally {
   try {

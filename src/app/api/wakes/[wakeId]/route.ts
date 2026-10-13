@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getWake } from '@/lib/runs-ledger';
+import { getWake, computeCustomIdempotencyKey } from '@/lib/runs-ledger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,14 @@ export async function GET(
     return NextResponse.json({ loi: `Wake '${cleanId}' not found.`, wakeId: cleanId }, { status: 404 });
   }
 
+  const safeWake = {
+    ...wake,
+    idempotencyKey: wake.idempotencyKey?.startsWith('custom:')
+      ? computeCustomIdempotencyKey(wake.seatId, wake.idempotencyKey.slice(7))
+      : wake.idempotencyKey,
+  };
+
   return NextResponse.json({
-    wake,
+    wake: safeWake,
   });
 }

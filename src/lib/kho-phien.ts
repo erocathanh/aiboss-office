@@ -14,8 +14,13 @@ import { bindingOf, sameBinding, nextBinding, type WriteBinding } from '@/compon
  * ⭐ Mã phiên NẰM LẠI máy chủ. Trình duyệt chỉ nói "ô số mấy", ⛔ không tự bịa mã phiên được.
  */
 
-const THU_MUC = path.join(process.cwd(), '.trang-thai');
-const TEP = path.join(THU_MUC, 'o-phien.json');
+function getThuMuc(): string {
+  return process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), '.trang-thai');
+}
+
+function getTep(): string {
+  return path.join(getThuMuc(), 'o-phien.json');
+}
 
 export interface TrangThaiO {
   generation?: number;
@@ -45,23 +50,24 @@ export function withSlotBinding<T>(slot: string, binding: WriteBinding, run: (ow
 
 function doc(): So {
   try {
-    return JSON.parse(fs.readFileSync(TEP, 'utf8')) as So;
+    return JSON.parse(fs.readFileSync(getTep(), 'utf8')) as So;
   } catch {
     return {};
   }
 }
 
 function ghi(s: So): void {
-  fs.mkdirSync(THU_MUC, { recursive: true });
+  fs.mkdirSync(getThuMuc(), { recursive: true });
   // Ghi tệp tạm rồi đổi tên → ⛔ không để lại tệp JSON dở dang nếu tắt máy giữa chừng.
   // 🔴 Tên tệp tạm phải RIÊNG cho từng tiến trình + từng lần ghi.
   // Ca thật 29/08: hai máy chủ cùng sống (một cái mồ côi sau `bootout`) ⇒ cả hai dùng
   // chung đúng một tên `<tệp>.tam` ⇒ bên này đang ghi dở thì bên kia `rename` mất,
   // và sổ nhận nguyên một tệp JSON của người khác — hỏng IM LẶNG, ⛔ báo lỗi.
-  const tam = `${TEP}.${process.pid}.${Date.now()}.tam`;
+  const tep = getTep();
+  const tam = `${tep}.${process.pid}.${Date.now()}.tam`;
   try {
     fs.writeFileSync(tam, JSON.stringify(s, null, 2), 'utf8');
-    fs.renameSync(tam, TEP);
+    fs.renameSync(tam, tep);
   } catch (loi) {
     // ⛔ để lại tệp tạm nằm rác trong .trang-thai nếu ghi/đổi tên hỏng giữa chừng.
     try { fs.unlinkSync(tam); } catch { /* tệp chưa kịp sinh ra — bỏ qua */ }

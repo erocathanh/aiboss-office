@@ -21,8 +21,13 @@ import { updateWake } from './runs-ledger';
  *    phải đổi sang kho dùng chung — cùng giới hạn đã ghi ở README (chặn mức dùng).
  */
 
-const THU_MUC = path.join(process.cwd(), '.trang-thai');
-const TEP = path.join(THU_MUC, 'danh-thuc.json');
+function getThuMuc(): string {
+  return process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), '.trang-thai');
+}
+
+function getTep(): string {
+  return path.join(getThuMuc(), 'danh-thuc.json');
+}
 
 /** Yêu cầu quá hạn này mà chưa ai xử → BỎ. ⛔ Đừng đánh thức bằng câu đã cũ. */
 export const HAN_YEU_CAU_MS = 3 * 60_000;
@@ -163,7 +168,7 @@ export function thamDoCuoiCua(maO: string): number | undefined {
 
 function doc(): So {
   try {
-    const j = JSON.parse(fs.readFileSync(TEP, 'utf8')) as Partial<So>;
+    const j = JSON.parse(fs.readFileSync(getTep(), 'utf8')) as Partial<So>;
     return {
       hang_doi: Array.isArray(j.hang_doi) ? j.hang_doi : [],
       moc_goi: Array.isArray(j.moc_goi) ? j.moc_goi : [],
@@ -174,16 +179,17 @@ function doc(): So {
 }
 
 function ghi(s: So): void {
-  fs.mkdirSync(THU_MUC, { recursive: true });
+  fs.mkdirSync(getThuMuc(), { recursive: true });
   // Ghi tệp tạm rồi đổi tên → ⛔ không để lại JSON dở dang nếu tắt máy giữa chừng.
   // 🔴 Tên tệp tạm phải RIÊNG cho từng tiến trình + từng lần ghi.
   // Ca thật 29/08: hai máy chủ cùng sống (một cái mồ côi sau `bootout`) ⇒ cả hai dùng
   // chung đúng một tên `<tệp>.tam` ⇒ bên này ghi dở thì bên kia `rename` mất, và sổ
   // nhận nguyên một tệp JSON của người khác — hỏng IM LẶNG, ⛔ báo lỗi.
-  const tam = `${TEP}.${process.pid}.${Date.now()}.tam`;
+  const tep = getTep();
+  const tam = `${tep}.${process.pid}.${Date.now()}.tam`;
   try {
     fs.writeFileSync(tam, JSON.stringify(s, null, 2), 'utf8');
-    fs.renameSync(tam, TEP);
+    fs.renameSync(tam, tep);
   } catch (loi) {
     try { fs.unlinkSync(tam); } catch { /* tệp chưa kịp sinh ra */ }
     throw loi;
@@ -274,14 +280,55 @@ function boMau(y: YeuCauDanhThuc, lyDo: string, bayGio: number): void {
   y.ly_do = chuanHoaLyDo(lyDo);
   if (y.wakeId) {
     try {
+      const wakeStatus =
+        lyDo.includes('skipped') ||
+        lyDo.includes('bo-qua') ||
+        lyDo.includes('busy') ||
+        lyDo.includes('held') ||
+        lyDo.includes('terminal')
+          ? 'skipped'
+          : 'expired';
       updateWake(y.wakeId, {
-        status: 'expired',
+        status: wakeStatus,
         reason: chuanHoaLyDo(lyDo),
       });
     } catch {
       /* ignore ledger update failure during queue cleanup */
     }
   }
+}
+
+/**
+ * Explicitly discard a queue item with a reason.
+ * Ensures the queue item is ended and marks ledger skipped/expired accordingly.
+ */
+export function boYeuCau(ma: string, lyDo: string): boolean {
+  const bayGio = Date.now();
+  const s = donDep(doc(), bayGio);
+  const y = s.hang_doi.find((x) => x.ma === ma);
+  if (!y) {
+    ghi(s);
+    return false;
+  }
+  boMau(y, lyDo, bayGio);
+  ghi(s);
+  return true;
+}
+
+/**
+ * Return a claimed/assigned item back to pending ('cho') queue.
+ * Used for recovery when downstream ledger append throws, preventing work loss and seat leaks.
+ */
+export function traVeHangDoi(ma: string): boolean {
+  const s = doc();
+  const y = s.hang_doi.find((x) => x.ma === ma);
+  if (!y) return false;
+  datTrangThai(y, 'cho');
+  delete y.giu_boi;
+  delete y.giu_han;
+  y.xu_luc = null;
+  ghi(s);
+  return true;
 }
 
 /**

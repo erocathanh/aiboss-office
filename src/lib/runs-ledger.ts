@@ -8,7 +8,7 @@
  * - Process-aware restart recovery (checks PID liveness, expires old queued wakes).
  * - Safe error handling (throws on append failure for 500 propagation).
  * - Finite errorKind codes (sigkill, timeout, exit_nonzero, result_error, spawn_failed, orphaned).
- * - Efficient date-bounded reverse querying for runs and wakes.
+ * - Efficient date-bounded reverse querying for runs and wakes with multi-day state folding.
  */
 
 import crypto from 'node:crypto';
@@ -33,7 +33,9 @@ export interface WakeRecord {
   status: 'queued' | 'claimed' | 'skipped' | 'expired';
   claimedAt?: string;
   runId?: string;
+  queueId?: string;
   reason?: string;
+  updatedAt?: string;
 }
 
 export interface RunRecord {
@@ -50,6 +52,8 @@ export interface RunRecord {
   errorKind?: RunErrorKind;
   attempt?: number;
   pid?: number;
+  costStatus?: 'recorded' | 'pending' | 'unpriced';
+  updatedAt?: string;
 }
 
 export type LedgerRecord = WakeRecord | RunRecord;
@@ -84,9 +88,19 @@ export function generateRunOrWakeId(prefix: 'wake' | 'run'): string {
 /**
  * Compute semantic idempotency key: hash of seatId + normalized content.
  * Does NOT bucket by fixed minutes — sliding window comparison is handled at query time.
+ * Always returns a 32-char hex SHA-256 digest (never raw text).
  */
 export function computeIdempotencyKey(seatId: string, content: string): string {
   const raw = `${seatId.trim()}::${content.trim()}`;
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
+}
+
+/**
+ * Compute custom idempotency key from caller-provided khoa.
+ * Always hashes with prefix to prevent leaking caller text into logs/APIs.
+ */
+export function computeCustomIdempotencyKey(seatId: string, khoa: string): string {
+  const raw = `custom::${seatId.trim()}::${khoa.trim()}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
 }
 
@@ -108,11 +122,22 @@ function appendRecord(record: LedgerRecord): void {
 }
 
 /**
+ * Helper to obtain the effective event timestamp in epoch milliseconds.
+ */
+function getRecordTimestamp(r: LedgerRecord): number {
+  if (r.type === 'run') {
+    return new Date(r.updatedAt || r.finishedAt || r.startedAt).getTime();
+  }
+  return new Date(r.updatedAt || r.claimedAt || r.requestedAt).getTime();
+}
+
+/**
  * Record a new wake request in the runs ledger.
  */
 export function recordWake(wake: Omit<WakeRecord, 'type'>): WakeRecord {
   const full: WakeRecord = {
     type: 'wake',
+    updatedAt: wake.requestedAt,
     ...wake,
   };
   appendRecord(full);
@@ -130,6 +155,7 @@ export function updateWake(wakeId: string, patch: Partial<WakeRecord>): WakeReco
     ...patch,
     type: 'wake',
     wakeId,
+    updatedAt: new Date().toISOString(),
   };
   appendRecord(updated);
   return updated;
@@ -141,6 +167,9 @@ export function updateWake(wakeId: string, patch: Partial<WakeRecord>): WakeReco
 export function recordRun(run: Omit<RunRecord, 'type'>): RunRecord {
   const full: RunRecord = {
     type: 'run',
+    attempt: 1,
+    costStatus: 'pending',
+    updatedAt: run.startedAt,
     ...run,
   };
   appendRecord(full);
@@ -158,6 +187,7 @@ export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord |
     ...patch,
     type: 'run',
     runId,
+    updatedAt: new Date().toISOString(),
   };
   appendRecord(updated);
   return updated;
@@ -203,6 +233,7 @@ export function readRunFiles(fileFilter?: (fileName: string) => boolean): Ledger
 /**
  * Find recent wake by idempotencyKey within sliding window (default 60s).
  * Evaluates true elapsed milliseconds between now and wake.requestedAt.
+ * Excludes expired and skipped wakes so previously rejected attempts do not block valid retries.
  */
 export function findRecentWakeByIdempotencyKey(
   seatId: string,
@@ -216,7 +247,10 @@ export function findRecentWakeByIdempotencyKey(
   const wakesById = new Map<string, WakeRecord>();
   for (const r of records) {
     if (r.type === 'wake') {
-      wakesById.set(r.wakeId, r);
+      const existing = wakesById.get(r.wakeId);
+      if (!existing || getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
+        wakesById.set(r.wakeId, { ...existing, ...r });
+      }
     }
   }
 
@@ -224,8 +258,8 @@ export function findRecentWakeByIdempotencyKey(
     if (wake.seatId === seatId && wake.idempotencyKey === idempotencyKey) {
       const reqTime = new Date(wake.requestedAt).getTime();
       const age = nowMs - reqTime;
-      // Sliding window match: requested within [0, maxAgeMs] and not expired
-      if (age >= 0 && age <= maxAgeMs && wake.status !== 'expired') {
+      // Sliding window match: requested within [0, maxAgeMs], not expired, and not skipped
+      if (age >= 0 && age <= maxAgeMs && wake.status !== 'expired' && wake.status !== 'skipped') {
         return wake;
       }
     }
@@ -241,7 +275,11 @@ export function getWake(wakeId: string): WakeRecord | null {
   let found: WakeRecord | null = null;
   for (const r of records) {
     if (r.type === 'wake' && r.wakeId === wakeId) {
-      found = r;
+      if (found) {
+        found = Object.assign({}, found, r);
+      } else {
+        found = r;
+      }
     }
   }
   return found;
@@ -255,7 +293,11 @@ export function getRun(runId: string): RunRecord | null {
   let found: RunRecord | null = null;
   for (const r of records) {
     if (r.type === 'run' && r.runId === runId) {
-      found = r;
+      if (found) {
+        found = Object.assign({}, found, r);
+      } else {
+        found = r;
+      }
     }
   }
   return found;
@@ -267,8 +309,12 @@ export interface MergedRunInfo extends RunRecord {
 
 /**
  * Query runs merged with corresponding wake data.
- * Optimized to scan files in reverse chronological order (from `to` date backward),
- * stopping early once limit matching runs have been gathered.
+ * Features:
+ * - Scans in reverse chronological order (newest dates first).
+ * - Folds multi-day runs preserving the latest event by timestamp (never overwrites newer with older).
+ * - Correctly normalizes ISO date bounds to UTC dates for file partitioning.
+ * - Includes next-day updates for runs started on the `to` date boundary.
+ * - Stops early once limit matching runs have been gathered.
  */
 export function getRuns(options?: {
   seat?: string;
@@ -282,8 +328,21 @@ export function getRuns(options?: {
 
   const fromTime = options?.from ? new Date(options.from).getTime() : undefined;
   const toTime = options?.to ? new Date(options.to).getTime() : undefined;
-  const fromDateStr = options?.from ? options.from.split('T')[0] : undefined;
-  const toDateStr = options?.to ? options.to.split('T')[0] : undefined;
+
+  // Align dates to UTC YYYY-MM-DD
+  let fromUtcDateStr: string | undefined = undefined;
+  if (options?.from) {
+    const fromDate = new Date(options.from);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 1);
+    fromUtcDateStr = fromDate.toISOString().split('T')[0];
+  }
+  let toUtcDateStr: string | undefined = undefined;
+  if (options?.to) {
+    // Include next UTC day to catch finish/recovery events spilling past UTC midnight
+    const toDate = new Date(options.to);
+    toDate.setUTCDate(toDate.getUTCDate() + 1);
+    toUtcDateStr = toDate.toISOString().split('T')[0];
+  }
 
   const allFiles = fs
     .readdirSync(runsDir)
@@ -296,15 +355,39 @@ export function getRuns(options?: {
 
   for (const file of allFiles) {
     const fileDateStr = file.replace('.jsonl', '');
-    if (toDateStr && fileDateStr > toDateStr) continue;
-    if (fromDateStr && fileDateStr < fromDateStr) break;
+    if (toUtcDateStr && fileDateStr > toUtcDateStr) continue;
+    if (fromUtcDateStr && fileDateStr < fromUtcDateStr) break;
 
     const records = readRunFiles((f) => f === file);
     for (const r of records) {
       if (r.type === 'wake') {
-        wakesById.set(r.wakeId, r);
+        const existing = wakesById.get(r.wakeId);
+        if (!existing) {
+          wakesById.set(r.wakeId, r);
+        } else {
+          // Keep the newer event by timestamp; merge to retain earlier metadata
+          const rTime = getRecordTimestamp(r);
+          const existTime = getRecordTimestamp(existing);
+          if (rTime >= existTime) {
+            wakesById.set(r.wakeId, { ...existing, ...r });
+          } else {
+            wakesById.set(r.wakeId, { ...r, ...existing });
+          }
+        }
       } else if (r.type === 'run') {
-        runsById.set(r.runId, r);
+        const existing = runsById.get(r.runId);
+        if (!existing) {
+          runsById.set(r.runId, r);
+        } else {
+          // Keep the newer event by timestamp; merge to retain earlier metadata
+          const rTime = getRecordTimestamp(r);
+          const existTime = getRecordTimestamp(existing);
+          if (rTime >= existTime) {
+            runsById.set(r.runId, { ...existing, ...r });
+          } else {
+            runsById.set(r.runId, { ...r, ...existing });
+          }
+        }
       }
     }
 
@@ -372,9 +455,15 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
 
   for (const r of records) {
     if (r.type === 'wake') {
-      wakesById.set(r.wakeId, r);
+      const existing = wakesById.get(r.wakeId);
+      if (!existing || getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
+        wakesById.set(r.wakeId, { ...existing, ...r });
+      }
     } else if (r.type === 'run') {
-      runsById.set(r.runId, r);
+      const existing = runsById.get(r.runId);
+      if (!existing || getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
+        runsById.set(r.runId, { ...existing, ...r });
+      }
     }
   }
 
@@ -386,10 +475,13 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
     if (run.status === 'running') {
       const alive = isProcessAlive(run.pid);
       if (!alive) {
+        const orphanTime = new Date(nowMs).toISOString();
         updateRun(run.runId, {
           status: 'failed',
-          finishedAt: new Date(nowMs).toISOString(),
+          finishedAt: orphanTime,
           errorKind: 'orphaned',
+          costStatus: 'unpriced',
+          updatedAt: orphanTime,
         });
         orphanedRuns++;
       }
@@ -402,9 +494,11 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
     if (wake.status === 'queued') {
       const age = nowMs - new Date(wake.requestedAt).getTime();
       if (age > THREE_MINUTES_MS) {
+        const expireTime = new Date(nowMs).toISOString();
         updateWake(wake.wakeId, {
           status: 'expired',
           reason: 'queued_ttl_exceeded',
+          updatedAt: expireTime,
         });
         expiredWakes++;
       }

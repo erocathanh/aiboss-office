@@ -7,12 +7,22 @@ import { batMotLan } from '@/lib/khoi-dong-nen';
 import {
   generateRunOrWakeId,
   computeIdempotencyKey,
+  computeCustomIdempotencyKey,
   findRecentWakeByIdempotencyKey,
   recordWake,
+  updateWake,
 } from '@/lib/runs-ledger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/**
+ * GET /api/danh-thuc
+ * Returns queue overview and timeout configuration for inspection and health checking.
+ */
+export async function GET() {
+  return Response.json({ ...xemSo(), han_yeu_cau_ms: HAN_YEU_CAU_MS });
+}
 
 /**
  * 🔔 CỔNG ĐÁNH THỨC — `POST /api/danh-thuc` (A-1 Run Ledger & Idempotency)
@@ -100,14 +110,16 @@ export async function POST(req: NextRequest) {
 
     const soHienTai = layTatCa();
     const maOHienTai = Object.keys(soHienTai).sort().find((k) => soHienTai[k]?.ma_nhan_su === maNhanSu) ?? null;
-    const existingQueueItem = xemSo().hang_doi.find((y) => y.ma_nhan_su === maNhanSu && y.wakeId === recentWake.wakeId);
+    const existingQueueItem = xemSo().hang_doi.find(
+      (y) => y.ma_nhan_su === maNhanSu && (y.wakeId === recentWake.wakeId || y.ma === recentWake.queueId)
+    );
 
     return Response.json({
       xong: true,
       trung_khoa: true,
       ma_o: maOHienTai,
       ma_nhan_su: maNhanSu,
-      ma_yeu_cau: existingQueueItem?.ma ?? recentWake.wakeId,
+      ma_yeu_cau: existingQueueItem?.ma ?? recentWake.queueId ?? recentWake.wakeId,
       wakeId: duplicateWakeId,
       existingWakeId: recentWake.wakeId,
       status: 'skipped',
@@ -123,13 +135,14 @@ export async function POST(req: NextRequest) {
     const cu = timTheoKhoa(khoa);
     if (cu) {
       const duplicateWakeId = generateRunOrWakeId('wake');
+      const customHash = computeCustomIdempotencyKey(maNhanSu, khoa);
       try {
         recordWake({
           wakeId: duplicateWakeId,
           seatId: maNhanSu,
           source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
           requestedAt: new Date().toISOString(),
-          idempotencyKey: `custom:${khoa}`,
+          idempotencyKey: customHash,
           status: 'skipped',
           reason: 'idempotent_duplicate_key',
         });
@@ -217,7 +230,7 @@ export async function POST(req: NextRequest) {
         reason: 'seat_not_open_in_any_slot',
         dang_mo: dangMo.length ? dangMo : ['(chưa có ô nào mở)'],
       },
-      { status: 409 },
+      { status: 404 },
     );
   }
 
@@ -229,7 +242,7 @@ export async function POST(req: NextRequest) {
       seatId: maNhanSu,
       source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
       requestedAt: new Date().toISOString(),
-      idempotencyKey: khoa ? `custom:${khoa}` : idempotencyKey,
+      idempotencyKey,
       status: 'queued',
     });
   } catch (err: unknown) {
@@ -240,6 +253,13 @@ export async function POST(req: NextRequest) {
   }
 
   const yeuCau = xepHang({ maO, maNhanSu, tuAi, cauHoi, wakeId, ...(khoa ? { khoa } : {}) });
+
+  // Record queueId in wake ledger for exact duplicate retry tracking
+  try {
+    updateWake(wakeRecord.wakeId, { queueId: yeuCau.ma });
+  } catch {
+    /* ignore */
+  }
 
   return Response.json({
     xong: true,
