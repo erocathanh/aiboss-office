@@ -123,6 +123,63 @@ else
   check_fail "pnpm not found in PATH"
 fi
 
+# 4b. Check macOS Command Line Tools & Python3 for safety hooks
+if xcode-select -p >/dev/null 2>&1; then
+  CLT_PATH="$(xcode-select -p)"
+  check_pass "Xcode Command Line Tools installed ($CLT_PATH)"
+else
+  check_fail "Xcode Command Line Tools missing (run 'xcode-select --install')"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  check_fail "python3 not found in PATH. Safety hooks require python3 >= 3.9 in PATH."
+else
+  PY_BIN="$(command -v python3)"
+  PY_VER="$("$PY_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")"
+  PY_MAJOR="$(echo "$PY_VER" | cut -d. -f1)"
+  PY_MINOR="$(echo "$PY_VER" | cut -d. -f2)"
+  if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 9 ]; }; then
+    check_fail "Python version $PY_VER too old (found $PY_BIN). Safety hooks require python3 >= 3.9."
+  else
+    check_pass "Python 3 available in PATH ($PY_BIN, version $PY_VER >= 3.9)"
+  fi
+fi
+
+if [ ! -x "/usr/bin/python3" ]; then
+  check_fail "/usr/bin/python3 missing or not executable (required by Claude settings.json hooks)"
+else
+  check_pass "/usr/bin/python3 executable for Claude hooks"
+fi
+
+# 4c. Check Claude settings.json structure (root + 8 seats)
+SETTINGS_ERR=0
+if [ ! -f ".claude/settings.json" ]; then
+  check_fail "Root .claude/settings.json missing"
+  SETTINGS_ERR=1
+else
+  if ! node -e "const s = JSON.parse(require('fs').readFileSync('.claude/settings.json')); if (!s.hooks || !s.permissions) process.exit(1)" 2>/dev/null; then
+    check_fail "Root .claude/settings.json invalid structure"
+    SETTINGS_ERR=1
+  fi
+fi
+
+for seat in "${MARKETING_SEATS[@]}"; do
+  seat_settings="departments/marketing/seats/$seat/.claude/settings.json"
+  if [ ! -f "$seat_settings" ]; then
+    check_fail "Seat settings $seat_settings missing"
+    SETTINGS_ERR=1
+  else
+    if ! node -e "const s = JSON.parse(require('fs').readFileSync('$seat_settings')); if (!s.hooks || !s.permissions) process.exit(1)" 2>/dev/null; then
+      check_fail "Seat settings $seat_settings invalid structure"
+      SETTINGS_ERR=1
+    fi
+  fi
+done
+
+if [ "$SETTINGS_ERR" -eq 0 ]; then
+  check_pass "Claude settings.json verified for root and all 8 seats"
+fi
+
 # 5. Check dependencies installation
 if [ -d "node_modules" ]; then
   check_pass "Dependencies installed (node_modules present)"

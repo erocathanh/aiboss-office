@@ -1,0 +1,13 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "MultiEdit",
+  "tool_input": {
+    "file_path": "wip/a.md",
+    "edits": [
+      {
+        "old_string": "x",
+        "new_string": "<KEY:ghp_:36>"
+      }
+    ]
+  }
+}

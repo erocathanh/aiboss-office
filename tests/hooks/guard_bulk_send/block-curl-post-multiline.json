@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl https://graph.facebook.com/v21.0/me/messages \\\n  -H 'Content-Type: application/json' \\\n  -d @body.json"
+  }
+}

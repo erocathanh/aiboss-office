@@ -1,0 +1,96 @@
+{
+  "_comment_pcn_v3": "PCN seat frame v3 hooks merge placeholder (reserved until 17/10)",
+  "permissions": {
+    "deny": [
+      "Edit(projects/**/references/**)",
+      "Edit(projects/**/templates/**)",
+      "Edit(projects/**/inputs/**)",
+      "Bash(rm:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.config/aiboss-office/**)",
+      "Bash(python3 tools/inbox-reader/save_token.py *)",
+      "Bash(/usr/bin/python3 tools/inbox-reader/save_token.py *)",
+      "Bash(python3 tools/inbox-reader/fetch_page_messages.py *)",
+      "Bash(/usr/bin/python3 tools/inbox-reader/fetch_page_messages.py *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/block_mass_delete.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/block_secret_leak.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/block_external_scan.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/protect_final_outputs.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/guard_customer_pii.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/guard_bulk_send.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/lock_raw_inputs.py\" || exit 2"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/remind_cross_check.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

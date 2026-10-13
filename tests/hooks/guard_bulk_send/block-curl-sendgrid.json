@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -X POST https://api.sendgrid.com/v3/mail/send -d @list.json"
+  }
+}

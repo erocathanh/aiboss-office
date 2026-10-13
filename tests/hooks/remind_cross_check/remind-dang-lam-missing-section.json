@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/wip/su-that-van-hanh_v01_20260930.md",
+    "content": "# Báo cáo sự thật vận hành\n## Câu nguyên văn của khách\nKhách khen tốt."
+  }
+}

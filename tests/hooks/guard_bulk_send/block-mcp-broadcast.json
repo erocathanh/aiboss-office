@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "mcp__telegram__send_message",
+  "tool_input": {
+    "chat_id": 123456,
+    "text": "Thông báo khuyến mãi"
+  }
+}

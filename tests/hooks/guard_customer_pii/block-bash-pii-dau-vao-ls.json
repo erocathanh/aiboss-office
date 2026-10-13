@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo \"0912345678\" >> projects/THU-SU-THAT/wip/nhap_v01_20260930.md; ls projects/THU-SU-THAT/inputs/"
+  }
+}

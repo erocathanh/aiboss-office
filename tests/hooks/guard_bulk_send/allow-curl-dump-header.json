@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -sS -D - 'https://graph.facebook.com/v21.0/t_123/messages?fields=message'"
+  }
+}

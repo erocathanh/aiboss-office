@@ -1,0 +1,13 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "MultiEdit",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/CHANNEL.md",
+    "edits": [
+      {
+        "old_string": "# Nhật ký dự án",
+        "new_string": "x"
+      }
+    ]
+  }
+}

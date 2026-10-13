@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/DANG-LAM/khach-hang-nhap.md",
+    "content": "Bản nháp gửi khách: 0912345678"
+  }
+}

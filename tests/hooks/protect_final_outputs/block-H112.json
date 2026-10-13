@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/CHANNEL.md",
+    "old_string": "# Nhật ký dự án",
+    "new_string": "x"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/outputs/chot-hoan-toan-moi_final.md",
+    "content": "x"
+  }
+}

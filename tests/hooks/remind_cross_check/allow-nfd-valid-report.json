@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/wip/su-that-van-hanh_v03_20260930.md",
+    "content": "# Sự thật\n## Ba chi tiết đã lược bỏ\n- Chi tiết 1 vì lý do A\n- Chi tiết 2 vì lý do B\n- Chi tiết 3 vì lý do C\n## Trục Vận hành"
+  }
+}

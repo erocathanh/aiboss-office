@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cp 'projects/THU-SU-THAT/inputs/a.md' 'projects/THU-SU-THAT/wip/a-v02.md'"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/wip/su-that-van-hanh_v03_20260930.md",
+    "content": "# Sự thật\nViệc còn thiếu: sẽ viết ## Ba chi tiết đã lược bỏ sau.\nKhách hủy vì giá.\nKhách chê vì chậm.\nKhách khen vì nhanh.\n## Trục Vận hành"
+  }
+}
