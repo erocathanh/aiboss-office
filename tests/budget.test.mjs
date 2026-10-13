@@ -82,6 +82,7 @@ import {
   checkProcessLiveness,
   acquireInstanceLock,
   releaseInstanceLock,
+  repairLogTail,
 } from '../src/lib/budget-ledger.ts';
 import {
   isValidNanodollarsString,
@@ -1348,7 +1349,11 @@ try {
     const currentPid = process.pid;
     const currentStartTime = getProcessStartTime(currentPid);
     assert.ok(currentStartTime, 'Current process start time must be queryable via ps');
-    assert.equal(isProcessAlive(currentPid), true, 'Current process must be alive');
+    assert.equal(
+      checkProcessLiveness(currentPid, undefined),
+      'unverified',
+      'Process without expectedStartedAt must return unverified (Hermes Item 8)'
+    );
     assert.equal(isProcessAlive(currentPid, currentStartTime), true, 'Current process must be alive with matching start time');
 
     // PID reuse simulation: mismatched start time must report process dead
@@ -1626,14 +1631,38 @@ try {
     });
     assert.equal(childLockRes.status, 42, 'Second server runner process must be rejected by instance lock (acquired: false)');
 
-    // 3. Stale lock reclamation from dead process
-    // Overwrite lock with a dead PID (e.g. 999999)
+    // 3. Stale lock inspection:
+    // a) Unverified owner (missing processStartedAt): startup MUST be refused and lock NOT deleted (Condition b)
+    const infoPath = fs.statSync(lockFilePath).isDirectory()
+      ? path.join(lockFilePath, 'info.json')
+      : lockFilePath;
+
     fs.writeFileSync(
-      lockFilePath,
+      infoPath,
+      JSON.stringify({
+        pid: process.pid,
+        // missing processStartedAt -> unverified!
+        token: 'unverified-token',
+        ts: new Date().toISOString(),
+      }),
+      'utf-8'
+    );
+    const unverifiedAttempt = acquireInstanceLock(testDataDir);
+    assert.equal(
+      unverifiedAttempt.acquired,
+      false,
+      'Instance lock with unverified owner must refuse startup and NOT delete/steal lock (Condition b)'
+    );
+    assert.ok(fs.existsSync(lockFilePath), 'Unverified lock must remain on disk without being deleted');
+
+    // b) Dead process owner (PID 999999) -> reclaimed safely via atomic rename
+    fs.writeFileSync(
+      infoPath,
       JSON.stringify({
         pid: 999999,
         processStartedAt: '1970-01-01T00:00:00.000Z',
-        createdAt: '1970-01-01T00:00:00.000Z',
+        token: 'dead-token',
+        ts: '1970-01-01T00:00:00.000Z',
       }),
       'utf-8'
     );
@@ -1644,9 +1673,9 @@ try {
 
     // 4. Release lock
     releaseInstanceLock(testDataDir);
-    assert.equal(fs.existsSync(lockFilePath), false, 'Instance lock file must be removed upon release');
+    assert.equal(fs.existsSync(lockFilePath), false, 'Instance lock directory must be removed upon release');
 
-    console.log('  [PASS] Case 25: single-instance startup lock rejection and dead PID reclamation verified (Condition b)');
+    console.log('  [PASS] Case 25: single-instance startup lock rejection, unverified guard, and dead PID reclamation verified (Condition b)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)
@@ -1734,7 +1763,356 @@ try {
     console.log('  [PASS] Case 27: pure read-only GET /api/budget without disk mutation verified (Item 9)');
   }
 
-  console.log('>>> ALL 27 A-3 BUDGET TEST CASES AND REVIEWS PASSED <<<');
+  // Case 28: Truncated/corrupted JSONL tail repair and uncommitted fragment guard (Item 6)
+  {
+    const todayStr = '2026-10-14';
+    const testLogFile = `${todayStr}.jsonl`;
+    const testLogPath = path.join(testDataDir, 'budget', testLogFile);
+
+    // 1. Write one valid hold
+    const validHold1 = {
+      type: 'hold',
+      holdId: 'hold-tail-valid-1',
+      wakeId: 'wake-tail-1',
+      seatId: 'marketing-lead',
+      amountNanodollars: '200000000',
+      basis: 'default',
+      overBudget: false,
+      ts: `${todayStr}T10:00:00.000Z`,
+    };
+    fs.writeFileSync(testLogPath, JSON.stringify(validHold1) + '\n', 'utf-8');
+
+    // 2. Append an uncommitted trailing fragment without newline
+    fs.appendFileSync(testLogPath, '{"type":"hold","holdId":"hold-broken-tail-partial', 'utf-8');
+
+    // repairLogTail must detect uncommitted fragment, trim it, and log warning
+    const res1 = repairLogTail(testLogPath);
+    assert.equal(res1.repaired, true, 'repairLogTail must report file was repaired');
+    assert.equal(res1.validLines, 1, 'Valid line count must be 1');
+
+    // Raw content must end with newline and contain exactly validHold1
+    const contentAfterRepair = fs.readFileSync(testLogPath, 'utf-8');
+    assert.ok(contentAfterRepair.endsWith('\n'), 'Repaired file must end with trailing newline');
+    assert.equal(contentAfterRepair.trim(), JSON.stringify(validHold1));
+
+    // 3. Replay: checkpoint must NEVER advance over uncommitted fragments
+    const cp = replayAndGetCheckpoint();
+    assert.equal(cp.filePositions[testLogFile], 1, 'Checkpoint filePosition must strictly match valid lines');
+    assert.ok(cp.holds['hold-tail-valid-1']);
+    assert.equal(cp.holds['hold-broken-tail-partial'], undefined);
+
+    // 4. Subsequent write via settleHold must write cleanly on next line
+    const validSettle1 = {
+      type: 'settle',
+      holdId: 'hold-tail-valid-1',
+      runId: 'run-tail-1',
+      actualNanodollars: '180000000',
+      priced: true,
+      ts: `${todayStr}T11:00:00.000Z`,
+    };
+    settleHold(validSettle1);
+
+    const cpAfterSettle = replayAndGetCheckpoint();
+    assert.equal(cpAfterSettle.filePositions[testLogFile], 2, 'File position advances to 2 after clean append');
+    assert.equal(cpAfterSettle.holds['hold-tail-valid-1'], undefined, 'Hold was settled');
+
+    // 5. Corrupted JSON parse error at tail
+    fs.appendFileSync(testLogPath, '{"type":"broken" garbage\n', 'utf-8');
+    const res2 = repairLogTail(testLogPath);
+    assert.equal(res2.repaired, true);
+    assert.equal(res2.validLines, 2);
+
+    console.log('  [PASS] Case 28: truncated/corrupted JSONL tail repair and uncommitted fragment guard verified (Item 6)');
+  }
+
+  // Case 29: Checkpoint v1 -> v2 migration rebuilding holds and filePositions from SST (Finding M4)
+  {
+    const legacyDate = '2026-07-15';
+    const legacyFile = `${legacyDate}.jsonl`;
+    const legacyLogPath = path.join(testDataDir, 'budget', legacyFile);
+    const holdV1Id = 'hold-v1-migration-test';
+
+    // In JSONL SST: hold was created and then settled!
+    const recHold = {
+      type: 'hold',
+      holdId: holdV1Id,
+      wakeId: 'wake-v1-test',
+      seatId: 'marketing-lead',
+      amountNanodollars: '300000000',
+      basis: 'default',
+      overBudget: false,
+      ts: `${legacyDate}T08:00:00.000Z`,
+    };
+    const recSettle = {
+      type: 'settle',
+      holdId: holdV1Id,
+      runId: 'run-v1-test',
+      actualNanodollars: '300000000',
+      priced: true,
+      ts: `${legacyDate}T09:00:00.000Z`,
+    };
+    fs.writeFileSync(legacyLogPath, JSON.stringify(recHold) + '\n' + JSON.stringify(recSettle) + '\n', 'utf-8');
+
+    // Simulate stale v1 checkpoint on disk:
+    // v1 snapshot falsely contains holdV1Id and only tracks lastReplayedFile/lastLineCount cursor
+    const openHoldsPath = path.join(testDataDir, 'budget', 'open-holds.json');
+    const staleV1 = {
+      version: 1,
+      updatedAt: '2026-07-15T08:30:00.000Z',
+      lastReplayedFile: legacyFile,
+      lastLineCount: 1,
+      holds: {
+        [holdV1Id]: recHold,
+      },
+    };
+    fs.writeFileSync(openHoldsPath, JSON.stringify(staleV1, null, 2), 'utf-8');
+
+    // Replay: loadOpenHoldsCheckpoint must reject v1 snapshot and replayAndGetCheckpoint
+    // must rebuild both holds and filePositions from JSONL SST from scratch.
+    const migratedCp = replayAndGetCheckpoint();
+    assert.equal(migratedCp.version, 2, 'Migrated checkpoint must be version 2');
+    assert.equal(
+      migratedCp.holds[holdV1Id],
+      undefined,
+      'Settled hold must NEVER be resurrected from stale v1 snapshot (Finding M4)'
+    );
+    assert.equal(migratedCp.filePositions[legacyFile], 2, 'File position must reflect both records in SST');
+    assert.equal(isHoldClosed(holdV1Id), true, 'Hold must be verified closed');
+
+    console.log('  [PASS] Case 29: checkpoint v1 -> v2 migration rebuilding holds from SST verified (Finding M4)');
+  }
+
+  // Case 30: Deterministic barrier counterproof fixture at concurrency points (Item 11)
+  {
+    const seatId = 'barrier-tester';
+    // Configure barrier-tester with cap = 700000000 (700M), default estimate = 700M
+    // Exactly 1 run can fit within the daily cap!
+    writeTestConfig({
+      currency: 'USD',
+      defaultRunEstimateNanodollars: '700000000',
+      office: { dailyCapNanodollars: null, hardStop: true },
+      seats: {
+        'marketing-lead': { dailyCapNanodollars: null, hardStop: true },
+        'content-writer': { dailyCapNanodollars: null, hardStop: true },
+        'barrier-tester': { dailyCapNanodollars: '700000000', hardStop: true },
+      },
+    });
+
+    const budgetLedgerPath = path.join(process.cwd(), 'src', 'lib', 'budget-ledger.ts');
+    const childScriptContent = `
+      import fs from 'node:fs';
+      import path from 'node:path';
+      import { checkAdmissionAndRecordHold } from '${budgetLedgerPath}';
+
+      try {
+        const [workerId, seatId, wakeId, holdId, barrierDir] = process.argv.slice(2);
+        const readyFile = path.join(barrierDir, 'ready-' + workerId);
+        const startFile = path.join(barrierDir, 'start');
+
+        // 1. Announce ready
+        fs.writeFileSync(readyFile, '1');
+
+        // 2. Wait for parent start signal
+        const startWait = Date.now();
+        while (!fs.existsSync(startFile) && Date.now() - startWait < 5000) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
+
+        // 3. Enter admission check and record hold
+        const result = checkAdmissionAndRecordHold({
+          seatId,
+          wakeId,
+          holdId,
+        });
+
+        if (result.allowed) {
+          process.exit(0);
+        } else {
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error('Child runner error:', err);
+        process.exit(99);
+      }
+    `;
+
+    const runnerScriptPath = path.join(testBaseDir, 'runner-case30.mjs');
+    fs.writeFileSync(runnerScriptPath, childScriptContent, 'utf-8');
+
+    // --- Phase A: Normal Mechanism (with lock) -> PASS ---
+    const barrierDirA = path.join(testBaseDir, 'barrier-a');
+    fs.mkdirSync(barrierDirA, { recursive: true });
+
+    const pA1 = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', runnerScriptPath, 'w1', seatId, 'wake-norm-1', 'hold-norm-1', barrierDirA],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: testDataDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          AIBOSS_TEST_BARRIER_DIR: barrierDirA,
+        },
+      }
+    );
+
+    const pA2 = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', runnerScriptPath, 'w2', seatId, 'wake-norm-2', 'hold-norm-2', barrierDirA],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: testDataDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          AIBOSS_TEST_BARRIER_DIR: barrierDirA,
+        },
+      }
+    );
+
+    let outA1 = '', errA1 = '', outA2 = '', errA2 = '';
+    pA1.stdout.on('data', (d) => { outA1 += d.toString(); });
+    pA1.stderr.on('data', (d) => { errA1 += d.toString(); });
+    pA2.stdout.on('data', (d) => { outA2 += d.toString(); });
+    pA2.stderr.on('data', (d) => { errA2 += d.toString(); });
+
+    // Wait for both to be ready
+    const readyA1 = path.join(barrierDirA, 'ready-w1');
+    const readyA2 = path.join(barrierDirA, 'ready-w2');
+    const waitReadyAStart = Date.now();
+    while ((!fs.existsSync(readyA1) || !fs.existsSync(readyA2)) && Date.now() - waitReadyAStart < 5000) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    // Release start signal
+    fs.writeFileSync(path.join(barrierDirA, 'start'), '1');
+
+    // Wait until at least one worker arrives at the critical concurrency point
+    const arrivedA1 = path.join(barrierDirA, `arrived-${pA1.pid}`);
+    const arrivedA2 = path.join(barrierDirA, `arrived-${pA2.pid}`);
+    const waitArrivedAStart = Date.now();
+    while (!fs.existsSync(arrivedA1) && !fs.existsSync(arrivedA2) && Date.now() - waitArrivedAStart < 5000) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    // Under lock, only ONE worker can be at the barrier inside the transaction at any moment!
+    // Release the barrier
+    fs.writeFileSync(path.join(barrierDirA, 'release'), '1');
+
+    const [codeA1, codeA2] = await Promise.all([
+      new Promise((resolve) => pA1.on('close', resolve)),
+      new Promise((resolve) => pA2.on('close', resolve)),
+    ]);
+
+    // Exactly one process must succeed (code 0), exactly one must fail (code 1)
+    const successCountA = (codeA1 === 0 ? 1 : 0) + (codeA2 === 0 ? 1 : 0);
+    assert.equal(successCountA, 1, 'Under budget lock, exactly 1 turn must be admitted');
+
+    const statusA = getBudgetStatus(seatId);
+    assert.equal(statusA.heldNanodollars, '700000000', 'Exactly 1 hold of 700M nanodollars committed');
+
+    // --- Phase B: Disabling Mechanism (AIBOSS_TEST_DISABLE_BUDGET_LOCK=1) -> FAILS (proves counterproof) ---
+    // Settle or release hold-norm-1 to reset budget
+    const activeHoldA = getActiveHolds();
+    for (const h of activeHoldA.values()) {
+      if (h.seatId === seatId) {
+        releaseHold({ holdId: h.holdId, reason: 'failed_no_receipt', ts: new Date().toISOString() });
+      }
+    }
+    const statusClean = getBudgetStatus(seatId);
+    assert.equal(statusClean.heldNanodollars, '0', 'Held nanodollars reset to 0 before counterproof run');
+
+    const barrierDirB = path.join(testBaseDir, 'barrier-b');
+    fs.mkdirSync(barrierDirB, { recursive: true });
+
+    const pB1 = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', runnerScriptPath, 'w1', seatId, 'wake-dis-1', 'hold-dis-1', barrierDirB],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: testDataDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          AIBOSS_TEST_BARRIER_DIR: barrierDirB,
+          AIBOSS_TEST_DISABLE_BUDGET_LOCK: '1',
+        },
+      }
+    );
+
+    const pB2 = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', runnerScriptPath, 'w2', seatId, 'wake-dis-2', 'hold-dis-2', barrierDirB],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: testDataDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          AIBOSS_TEST_BARRIER_DIR: barrierDirB,
+          AIBOSS_TEST_DISABLE_BUDGET_LOCK: '1',
+        },
+      }
+    );
+
+    // Wait for both to be ready
+    const readyB1 = path.join(barrierDirB, 'ready-w1');
+    const readyB2 = path.join(barrierDirB, 'ready-w2');
+    const waitReadyBStart = Date.now();
+    while ((!fs.existsSync(readyB1) || !fs.existsSync(readyB2)) && Date.now() - waitReadyBStart < 5000) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    // Release start signal
+    fs.writeFileSync(path.join(barrierDirB, 'start'), '1');
+
+    // Without budget lock, BOTH workers simultaneously reach the concurrency point!
+    const arrivedB1 = path.join(barrierDirB, `arrived-${pB1.pid}`);
+    const arrivedB2 = path.join(barrierDirB, `arrived-${pB2.pid}`);
+    const waitArrivedBStart = Date.now();
+    while ((!fs.existsSync(arrivedB1) || !fs.existsSync(arrivedB2)) && Date.now() - waitArrivedBStart < 5000) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    assert.ok(fs.existsSync(arrivedB1), 'Worker 1 reached concurrency point without lock');
+    assert.ok(fs.existsSync(arrivedB2), 'Worker 2 reached concurrency point without lock simultaneously');
+
+    // Release both workers simultaneously past the concurrency point
+    fs.writeFileSync(path.join(barrierDirB, 'release'), '1');
+
+    const [codeB1, codeB2] = await Promise.all([
+      new Promise((resolve) => pB1.on('close', resolve)),
+      new Promise((resolve) => pB2.on('close', resolve)),
+    ]);
+
+    // Counterproof result: WITHOUT lock, BOTH workers pass admission and commit holds!
+    assert.equal(codeB1, 0, 'Worker 1 was admitted without lock');
+    assert.equal(codeB2, 0, 'Worker 2 was admitted without lock');
+
+    const allRecords = readAllBudgetRecords();
+    const disHolds = allRecords.filter(
+      (r) => r.type === 'hold' && r.seatId === seatId && r.holdId.startsWith('hold-dis-')
+    );
+    assert.equal(
+      disHolds.length,
+      2,
+      'Counterproof proved: without lock, both workers concurrently committed holds (2 holds > 1 allowed)'
+    );
+    const totalCommittedWithoutLock = disHolds.reduce(
+      (sum, r) => sum + BigInt(r.amountNanodollars),
+      0n
+    );
+    assert.equal(
+      totalCommittedWithoutLock.toString(),
+      '1400000000',
+      'Counterproof proved: without lock, total committed holds (1.4B) exceeds daily cap (700M)'
+    );
+
+    console.log('  [PASS] Case 30: deterministic barrier counterproof fixture at concurrency points verified (Item 11)');
+  }
+
+  console.log('>>> ALL 30 A-3 BUDGET TEST CASES AND REVIEWS PASSED <<<');
 } catch (err) {
   console.error('\nTest failed with error:', err);
   process.exit(1);

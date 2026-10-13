@@ -173,15 +173,17 @@ export function checkProcessLiveness(pid: number, expectedStartedAt?: string): P
     }
     return 'unverified';
   }
-  if (expectedStartedAt) {
-    const actual = getProcessStartTime(pid);
-    if (!actual) {
-      // ps query failed but process signal succeeded -> unverified
-      return 'unverified';
-    }
-    if (actual !== expectedStartedAt) {
-      return 'dead'; // Start time mismatch indicates PID was reused
-    }
+  if (!expectedStartedAt) {
+    // Hermes Item 8: Missing worker start time cannot verify PID recycling -> unverified!
+    return 'unverified';
+  }
+  const actual = getProcessStartTime(pid);
+  if (!actual) {
+    // ps query failed but process signal succeeded -> unverified
+    return 'unverified';
+  }
+  if (actual !== expectedStartedAt) {
+    return 'dead'; // Start time mismatch indicates PID was reused
   }
   return 'alive';
 }
@@ -194,80 +196,159 @@ export function isProcessAlive(pid: number, expectedStartedAt?: string): boolean
 // Single-Instance Startup Lock on AIBOSS_DATA_DIR (Condition b)
 // -------------------------------------------------------------
 
+export interface InstanceLockMetadata {
+  pid: number;
+  processStartedAt: string;
+  token: string;
+  ts: string;
+}
+
+let activeInstanceToken: string | null = null;
+
 export function getInstanceLockFilePath(dataDir?: string): string {
   const baseDir = dataDir || process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
   return path.join(baseDir, '.instance.lock');
 }
 
-export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?: number } {
-  const lockPath = getInstanceLockFilePath(dataDir);
-  const baseDir = path.dirname(lockPath);
+export function acquireInstanceLock(dataDir?: string): { acquired: boolean; pid?: number; token?: string } {
+  const lockDir = getInstanceLockFilePath(dataDir);
+  const baseDir = path.dirname(lockDir);
   if (!fs.existsSync(baseDir)) {
     fs.mkdirSync(baseDir, { recursive: true });
   }
 
   const currentPid = process.pid;
   const currentStartTime = getProcessStartTime(currentPid) || new Date().toISOString();
-  const metadata = {
+  const token = `${currentPid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const metadata: InstanceLockMetadata = {
     pid: currentPid,
     processStartedAt: currentStartTime,
+    token,
     ts: new Date().toISOString(),
   };
 
+  // 1. Write metadata inside private tmp directory before atomic publication
+  const tmpDir = path.join(baseDir, `.instance-init-${token}`);
   try {
-    const fd = fs.openSync(lockPath, 'wx');
-    fs.writeFileSync(fd, JSON.stringify(metadata, null, 2), 'utf-8');
-    fs.closeSync(fd);
-    return { acquired: true, pid: currentPid };
-  } catch (err: unknown) {
-    if ((err as { code?: string }).code === 'EEXIST') {
-      // Lock file already exists. Inspect owner liveness.
-      try {
-        const content = fs.readFileSync(lockPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        if (parsed && typeof parsed.pid === 'number') {
-          const liveness = checkProcessLiveness(parsed.pid, parsed.processStartedAt);
-          if (liveness === 'alive') {
-            // Existing instance is active!
-            return { acquired: false, pid: parsed.pid };
-          }
-        }
-      } catch {
-        /* corrupted lock file or read error */
-      }
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'info.json'), JSON.stringify(metadata, null, 2), 'utf-8');
 
-      // Reclaim stale lock of dead or unverified process
+    // 2. Atomic publish via renameSync
+    try {
+      fs.renameSync(tmpDir, lockDir);
+      activeInstanceToken = token;
+      return { acquired: true, pid: currentPid, token };
+    } catch {
+      // lockDir already exists (EEXIST / ENOTEMPTY)
       try {
-        fs.unlinkSync(lockPath);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       } catch {
         /* ignore */
       }
-
-      try {
-        const fd = fs.openSync(lockPath, 'wx');
-        fs.writeFileSync(fd, JSON.stringify(metadata, null, 2), 'utf-8');
-        fs.closeSync(fd);
-        return { acquired: true, pid: currentPid };
-      } catch {
-        return { acquired: false };
-      }
+    }
+  } catch (err) {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
     }
     throw err;
   }
-}
 
-export function releaseInstanceLock(dataDir?: string): void {
-  const lockPath = getInstanceLockFilePath(dataDir);
+  // 3. Inspect existing lock
   try {
-    if (fs.existsSync(lockPath)) {
-      const content = fs.readFileSync(lockPath, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (parsed.pid === process.pid) {
-        fs.unlinkSync(lockPath);
+    let held: InstanceLockMetadata | null = null;
+    const infoPath = path.join(lockDir, 'info.json');
+
+    if (fs.existsSync(infoPath)) {
+      held = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+    } else if (fs.existsSync(lockDir) && !fs.statSync(lockDir).isDirectory()) {
+      // Plain file fallback
+      held = JSON.parse(fs.readFileSync(lockDir, 'utf-8'));
+    }
+
+    if (held && typeof held.pid === 'number') {
+      const liveness = checkProcessLiveness(held.pid, held.processStartedAt);
+      if (liveness === 'alive') {
+        // Active instance is running
+        return { acquired: false, pid: held.pid };
+      }
+      if (liveness === 'unverified') {
+        // Hermes Condition (b): Chưa xác minh được chủ thì TỪ CHỐI khởi động, không xoá khoá!
+        return { acquired: false, pid: held.pid };
+      }
+
+      // liveness === 'dead': Reclaim safely via atomic rename (no check-then-unlink race!)
+      const reclaimDir = path.join(baseDir, `.instance-reclaim-${held.token || 'stale'}-${Date.now()}`);
+      try {
+        fs.renameSync(lockDir, reclaimDir);
+        try {
+          fs.rmSync(reclaimDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+
+        // Now attempt acquire
+        const reacquireTmp = path.join(baseDir, `.instance-init-${token}`);
+        fs.mkdirSync(reacquireTmp, { recursive: true });
+        fs.writeFileSync(path.join(reacquireTmp, 'info.json'), JSON.stringify(metadata, null, 2), 'utf-8');
+        try {
+          fs.renameSync(reacquireTmp, lockDir);
+          activeInstanceToken = token;
+          return { acquired: true, pid: currentPid, token };
+        } catch {
+          try {
+            fs.rmSync(reacquireTmp, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+          return { acquired: false };
+        }
+      } catch {
+        // Another concurrent process won the reclaim race
+        return { acquired: false };
       }
     }
   } catch {
-    /* ignore */
+    /* error reading or parsing existing lock */
+  }
+
+  return { acquired: false };
+}
+
+export function releaseInstanceLock(dataDir?: string): void {
+  const lockDir = getInstanceLockFilePath(dataDir);
+  const baseDir = path.dirname(lockDir);
+  try {
+    if (!fs.existsSync(lockDir)) return;
+
+    let held: InstanceLockMetadata | null = null;
+    const infoPath = path.join(lockDir, 'info.json');
+    if (fs.existsSync(infoPath)) {
+      held = JSON.parse(fs.readFileSync(infoPath, 'utf-8'));
+    } else if (!fs.statSync(lockDir).isDirectory()) {
+      held = JSON.parse(fs.readFileSync(lockDir, 'utf-8'));
+    }
+
+    if (held && (held.token === activeInstanceToken || held.pid === process.pid)) {
+      const retireDir = path.join(
+        baseDir,
+        `.instance-retired-${held.token || process.pid}-${Date.now()}`
+      );
+      try {
+        fs.renameSync(lockDir, retireDir);
+        fs.rmSync(retireDir, { recursive: true, force: true });
+      } catch {
+        try {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+      activeInstanceToken = null;
+    }
+  } catch {
+    /* ignore release errors */
   }
 }
 
@@ -291,6 +372,14 @@ let lockDepth = 0;
  * - Metadata write errors abort immediately without entering critical section.
  */
 export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
+  // Test hook for counterproof verification:
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.AIBOSS_TEST_DISABLE_BUDGET_LOCK === '1'
+  ) {
+    return fn();
+  }
+
   if (lockDepth > 0) {
     lockDepth++;
     try {
@@ -578,9 +667,92 @@ export function readAllBudgetRecords(fileFilter?: (fileName: string) => boolean)
   return records;
 }
 
+export interface RepairLogTailResult {
+  repaired: boolean;
+  validLines: number;
+}
+
+/**
+ * Inspects the tail of a date-partitioned JSONL file (Hermes Item 6).
+ * Any uncommitted fragment (line without trailing newline or failing JSON parse)
+ * is treated as an incomplete uncommitted tail and trimmed back to the last valid line.
+ * Checkpoint filePositions must only reflect valid committed lines.
+ * Throws if the file cannot be safely repaired (fails closed).
+ */
+export function repairLogTail(filePath: string): RepairLogTailResult {
+  if (!fs.existsSync(filePath)) {
+    return { repaired: false, validLines: 0 };
+  }
+  const stat = fs.statSync(filePath);
+  if (stat.size === 0) {
+    return { repaired: false, validLines: 0 };
+  }
+
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  const hasTrailingNewline = raw.endsWith('\n');
+
+  // Split lines
+  const rawLines = raw.split('\n');
+  if (hasTrailingNewline) {
+    rawLines.pop(); // Remove the empty string after the trailing newline
+  }
+
+  const validLinesList: string[] = [];
+  let needsRepair = !hasTrailingNewline;
+  let corruptStartIndex = -1;
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const rawLine = rawLines[i];
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      if (i === rawLines.length - 1 && !hasTrailingNewline) {
+        needsRepair = true;
+        corruptStartIndex = i;
+        break;
+      }
+      continue;
+    }
+
+    if (i === rawLines.length - 1 && !hasTrailingNewline) {
+      needsRepair = true;
+      corruptStartIndex = i;
+      break;
+    }
+
+    try {
+      JSON.parse(trimmed);
+      validLinesList.push(trimmed);
+    } catch {
+      needsRepair = true;
+      corruptStartIndex = i;
+      break;
+    }
+  }
+
+  if (needsRepair) {
+    try {
+      const repairedContent = validLinesList.length > 0 ? validLinesList.join('\n') + '\n' : '';
+      fs.writeFileSync(filePath, repairedContent, 'utf-8');
+      console.warn(
+        `[budget-ledger] Repaired incomplete log tail in ${filePath}: trimmed uncommitted fragment from line ${
+          corruptStartIndex >= 0 ? corruptStartIndex + 1 : rawLines.length
+        }`
+      );
+      return { repaired: true, validLines: validLinesList.length };
+    } catch (err) {
+      console.error(`[budget-ledger] FAILED to repair corrupted log tail in ${filePath}:`, err);
+      throw new Error(`Corrupted log tail in ${filePath} could not be safely repaired: ${String(err)}`);
+    }
+  }
+
+  return { repaired: false, validLines: validLinesList.length };
+}
+
 function appendBudgetRecordDirect(record: BudgetRecord): void {
   ensureBudgetDir();
   const filePath = getBudgetLogPathForDate(record.ts);
+  // Hermes Item 6: Ensure tail is clean before appending
+  repairLogTail(filePath);
   fs.appendFileSync(filePath, JSON.stringify(record) + '\n', 'utf-8');
 }
 
@@ -609,14 +781,16 @@ export function loadOpenHoldsCheckpoint(): OpenHoldsCheckpoint | null {
   try {
     const content = fs.readFileSync(openHoldsPath, 'utf-8');
     const parsed = JSON.parse(content);
-    if (parsed && (parsed.version === 1 || parsed.version === 2) && parsed.holds && typeof parsed.holds === 'object') {
-      if (parsed.version === 1 || !parsed.filePositions) {
-        parsed.version = 2;
-        parsed.filePositions = parsed.filePositions || {};
-        if (parsed.lastReplayedFile && typeof parsed.lastLineCount === 'number') {
-          parsed.filePositions[parsed.lastReplayedFile] = parsed.lastLineCount;
-        }
-      }
+    // Hermes Finding M4: If checkpoint is v1 or missing filePositions, do NOT mix snapshot holds with single cursor!
+    // Return null to force replayAndGetCheckpoint to rebuild holds and filePositions from JSONL SST from scratch.
+    if (
+      parsed &&
+      parsed.version === 2 &&
+      parsed.holds &&
+      typeof parsed.holds === 'object' &&
+      parsed.filePositions &&
+      typeof parsed.filePositions === 'object'
+    ) {
       return parsed as OpenHoldsCheckpoint;
     }
   } catch {
@@ -636,7 +810,7 @@ export function saveOpenHoldsCheckpoint(cp: OpenHoldsCheckpoint): void {
 /**
  * Replay unindexed budget records from date-partitioned JSONL files (the Single Source of Truth)
  * into the durable open-holds checkpoint index.
- * Multi-partition tracking (Hermes Item M2):
+ * Multi-partition tracking (Hermes Item M2 & M4):
  * Tracks line counts per file in cp.filePositions[file]. Any append to an older partition
  * (e.g. cross-midnight settles) is detected and replayed cleanly.
  * Must be called under withBudgetLock.
@@ -647,6 +821,22 @@ export function replayAndGetCheckpoint(): OpenHoldsCheckpoint {
   let cp = loadOpenHoldsCheckpoint();
 
   if (!cp) {
+    // Hermes Finding M4: Log v1 migration when encountering legacy checkpoint file
+    const openHoldsPath = getOpenHoldsFilePath();
+    if (fs.existsSync(openHoldsPath)) {
+      try {
+        const raw = fs.readFileSync(openHoldsPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.version === 1) {
+          console.warn(
+            '[budget-ledger] Detected v1 checkpoint index. Rebuilding holds and filePositions from JSONL SST from scratch.'
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     cp = {
       version: 2,
       updatedAt: new Date().toISOString(),
@@ -664,9 +854,45 @@ export function replayAndGetCheckpoint(): OpenHoldsCheckpoint {
     const filePath = path.join(budgetDir, file);
     if (!fs.existsSync(filePath)) continue;
 
+    // Hermes Item 6: Inspect and repair log tail before reading
+    repairLogTail(filePath);
+
     const content = fs.readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
-    const startLineIndex = cp.filePositions[file] ?? 0;
+    let startLineIndex = cp.filePositions[file] ?? 0;
+
+    // If checkpoint position exceeds valid lines, reset and rebuild
+    if (startLineIndex > lines.length) {
+      console.warn(
+        `[budget-ledger] Checkpoint filePosition for ${file} (${startLineIndex}) exceeds valid line count (${lines.length}). Rebuilding checkpoint from scratch.`
+      );
+      cp.holds = {};
+      cp.filePositions = {};
+      startLineIndex = 0;
+      for (const f of allFiles) {
+        const fp = path.join(budgetDir, f);
+        if (!fs.existsSync(fp)) continue;
+        repairLogTail(fp);
+        const fc = fs.readFileSync(fp, 'utf-8');
+        const fl = fc.split('\n').filter((l) => l.trim().length > 0);
+        for (const l of fl) {
+          try {
+            const p = JSON.parse(l);
+            const s = sanitizeBudgetRecord(p);
+            if (!s) continue;
+            if (s.type === 'hold') {
+              cp.holds[s.holdId] = s;
+            } else if (s.type === 'settle' || s.type === 'release') {
+              delete cp.holds[s.holdId];
+            }
+          } catch {
+            /* skip */
+          }
+        }
+        cp.filePositions[f] = fl.length;
+      }
+      break;
+    }
 
     if (startLineIndex < lines.length) {
       for (let i = startLineIndex; i < lines.length; i++) {
@@ -1358,6 +1584,21 @@ export function checkAdmissionAndRecordHold(params: {
     const admission = checkBudgetAdmission(params.seatId, params.wakeId, params.nowIso);
     if (!admission.allowed) {
       return { allowed: false, reason: admission.reason, admission, hold: null };
+    }
+
+    // Deterministic barrier test hook for counterproof verification (Hermes Item 11):
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      process.env.AIBOSS_TEST_BARRIER_DIR
+    ) {
+      const barrierDir = process.env.AIBOSS_TEST_BARRIER_DIR;
+      const myPid = process.pid;
+      fs.writeFileSync(path.join(barrierDir, `arrived-${myPid}`), '1');
+      const releaseFile = path.join(barrierDir, 'release');
+      const start = Date.now();
+      while (!fs.existsSync(releaseFile) && Date.now() - start < 3000) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
     }
 
     const hold = recordHold({
