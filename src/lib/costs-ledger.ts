@@ -166,10 +166,31 @@ export function hasPricedCostReceiptsForRun(runId: string): boolean {
 }
 
 /**
+ * Return all model names that have cost receipts recorded for the specified runId.
+ */
+export function getRecordedModelsForRun(runId: string): Set<string> {
+  const records = readAllCostRecords();
+  const models = new Set<string>();
+  for (const r of records) {
+    if (r.runId === runId) {
+      models.add(r.model);
+    }
+  }
+  return models;
+}
+
+/**
  * Record a single cost record idempotently. If (runId, model) exists, returns existing record.
  * Throws if disk write fails.
  */
 export function recordCostReceipt(record: CostRecord): CostRecord {
+  if (
+    process.env.AIBOSS_TEST_FAIL_COST_APPEND === '1' ||
+    (process.env.AIBOSS_TEST_FAIL_COST_MODEL &&
+      process.env.AIBOSS_TEST_FAIL_COST_MODEL === record.model)
+  ) {
+    throw new Error(`Injected cost record failure for model ${record.model}`);
+  }
   ensureCostsDir();
   if (isCostRecorded(record.runId, record.model)) {
     const existing = readAllCostRecords().find((r) => r.runId === record.runId && r.model === record.model);

@@ -25,9 +25,11 @@ import {
   findRecentWakeByIdempotencyKey,
   getRunsDir,
   isProcessAlive,
+  sanitizeRun,
 } from '../src/lib/runs-ledger.ts';
-import { traVeHangDoi } from '../src/lib/kho-danh-thuc.ts';
-import { readAllCostRecords } from '../src/lib/costs-ledger.ts';
+import { readAllCostRecords, recordCostReceipt } from '../src/lib/costs-ledger.ts';
+import { tickRunner, getOfficeRunnerStatus } from '../src/lib/office-runner.ts';
+import { sanitizeUsageReceipts, getNormalizedUsageFromRaw } from '../src/lib/usage-receipt.ts';
 
 console.log('--- Testing src/lib/runs-ledger.ts ---');
 
@@ -338,9 +340,8 @@ try {
     console.log('  [PASS] Case 10: missing directory and missing files return clean empty/null results');
   }
 
-  // Case 11: Fault injection & queue recovery (simulates runner append failure -> activeSeats cleaned + item reverted)
+  // Case 11: Real tickRunner fault injection & queue recovery (append failure -> activeSeats cleaned + item reverted)
   {
-    const activeSeats = new Set();
     const testQueueMa = 'test-queue-fault-' + Date.now();
     const testQueueFile = path.join(testDataDir, 'danh-thuc.json');
     fs.mkdirSync(testDataDir, { recursive: true });
@@ -355,99 +356,239 @@ try {
             tu_ai: 'tester',
             cau_hoi: 'Test fault handling',
             luc: Date.now(),
-            da_xu: true,
-            trang_thai: 'da_giao',
+            da_xu: false,
+            trang_thai: 'cho',
           },
         ],
         moc_goi: [],
       })
     );
 
-    // Simulate runner claiming seat
-    activeSeats.add('fault-seat');
-    assert.equal(activeSeats.has('fault-seat'), true);
+    // Initial check: fault-seat not in active_seats
+    assert.equal(getOfficeRunnerStatus().active_seats.includes('fault-seat'), false);
 
-    // Fault injection: simulate append failure in runner
+    // Injected failure on appendRecord
+    process.env.AIBOSS_TEST_FAIL_APPEND = '1';
     try {
-      throw new Error('Disk full on recordRun');
-    } catch {
-      activeSeats.delete('fault-seat');
-      traVeHangDoi(testQueueMa);
+      // Execute REAL tickRunner
+      await tickRunner();
+    } finally {
+      delete process.env.AIBOSS_TEST_FAIL_APPEND;
     }
 
-    assert.equal(activeSeats.has('fault-seat'), false, 'activeSeats must be cleaned up on failure');
+    // Verify real activeSeats cleaned up 'fault-seat'
+    const status = getOfficeRunnerStatus();
+    assert.equal(
+      status.active_seats.includes('fault-seat'),
+      false,
+      'real activeSeats must not contain fault-seat after error'
+    );
+
+    // Verify queue item reverted to 'cho' via real traVeHangDoi
     const updatedQueue = JSON.parse(fs.readFileSync(testQueueFile, 'utf-8'));
     const item = updatedQueue.hang_doi.find((x) => x.ma === testQueueMa);
     assert.equal(item.trang_thai, 'cho', 'Queue item must revert to "cho" on ledger throw');
     assert.equal(item.da_xu, false);
     assert.equal(item.xu_luc, null);
-    console.log('  [PASS] Case 11: fault injection recovery verifies activeSeats cleanup and queue item return');
+    console.log('  [PASS] Case 11: fault injection recovery verifies real tickRunner activeSeats cleanup and queue return');
   }
 
-  // Case 12: Finding B — pending cost reconciliation & fault injection recovery
+  // Case 12: Multi-model run partial failure, retry per-model, and idempotency (Hermes Finding B / Item 2)
   {
-    const costRunId = generateRunOrWakeId('run');
-    const rawStreamEvent = {
-      type: 'result',
-      usage: {
-        input_tokens: 1500,
-        output_tokens: 250,
-        cache_read_input_tokens: 100,
-        cache_creation_input_tokens: 50,
-      },
-      total_cost_usd: 0.015,
-      model: 'claude-3-7-sonnet-20250219',
-    };
+    const multiRunId = generateRunOrWakeId('run');
+    const modelA = 'claude-3-7-sonnet-20250219';
+    const modelB = 'claude-3-5-haiku-20241022';
 
-    // Attempt 1: Run finishes but recording costs threw -> stored with costStatus: 'pending' and rawUsage
+    const normalizedReceipts = sanitizeUsageReceipts([
+      {
+        model: modelA,
+        inputTokens: 1000,
+        cachedInputTokens: 50,
+        cacheCreationTokens: 20,
+        outputTokens: 200,
+        totalCostUsd: '0.010',
+        costNanodollars: '10000000',
+        priced: true,
+      },
+      {
+        model: modelB,
+        inputTokens: 500,
+        cachedInputTokens: 20,
+        cacheCreationTokens: 0,
+        outputTokens: 100,
+        totalCostUsd: '0.002',
+        costNanodollars: '2000000',
+        priced: true,
+      },
+    ]);
+
+    // Simulate partial write during run completion: modelA succeeds, but modelB throws
+    recordCostReceipt({
+      ts: new Date().toISOString(),
+      seatId: 'multi-model-seat',
+      runId: multiRunId,
+      model: modelA,
+      inputTokens: 1020,
+      cachedInputTokens: 50,
+      cacheCreationTokens: 20,
+      outputTokens: 200,
+      costNanodollars: '10000000',
+      priced: true,
+      source: 'claude-stream-json',
+    });
+
+    // Run is saved as pending with normalized rawUsage
     recordRun({
-      runId: costRunId,
-      seatId: 'cost-lifecycle-seat',
+      runId: multiRunId,
+      seatId: 'multi-model-seat',
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
       status: 'finished',
       costStatus: 'pending',
-      rawUsage: rawStreamEvent,
+      rawUsage: normalizedReceipts,
     });
 
-    const pendingRun = getRun(costRunId);
-    assert.equal(pendingRun.costStatus, 'pending', 'Attempt 1 failed recording: status must be pending');
-    const costsBefore = readAllCostRecords().filter((c) => c.runId === costRunId);
-    assert.equal(costsBefore.length, 0, 'No costs recorded before reconciliation');
+    // Verify modelA is recorded, modelB is not
+    const costsBefore = readAllCostRecords().filter((c) => c.runId === multiRunId);
+    assert.equal(costsBefore.length, 1);
+    assert.equal(costsBefore[0].model, modelA);
 
-    // Attempt 2: Reconciler runs (at runner startup / recoverOrphanedRuns)
-    const reconciled = reconcilePendingCosts();
-    assert.ok(reconciled >= 1, 'Reconciler must recover pending run');
+    // 1. Reconcile with failure still active for modelB: must NOT mark recorded!
+    process.env.AIBOSS_TEST_FAIL_COST_MODEL = modelB;
+    try {
+      const reconciledPartial = reconcilePendingCosts();
+      assert.equal(reconciledPartial, 0, 'Must not mark run recorded when modelB fails');
+      const runStillPending = getRun(multiRunId);
+      assert.equal(runStillPending.costStatus, 'pending', 'Run must remain pending when some models missing');
+    } finally {
+      delete process.env.AIBOSS_TEST_FAIL_COST_MODEL;
+    }
 
-    const reconciledRun = getRun(costRunId);
-    assert.equal(reconciledRun.costStatus, 'recorded', 'Reconciled run must have costStatus: recorded');
+    // 2. Reconcile with failure cleared: modelB is now recorded, run transitions to recorded
+    const reconciledComplete = reconcilePendingCosts();
+    assert.equal(reconciledComplete, 1, 'Reconciler must complete multi-model run');
 
-    const costsAfter = readAllCostRecords().filter((c) => c.runId === costRunId);
-    assert.equal(costsAfter.length, 1, 'Costs ledger must contain exact single line for recovered run');
-    assert.equal(costsAfter[0].model, 'claude-3-7-sonnet-20250219');
-    assert.equal(costsAfter[0].inputTokens, 1550); // 1500 + 50
-    assert.equal(costsAfter[0].outputTokens, 250);
-    assert.equal(costsAfter[0].cachedInputTokens, 100);
-    assert.equal(costsAfter[0].priced, true);
+    const runCompleted = getRun(multiRunId);
+    assert.equal(runCompleted.costStatus, 'recorded', 'Run must now be recorded');
+    assert.equal(runCompleted.rawUsage, undefined, 'rawUsage must be removed by tombstone folding');
 
-    // Attempt 3: Idempotent re-run must not create duplicate cost lines
-    reconcilePendingCosts();
-    const costsIdempotent = readAllCostRecords().filter((c) => c.runId === costRunId);
-    assert.equal(costsIdempotent.length, 1, 'Reconciler must be idempotent (exact 1 line in costs ledger)');
+    const costsAfter = readAllCostRecords().filter((c) => c.runId === multiRunId);
+    assert.equal(costsAfter.length, 2, 'Both modelA and modelB receipts must now exist');
+    assert.ok(costsAfter.some((c) => c.model === modelA));
+    assert.ok(costsAfter.some((c) => c.model === modelB));
 
-    // Test orphaned recovery preserves existing recorded costs
+    // 3. Reconcile a 3rd time: idempotent, no extra cost records created
+    const reconciledAgain = reconcilePendingCosts();
+    assert.equal(reconciledAgain, 0);
+    const costsFinal = readAllCostRecords().filter((c) => c.runId === multiRunId);
+    assert.equal(costsFinal.length, 2, 'No duplicates in costs ledger on repeated reconciliation');
+
+    console.log('  [PASS] Case 12: multi-model partial failure retry and idempotent reconciliation verified');
+  }
+
+  // Case 13: Orphaned run recovery fallback failure preserves pending (Hermes Item 3)
+  {
     const orphanRunId = generateRunOrWakeId('run');
     recordRun({
       runId: orphanRunId,
-      seatId: 'cost-lifecycle-seat',
-      startedAt: new Date(Date.now() - 30_000).toISOString(),
+      seatId: 'orphan-fallback-seat',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
       status: 'running',
-      pid: 9999998,
+      pid: 9999997,
     });
-    recoverOrphanedRuns();
-    const orphanRun = getRun(orphanRunId);
-    assert.equal(orphanRun.costStatus, 'unpriced', 'Orphaned run without usage must mark costStatus: unpriced');
-    console.log('  [PASS] Case 12: Finding B pending cost reconciliation verified with fault injection & single ledger line');
+
+    // Simulate failure writing fallback receipt
+    process.env.AIBOSS_TEST_FAIL_COST_MODEL = 'unknown';
+    try {
+      recoverOrphanedRuns();
+    } finally {
+      delete process.env.AIBOSS_TEST_FAIL_COST_MODEL;
+    }
+
+    const orphanAfterFailedFallback = getRun(orphanRunId);
+    assert.equal(orphanAfterFailedFallback.status, 'failed');
+    assert.equal(orphanAfterFailedFallback.errorKind, 'orphaned');
+    assert.equal(
+      orphanAfterFailedFallback.costStatus,
+      'pending',
+      'Orphaned run must remain pending when fallback receipt write fails'
+    );
+
+    // Now reconcile with fallback writing functioning
+    const recoveredCount = reconcilePendingCosts();
+    assert.ok(recoveredCount >= 1, 'Reconciler must recover pending orphan fallback');
+    const orphanFinal = getRun(orphanRunId);
+    assert.equal(orphanFinal.costStatus, 'unpriced', 'Orphaned run must transition to unpriced once recorded');
+    console.log('  [PASS] Case 13: orphaned run fallback failure preserves pending status and recovers cleanly');
+  }
+
+  // Case 14: Zero free-text leaks in ledger files, tombstone null, and whitelist API (Hermes Item 10 / H1 / H2)
+  {
+    const leakRunId = generateRunOrWakeId('run');
+    const secretText = 'SECRET_DO_NOT_LEAK_PROMPT_12345';
+    const errorText = 'CRITICAL_INTERNAL_ERROR_STACK_67890';
+
+    const rawEventWithSecrets = {
+      type: 'result',
+      result: secretText,
+      prompt: secretText,
+      errors: [errorText],
+      model: 'claude-3-7-sonnet-20250219',
+      total_cost_usd: 0.005,
+      usage: {
+        input_tokens: 200,
+        output_tokens: 80,
+      },
+    };
+
+    // Sanitize usage receipts: must strip result, prompt, errors
+    const sanitized = getNormalizedUsageFromRaw(rawEventWithSecrets);
+    assert.equal(sanitized.length, 1);
+    assert.equal(sanitized[0].model, 'claude-3-7-sonnet-20250219');
+    assert.equal(sanitized[0].inputTokens, 200);
+    assert.equal(sanitized[0].outputTokens, 80);
+    assert.equal('result' in sanitized[0], false, 'result text must be stripped');
+    assert.equal('prompt' in sanitized[0], false, 'prompt text must be stripped');
+    assert.equal('errors' in sanitized[0], false, 'errors text must be stripped');
+
+    // Record pending run
+    recordRun({
+      runId: leakRunId,
+      seatId: 'leak-seat',
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: 'finished',
+      costStatus: 'pending',
+      rawUsage: sanitized,
+    });
+
+    // Check ledger files on disk: verify no secret text was ever written
+    const files = fs.readdirSync(getRunsDir());
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(getRunsDir(), f), 'utf-8');
+      assert.equal(content.includes(secretText), false, `Ledger file ${f} must not contain secret text`);
+      assert.equal(content.includes(errorText), false, `Ledger file ${f} must not contain error text`);
+    }
+
+    // Reconcile run: writes tombstone rawUsage: null
+    reconcilePendingCosts();
+
+    // Verify getRun has no rawUsage property after folding
+    const foldedRun = getRun(leakRunId);
+    assert.equal(foldedRun.costStatus, 'recorded');
+    assert.equal('rawUsage' in foldedRun, false, 'rawUsage must be deleted from folded run');
+
+    // Verify getRuns query output has no rawUsage property
+    const queriedRuns = getRuns({ limit: 10 });
+    const matchingQueried = queriedRuns.find((r) => r.runId === leakRunId);
+    assert.ok(matchingQueried);
+    assert.equal('rawUsage' in matchingQueried, false, 'rawUsage must not exist in getRuns output');
+
+    // Verify sanitizeRun strips rawUsage unconditionally
+    const sanitizedApiRun = sanitizeRun({ ...foldedRun, rawUsage: sanitized });
+    assert.equal('rawUsage' in sanitizedApiRun, false, 'sanitizeRun must strip rawUsage');
+
+    console.log('  [PASS] Case 14: zero free-text leaks, tombstone deletion, and API whitelisting verified');
   }
 
   console.log('>>> ALL RUNS LEDGER TEST CASES PASSED <<<');

@@ -22,7 +22,12 @@ import {
   reconcilePendingCosts,
   type RunErrorKind,
 } from '@/lib/runs-ledger';
-import { extractUsageReceipts, type StreamJsonEvent } from '@/lib/usage-receipt';
+import {
+  extractUsageReceipts,
+  sanitizeUsageReceipts,
+  type StreamJsonEvent,
+  type NormalizedUsage,
+} from '@/lib/usage-receipt';
 import { recordCostReceipts, recordCostReceipt } from '@/lib/costs-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -366,33 +371,36 @@ export async function tickRunner(): Promise<number> {
 
           // 1. Process cost receipts FIRST (Finding B: record costs before finished, durable costStatus)
           let costStatus: 'recorded' | 'pending' | 'unpriced' = 'pending';
-          let pendingRawUsage: unknown = undefined;
-          if (result.rawResult) {
+          let pendingRawUsage: NormalizedUsage[] | undefined = undefined;
+
+          const rawEvents = result.rawResult ? [result.rawResult as StreamJsonEvent] : [];
+          const extractedReceipts = extractUsageReceipts(rawEvents);
+          const sanitizedUsage = sanitizeUsageReceipts(
+            extractedReceipts.length > 0
+              ? extractedReceipts
+              : [
+                  {
+                    model: 'unknown',
+                    inputTokens: 0,
+                    cachedInputTokens: 0,
+                    cacheCreationTokens: 0,
+                    outputTokens: 0,
+                    costNanodollars: null,
+                    priced: false,
+                  },
+                ]
+          );
+
+          if (extractedReceipts.length > 0) {
             try {
-              const receipts = extractUsageReceipts([result.rawResult as StreamJsonEvent]);
-              if (receipts.length > 0) {
-                recordCostReceipts(y.ma_nhan_su, runId, receipts, endIso);
-                costStatus = 'recorded';
-              } else {
-                recordCostReceipt({
-                  ts: endIso,
-                  seatId: y.ma_nhan_su,
-                  runId,
-                  model: 'unknown',
-                  inputTokens: 0,
-                  cachedInputTokens: 0,
-                  cacheCreationTokens: 0,
-                  outputTokens: 0,
-                  costNanodollars: null,
-                  priced: false,
-                  source: 'claude-stream-json',
-                });
-                costStatus = 'unpriced';
-              }
+              recordCostReceipts(y.ma_nhan_su, runId, extractedReceipts, endIso);
+              costStatus = 'recorded';
             } catch (err: unknown) {
               console.error(`[office-runner] Failed to record cost receipts for run ${runId}:`, err);
               costStatus = 'pending';
-              pendingRawUsage = result.rawResult;
+              // CRITICAL (Hermes Item 10 / H1): NEVER save rawResult (which contains prompt/result/errors text).
+              // Save ONLY sanitized usage receipts containing numbers/model.
+              pendingRawUsage = sanitizedUsage;
             }
           } else {
             try {
@@ -413,6 +421,7 @@ export async function tickRunner(): Promise<number> {
             } catch (err: unknown) {
               console.error(`[office-runner] Failed to record fallback unpriced cost receipt for run ${runId}:`, err);
               costStatus = 'pending';
+              pendingRawUsage = sanitizedUsage;
             }
           }
 

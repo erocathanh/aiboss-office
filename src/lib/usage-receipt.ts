@@ -194,3 +194,62 @@ export function extractUsageReceipts(
 
   return receipts;
 }
+
+export interface NormalizedUsage {
+  model: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  totalCostUsd?: string;
+  costNanodollars: string | null;
+  priced: boolean;
+}
+
+/**
+ * Sanitize an array of receipts to ensure ONLY numerical token/cost metrics and model name are kept.
+ * Strips any free-form user/LLM text, prompts, tool outputs, or error strings.
+ */
+export function sanitizeUsageReceipts(
+  receipts: (ModelReceipt | NormalizedUsage)[]
+): NormalizedUsage[] {
+  return receipts.map((r) => ({
+    model: String(r.model || 'unknown'),
+    inputTokens: Number(r.inputTokens) || 0,
+    cachedInputTokens: Number(r.cachedInputTokens) || 0,
+    cacheCreationTokens: Number(r.cacheCreationTokens) || 0,
+    outputTokens: Number(r.outputTokens) || 0,
+    ...(r.totalCostUsd !== undefined ? { totalCostUsd: String(r.totalCostUsd) } : {}),
+    costNanodollars:
+      r.costNanodollars !== null && r.costNanodollars !== undefined
+        ? String(r.costNanodollars)
+        : null,
+    priced: Boolean(r.priced),
+  }));
+}
+
+/**
+ * Robustly extract normalized usage from either NormalizedUsage[] or raw StreamJsonEvent[].
+ */
+export function getNormalizedUsageFromRaw(raw: unknown): NormalizedUsage[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    if (
+      raw.length > 0 &&
+      typeof raw[0] === 'object' &&
+      raw[0] !== null &&
+      'model' in raw[0] &&
+      'inputTokens' in raw[0]
+    ) {
+      return sanitizeUsageReceipts(raw as (ModelReceipt | NormalizedUsage)[]);
+    }
+    const extracted = extractUsageReceipts(raw as StreamJsonEvent[]);
+    return sanitizeUsageReceipts(extracted);
+  }
+  if (typeof raw === 'object' && raw !== null) {
+    const extracted = extractUsageReceipts([raw as StreamJsonEvent]);
+    return sanitizeUsageReceipts(extracted);
+  }
+  return [];
+}
+

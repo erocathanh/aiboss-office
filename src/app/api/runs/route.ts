@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRunsWithMetadata } from '@/lib/runs-ledger';
+import { getRunsWithMetadata, sanitizeRun } from '@/lib/runs-ledger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
     const result = getRunsWithMetadata({ seat, from, to, limit });
 
     return NextResponse.json({
-      runs: result.runs,
+      runs: result.runs.map(sanitizeRun),
       total: result.total,
       partial: result.partial,
       scannedFrom: result.scannedFrom,

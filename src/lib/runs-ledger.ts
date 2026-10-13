@@ -14,10 +14,13 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { extractUsageReceipts, type StreamJsonEvent } from '@/lib/usage-receipt';
+import {
+  getNormalizedUsageFromRaw,
+  type NormalizedUsage,
+} from '@/lib/usage-receipt';
 import {
   hasPricedCostReceiptsForRun,
-  recordCostReceipts,
+  getRecordedModelsForRun,
   recordCostReceipt,
 } from '@/lib/costs-ledger';
 
@@ -59,7 +62,7 @@ export interface RunRecord {
   attempt?: number;
   pid?: number;
   costStatus?: 'recorded' | 'pending' | 'unpriced';
-  rawUsage?: unknown;
+  rawUsage?: NormalizedUsage[] | null;
   updatedAt?: string;
 }
 
@@ -127,6 +130,53 @@ export function sanitizeWake(wake: WakeRecord): WakeRecord {
   };
 }
 
+/**
+ * Sanitize a run record for external API exposure.
+ * Strips rawUsage completely and sanitizes embedded wake.
+ */
+export function sanitizeRun(run: MergedRunInfo): MergedRunInfo {
+  const sanitized = { ...run };
+  delete (sanitized as Record<string, unknown>).rawUsage;
+  if (sanitized.wake) {
+    sanitized.wake = sanitizeWake(sanitized.wake);
+  }
+  return sanitized;
+}
+
+/**
+ * Fold a single run record, removing rawUsage if status is recorded or unpriced, or if rawUsage is null.
+ */
+export function foldRunRecord(record: RunRecord): RunRecord {
+  const res = { ...record };
+  if (
+    res.rawUsage === null ||
+    res.costStatus === 'recorded' ||
+    res.costStatus === 'unpriced'
+  ) {
+    delete res.rawUsage;
+  }
+  return res;
+}
+
+/**
+ * Merge older and newer run records respecting tombstones and state transitions.
+ * When newer has rawUsage === null or costStatus === 'recorded' | 'unpriced',
+ * rawUsage is deleted from the merged record.
+ */
+export function mergeRunRecordPair(older: RunRecord, newer: RunRecord): RunRecord {
+  const merged: RunRecord = { ...older, ...newer };
+  if (
+    newer.rawUsage === null ||
+    newer.costStatus === 'recorded' ||
+    newer.costStatus === 'unpriced' ||
+    merged.costStatus === 'recorded' ||
+    merged.costStatus === 'unpriced'
+  ) {
+    delete merged.rawUsage;
+  }
+  return merged;
+}
+
 function getLogPathForDate(isoDateString?: string): string {
   ensureRunsDir();
   const dateStr = (isoDateString ? new Date(isoDateString) : new Date())
@@ -139,6 +189,9 @@ function getLogPathForDate(isoDateString?: string): string {
  * Appends record to ledger file. Throws on error to prevent silent data loss.
  */
 function appendRecord(record: LedgerRecord): void {
+  if (process.env.AIBOSS_TEST_FAIL_APPEND === '1') {
+    throw new Error('Injected ledger append failure for testing');
+  }
   ensureRunsDir();
   const filePath = getLogPathForDate();
   fs.appendFileSync(filePath, JSON.stringify(record) + '\n', 'utf-8');
@@ -212,6 +265,13 @@ export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord |
     runId,
     updatedAt: new Date().toISOString(),
   };
+  if (
+    patch.rawUsage === null ||
+    patch.costStatus === 'recorded' ||
+    patch.costStatus === 'unpriced'
+  ) {
+    updated.rawUsage = null;
+  }
   appendRecord(updated);
   return updated;
 }
@@ -317,9 +377,9 @@ export function getRun(runId: string): RunRecord | null {
   for (const r of records) {
     if (r.type === 'run' && r.runId === runId) {
       if (found) {
-        found = Object.assign({}, found, r);
+        found = mergeRunRecordPair(found, r);
       } else {
-        found = r;
+        found = foldRunRecord(r);
       }
     }
   }
@@ -413,15 +473,15 @@ export function getRunsWithMetadata(options?: {
       } else if (r.type === 'run') {
         const existing = runsById.get(r.runId);
         if (!existing) {
-          runsById.set(r.runId, r);
+          runsById.set(r.runId, foldRunRecord(r));
         } else {
           // Keep the newer event by timestamp; merge to retain earlier metadata
           const rTime = getRecordTimestamp(r);
           const existTime = getRecordTimestamp(existing);
           if (rTime >= existTime) {
-            runsById.set(r.runId, { ...existing, ...r });
+            runsById.set(r.runId, mergeRunRecordPair(existing, r));
           } else {
-            runsById.set(r.runId, { ...r, ...existing });
+            runsById.set(r.runId, mergeRunRecordPair(r, existing));
           }
         }
       }
@@ -472,10 +532,11 @@ export function getRunsWithMetadata(options?: {
   const slicedRuns = runs.slice(0, limit).map((run) => {
     const rawWake = run.wakeId ? wakesById.get(run.wakeId) : undefined;
     const wake = rawWake ? sanitizeWake(rawWake) : undefined;
-    return {
+    const runInfo: MergedRunInfo = {
       ...run,
       ...(wake ? { wake } : {}),
     };
+    return sanitizeRun(runInfo);
   });
 
   const scannedTo = scannedFileDates.length > 0 ? scannedFileDates[0] : undefined;
@@ -530,8 +591,12 @@ export function reconcilePendingCosts(): number {
   for (const r of records) {
     if (r.type === 'run') {
       const existing = runsById.get(r.runId);
-      if (!existing || getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
-        runsById.set(r.runId, { ...existing, ...r });
+      if (!existing) {
+        runsById.set(r.runId, foldRunRecord(r));
+      } else if (getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
+        runsById.set(r.runId, mergeRunRecordPair(existing, r));
+      } else {
+        runsById.set(r.runId, mergeRunRecordPair(r, existing));
       }
     }
   }
@@ -543,23 +608,54 @@ export function reconcilePendingCosts(): number {
     if (run.status === 'running') continue;
 
     if (run.costStatus === 'pending') {
-      // 1. Check if priced receipts already exist in costs-ledger
-      if (hasPricedCostReceiptsForRun(run.runId)) {
-        updateRun(run.runId, { costStatus: 'recorded', rawUsage: undefined });
-        reconciledCount++;
-        continue;
-      }
-
-      // 2. If rawUsage exists, attempt to extract and record receipts
       const timestampIso = run.finishedAt || run.updatedAt || new Date().toISOString();
-      if (run.rawUsage) {
-        try {
-          const receipts = extractUsageReceipts([run.rawUsage as StreamJsonEvent]);
-          if (receipts.length > 0) {
-            recordCostReceipts(run.seatId, run.runId, receipts, timestampIso);
-            updateRun(run.runId, { costStatus: 'recorded', rawUsage: undefined });
-            reconciledCount++;
-          } else {
+      const recordedModels = getRecordedModelsForRun(run.runId);
+
+      // Check expected receipts from rawUsage
+      const expectedReceipts = getNormalizedUsageFromRaw(run.rawUsage);
+
+      if (expectedReceipts.length > 0) {
+        let allModelsRecorded = true;
+        for (const receipt of expectedReceipts) {
+          if (!recordedModels.has(receipt.model)) {
+            try {
+              recordCostReceipt({
+                ts: timestampIso,
+                seatId: run.seatId,
+                runId: run.runId,
+                model: receipt.model,
+                inputTokens: receipt.inputTokens,
+                cachedInputTokens: receipt.cachedInputTokens,
+                cacheCreationTokens: receipt.cacheCreationTokens,
+                outputTokens: receipt.outputTokens,
+                costNanodollars: receipt.costNanodollars,
+                priced: receipt.priced,
+                source: 'claude-stream-json',
+              });
+              recordedModels.add(receipt.model);
+            } catch (err: unknown) {
+              allModelsRecorded = false;
+              console.error(`[runs-ledger] Reconcile cost failed for model ${receipt.model} in run ${run.runId}:`, err);
+            }
+          }
+        }
+
+        // CRITICAL (Hermes Finding B & Item 2):
+        // Only mark recorded if ALL expected models have been successfully recorded!
+        if (allModelsRecorded && expectedReceipts.every((r) => recordedModels.has(r.model))) {
+          // Tombstone rawUsage with null to wipe it from ledger and readers
+          updateRun(run.runId, { costStatus: 'recorded', rawUsage: null });
+          reconciledCount++;
+        }
+      } else {
+        // No rawUsage available to price (e.g. unknown model or fallback)
+        // Check if any cost receipt exists for runId
+        if (recordedModels.size > 0) {
+          const hasPriced = hasPricedCostReceiptsForRun(run.runId);
+          updateRun(run.runId, { costStatus: hasPriced ? 'recorded' : 'unpriced', rawUsage: null });
+          reconciledCount++;
+        } else {
+          try {
             recordCostReceipt({
               ts: timestampIso,
               seatId: run.seatId,
@@ -573,32 +669,12 @@ export function reconcilePendingCosts(): number {
               priced: false,
               source: 'claude-stream-json',
             });
-            updateRun(run.runId, { costStatus: 'unpriced', rawUsage: undefined });
+            updateRun(run.runId, { costStatus: 'unpriced', rawUsage: null });
             reconciledCount++;
+          } catch (err: unknown) {
+            console.error(`[runs-ledger] Fallback unpriced cost failed for run ${run.runId}:`, err);
+            // Keep pending so consumer / reconciler will retry
           }
-        } catch (err: unknown) {
-          console.error(`[runs-ledger] Reconcile cost failed for run ${run.runId}:`, err);
-        }
-      } else {
-        // No rawUsage available to price — fallback to unpriced
-        try {
-          recordCostReceipt({
-            ts: timestampIso,
-            seatId: run.seatId,
-            runId: run.runId,
-            model: 'unknown',
-            inputTokens: 0,
-            cachedInputTokens: 0,
-            cacheCreationTokens: 0,
-            outputTokens: 0,
-            costNanodollars: null,
-            priced: false,
-            source: 'claude-stream-json',
-          });
-          updateRun(run.runId, { costStatus: 'unpriced' });
-          reconciledCount++;
-        } catch {
-          /* ignore */
         }
       }
     }
@@ -632,8 +708,12 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
       }
     } else if (r.type === 'run') {
       const existing = runsById.get(r.runId);
-      if (!existing || getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
-        runsById.set(r.runId, { ...existing, ...r });
+      if (!existing) {
+        runsById.set(r.runId, foldRunRecord(r));
+      } else if (getRecordTimestamp(r) >= getRecordTimestamp(existing)) {
+        runsById.set(r.runId, mergeRunRecordPair(existing, r));
+      } else {
+        runsById.set(r.runId, mergeRunRecordPair(r, existing));
       }
     }
   }
@@ -648,6 +728,7 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
       if (!alive) {
         const orphanTime = new Date(nowMs).toISOString();
         const hasPriced = hasPricedCostReceiptsForRun(run.runId);
+        let orphanCostStatus: 'recorded' | 'pending' | 'unpriced' = hasPriced ? 'recorded' : 'unpriced';
         if (!hasPriced) {
           try {
             recordCostReceipt({
@@ -663,15 +744,19 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
               priced: false,
               source: 'claude-stream-json',
             });
-          } catch {
-            /* ignore fallback receipt write failure */
+            orphanCostStatus = 'unpriced';
+          } catch (err: unknown) {
+            console.error(`[runs-ledger] Failed to record fallback cost receipt for orphaned run ${run.runId}:`, err);
+            // CRITICAL (Hermes Item 3): Keep pending so reconciler can retry later
+            orphanCostStatus = 'pending';
           }
         }
         updateRun(run.runId, {
           status: 'failed',
           finishedAt: orphanTime,
           errorKind: 'orphaned',
-          costStatus: hasPriced ? 'recorded' : 'unpriced',
+          costStatus: orphanCostStatus,
+          rawUsage: orphanCostStatus === 'pending' ? (run.rawUsage ?? null) : null,
           updatedAt: orphanTime,
         });
         orphanedRuns++;
