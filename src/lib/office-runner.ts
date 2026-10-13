@@ -13,6 +13,15 @@ import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
 import { isSeatHeldByTerminal } from '@/lib/seat-active';
 import { dsViec } from '@/lib/kho-tien-trinh';
+import {
+  generateRunOrWakeId,
+  recordRun,
+  updateRun,
+  updateWake,
+  recoverOrphanedRuns,
+} from '@/lib/runs-ledger';
+import { extractUsageReceipts, type StreamJsonEvent } from '@/lib/usage-receipt';
+import { recordCostReceipts } from '@/lib/costs-ledger';
 
 const REPO_ROOT = process.cwd();
 const RUNNER_OFF_FILE = path.join(REPO_ROOT, 'operations/data/runner.off');
@@ -47,6 +56,8 @@ const activeSeats = new Set<string>();
 interface InFlightTurn {
   seat: string;
   bell_id: string;
+  wakeId: string;
+  runId: string;
   startIso: string;
   startTime: number;
 }
@@ -70,6 +81,18 @@ export function flushInFlightTurns(reason: string): void {
       exit: null,
       error: reason,
     });
+    if (turn.runId) {
+      try {
+        updateRun(turn.runId, {
+          status: 'killed',
+          finishedAt: endIso,
+          exitCode: null,
+          errorKind: reason,
+        });
+      } catch {
+        /* ignore ledger write error during shutdown */
+      }
+    }
     inFlightTurns.delete(seat);
   }
 }
@@ -214,10 +237,29 @@ export async function tickRunner(): Promise<number> {
 
       const startIso = new Date().toISOString();
       const startTime = Date.now();
+      const wakeId = claimed.y.wakeId ?? claimed.y.ma;
+      const runId = generateRunOrWakeId('run');
+
+      updateWake(wakeId, {
+        status: 'claimed',
+        claimedAt: startIso,
+        runId,
+      });
+
+      recordRun({
+        runId,
+        wakeId,
+        seatId: y.ma_nhan_su,
+        startedAt: startIso,
+        status: 'running',
+        attempt: 1,
+      });
 
       inFlightTurns.set(y.ma_nhan_su, {
         seat: y.ma_nhan_su,
         bell_id: y.ma,
+        wakeId,
+        runId,
         startIso,
         startTime,
       });
@@ -252,6 +294,7 @@ export async function tickRunner(): Promise<number> {
 
           const endIso = new Date().toISOString();
           const durationMs = Date.now() - startTime;
+          const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
 
           if (result.loi?.startsWith('skipped: terminal')) {
             logRunnerEvent({
@@ -265,6 +308,31 @@ export async function tickRunner(): Promise<number> {
               exit: null,
               error: result.loi,
             });
+            updateRun(runId, {
+              status: 'failed',
+              finishedAt: endIso,
+              exitCode: null,
+              errorKind: result.loi,
+            });
+          } else if (result.loi) {
+            const isKilled = result.loi.includes('bị dừng bởi tín hiệu') || result.loi.includes('terminated');
+            logRunnerEvent({
+              timestamp: endIso,
+              seat: y.ma_nhan_su,
+              bell_id: y.ma,
+              event: 'end',
+              start: startIso,
+              end: endIso,
+              duration_ms: durationMs,
+              exit: exitCode,
+              error: result.loi,
+            });
+            updateRun(runId, {
+              status: isKilled ? 'killed' : 'failed',
+              finishedAt: endIso,
+              exitCode,
+              errorKind: result.loi,
+            });
           } else {
             logRunnerEvent({
               timestamp: endIso,
@@ -274,10 +342,26 @@ export async function tickRunner(): Promise<number> {
               start: startIso,
               end: endIso,
               duration_ms: durationMs,
-              exit: result.loi ? 1 : 0,
+              exit: 0,
               session_id: result.maPhien ?? undefined,
-              error: result.loi ?? undefined,
             });
+            updateRun(runId, {
+              status: 'finished',
+              finishedAt: endIso,
+              exitCode: 0,
+              sessionId: result.maPhien ?? undefined,
+            });
+
+            if (result.rawResult) {
+              try {
+                const receipts = extractUsageReceipts([result.rawResult as StreamJsonEvent]);
+                if (receipts.length > 0) {
+                  recordCostReceipts(y.ma_nhan_su, runId, receipts, endIso);
+                }
+              } catch {
+                /* ignore cost recording failures */
+              }
+            }
           }
 
           if (result.maPhien) {
@@ -307,6 +391,12 @@ export async function tickRunner(): Promise<number> {
             exit: null,
             error: errMsg,
           });
+          updateRun(runId, {
+            status: 'failed',
+            finishedAt: endIso,
+            exitCode: null,
+            errorKind: errMsg,
+          });
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);
           activeSeats.delete(y.ma_nhan_su);
@@ -326,6 +416,13 @@ export async function tickRunner(): Promise<number> {
 export function startOfficeRunner(): boolean {
   if (isRunning) {
     return false;
+  }
+
+  // Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
+  try {
+    recoverOrphanedRuns();
+  } catch {
+    /* ignore ledger recovery error */
   }
 
   isRunning = true;

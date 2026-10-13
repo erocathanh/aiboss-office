@@ -159,7 +159,7 @@ export const CONG_CU_CAM: string[] = GIONG_TERMINAL ? [] : CAM_KHI_HAN_CHE;
 export type MauTraLoi =
   | { loai: 'phien'; ma_phien: string }
   | { loai: 'chu'; chu: string }
-  | { loai: 'xong'; ma_phien: string; chi_phi_usd: number | null; token: number | null }
+  | { loai: 'xong'; ma_phien: string; chi_phi_usd: number | null; token: number | null; rawResult?: Record<string, unknown> }
   | { loai: 'loi'; thong_diep: string };
 
 export interface ThamSoChay {
@@ -505,6 +505,7 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
         ma_phien: maPhien,
         chi_phi_usd: typeof j.total_cost_usd === 'number' ? j.total_cost_usd : null,
         token,
+        rawResult: j,
       });
     }
   }
@@ -528,7 +529,7 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     danhThuc = null;
   });
 
-  tien.on('close', (ma) => {
+  tien.on('close', (ma, signal) => {
     // ⚰️ Báo NGAY, TRƯỚC mọi xử lý khác: dù nhánh nào chạy tiếp thì con cũng đã chết rồi.
     // 🖐 KHÔNG cần chốt `if (tien.pid)` ở ĐƯỜNG XOÁ (khác đường ghi ở trên, đọc kỹ kẻo chép nhầm):
     //    `xoaViec` so TAY CẦM, nên tay cầm KHÔNG có pid thì cũng KHÔNG khớp dòng nào ⇒ lời gọi
@@ -548,7 +549,9 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
         'đã quá ngưỡng. Muốn biết thì kiểm KẾT QUẢ: thứ bạn cần đã có chưa.\n\n' +
         `**Muốn nới ngưỡng:** dừng máy chủ rồi mở lại bằng \`HAN_GIO_MS=${CAU_HINH.hanGio * 3} pnpm dev\` ` +
         `— gấp ba mức đang chạy (${giay} giây).`;
-    } else if (ma !== 0 && ma !== null && hangDoi.length === 0 && !maPhien) {
+    } else if (signal) {
+      loiTienTrinh = `Tiến trình claude bị dừng bởi tín hiệu ${signal}.`;
+    } else if (ma !== 0 && ma !== null) {
       loiTienTrinh = `Tiến trình claude thoát với mã ${ma}.${loiChuan ? ' ' + loiChuan.trim() : ''}`;
     }
     ketThuc = true;

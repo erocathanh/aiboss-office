@@ -95,6 +95,7 @@ export const HAN_GIU_CHO_MS = 30_000;
 
 export interface YeuCauDanhThuc {
   ma: string;
+  wakeId?: string;
   ma_o: string;
   ma_nhan_su: string;
   /** Ai đánh thức — tên kỹ thuật của ghế gửi. Hiện lên giao diện làm nhãn. */
@@ -455,11 +456,13 @@ export function xepHang(ts: {
   tuAi: string;
   cauHoi: string;
   khoa?: string;
+  wakeId?: string;
 }): YeuCauDanhThuc {
   const bayGio = Date.now();
   const s = donDep(doc(), bayGio);
   const yeuCau: YeuCauDanhThuc = {
     ma: randomUUID(),
+    wakeId: ts.wakeId,
     ma_o: ts.maO,
     ma_nhan_su: ts.maNhanSu,
     tu_ai: ts.tuAi,
