@@ -591,6 +591,106 @@ try {
     console.log('  [PASS] Case 14: zero free-text leaks, tombstone deletion, and API whitelisting verified');
   }
 
+  // Case 15: Invalid total_cost_usd string (e.g. "provider-error-detail") drops string and marks priced: false (Hermes v06 #1)
+  {
+    const invalidCostEvent = {
+      type: 'result',
+      model: 'claude-3-7-sonnet-20250219',
+      total_cost_usd: 'provider-error-detail',
+      usage: {
+        input_tokens: 300,
+        output_tokens: 120,
+      },
+    };
+
+    const receipts = getNormalizedUsageFromRaw(invalidCostEvent);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].model, 'claude-3-7-sonnet-20250219');
+    assert.equal(receipts[0].inputTokens, 300);
+    assert.equal(receipts[0].outputTokens, 120);
+    assert.equal(receipts[0].totalCostUsd, undefined, 'Invalid totalCostUsd string must be omitted');
+    assert.equal(receipts[0].costNanodollars, null, 'Unparsed cost must be costNanodollars: null');
+    assert.equal(receipts[0].priced, false, 'Unparsed cost must be priced: false');
+    assert.equal('provider-error-detail' in receipts[0], false);
+    assert.equal(
+      JSON.stringify(receipts).includes('provider-error-detail'),
+      false,
+      'Error detail string must not leak into receipt'
+    );
+
+    // Also verify sanitizeUsageReceipts with explicit bad totalCostUsd
+    const badCostReceipts = sanitizeUsageReceipts([
+      {
+        model: 'bad-cost-model',
+        inputTokens: 10,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        outputTokens: 5,
+        totalCostUsd: 'not-a-number-rate-limit-error',
+        costNanodollars: null,
+        priced: true,
+      },
+    ]);
+    assert.equal(badCostReceipts[0].totalCostUsd, undefined);
+    assert.equal(badCostReceipts[0].priced, false);
+    assert.equal(JSON.stringify(badCostReceipts).includes('rate-limit-error'), false);
+
+    console.log('  [PASS] Case 15: invalid totalCostUsd strings strictly dropped and marked unpriced');
+  }
+
+  // Case 16: Legacy record with raw text in rawUsage sanitized across updates and API output (Hermes v06 #2, #3)
+  {
+    const legacyRunId = generateRunOrWakeId('run');
+    const legacySecretText = 'LEGACY_PROMPT_SECRET_IN_RAW_USAGE_88888';
+    const legacyErrorText = 'LEGACY_ERROR_STACK_IN_RAW_USAGE_99999';
+
+    // Simulate legacy run directly recorded with un-sanitized rawUsage
+    recordRun({
+      runId: legacyRunId,
+      seatId: 'legacy-seat',
+      startedAt: new Date().toISOString(),
+      status: 'running',
+      rawUsage: {
+        result: legacySecretText,
+        errors: [legacyErrorText],
+        custom_junk: 'should_never_exist_on_disk',
+      },
+    });
+
+    // Check disk: sanitizeRawUsage in recordRun/appendRecord must have stripped all junk!
+    const files = fs.readdirSync(getRunsDir());
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(getRunsDir(), f), 'utf-8');
+      assert.equal(content.includes(legacySecretText), false, 'Disk must not contain legacy secret text');
+      assert.equal(content.includes(legacyErrorText), false, 'Disk must not contain legacy error text');
+      assert.equal(content.includes('custom_junk'), false, 'Disk must not contain custom junk');
+    }
+
+    // Update the run with another patch
+    updateRun(legacyRunId, {
+      status: 'failed',
+      finishedAt: new Date().toISOString(),
+      rawUsage: {
+        result: 'ANOTHER_LEAK_ATTEMPT',
+      },
+    });
+
+    // Check disk again: no leak
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(getRunsDir(), f), 'utf-8');
+      assert.equal(content.includes('ANOTHER_LEAK_ATTEMPT'), false);
+    }
+
+    // Query via getRuns: verify sanitizeRun explicit whitelist drops any unknown properties
+    const runsResult = getRuns({ limit: 5 });
+    const legacyRun = runsResult.find((r) => r.runId === legacyRunId);
+    assert.ok(legacyRun);
+    assert.equal('rawUsage' in legacyRun, false, 'rawUsage must not exist in API output');
+    assert.equal('custom_junk' in legacyRun, false, 'unknown properties must not exist in API output');
+
+    console.log('  [PASS] Case 16: legacy rawUsage sanitized across writer boundaries and API output strictly whitelisted');
+  }
+
   console.log('>>> ALL RUNS LEDGER TEST CASES PASSED <<<');
 } finally {
   // Clean up isolated test directory

@@ -12,6 +12,8 @@
 
 import { usdToUnits } from './money';
 
+export const VALID_COST_USD_REGEX = /^\d+(\.\d+)?$/;
+
 export interface ModelReceipt {
   model: string;
   inputTokens: number;
@@ -102,23 +104,29 @@ export function extractUsageReceipts(
       let priced = false;
 
       if (typeof rawCost === 'number' && Number.isFinite(rawCost) && rawCost >= 0) {
-        totalCostUsd = String(rawCost);
-        try {
-          const units = usdToUnits(totalCostUsd);
-          costNanodollars = units.toString();
-          priced = true;
-        } catch {
-          costNanodollars = null;
-          priced = false;
+        const costStr = String(rawCost);
+        if (VALID_COST_USD_REGEX.test(costStr)) {
+          try {
+            const units = usdToUnits(costStr);
+            costNanodollars = units.toString();
+            totalCostUsd = costStr;
+            priced = true;
+          } catch {
+            costNanodollars = null;
+            totalCostUsd = undefined;
+            priced = false;
+          }
         }
-      } else if (typeof rawCost === 'string' && rawCost.trim()) {
-        totalCostUsd = rawCost.trim();
+      } else if (typeof rawCost === 'string' && VALID_COST_USD_REGEX.test(rawCost.trim())) {
+        const costStr = rawCost.trim();
         try {
-          const units = usdToUnits(totalCostUsd);
+          const units = usdToUnits(costStr);
           costNanodollars = units.toString();
+          totalCostUsd = costStr;
           priced = true;
         } catch {
           costNanodollars = null;
+          totalCostUsd = undefined;
           priced = false;
         }
       }
@@ -159,23 +167,29 @@ export function extractUsageReceipts(
     let priced = false;
 
     if (typeof rawCost === 'number' && Number.isFinite(rawCost) && rawCost >= 0) {
-      totalCostUsd = String(rawCost);
-      try {
-        const units = usdToUnits(totalCostUsd);
-        costNanodollars = units.toString();
-        priced = true;
-      } catch {
-        costNanodollars = null;
-        priced = false;
+      const costStr = String(rawCost);
+      if (VALID_COST_USD_REGEX.test(costStr)) {
+        try {
+          const units = usdToUnits(costStr);
+          costNanodollars = units.toString();
+          totalCostUsd = costStr;
+          priced = true;
+        } catch {
+          costNanodollars = null;
+          totalCostUsd = undefined;
+          priced = false;
+        }
       }
-    } else if (typeof rawCost === 'string' && rawCost.trim()) {
-      totalCostUsd = rawCost.trim();
+    } else if (typeof rawCost === 'string' && VALID_COST_USD_REGEX.test(rawCost.trim())) {
+      const costStr = rawCost.trim();
       try {
-        const units = usdToUnits(totalCostUsd);
+        const units = usdToUnits(costStr);
         costNanodollars = units.toString();
+        totalCostUsd = costStr;
         priced = true;
       } catch {
         costNanodollars = null;
+        totalCostUsd = undefined;
         priced = false;
       }
     }
@@ -213,19 +227,29 @@ export interface NormalizedUsage {
 export function sanitizeUsageReceipts(
   receipts: (ModelReceipt | NormalizedUsage)[]
 ): NormalizedUsage[] {
-  return receipts.map((r) => ({
-    model: String(r.model || 'unknown'),
-    inputTokens: Number(r.inputTokens) || 0,
-    cachedInputTokens: Number(r.cachedInputTokens) || 0,
-    cacheCreationTokens: Number(r.cacheCreationTokens) || 0,
-    outputTokens: Number(r.outputTokens) || 0,
-    ...(r.totalCostUsd !== undefined ? { totalCostUsd: String(r.totalCostUsd) } : {}),
-    costNanodollars:
-      r.costNanodollars !== null && r.costNanodollars !== undefined
-        ? String(r.costNanodollars)
-        : null,
-    priced: Boolean(r.priced),
-  }));
+  return receipts.map((r) => {
+    const rawCost = r.totalCostUsd;
+    const validCost =
+      rawCost !== undefined &&
+      typeof rawCost === 'string' &&
+      VALID_COST_USD_REGEX.test(rawCost.trim())
+        ? rawCost.trim()
+        : undefined;
+
+    return {
+      model: String(r.model || 'unknown'),
+      inputTokens: Number(r.inputTokens) || 0,
+      cachedInputTokens: Number(r.cachedInputTokens) || 0,
+      cacheCreationTokens: Number(r.cacheCreationTokens) || 0,
+      outputTokens: Number(r.outputTokens) || 0,
+      ...(validCost !== undefined ? { totalCostUsd: validCost } : {}),
+      costNanodollars:
+        r.costNanodollars !== null && r.costNanodollars !== undefined
+          ? String(r.costNanodollars)
+          : null,
+      priced: Boolean(r.priced && r.costNanodollars !== null),
+    };
+  });
 }
 
 /**

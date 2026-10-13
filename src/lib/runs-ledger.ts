@@ -124,23 +124,60 @@ export function sanitizeWake(wake: WakeRecord): WakeRecord {
   if (key && key.startsWith('custom:')) {
     key = computeCustomIdempotencyKey(wake.seatId, key.slice(7));
   }
-  return {
-    ...wake,
+  const sanitized: WakeRecord = {
+    type: 'wake',
+    wakeId: wake.wakeId,
+    seatId: wake.seatId,
+    source: wake.source,
+    requestedAt: wake.requestedAt,
     idempotencyKey: key,
+    status: wake.status,
+    ...(wake.claimedAt ? { claimedAt: wake.claimedAt } : {}),
+    ...(wake.runId ? { runId: wake.runId } : {}),
+    ...(wake.queueId ? { queueId: wake.queueId } : {}),
+    ...(wake.reason ? { reason: wake.reason } : {}),
+    ...(wake.updatedAt ? { updatedAt: wake.updatedAt } : {}),
   };
+  return sanitized;
 }
 
 /**
  * Sanitize a run record for external API exposure.
- * Strips rawUsage completely and sanitizes embedded wake.
+ * Explicit schema whitelist — strips rawUsage completely and excludes any unknown/legacy properties.
  */
 export function sanitizeRun(run: MergedRunInfo): MergedRunInfo {
-  const sanitized = { ...run };
-  delete (sanitized as Record<string, unknown>).rawUsage;
-  if (sanitized.wake) {
-    sanitized.wake = sanitizeWake(sanitized.wake);
-  }
+  const sanitized: MergedRunInfo = {
+    type: 'run',
+    runId: run.runId,
+    seatId: run.seatId,
+    startedAt: run.startedAt,
+    status: run.status,
+    ...(run.wakeId ? { wakeId: run.wakeId } : {}),
+    ...(run.sessionId ? { sessionId: run.sessionId } : {}),
+    ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
+    ...(run.exitCode !== undefined ? { exitCode: run.exitCode } : {}),
+    ...(run.resumeCmd ? { resumeCmd: run.resumeCmd } : {}),
+    ...(run.errorKind ? { errorKind: run.errorKind } : {}),
+    ...(run.attempt !== undefined ? { attempt: run.attempt } : {}),
+    ...(run.pid !== undefined ? { pid: run.pid } : {}),
+    ...(run.costStatus ? { costStatus: run.costStatus } : {}),
+    ...(run.updatedAt ? { updatedAt: run.updatedAt } : {}),
+    ...(run.wake ? { wake: sanitizeWake(run.wake) } : {}),
+  };
   return sanitized;
+}
+
+/**
+ * Sanitize rawUsage at storage boundaries (recordRun, updateRun, appendRecord).
+ * Guarantees that no raw strings, prompt text, result, or error arrays can ever be written to disk.
+ */
+export function sanitizeRawUsage(
+  rawUsage: unknown
+): NormalizedUsage[] | null | undefined {
+  if (rawUsage === null) return null;
+  if (rawUsage === undefined) return undefined;
+  const normalized = getNormalizedUsageFromRaw(rawUsage);
+  return normalized.length > 0 ? normalized : null;
 }
 
 /**
@@ -187,10 +224,14 @@ function getLogPathForDate(isoDateString?: string): string {
 
 /**
  * Appends record to ledger file. Throws on error to prevent silent data loss.
+ * Sanitizes rawUsage before write to guarantee no raw strings enter JSONL files.
  */
 function appendRecord(record: LedgerRecord): void {
   if (process.env.AIBOSS_TEST_FAIL_APPEND === '1') {
     throw new Error('Injected ledger append failure for testing');
+  }
+  if (record.type === 'run' && record.rawUsage !== undefined && record.rawUsage !== null) {
+    record.rawUsage = sanitizeRawUsage(record.rawUsage);
   }
   ensureRunsDir();
   const filePath = getLogPathForDate();
@@ -247,6 +288,7 @@ export function recordRun(run: Omit<RunRecord, 'type'>): RunRecord {
     costStatus: 'pending',
     updatedAt: run.startedAt,
     ...run,
+    ...(run.rawUsage !== undefined ? { rawUsage: sanitizeRawUsage(run.rawUsage) } : {}),
   };
   appendRecord(full);
   return full;
@@ -271,6 +313,10 @@ export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord |
     patch.costStatus === 'unpriced'
   ) {
     updated.rawUsage = null;
+  } else if (patch.rawUsage !== undefined) {
+    updated.rawUsage = sanitizeRawUsage(patch.rawUsage);
+  } else if (current.rawUsage !== undefined && updated.rawUsage !== null) {
+    updated.rawUsage = sanitizeRawUsage(current.rawUsage);
   }
   appendRecord(updated);
   return updated;
@@ -756,7 +802,7 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
           finishedAt: orphanTime,
           errorKind: 'orphaned',
           costStatus: orphanCostStatus,
-          rawUsage: orphanCostStatus === 'pending' ? (run.rawUsage ?? null) : null,
+          rawUsage: orphanCostStatus === 'pending' ? (sanitizeRawUsage(run.rawUsage) ?? null) : null,
           updatedAt: orphanTime,
         });
         orphanedRuns++;
