@@ -197,7 +197,7 @@ export interface ThamSoChay {
    *    và một dòng khác trỏ tới pid đã chết. Sổ lệch CẢ HAI CHIỀU, nên đây là lỗi
    *    VÒNG ĐỜI, KHÔNG phải chuyện trễ một nhịp.
    */
-  khiChet?: (tien: ChildProcess, ma: number | null) => void;
+  khiChet?: (tien: ChildProcess, ma: number | null, signal?: string | null) => void;
   /** Thư mục làm việc RIÊNG của nhân sự — quyết định phiên nằm ở kho nào. */
   thuMuc: string;
   /**
@@ -534,7 +534,7 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     // 🖐 KHÔNG cần chốt `if (tien.pid)` ở ĐƯỜNG XOÁ (khác đường ghi ở trên, đọc kỹ kẻo chép nhầm):
     //    `xoaViec` so TAY CẦM, nên tay cầm KHÔNG có pid thì cũng KHÔNG khớp dòng nào ⇒ lời gọi
     //    thành vô hại. Còn chốt lại thì ta lại đang dùng một con số để quyết một việc KHÔNG cần số.
-    ts.khiChet?.(tien, ma);
+    ts.khiChet?.(tien, ma, signal);
     // ⭐ Ghế bị CHÍNH TA chém thì phải nói thẳng là ta chém, kèm con số thật.
     //    ⛔ Đừng để nó rơi xuống nhánh dưới rồi hiện thành "lỗi công cụ" — đó là
     //    cách một phép đo tự nói dối: người dùng đi sửa câu hỏi trong khi thủ phạm

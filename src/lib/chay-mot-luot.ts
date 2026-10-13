@@ -69,6 +69,8 @@ export interface DauVaoLuot {
   maPhienCu: string | null;
   /** Cho phép người gọi dừng lượt (nút Dừng dùng đường khác — `gietViec`). */
   tinHieuHuy?: AbortSignal;
+  /** Báo pid ngay khi tiến trình con vừa sinh ra để ghi sổ */
+  khiSinh?: (pid: number) => void;
 }
 
 export interface KetQuaLuot {
@@ -92,6 +94,7 @@ export interface KetQuaLuot {
    */
   buocOThatBai: boolean;
   exitCode?: number | null;
+  exitSignal?: string | null;
   rawResult?: Record<string, unknown> | null;
 }
 
@@ -145,6 +148,7 @@ export async function chayMotLuot(
   let exitCode: number | null = null;
   let rawResult: Record<string, unknown> | null = null;
   let loi: string | null = null;
+  let exitSignal: string | null = null;
 
   nhan({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) });
 
@@ -188,11 +192,15 @@ export async function chayMotLuot(
         tienDangChay = t;
         pidDeHienThi = t.pid ?? null;
         dangKyViec(maO, t, maNhanSu); // ← MẮT XÍCH ①: nút Dừng phải thấy được lượt này
+        if (t.pid) {
+          vao.khiSinh?.(t.pid);
+        }
       },
       // ⚰️ Đường này KHÔNG có người xem để rời đi, nên `finally` bên dưới vốn đã đúng.
       //    Nối `khiChet` cho ĐỒNG NHẤT với đường SSE: một luật xoá sổ, KHÔNG phải hai.
-      khiChet: (t, ma) => {
+      khiChet: (t, ma, signal) => {
         exitCode = ma;
+        exitSignal = signal ?? null;
         xoaViec(maO, t);
       },
     })) {
@@ -239,11 +247,11 @@ export async function chayMotLuot(
     } else if (!loi && exitCode === null && !rawResult) {
       loi = `Process terminated unexpectedly without exit code`;
     }
-    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi, buocOThatBai, exitCode, rawResult };
+    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi, buocOThatBai, exitCode, exitSignal, rawResult };
   } catch (e) {
     const thongDiep = e instanceof Error ? e.message : 'Lỗi không rõ.';
     nhan({ loai: 'loi', thong_diep: thongDiep });
-    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai, exitCode: exitCode ?? 1, rawResult };
+    return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai, exitCode: exitCode ?? 1, exitSignal, rawResult };
   } finally {
     updateSeatActivePid(maNhanSu, null);
     // Rút khỏi sổ tiến trình — CHỈ rút đúng TAY CẦM của mình (xem `xoaViec`).

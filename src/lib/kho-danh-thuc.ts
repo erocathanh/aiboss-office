@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { baoMauChet } from './bao-mau-chet';
+import { updateWake } from './runs-ledger';
 
 /**
  * SỔ "YÊU CẦU ĐÁNH THỨC" — ghi XUỐNG ĐĨA, cùng chỗ với sổ ô↔phiên.
@@ -271,6 +272,16 @@ function boMau(y: YeuCauDanhThuc, lyDo: string, bayGio: number): void {
   y.bo_luc = bayGio;
   datTrangThai(y, 'bo');
   y.ly_do = chuanHoaLyDo(lyDo);
+  if (y.wakeId) {
+    try {
+      updateWake(y.wakeId, {
+        status: 'expired',
+        reason: chuanHoaLyDo(lyDo),
+      });
+    } catch {
+      /* ignore ledger update failure during queue cleanup */
+    }
+  }
 }
 
 /**

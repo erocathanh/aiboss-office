@@ -36,8 +36,8 @@ console.log('--- Testing src/lib/usage-receipt.ts ---');
   assert.equal(r.outputTokens, 85);
   assert.equal(r.priced, true);
   assert.equal(r.totalCostUsd, '0.067425');
-  // 0.067425 USD = 67,425,000 nanodollars
-  assert.equal(r.costNanodollars, 67_425_000);
+  // 0.067425 USD = 67,425,000 nanodollars as decimal string
+  assert.equal(r.costNanodollars, '67425000');
   console.log('  [PASS] Case 1: standard single-model run with nanodollar precision');
 }
 
@@ -74,9 +74,9 @@ console.log('--- Testing src/lib/usage-receipt.ts ---');
 
   assert.ok(sonnet && haiku);
   assert.equal(sonnet.inputTokens, 2500); // 2000 + 500
-  assert.equal(sonnet.costNanodollars, 75_000_000);
+  assert.equal(sonnet.costNanodollars, '75000000');
   assert.equal(haiku.inputTokens, 800);
-  assert.equal(haiku.costNanodollars, 6_200_000);
+  assert.equal(haiku.costNanodollars, '6200000');
   console.log('  [PASS] Case 2: multi-model / subagent usage properly partitioned');
 }
 
@@ -131,7 +131,54 @@ console.log('--- Testing src/lib/usage-receipt.ts ---');
   console.log('  [PASS] Case 4: cache tokens properly separated and summed');
 }
 
-// Case 5: Positive Control — Verifying that failing to add cache-creation to inputTokens FAILS
+// Case 5: Errored run (is_error: true) that still reported usage and cost
+{
+  const events = [
+    {
+      type: 'result',
+      is_error: true,
+      errors: ['Tool execution failed: rate_limit_exceeded'],
+      total_cost_usd: 0.005,
+      usage: {
+        input_tokens: 300,
+        output_tokens: 20,
+      },
+      model: 'claude-3-5-sonnet',
+    },
+  ];
+
+  const receipts = extractUsageReceipts(events);
+  assert.equal(receipts.length, 1);
+  const r = receipts[0];
+  assert.equal(r.inputTokens, 300);
+  assert.equal(r.costNanodollars, '5000000');
+  assert.equal(r.priced, true);
+  console.log('  [PASS] Case 5: errored run with usage still extracts cost receipt');
+}
+
+// Case 6: Corrupted JSON lines and missing fields
+{
+  const rawWithCorrupt = [
+    'INVALID_NOT_JSON',
+    '{"type": "init"}',
+    '{corrupt_json: 123',
+    '',
+    JSON.stringify({
+      type: 'result',
+      // missing usage, model, and total_cost_usd
+    }),
+  ].join('\n');
+
+  const receipts = extractUsageReceipts(rawWithCorrupt);
+  assert.equal(receipts.length, 0, 'Missing usage result produces empty receipts list without crashing');
+
+  // Completely empty input
+  assert.deepEqual(extractUsageReceipts(''), []);
+  assert.deepEqual(extractUsageReceipts([]), []);
+  console.log('  [PASS] Case 6: corrupted lines and missing fields handled gracefully');
+}
+
+// Case 7: Positive Control — Verifying that failing to add cache-creation to inputTokens FAILS
 {
   console.log('--- Testing Positive Control for Cache Creation Addition ---');
   const sample = [

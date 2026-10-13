@@ -84,19 +84,23 @@ Theo dõi chi tiết usage token và chi phí theo từng model của mỗi lư�
   "cachedInputTokens": 200,
   "cacheCreationTokens": 400,
   "outputTokens": 150,
-  "costNanodollars": 680000000,
+  "costNanodollars": "680000000",
   "priced": true,
   "source": "claude-stream-json"
 }
 ```
 
-#### Quy tắc kế toán:
+#### Quy tắc kế toán & Lưu trữ:
 1. **Idempotency**: Khoá `(runId, model)` là duy nhất. Khi ghi lại cùng receipt, hệ thống không bao giờ ghi trùng hay cộng dồn hai lần.
 2. **Quy tắc gom token Paperclip**:
    - `inputTokens` = `prompt_tokens` + `cache_creation_input_tokens` (đúng bản chất tính phí của Anthropic).
    - `cachedInputTokens` = `cache_read_input_tokens` (được cách ly riêng).
    - `outputTokens` = `output_tokens`.
-3. **Lượt thiếu giá**: Nếu provider không trả về `total_cost_usd`, trường `costNanodollars: null` và `priced: false`. Bảng thống kê hiển thị `Unpriced runs: N`, tuyệt đối không ước lượng giá bịa.
+   - `totalTokens` = `inputTokens` + `cachedInputTokens` + `outputTokens` (không cộng lặp `cacheCreationTokens`).
+3. **Số học Nanodollar & Chuỗi số nguyên**:
+   - `costNanodollars` được lưu và trả qua API dưới dạng chuỗi số nguyên (`string`) để bảo toàn chính xác tuyệt đối, không bị giới hạn bởi `Number.MAX_SAFE_INTEGER` ($2^{53}-1$).
+   - Phép cộng dồn dùng `BigInt` xuyên suốt.
+4. **Lượt thiếu giá**: Nếu provider không trả về `total_cost_usd`, trường `costNanodollars: null` và `priced: false`. Bảng thống kê hiển thị `Unpriced runs: N`, tuyệt đối không ước lượng giá bịa.
 
 ---
 

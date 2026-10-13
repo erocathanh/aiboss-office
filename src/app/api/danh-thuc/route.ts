@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { layTatCa, datO } from '@/lib/kho-phien';
+import { layTatCa } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { CAU_HINH } from '@/lib/cau-hinh';
 import { xinLuot, xepHang, xemSo, timTheoKhoa, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
  *
  * Nhận `{ ma_nhan_su, cau_hoi, tu_ai }` từ MỘT GHẾ hoặc chuông app.
  * - Trả về `{ wakeId, status: "queued" }` với mã 200.
- * - Idempotency trong cửa sổ 60 giây: cùng nội dung + ghế trong vòng 60s trả về `status: "skipped"`.
+ * - Idempotency trong cửa sổ 60 giây trượt: cùng nội dung + ghế trong vòng 60s trả về `status: "skipped"`.
  * - Ghi nhận vào runs-ledger: operations/data/runs/<YYYY-MM-DD>.jsonl.
  */
 
@@ -36,27 +36,27 @@ interface Than {
   khoa?: unknown;
 }
 
-export async function GET() {
-  batMotLan(); // 🚀 bật bộ chạy nền MỘT LẦN — cửa này chạy runtime 'nodejs'
-  // Xem sổ để nghiệm thu / tra "ai gọi ai lúc nào". Chỉ đọc.
-  return Response.json({ ...xemSo(), han_yeu_cau_ms: HAN_YEU_CAU_MS });
-}
-
 export async function POST(req: NextRequest) {
-  batMotLan(); // 🚀 bật bộ chạy nền MỘT LẦN — cửa này chạy runtime 'nodejs'
+  // 🔌 Đánh thức tiến trình nền nếu máy chủ mới mở lần đầu
+  batMotLan();
+
   let than: Than;
   try {
     than = (await req.json()) as Than;
   } catch {
-    return Response.json({ loi: 'Request body must be valid JSON.' }, { status: 400 });
+    return Response.json({ loi: 'Invalid JSON body.' }, { status: 400 });
   }
 
   const maNhanSu = typeof than.ma_nhan_su === 'string'
     ? than.ma_nhan_su.trim()
-    : (typeof than.seat === 'string' ? than.seat.trim() : (typeof than.seatId === 'string' ? than.seatId.trim() : ''));
+    : (typeof than.seat === 'string'
+      ? than.seat.trim()
+      : (typeof than.seatId === 'string' ? than.seatId.trim() : ''));
   const cauHoi = typeof than.cau_hoi === 'string'
     ? than.cau_hoi.trim()
-    : (typeof than.prompt === 'string' ? than.prompt.trim() : (typeof than.content === 'string' ? than.content.trim() : ''));
+    : (typeof than.prompt === 'string'
+      ? than.prompt.trim()
+      : (typeof than.content === 'string' ? than.content.trim() : ''));
   const tuAi = typeof than.tu_ai === 'string'
     ? than.tu_ai.trim()
     : (typeof than.source === 'string' ? than.source.trim() : 'bell');
@@ -76,29 +76,42 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 🔑 IDEMPOTENCY CHECK (A-1: 60s window deduplication)
+  // 🔑 IDEMPOTENCY CHECK (A-1: 60s sliding window deduplication)
   const idempotencyKey = computeIdempotencyKey(maNhanSu, cauHoi);
   const recentWake = findRecentWakeByIdempotencyKey(maNhanSu, idempotencyKey, 60_000);
   if (recentWake) {
     const duplicateWakeId = generateRunOrWakeId('wake');
-    recordWake({
-      wakeId: duplicateWakeId,
-      seatId: maNhanSu,
-      source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
-      requestedAt: new Date().toISOString(),
-      idempotencyKey,
-      status: 'skipped',
-      reason: 'idempotent_duplicate_within_60s',
-    });
+    try {
+      recordWake({
+        wakeId: duplicateWakeId,
+        seatId: maNhanSu,
+        source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
+        requestedAt: new Date().toISOString(),
+        idempotencyKey,
+        status: 'skipped',
+        reason: 'idempotent_duplicate_within_60s',
+      });
+    } catch (err: unknown) {
+      return Response.json(
+        { loi: 'Failed to record wake ledger', chi_tiet: err instanceof Error ? err.message : String(err) },
+        { status: 500 }
+      );
+    }
+
+    const soHienTai = layTatCa();
+    const maOHienTai = Object.keys(soHienTai).sort().find((k) => soHienTai[k]?.ma_nhan_su === maNhanSu) ?? null;
+    const existingQueueItem = xemSo().hang_doi.find((y) => y.ma_nhan_su === maNhanSu && y.wakeId === recentWake.wakeId);
+
     return Response.json({
       xong: true,
       trung_khoa: true,
+      ma_o: maOHienTai,
+      ma_nhan_su: maNhanSu,
+      ma_yeu_cau: existingQueueItem?.ma ?? recentWake.wakeId,
       wakeId: duplicateWakeId,
       existingWakeId: recentWake.wakeId,
       status: 'skipped',
       reason: 'idempotent_duplicate_within_60s',
-      ma_nhan_su: maNhanSu,
-      ma_yeu_cau: duplicateWakeId,
       ghi_chu: 'Duplicate wake within 60s window skipped by idempotency key.',
     });
   }
@@ -109,12 +122,31 @@ export async function POST(req: NextRequest) {
   if (khoa) {
     const cu = timTheoKhoa(khoa);
     if (cu) {
+      const duplicateWakeId = generateRunOrWakeId('wake');
+      try {
+        recordWake({
+          wakeId: duplicateWakeId,
+          seatId: maNhanSu,
+          source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
+          requestedAt: new Date().toISOString(),
+          idempotencyKey: `custom:${khoa}`,
+          status: 'skipped',
+          reason: 'idempotent_duplicate_key',
+        });
+      } catch (err: unknown) {
+        return Response.json(
+          { loi: 'Failed to record wake ledger', chi_tiet: err instanceof Error ? err.message : String(err) },
+          { status: 500 }
+        );
+      }
+
       return Response.json({
         xong: true,
         trung_khoa: true,
         ma_o: cu.ma_o,
         ma_nhan_su: cu.ma_nhan_su,
         ma_yeu_cau: cu.ma,
+        wakeId: duplicateWakeId,
         status: 'skipped',
         reason: 'idempotent_duplicate_key',
         ghi_chu:
@@ -126,15 +158,19 @@ export async function POST(req: NextRequest) {
 
   if (!timNhanSu(maNhanSu)) {
     const wakeId = generateRunOrWakeId('wake');
-    recordWake({
-      wakeId,
-      seatId: maNhanSu,
-      source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
-      requestedAt: new Date().toISOString(),
-      idempotencyKey,
-      status: 'skipped',
-      reason: 'seat_not_found',
-    });
+    try {
+      recordWake({
+        wakeId,
+        seatId: maNhanSu,
+        source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
+        requestedAt: new Date().toISOString(),
+        idempotencyKey,
+        status: 'skipped',
+        reason: 'seat_not_found',
+      });
+    } catch {
+      /* ignore */
+    }
     return Response.json({ loi: `Seat "${maNhanSu}" not found.`, wakeId, status: 'skipped', reason: 'seat_not_found' }, { status: 404 });
   }
 
@@ -149,57 +185,59 @@ export async function POST(req: NextRequest) {
 
   // Tìm ô nào ĐANG MỞ ghế đó — đọc SỔ TRÊN ĐĨA, ⛔ không đoán.
   const so = layTatCa();
-  let maO = Object.keys(so)
+  const maO = Object.keys(so)
     .sort()
     .find((k) => so[k]?.ma_nhan_su === maNhanSu);
 
   if (!maO) {
-    // If seat is not currently assigned to a slot, assign first open slot (o-1..o-4)
-    const availableSlot = ['o-1', 'o-2', 'o-3', 'o-4'].find((slot) => !so[slot]?.ma_nhan_su);
-    if (availableSlot) {
-      datO(availableSlot, maNhanSu, null);
-      maO = availableSlot;
-    }
-  }
-
-  if (!maO) {
     const wakeId = generateRunOrWakeId('wake');
-    recordWake({
-      wakeId,
-      seatId: maNhanSu,
-      source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
-      requestedAt: new Date().toISOString(),
-      idempotencyKey,
-      status: 'skipped',
-      reason: 'no_available_slot',
-    });
+    try {
+      recordWake({
+        wakeId,
+        seatId: maNhanSu,
+        source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
+        requestedAt: new Date().toISOString(),
+        idempotencyKey,
+        status: 'skipped',
+        reason: 'seat_not_open_in_any_slot',
+      });
+    } catch {
+      /* ignore */
+    }
     const dangMo = Object.entries(so)
       .filter(([, v]) => v?.ma_nhan_su)
       .map(([k, v]) => `${k}=${v!.ma_nhan_su}`);
     return Response.json(
       {
         loi:
-          `No slot is currently holding seat "${maNhanSu}". ` +
-          'All slots are occupied. ' +
-          'Please assign the seat to a slot in the UI and try again.',
+          `Ghế "${maNhanSu}" hiện ⛔ KHÔNG mở ở ô nào (đang mở: ${dangMo.join(', ') || 'trống'}). ` +
+          'Vào giao diện gắn ghế vào một ô rồi gọi lại.',
         wakeId,
         status: 'skipped',
-        reason: 'no_available_slot',
-        dang_mo: dangMo.length ? dangMo : ['(no slot assigned)'],
+        reason: 'seat_not_open_in_any_slot',
+        dang_mo: dangMo.length ? dangMo : ['(chưa có ô nào mở)'],
       },
-      { status: 404 },
+      { status: 409 },
     );
   }
 
   const wakeId = generateRunOrWakeId('wake');
-  const wakeRecord = recordWake({
-    wakeId,
-    seatId: maNhanSu,
-    source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
-    requestedAt: new Date().toISOString(),
-    idempotencyKey,
-    status: 'queued',
-  });
+  let wakeRecord;
+  try {
+    wakeRecord = recordWake({
+      wakeId,
+      seatId: maNhanSu,
+      source: (tuAi === 'bell' || !tuAi ? 'bell' : 'app'),
+      requestedAt: new Date().toISOString(),
+      idempotencyKey: khoa ? `custom:${khoa}` : idempotencyKey,
+      status: 'queued',
+    });
+  } catch (err: unknown) {
+    return Response.json(
+      { loi: 'Failed to record wake ledger', chi_tiet: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 
   const yeuCau = xepHang({ maO, maNhanSu, tuAi, cauHoi, wakeId, ...(khoa ? { khoa } : {}) });
 

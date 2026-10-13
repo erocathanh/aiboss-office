@@ -70,4 +70,16 @@ console.log('--- Testing src/lib/money.ts ---');
   console.log('  [PASS] Case 5: negative amounts preserved and formatted correctly');
 }
 
-console.log('>>> ALL 5 MONEY TEST CASES PASSED <<<');
+// Case 6: Numbers exceeding Number.MAX_SAFE_INTEGER (2^53 - 1 = 9,007,199,254,740,991)
+{
+  const bigAmountUsd = '15000000.50'; // $15 million and 50 cents
+  const units = usdToUnits(bigAmountUsd); // 15,000,000,500,000,000 nanodollars > 2^53
+  assert.equal(units > 9007199254740991n, true, 'Units must exceed MAX_SAFE_INTEGER');
+  assert.equal(units, 15000000500000000n, 'Units must match exact bigint representation');
+  const cents = usdToCents(bigAmountUsd);
+  const formatted = formatUsdExact(cents);
+  assert.equal(formatted, '$15000000.50', 'Large amount formats exact USD without precision loss');
+  console.log('  [PASS] Case 6: large numbers > 2^53 preserved with exact precision');
+}
+
+console.log('>>> ALL 6 MONEY TEST CASES PASSED <<<');

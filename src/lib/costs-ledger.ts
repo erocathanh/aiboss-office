@@ -7,9 +7,11 @@
  * Features:
  * - Append-only JSONL storage.
  * - Idempotency by (runId, model) — duplicate records are not re-appended and not double-counted.
- * - Exact integer nanodollar arithmetic using money.ts.
+ * - Exact integer nanodollar arithmetic using money.ts and BigInt throughout (no Number conversion).
+ * - Stores and returns costNanodollars as decimal string (exact precision for arbitrary numbers).
+ * - Avoids double-counting cache-creation tokens in totalTokens (inputTokens already includes them).
  * - Unpriced run accounting (priced: false, costNanodollars: null).
- * - Aggregation by seat, by day, and date-range filters.
+ * - Paginated / bounded aggregation queries by seat, by day, and date ranges.
  */
 
 import fs from 'node:fs';
@@ -26,7 +28,7 @@ export interface CostRecord {
   cachedInputTokens: number;
   cacheCreationTokens: number;
   outputTokens: number;
-  costNanodollars: number | null;
+  costNanodollars: string | null; // Decimal string of nanodollars (10^9 per USD)
   priced: boolean;
   source: 'claude-stream-json';
 }
@@ -37,7 +39,7 @@ export interface CostTotals {
   cacheCreationTokens: number;
   outputTokens: number;
   totalTokens: number;
-  costNanodollars: number;
+  costNanodollars: string; // Exact nanodollars as decimal string
   formattedCostUsd: string;
   unpricedRuns: number;
   totalRuns: number;
@@ -58,12 +60,15 @@ export interface CostsAggregation {
   records: CostRecord[];
 }
 
-const REPO_ROOT = process.cwd();
-const COSTS_DIR = path.join(REPO_ROOT, 'operations', 'data', 'costs');
+export function getCostsDir(): string {
+  const baseDir = process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
+  return path.join(baseDir, 'costs');
+}
 
 function ensureCostsDir(): void {
-  if (!fs.existsSync(COSTS_DIR)) {
-    fs.mkdirSync(COSTS_DIR, { recursive: true });
+  const dir = getCostsDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -72,24 +77,29 @@ function getLogPathForDate(isoDateString?: string): string {
   const dateStr = (isoDateString ? new Date(isoDateString) : new Date())
     .toISOString()
     .split('T')[0];
-  return path.join(COSTS_DIR, `${dateStr}.jsonl`);
+  return path.join(getCostsDir(), `${dateStr}.jsonl`);
 }
 
 /**
- * Read all cost records from operations/data/costs/*.jsonl
+ * Read cost records, gracefully skipping unparseable or corrupted lines.
  */
-export function readAllCostRecords(): CostRecord[] {
+export function readAllCostRecords(fileFilter?: (fileName: string) => boolean): CostRecord[] {
   ensureCostsDir();
-  if (!fs.existsSync(COSTS_DIR)) return [];
+  const costsDir = getCostsDir();
+  if (!fs.existsSync(costsDir)) return [];
 
-  const files = fs
-    .readdirSync(COSTS_DIR)
+  let files = fs
+    .readdirSync(costsDir)
     .filter((f) => f.endsWith('.jsonl'))
     .sort();
 
+  if (fileFilter) {
+    files = files.filter(fileFilter);
+  }
+
   const records: CostRecord[] = [];
   for (const file of files) {
-    const filePath = path.join(COSTS_DIR, file);
+    const filePath = path.join(costsDir, file);
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
       const lines = content.split('\n');
@@ -99,7 +109,12 @@ export function readAllCostRecords(): CostRecord[] {
         try {
           const parsed = JSON.parse(trimmed) as CostRecord;
           if (parsed && parsed.runId && parsed.model) {
-            records.push(parsed);
+            records.push({
+              ...parsed,
+              costNanodollars: parsed.costNanodollars !== null && parsed.costNanodollars !== undefined
+                ? String(parsed.costNanodollars)
+                : null,
+            });
           }
         } catch {
           /* ignore corrupted lines */
@@ -122,11 +137,11 @@ export function isCostRecorded(runId: string, model: string): boolean {
 
 /**
  * Record a single cost record idempotently. If (runId, model) exists, returns existing record.
+ * Throws if disk write fails.
  */
 export function recordCostReceipt(record: CostRecord): CostRecord {
   ensureCostsDir();
   if (isCostRecorded(record.runId, record.model)) {
-    // Already recorded: return existing without appending
     const existing = readAllCostRecords().find((r) => r.runId === record.runId && r.model === record.model);
     return existing ?? record;
   }
@@ -163,76 +178,103 @@ export function recordCostReceipts(
       priced: receipt.priced,
       source: 'claude-stream-json',
     };
-    recorded.push(recordCostReceipt(record));
+    recordCostReceipt(record);
+    recorded.push(record);
   }
 
   return recorded;
 }
 
 /**
- * Format integer nanodollars to human USD string using money.ts.
+ * Format exact nanodollars to USD string (e.g. 733263400n -> "$0.73").
+ * Accepts BigInt, string, or number.
  */
-export function formatNanodollars(nanodollars: bigint | number): string {
-  const big = typeof nanodollars === 'bigint' ? nanodollars : BigInt(Math.round(nanodollars));
-  return formatUsdExact(unitsToCents(big));
+export function formatNanodollars(units: bigint | string | number): string {
+  try {
+    const b = typeof units === 'bigint' ? units : BigInt(String(units || '0'));
+    return formatUsdExact(unitsToCents(b));
+  } catch {
+    return '$0.00';
+  }
+}
+
+function makeTotals(): CostTotals {
+  return {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costNanodollars: '0',
+    formattedCostUsd: '$0.00',
+    unpricedRuns: 0,
+    totalRuns: 0,
+  };
 }
 
 /**
- * Query and aggregate costs with optional seat, from, to filters.
+ * Aggregate cost records by seat and by day within optional date ranges.
+ * Features:
+ * - Deduplicates in-memory by (runId, model) to prevent double counting.
+ * - Exact bigint addition throughout.
+ * - Does not double-count cacheCreationTokens in totalTokens.
+ * - Limits records array returned to options.limit (default 50).
  */
 export function getCostsAggregation(options?: {
   seat?: string;
-  from?: string; // ISO string
-  to?: string; // ISO string
+  from?: string;
+  to?: string;
+  limit?: number;
 }): CostsAggregation {
-  const rawRecords = readAllCostRecords();
+  const fromTime = options?.from ? new Date(options.from).getTime() : undefined;
+  const toTime = options?.to ? new Date(options.to).getTime() : undefined;
+  const fromDateStr = options?.from ? options.from.split('T')[0] : undefined;
+  const toDateStr = options?.to ? options.to.split('T')[0] : undefined;
+  const limit = Math.max(1, Math.min(500, options?.limit ?? 50));
 
-  // 1. Deduplicate by runId + model
-  const deduplicated = new Map<string, CostRecord>();
-  for (const r of rawRecords) {
+  const allRecords = readAllCostRecords((file) => {
+    const fileDateStr = file.replace('.jsonl', '');
+    if (toDateStr && fileDateStr > toDateStr) return false;
+    if (fromDateStr && fileDateStr < fromDateStr) return false;
+    return true;
+  });
+
+  // Deduplicate by (runId, model) keeping the latest record
+  const uniqueRecordsMap = new Map<string, CostRecord>();
+  for (const r of allRecords) {
     const key = `${r.runId}::${r.model}`;
-    // Keep first or latest; here we set it
-    deduplicated.set(key, r);
+    uniqueRecordsMap.set(key, r);
   }
 
-  let records = Array.from(deduplicated.values());
+  let records = Array.from(uniqueRecordsMap.values());
 
-  // 2. Filters
   if (options?.seat) {
     records = records.filter((r) => r.seatId === options.seat);
   }
-  if (options?.from) {
-    const fromTime = new Date(options.from).getTime();
+  if (fromTime !== undefined) {
     records = records.filter((r) => new Date(r.ts).getTime() >= fromTime);
   }
-  if (options?.to) {
-    const toTime = new Date(options.to).getTime();
+  if (toTime !== undefined) {
     records = records.filter((r) => new Date(r.ts).getTime() <= toTime);
   }
 
-  // 3. Compute Totals Helper
-  function makeTotals(): CostTotals {
-    return {
-      inputTokens: 0,
-      cachedInputTokens: 0,
-      cacheCreationTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      costNanodollars: 0,
-      formattedCostUsd: '$0.00',
-      unpricedRuns: 0,
-      totalRuns: 0,
-    };
-  }
+  // Sort descending by timestamp
+  records.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 
-  let totalNanoBigInt = 0n;
   const summary = makeTotals();
-
-  const bySeatMap = new Map<string, { totals: CostTotals; runs: Set<string>; unpricedRunIds: Set<string>; nanoBig: bigint }>();
-  const byDayMap = new Map<string, { totals: CostTotals; runs: Set<string>; unpricedRunIds: Set<string>; nanoBig: bigint }>();
-
   const allRunIds = new Set<string>();
   const allUnpricedRunIds = new Set<string>();
+  let totalNanoBigInt = 0n;
+
+  interface SeatAccumulator {
+    totals: CostTotals;
+    runs: Set<string>;
+    unpricedRunIds: Set<string>;
+    nanoBig: bigint;
+  }
+
+  const bySeatMap = new Map<string, SeatAccumulator>();
+  const byDayMap = new Map<string, SeatAccumulator>();
 
   for (const r of records) {
     const dateStr = r.ts.split('T')[0];
@@ -241,15 +283,19 @@ export function getCostsAggregation(options?: {
       allUnpricedRunIds.add(r.runId);
     }
 
-    // Update global
+    // Update global tokens (Anthropic inputTokens already includes cacheCreationTokens)
     summary.inputTokens += r.inputTokens;
     summary.cachedInputTokens += r.cachedInputTokens;
     summary.cacheCreationTokens += r.cacheCreationTokens;
     summary.outputTokens += r.outputTokens;
-    summary.totalTokens += r.inputTokens + r.cachedInputTokens + r.cacheCreationTokens + r.outputTokens;
+    summary.totalTokens += r.inputTokens + r.cachedInputTokens + r.outputTokens;
 
     if (r.costNanodollars !== null && r.priced) {
-      totalNanoBigInt += BigInt(r.costNanodollars);
+      try {
+        totalNanoBigInt += BigInt(r.costNanodollars);
+      } catch {
+        /* skip invalid bigint string */
+      }
     }
 
     // Seat grouping
@@ -271,9 +317,13 @@ export function getCostsAggregation(options?: {
     seatEntry.totals.cachedInputTokens += r.cachedInputTokens;
     seatEntry.totals.cacheCreationTokens += r.cacheCreationTokens;
     seatEntry.totals.outputTokens += r.outputTokens;
-    seatEntry.totals.totalTokens += r.inputTokens + r.cachedInputTokens + r.cacheCreationTokens + r.outputTokens;
+    seatEntry.totals.totalTokens += r.inputTokens + r.cachedInputTokens + r.outputTokens;
     if (r.costNanodollars !== null && r.priced) {
-      seatEntry.nanoBig += BigInt(r.costNanodollars);
+      try {
+        seatEntry.nanoBig += BigInt(r.costNanodollars);
+      } catch {
+        /* skip invalid bigint string */
+      }
     }
 
     // Day grouping
@@ -295,22 +345,26 @@ export function getCostsAggregation(options?: {
     dayEntry.totals.cachedInputTokens += r.cachedInputTokens;
     dayEntry.totals.cacheCreationTokens += r.cacheCreationTokens;
     dayEntry.totals.outputTokens += r.outputTokens;
-    dayEntry.totals.totalTokens += r.inputTokens + r.cachedInputTokens + r.cacheCreationTokens + r.outputTokens;
+    dayEntry.totals.totalTokens += r.inputTokens + r.cachedInputTokens + r.outputTokens;
     if (r.costNanodollars !== null && r.priced) {
-      dayEntry.nanoBig += BigInt(r.costNanodollars);
+      try {
+        dayEntry.nanoBig += BigInt(r.costNanodollars);
+      } catch {
+        /* skip invalid bigint string */
+      }
     }
   }
 
   summary.totalRuns = allRunIds.size;
   summary.unpricedRuns = allUnpricedRunIds.size;
-  summary.costNanodollars = Number(totalNanoBigInt);
+  summary.costNanodollars = totalNanoBigInt.toString();
   summary.formattedCostUsd = formatNanodollars(totalNanoBigInt);
 
   const bySeat: Record<string, SeatCostSummary> = {};
   for (const [seatId, entry] of bySeatMap.entries()) {
     entry.totals.totalRuns = entry.runs.size;
     entry.totals.unpricedRuns = entry.unpricedRunIds.size;
-    entry.totals.costNanodollars = Number(entry.nanoBig);
+    entry.totals.costNanodollars = entry.nanoBig.toString();
     entry.totals.formattedCostUsd = formatNanodollars(entry.nanoBig);
     bySeat[seatId] = {
       seatId,
@@ -322,7 +376,7 @@ export function getCostsAggregation(options?: {
   for (const [date, entry] of byDayMap.entries()) {
     entry.totals.totalRuns = entry.runs.size;
     entry.totals.unpricedRuns = entry.unpricedRunIds.size;
-    entry.totals.costNanodollars = Number(entry.nanoBig);
+    entry.totals.costNanodollars = entry.nanoBig.toString();
     entry.totals.formattedCostUsd = formatNanodollars(entry.nanoBig);
     byDay[date] = {
       date,
@@ -334,41 +388,78 @@ export function getCostsAggregation(options?: {
     summary,
     bySeat,
     byDay,
-    records,
+    records: records.slice(0, limit),
   };
 }
 
-/**
- * Convenient helper for Settings UI: Cost today and this month per seat.
- */
-export function getSeatPeriodCosts(seatIds: string[]): Array<{
+export interface SeatPeriodCost {
   seatId: string;
-  costTodayNanodollars: number;
   formattedCostToday: string;
-  costThisMonthNanodollars: number;
   formattedCostThisMonth: string;
-  unpricedRunsToday: number;
   unpricedRunsThisMonth: number;
-}> {
+}
+
+/**
+ * Returns summary of cost today and this month for each seat.
+ */
+export function getSeatPeriodCosts(seatList?: string[]): SeatPeriodCost[] {
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
-  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  const thisMonthPrefix = todayStr.slice(0, 7);
 
-  const todayAgg = getCostsAggregation({ from: `${todayStr}T00:00:00.000Z` });
-  const monthAgg = getCostsAggregation({ from: startOfMonth });
+  const allRecords = readAllCostRecords();
+  const uniqueRecordsMap = new Map<string, CostRecord>();
+  for (const r of allRecords) {
+    uniqueRecordsMap.set(`${r.runId}::${r.model}`, r);
+  }
 
-  return seatIds.map((seatId) => {
-    const todaySeat = todayAgg.bySeat[seatId];
-    const monthSeat = monthAgg.bySeat[seatId];
+  const seatTodayMap = new Map<string, bigint>();
+  const seatMonthMap = new Map<string, bigint>();
+  const seatUnpricedMap = new Map<string, Set<string>>();
 
+  for (const r of uniqueRecordsMap.values()) {
+    const dateStr = r.ts.split('T')[0];
+    const isToday = dateStr === todayStr;
+    const isThisMonth = dateStr.startsWith(thisMonthPrefix);
+
+    if (!r.priced || r.costNanodollars === null) {
+      if (isToday || isThisMonth) {
+        if (!seatUnpricedMap.has(r.seatId)) {
+          seatUnpricedMap.set(r.seatId, new Set());
+        }
+        seatUnpricedMap.get(r.seatId)!.add(r.runId);
+      }
+      continue;
+    }
+
+    let nano = 0n;
+    try {
+      nano = BigInt(r.costNanodollars);
+    } catch {
+      continue;
+    }
+
+    if (isToday) {
+      seatTodayMap.set(r.seatId, (seatTodayMap.get(r.seatId) ?? 0n) + nano);
+    }
+    if (isThisMonth) {
+      seatMonthMap.set(r.seatId, (seatMonthMap.get(r.seatId) ?? 0n) + nano);
+    }
+  }
+
+  const seatsToIterate = seatList && seatList.length > 0
+    ? seatList
+    : Array.from(new Set([...seatTodayMap.keys(), ...seatMonthMap.keys()]));
+
+  return seatsToIterate.map((seatId) => {
+    const todayBig = seatTodayMap.get(seatId) ?? 0n;
+    const monthBig = seatMonthMap.get(seatId) ?? 0n;
+    const unpriced = seatUnpricedMap.get(seatId)?.size ?? 0;
     return {
       seatId,
-      costTodayNanodollars: todaySeat?.costNanodollars ?? 0,
-      formattedCostToday: todaySeat?.formattedCostUsd ?? '$0.00',
-      costThisMonthNanodollars: monthSeat?.costNanodollars ?? 0,
-      formattedCostThisMonth: monthSeat?.formattedCostUsd ?? '$0.00',
-      unpricedRunsToday: todaySeat?.unpricedRuns ?? 0,
-      unpricedRunsThisMonth: monthSeat?.unpricedRuns ?? 0,
+      formattedCostToday: formatNanodollars(todayBig),
+      formattedCostThisMonth: formatNanodollars(monthBig),
+      unpricedRunsThisMonth: unpriced,
     };
   });
 }

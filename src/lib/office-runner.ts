@@ -19,14 +19,16 @@ import {
   updateRun,
   updateWake,
   recoverOrphanedRuns,
+  type RunErrorKind,
 } from '@/lib/runs-ledger';
 import { extractUsageReceipts, type StreamJsonEvent } from '@/lib/usage-receipt';
-import { recordCostReceipts } from '@/lib/costs-ledger';
+import { recordCostReceipts, recordCostReceipt } from '@/lib/costs-ledger';
 
 const REPO_ROOT = process.cwd();
-const RUNNER_OFF_FILE = path.join(REPO_ROOT, 'operations/data/runner.off');
-const CONFIG_FILE = path.join(REPO_ROOT, 'config/office.json');
-const LOG_FILE = path.join(REPO_ROOT, 'operations/data/runner.log.jsonl');
+const BASE_DATA_DIR = process.env.AIBOSS_DATA_DIR || path.join(REPO_ROOT, 'operations', 'data');
+const RUNNER_OFF_FILE = path.join(BASE_DATA_DIR, 'runner.off');
+const CONFIG_FILE = path.join(REPO_ROOT, 'config', 'office.json');
+const LOG_FILE = path.join(BASE_DATA_DIR, 'runner.log.jsonl');
 
 export interface RunnerConfig {
   enabled: boolean;
@@ -87,7 +89,7 @@ export function flushInFlightTurns(reason: string): void {
           status: 'killed',
           finishedAt: endIso,
           exitCode: null,
-          errorKind: reason,
+          errorKind: 'sigkill',
         });
       } catch {
         /* ignore ledger write error during shutdown */
@@ -211,6 +213,16 @@ export async function tickRunner(): Promise<number> {
           event: 'skipped',
           skipped_reason: 'terminal',
         });
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'seat_held_by_terminal',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
         continue;
       }
 
@@ -218,6 +230,16 @@ export async function tickRunner(): Promise<number> {
       const o = layO(y.ma_o);
       const maPhienCu = o && o.ma_nhan_su === y.ma_nhan_su ? (o.ma_phien ?? null) : null;
       if (maPhienCu && dangChayNoiKhac(y.ma_nhan_su, maPhienCu, o?.moc_ket_thuc ?? null)) {
+        if (y.wakeId) {
+          try {
+            updateWake(y.wakeId, {
+              status: 'skipped',
+              reason: 'seat_busy_running_elsewhere',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
         continue;
       }
 
@@ -286,6 +308,9 @@ export async function tickRunner(): Promise<number> {
               maNhanSu: y.ma_nhan_su,
               cauHoi: y.cau_hoi,
               maPhienCu: phienDung,
+              khiSinh: (pid) => {
+                updateRun(runId, { pid });
+              },
             },
             () => {
               /* output streams to Claude Code session file directly */
@@ -296,73 +321,92 @@ export async function tickRunner(): Promise<number> {
           const durationMs = Date.now() - startTime;
           const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
 
-          if (result.loi?.startsWith('skipped: terminal')) {
-            logRunnerEvent({
-              timestamp: endIso,
-              seat: y.ma_nhan_su,
-              bell_id: y.ma,
-              event: 'end',
-              start: startIso,
-              end: endIso,
-              duration_ms: durationMs,
-              exit: null,
-              error: result.loi,
-            });
-            updateRun(runId, {
-              status: 'failed',
-              finishedAt: endIso,
-              exitCode: null,
-              errorKind: result.loi,
-            });
-          } else if (result.loi) {
-            const isKilled = result.loi.includes('bị dừng bởi tín hiệu') || result.loi.includes('terminated');
-            logRunnerEvent({
-              timestamp: endIso,
-              seat: y.ma_nhan_su,
-              bell_id: y.ma,
-              event: 'end',
-              start: startIso,
-              end: endIso,
-              duration_ms: durationMs,
-              exit: exitCode,
-              error: result.loi,
-            });
-            updateRun(runId, {
-              status: isKilled ? 'killed' : 'failed',
-              finishedAt: endIso,
-              exitCode,
-              errorKind: result.loi,
-            });
-          } else {
-            logRunnerEvent({
-              timestamp: endIso,
-              seat: y.ma_nhan_su,
-              bell_id: y.ma,
-              event: 'end',
-              start: startIso,
-              end: endIso,
-              duration_ms: durationMs,
-              exit: 0,
-              session_id: result.maPhien ?? undefined,
-            });
-            updateRun(runId, {
-              status: 'finished',
-              finishedAt: endIso,
-              exitCode: 0,
-              sessionId: result.maPhien ?? undefined,
-            });
-
-            if (result.rawResult) {
-              try {
-                const receipts = extractUsageReceipts([result.rawResult as StreamJsonEvent]);
-                if (receipts.length > 0) {
-                  recordCostReceipts(y.ma_nhan_su, runId, receipts, endIso);
-                }
-              } catch {
-                /* ignore cost recording failures */
+          // 1. Process cost receipts FIRST (Finding B: record costs before finished, include errored runs with usage, unpriced marker if none)
+          if (result.rawResult) {
+            try {
+              const receipts = extractUsageReceipts([result.rawResult as StreamJsonEvent]);
+              if (receipts.length > 0) {
+                recordCostReceipts(y.ma_nhan_su, runId, receipts, endIso);
+              } else {
+                recordCostReceipt({
+                  ts: endIso,
+                  seatId: y.ma_nhan_su,
+                  runId,
+                  model: 'unknown',
+                  inputTokens: 0,
+                  cachedInputTokens: 0,
+                  cacheCreationTokens: 0,
+                  outputTokens: 0,
+                  costNanodollars: null,
+                  priced: false,
+                  source: 'claude-stream-json',
+                });
               }
+            } catch (err: unknown) {
+              console.error(`[office-runner] Failed to record cost receipts for run ${runId}:`, err);
+            }
+          } else {
+            try {
+              recordCostReceipt({
+                ts: endIso,
+                seatId: y.ma_nhan_su,
+                runId,
+                model: 'unknown',
+                inputTokens: 0,
+                cachedInputTokens: 0,
+                cacheCreationTokens: 0,
+                outputTokens: 0,
+                costNanodollars: null,
+                priced: false,
+                source: 'claude-stream-json',
+              });
+            } catch (err: unknown) {
+              console.error(`[office-runner] Failed to record fallback unpriced cost receipt for run ${runId}:`, err);
             }
           }
+
+          // 2. Map failure to finite RunErrorKind codes (Item 10: sigkill, timeout, exit_nonzero, result_error, spawn_failed, orphaned)
+          let finalStatus: 'finished' | 'failed' | 'timeout' | 'killed' = 'finished';
+          let errorKind: RunErrorKind | undefined = undefined;
+
+          if (result.exitSignal === 'SIGKILL' || result.loi?.includes('bị dừng bởi tín hiệu SIGKILL')) {
+            finalStatus = 'killed';
+            errorKind = 'sigkill';
+          } else if (result.loi?.includes('khoảng lặng đã quá ngưỡng') || result.loi?.includes('timeout')) {
+            finalStatus = 'timeout';
+            errorKind = 'timeout';
+          } else if (result.exitCode !== 0 && result.exitCode !== null) {
+            finalStatus = 'failed';
+            errorKind = 'exit_nonzero';
+          } else if (result.loi?.startsWith('skipped: terminal')) {
+            finalStatus = 'failed';
+            errorKind = 'spawn_failed';
+          } else if (result.loi) {
+            finalStatus = 'failed';
+            errorKind = 'result_error';
+          }
+
+          logRunnerEvent({
+            timestamp: endIso,
+            seat: y.ma_nhan_su,
+            bell_id: y.ma,
+            event: 'end',
+            start: startIso,
+            end: endIso,
+            duration_ms: durationMs,
+            exit: exitCode,
+            error: errorKind,
+            session_id: result.maPhien ?? undefined,
+          });
+
+          updateRun(runId, {
+            status: finalStatus,
+            finishedAt: endIso,
+            exitCode: finalStatus === 'finished' ? 0 : exitCode,
+            errorKind,
+            sessionId: result.maPhien ?? undefined,
+            pid: result.pid_de_hien_thi ?? undefined,
+          });
 
           if (result.maPhien) {
             const maP = result.maPhien;
@@ -377,9 +421,25 @@ export async function tickRunner(): Promise<number> {
               setTimeout(ghiLai, delay).unref?.();
             }
           }
-        } catch (err: unknown) {
+        } catch {
           const endIso = new Date().toISOString();
-          const errMsg = err instanceof Error ? err.message : String(err);
+          try {
+            recordCostReceipt({
+              ts: endIso,
+              seatId: y.ma_nhan_su,
+              runId,
+              model: 'unknown',
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              cacheCreationTokens: 0,
+              outputTokens: 0,
+              costNanodollars: null,
+              priced: false,
+              source: 'claude-stream-json',
+            });
+          } catch {
+            /* ignore fallback unpriced marker */
+          }
           logRunnerEvent({
             timestamp: endIso,
             seat: y.ma_nhan_su,
@@ -389,13 +449,13 @@ export async function tickRunner(): Promise<number> {
             end: endIso,
             duration_ms: Date.now() - startTime,
             exit: null,
-            error: errMsg,
+            error: 'result_error',
           });
           updateRun(runId, {
             status: 'failed',
             finishedAt: endIso,
             exitCode: null,
-            errorKind: errMsg,
+            errorKind: 'result_error',
           });
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);

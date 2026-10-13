@@ -4,14 +4,24 @@
  * Appends and tracks wake requests and execution runs in operations/data/runs/<YYYY-MM-DD>.jsonl.
  * Implements:
  * - Append-only JSONL logging.
- * - Idempotency key deduplication (seatId + prompt + 60s window).
- * - Safe restart recovery (orphaned running -> failed, expired queued > 10m).
- * - Queries for runs and wakes.
+ * - Sliding-window idempotency deduplication (seatId + prompt, 60s sliding window).
+ * - Process-aware restart recovery (checks PID liveness, expires old queued wakes).
+ * - Safe error handling (throws on append failure for 500 propagation).
+ * - Finite errorKind codes (sigkill, timeout, exit_nonzero, result_error, spawn_failed, orphaned).
+ * - Efficient date-bounded reverse querying for runs and wakes.
  */
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+
+export type RunErrorKind =
+  | 'sigkill'
+  | 'timeout'
+  | 'exit_nonzero'
+  | 'result_error'
+  | 'spawn_failed'
+  | 'orphaned';
 
 export interface WakeRecord {
   type: 'wake';
@@ -37,23 +47,27 @@ export interface RunRecord {
   status: 'running' | 'finished' | 'failed' | 'timeout' | 'killed';
   exitCode?: number | null;
   resumeCmd?: string;
-  errorKind?: string;
+  errorKind?: RunErrorKind;
   attempt?: number;
+  pid?: number;
 }
 
 export type LedgerRecord = WakeRecord | RunRecord;
 
-const REPO_ROOT = process.cwd();
-const RUNS_DIR = path.join(REPO_ROOT, 'operations', 'data', 'runs');
+export function getRunsDir(): string {
+  const baseDir = process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
+  return path.join(baseDir, 'runs');
+}
 
 function ensureRunsDir(): void {
-  if (!fs.existsSync(RUNS_DIR)) {
-    fs.mkdirSync(RUNS_DIR, { recursive: true });
+  const dir = getRunsDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
 /**
- * Generate an ID in the format YYYYMMDD-HHMMSS-<6 hex>.
+ * Generate an ID in the format prefix-YYYYMMDD-HHMMSS-<6 hex>.
  */
 export function generateRunOrWakeId(prefix: 'wake' | 'run'): string {
   const now = new Date();
@@ -68,11 +82,11 @@ export function generateRunOrWakeId(prefix: 'wake' | 'run'): string {
 }
 
 /**
- * Compute idempotency key: hash of seatId + content + 60-second window.
+ * Compute semantic idempotency key: hash of seatId + normalized content.
+ * Does NOT bucket by fixed minutes — sliding window comparison is handled at query time.
  */
-export function computeIdempotencyKey(seatId: string, content: string, nowMs = Date.now()): string {
-  const windowIndex = Math.floor(nowMs / 60_000);
-  const raw = `${seatId.trim()}::${content.trim()}::${windowIndex}`;
+export function computeIdempotencyKey(seatId: string, content: string): string {
+  const raw = `${seatId.trim()}::${content.trim()}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
 }
 
@@ -81,16 +95,16 @@ function getLogPathForDate(isoDateString?: string): string {
   const dateStr = (isoDateString ? new Date(isoDateString) : new Date())
     .toISOString()
     .split('T')[0];
-  return path.join(RUNS_DIR, `${dateStr}.jsonl`);
+  return path.join(getRunsDir(), `${dateStr}.jsonl`);
 }
 
+/**
+ * Appends record to ledger file. Throws on error to prevent silent data loss.
+ */
 function appendRecord(record: LedgerRecord): void {
-  try {
-    const filePath = getLogPathForDate();
-    fs.appendFileSync(filePath, JSON.stringify(record) + '\n', 'utf-8');
-  } catch {
-    /* ignore ledger append failures to preserve main loop */
-  }
+  ensureRunsDir();
+  const filePath = getLogPathForDate();
+  fs.appendFileSync(filePath, JSON.stringify(record) + '\n', 'utf-8');
 }
 
 /**
@@ -150,18 +164,20 @@ export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord |
 }
 
 /**
- * Scan recent files in operations/data/runs to find recent records.
+ * Reads records from files, skipping corrupted lines gracefully.
  */
-function readAllRunFiles(): LedgerRecord[] {
+export function readRunFiles(fileFilter?: (fileName: string) => boolean): LedgerRecord[] {
   ensureRunsDir();
-  if (!fs.existsSync(RUNS_DIR)) return [];
-  const files = fs.readdirSync(RUNS_DIR)
-    .filter((f) => f.endsWith('.jsonl'))
-    .sort();
+  const runsDir = getRunsDir();
+  if (!fs.existsSync(runsDir)) return [];
+  let files = fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl')).sort();
+  if (fileFilter) {
+    files = files.filter(fileFilter);
+  }
 
   const records: LedgerRecord[] = [];
   for (const file of files) {
-    const filePath = path.join(RUNS_DIR, file);
+    const filePath = path.join(runsDir, file);
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
       const lines = content.split('\n');
@@ -170,28 +186,31 @@ function readAllRunFiles(): LedgerRecord[] {
         if (!trimmed) continue;
         try {
           const parsed = JSON.parse(trimmed) as LedgerRecord;
-          records.push(parsed);
+          if (parsed && (parsed.type === 'wake' || parsed.type === 'run')) {
+            records.push(parsed);
+          }
         } catch {
-          /* skip corrupted line */
+          /* skip corrupted line gracefully */
         }
       }
     } catch {
-      /* skip read error */
+      /* skip unreadable file gracefully */
     }
   }
   return records;
 }
 
 /**
- * Find recent wake by idempotencyKey within window (default 60s).
+ * Find recent wake by idempotencyKey within sliding window (default 60s).
+ * Evaluates true elapsed milliseconds between now and wake.requestedAt.
  */
 export function findRecentWakeByIdempotencyKey(
   seatId: string,
   idempotencyKey: string,
-  maxAgeMs = 60_000
+  maxAgeMs = 60_000,
+  nowMs = Date.now()
 ): WakeRecord | null {
-  const records = readAllRunFiles();
-  const now = Date.now();
+  const records = readRunFiles();
 
   // Fold wakes to latest status
   const wakesById = new Map<string, WakeRecord>();
@@ -203,8 +222,10 @@ export function findRecentWakeByIdempotencyKey(
 
   for (const wake of wakesById.values()) {
     if (wake.seatId === seatId && wake.idempotencyKey === idempotencyKey) {
-      const age = now - new Date(wake.requestedAt).getTime();
-      if (age <= maxAgeMs && (wake.status === 'queued' || wake.status === 'claimed')) {
+      const reqTime = new Date(wake.requestedAt).getTime();
+      const age = nowMs - reqTime;
+      // Sliding window match: requested within [0, maxAgeMs] and not expired
+      if (age >= 0 && age <= maxAgeMs && wake.status !== 'expired') {
         return wake;
       }
     }
@@ -213,10 +234,10 @@ export function findRecentWakeByIdempotencyKey(
 }
 
 /**
- * Get wake by wakeId (resolves to latest event).
+ * Get wake by wakeId (resolves to latest folded event).
  */
 export function getWake(wakeId: string): WakeRecord | null {
-  const records = readAllRunFiles();
+  const records = readRunFiles();
   let found: WakeRecord | null = null;
   for (const r of records) {
     if (r.type === 'wake' && r.wakeId === wakeId) {
@@ -227,10 +248,10 @@ export function getWake(wakeId: string): WakeRecord | null {
 }
 
 /**
- * Get run by runId (resolves to latest event).
+ * Get run by runId (resolves to latest folded event).
  */
 export function getRun(runId: string): RunRecord | null {
-  const records = readAllRunFiles();
+  const records = readRunFiles();
   let found: RunRecord | null = null;
   for (const r of records) {
     if (r.type === 'run' && r.runId === runId) {
@@ -246,6 +267,8 @@ export interface MergedRunInfo extends RunRecord {
 
 /**
  * Query runs merged with corresponding wake data.
+ * Optimized to scan files in reverse chronological order (from `to` date backward),
+ * stopping early once limit matching runs have been gathered.
  */
 export function getRuns(options?: {
   seat?: string;
@@ -253,18 +276,49 @@ export function getRuns(options?: {
   to?: string;
   limit?: number;
 }): MergedRunInfo[] {
-  const records = readAllRunFiles();
-  const limit = options?.limit ?? 50;
+  const limit = Math.max(1, Math.min(500, options?.limit ?? 50));
+  const runsDir = getRunsDir();
+  if (!fs.existsSync(runsDir)) return [];
 
-  // Group latest states
+  const fromTime = options?.from ? new Date(options.from).getTime() : undefined;
+  const toTime = options?.to ? new Date(options.to).getTime() : undefined;
+  const fromDateStr = options?.from ? options.from.split('T')[0] : undefined;
+  const toDateStr = options?.to ? options.to.split('T')[0] : undefined;
+
+  const allFiles = fs
+    .readdirSync(runsDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .sort()
+    .reverse(); // Newest dates first
+
   const wakesById = new Map<string, WakeRecord>();
   const runsById = new Map<string, RunRecord>();
 
-  for (const r of records) {
-    if (r.type === 'wake') {
-      wakesById.set(r.wakeId, r);
-    } else if (r.type === 'run') {
-      runsById.set(r.runId, r);
+  for (const file of allFiles) {
+    const fileDateStr = file.replace('.jsonl', '');
+    if (toDateStr && fileDateStr > toDateStr) continue;
+    if (fromDateStr && fileDateStr < fromDateStr) break;
+
+    const records = readRunFiles((f) => f === file);
+    for (const r of records) {
+      if (r.type === 'wake') {
+        wakesById.set(r.wakeId, r);
+      } else if (r.type === 'run') {
+        runsById.set(r.runId, r);
+      }
+    }
+
+    // Check how many valid matching runs we have accumulated
+    const currentMatchingRuns = Array.from(runsById.values()).filter((r) => {
+      if (options?.seat && r.seatId !== options.seat) return false;
+      const started = new Date(r.startedAt).getTime();
+      if (fromTime !== undefined && started < fromTime) return false;
+      if (toTime !== undefined && started > toTime) return false;
+      return true;
+    });
+
+    if (currentMatchingRuns.length >= limit && !options?.from) {
+      break;
     }
   }
 
@@ -273,35 +327,45 @@ export function getRuns(options?: {
   if (options?.seat) {
     runs = runs.filter((r) => r.seatId === options.seat);
   }
-  if (options?.from) {
-    const fromTime = new Date(options.from).getTime();
+  if (fromTime !== undefined) {
     runs = runs.filter((r) => new Date(r.startedAt).getTime() >= fromTime);
   }
-  if (options?.to) {
-    const toTime = new Date(options.to).getTime();
+  if (toTime !== undefined) {
     runs = runs.filter((r) => new Date(r.startedAt).getTime() <= toTime);
   }
 
   // Sort descending by startedAt
   runs.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
-  const merged: MergedRunInfo[] = runs.slice(0, limit).map((run) => {
+  return runs.slice(0, limit).map((run) => {
     const wake = run.wakeId ? wakesById.get(run.wakeId) : undefined;
     return {
       ...run,
       ...(wake ? { wake } : {}),
     };
   });
+}
 
-  return merged;
+/**
+ * Check if a process is still alive using signal 0.
+ */
+export function isProcessAlive(pid: number | undefined | null): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    return code === 'EPERM'; // Process exists but we do not have permission to signal it
+  }
 }
 
 /**
  * On runner startup: recover orphaned running runs and expire old queued wakes.
+ * Only marks running runs as orphaned if their PID is no longer alive.
  */
-export function recoverOrphanedRuns(): { orphanedRuns: number; expiredWakes: number } {
-  const records = readAllRunFiles();
-  const now = Date.now();
+export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number; expiredWakes: number } {
+  const records = readRunFiles();
 
   const wakesById = new Map<string, WakeRecord>();
   const runsById = new Map<string, RunRecord>();
@@ -317,27 +381,30 @@ export function recoverOrphanedRuns(): { orphanedRuns: number; expiredWakes: num
   let orphanedRuns = 0;
   let expiredWakes = 0;
 
-  // 1. Recover runs marked running on restart
+  // 1. Recover runs marked running on restart IF process is dead
   for (const run of runsById.values()) {
     if (run.status === 'running') {
-      updateRun(run.runId, {
-        status: 'failed',
-        finishedAt: new Date().toISOString(),
-        errorKind: 'orphaned',
-      });
-      orphanedRuns++;
+      const alive = isProcessAlive(run.pid);
+      if (!alive) {
+        updateRun(run.runId, {
+          status: 'failed',
+          finishedAt: new Date(nowMs).toISOString(),
+          errorKind: 'orphaned',
+        });
+        orphanedRuns++;
+      }
     }
   }
 
-  // 2. Expire queued wakes older than 10 minutes
-  const TEN_MINUTES_MS = 10 * 60 * 1000;
+  // 2. Expire queued wakes older than 3 minutes (aligning with queue TTL)
+  const THREE_MINUTES_MS = 3 * 60 * 1000;
   for (const wake of wakesById.values()) {
     if (wake.status === 'queued') {
-      const age = now - new Date(wake.requestedAt).getTime();
-      if (age > TEN_MINUTES_MS) {
+      const age = nowMs - new Date(wake.requestedAt).getTime();
+      if (age > THREE_MINUTES_MS) {
         updateWake(wake.wakeId, {
           status: 'expired',
-          reason: 'queued_timeout_exceeded',
+          reason: 'queued_ttl_exceeded',
         });
         expiredWakes++;
       }

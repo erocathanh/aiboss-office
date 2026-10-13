@@ -5,7 +5,8 @@
  * - Cache-creation input tokens are billed as input prompt tokens and added to inputTokens.
  * - Cache-read input tokens are kept separate as cachedInputTokens.
  * - Output tokens are kept separate as outputTokens.
- * - Cost in nanodollars (10^9 per USD) is parsed using money.ts integer arithmetic.
+ * - Cost in nanodollars (10^9 per USD) is parsed using money.ts integer arithmetic
+ *   and represented as a decimal integer string to prevent precision loss.
  * - Missing or invalid total_cost_usd produces { costNanodollars: null, priced: false }.
  */
 
@@ -18,7 +19,7 @@ export interface ModelReceipt {
   cacheCreationTokens: number;
   outputTokens: number;
   totalCostUsd?: string;
-  costNanodollars: number | null;
+  costNanodollars: string | null;
   priced: boolean;
 }
 
@@ -74,28 +75,29 @@ export function extractUsageReceipts(
     return [];
   }
 
+  const skipAddition = Boolean(options?.skipCacheCreationAddition);
   const receipts: ModelReceipt[] = [];
-  const skipAddition = options?.skipCacheCreationAddition === true;
 
-  // 1. Try modelUsage first (most authoritative per-model ledger)
+  // 1. Check for detailed modelUsage breakdown
   const modelUsage = resultEvent.modelUsage;
   if (modelUsage && typeof modelUsage === 'object' && Object.keys(modelUsage).length > 0) {
-    for (const [model, rawEntry] of Object.entries(modelUsage)) {
-      if (!rawEntry || typeof rawEntry !== 'object') continue;
 
-      const rawInput = Number(rawEntry.inputTokens ?? rawEntry.input_tokens ?? 0) || 0;
-      const cacheCreation = Number(rawEntry.cacheCreationInputTokens ?? rawEntry.cache_creation_input_tokens ?? 0) || 0;
-      const cachedInput = Number(rawEntry.cacheReadInputTokens ?? rawEntry.cache_read_input_tokens ?? 0) || 0;
-      const output = Number(rawEntry.outputTokens ?? rawEntry.output_tokens ?? 0) || 0;
+    for (const [model, usageData] of Object.entries(modelUsage)) {
+      if (!usageData || typeof usageData !== 'object') continue;
+
+      const rawInput = Number(usageData.input_tokens ?? usageData.inputTokens ?? 0) || 0;
+      const cacheCreation = Number(usageData.cache_creation_input_tokens ?? usageData.cacheCreationInputTokens ?? 0) || 0;
+      const cachedInput = Number(usageData.cache_read_input_tokens ?? usageData.cacheReadInputTokens ?? 0) || 0;
+      const output = Number(usageData.output_tokens ?? usageData.outputTokens ?? 0) || 0;
 
       const inputTokens = skipAddition ? rawInput : rawInput + cacheCreation;
 
-      // Extract cost
-      const rawCost = rawEntry.costUSD ?? rawEntry.cost_usd ?? (
+      // Extract model-specific cost if available, or fallback to total_cost_usd if single model
+      const rawCost = usageData.cost_usd ?? usageData.costUSD ?? usageData.cost ?? (
         Object.keys(modelUsage).length === 1 ? resultEvent.total_cost_usd : undefined
       );
 
-      let costNanodollars: number | null = null;
+      let costNanodollars: string | null = null;
       let totalCostUsd: string | undefined = undefined;
       let priced = false;
 
@@ -103,7 +105,17 @@ export function extractUsageReceipts(
         totalCostUsd = String(rawCost);
         try {
           const units = usdToUnits(totalCostUsd);
-          costNanodollars = Number(units);
+          costNanodollars = units.toString();
+          priced = true;
+        } catch {
+          costNanodollars = null;
+          priced = false;
+        }
+      } else if (typeof rawCost === 'string' && rawCost.trim()) {
+        totalCostUsd = rawCost.trim();
+        try {
+          const units = usdToUnits(totalCostUsd);
+          costNanodollars = units.toString();
           priced = true;
         } catch {
           costNanodollars = null;
@@ -142,7 +154,7 @@ export function extractUsageReceipts(
       : 'claude-default';
 
     const rawCost = resultEvent.total_cost_usd;
-    let costNanodollars: number | null = null;
+    let costNanodollars: string | null = null;
     let totalCostUsd: string | undefined = undefined;
     let priced = false;
 
@@ -150,7 +162,17 @@ export function extractUsageReceipts(
       totalCostUsd = String(rawCost);
       try {
         const units = usdToUnits(totalCostUsd);
-        costNanodollars = Number(units);
+        costNanodollars = units.toString();
+        priced = true;
+      } catch {
+        costNanodollars = null;
+        priced = false;
+      }
+    } else if (typeof rawCost === 'string' && rawCost.trim()) {
+      totalCostUsd = rawCost.trim();
+      try {
+        const units = usdToUnits(totalCostUsd);
+        costNanodollars = units.toString();
         priced = true;
       } catch {
         costNanodollars = null;
