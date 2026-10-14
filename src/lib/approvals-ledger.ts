@@ -448,6 +448,43 @@ function getApprovalLedgerScriptPath(): string {
   return path.resolve(root, 'operations', 'scripts', 'approval_ledger.py');
 }
 
+const ALLOWED_EXACT_ENV_KEYS = new Set([
+  'PATH',
+  'HOME',
+  'LANG',
+  'TZ',
+  'NODE_ENV',
+  'AIBOSS_DATA_DIR',
+  'AIBOSS_OFFICE_ROOT',
+]);
+
+/**
+ * Construct a strict whitelist environment for `spawnSync('python3', ...)` (A-4 v07 F21).
+ * Strips all `AIBOSS_TEST_*` variables unless `process.env.NODE_ENV === 'test'`.
+ */
+function buildPythonCliEnv(): NodeJS.ProcessEnv {
+  const safeEnv: NodeJS.ProcessEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+  };
+  const isTestEnv = process.env.NODE_ENV === 'test';
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (
+      ALLOWED_EXACT_ENV_KEYS.has(key) ||
+      key.startsWith('LC_') ||
+      key.startsWith('PYTHON')
+    ) {
+      safeEnv[key] = value;
+      continue;
+    }
+    if (isTestEnv && key.startsWith('AIBOSS_TEST_')) {
+      safeEnv[key] = value;
+    }
+  }
+  return safeEnv;
+}
+
 /**
  * Invoke `operations/scripts/approval_ledger.py` via `spawnSync('python3', ...)`
  * and map infrastructure errors (`lock_timeout`, `ledger_unreadable`, `io_error`) to typed exceptions.
@@ -456,7 +493,7 @@ function getApprovalLedgerScriptPath(): string {
 function runApprovalLedgerCli(args: string[]): Record<string, unknown> {
   const scriptPath = getApprovalLedgerScriptPath();
   const res = spawnSync('python3', [scriptPath, ...args], {
-    env: process.env,
+    env: buildPythonCliEnv(),
     encoding: 'utf-8',
     timeout: 15_000,
   });
@@ -509,15 +546,15 @@ export interface GetApprovalsResult {
 
 export function getApprovals(query: GetApprovalsQuery = {}): GetApprovalsResult {
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
-  const args = ['dump', '--json', '--limit', String(limit)];
+  const args = ['dump', '--json', `--limit=${limit}`];
   if (query.status && trimAscii(query.status)) {
-    args.push('--status', trimAscii(query.status).toLowerCase());
+    args.push(`--status=${trimAscii(query.status).toLowerCase()}`);
   }
   if (query.seat && trimAscii(query.seat)) {
-    args.push('--seat', trimAscii(query.seat));
+    args.push(`--seat=${trimAscii(query.seat)}`);
   }
   if (typeof query.nowMs === 'number' && Number.isFinite(query.nowMs)) {
-    args.push('--now-ms', String(Math.floor(query.nowMs)));
+    args.push(`--now-ms=${Math.floor(query.nowMs)}`);
   }
 
   const parsed = runApprovalLedgerCli(args);
@@ -536,9 +573,9 @@ export function getApprovalById(
 ): ApprovalItem | null {
   const normId = trimAscii(requestId || '').toLowerCase();
   if (!normId) return null;
-  const args = ['dump', '--json', '--request-id', normId];
+  const args = ['dump', '--json', `--request-id=${normId}`];
   if (typeof nowMs === 'number' && Number.isFinite(nowMs)) {
-    args.push('--now-ms', String(Math.floor(nowMs)));
+    args.push(`--now-ms=${Math.floor(nowMs)}`);
   }
   const parsed = runApprovalLedgerCli(args);
   if (!parsed.item || typeof parsed.item !== 'object') {
@@ -570,7 +607,7 @@ export type RecordDecisionResult = RecordDecisionSuccess | RecordDecisionFailure
 
 /**
  * Record an approval decision (`approved` or `denied`) for `requestId` by calling
- * `operations/scripts/approval_ledger.py decide` (A-4 v06 Item 2 & 4).
+ * `operations/scripts/approval_ledger.py decide` (A-4 v06/v07 Item 2 & F23).
  */
 export function recordApprovalDecision(params: {
   requestId: string;
@@ -651,23 +688,19 @@ export function recordApprovalDecision(params: {
 
   const args = [
     'decide',
-    '--request-id',
-    normId,
-    '--decision',
-    params.decision,
-    '--by',
-    params.by,
-    '--ttl-minutes',
-    String(ttlMinutes),
+    `--request-id=${normId}`,
+    `--decision=${params.decision}`,
+    `--by=${params.by}`,
+    `--ttl-minutes=${ttlMinutes}`,
   ];
   if (noteClean !== undefined) {
-    args.push('--note', noteClean);
+    args.push(`--note=${noteClean}`);
   }
   if (params.at !== undefined) {
-    args.push('--at', trimAscii(params.at));
+    args.push(`--at=${trimAscii(params.at)}`);
   }
   if (typeof params.nowMs === 'number' && Number.isFinite(params.nowMs)) {
-    args.push('--now-ms', String(Math.floor(params.nowMs)));
+    args.push(`--now-ms=${Math.floor(params.nowMs)}`);
   }
 
   const parsed = runApprovalLedgerCli(args);
@@ -723,7 +756,7 @@ export type RecordExecutionOutcome =
     };
 
 /**
- * Record an execution for `requestId` by calling `operations/scripts/approval_ledger.py mark` (A-4 v06).
+ * Record an execution for `requestId` by calling `operations/scripts/approval_ledger.py mark` (A-4 v06/v07 F23).
  */
 export function recordApprovalExecution(params: {
   requestId: string;
@@ -743,26 +776,24 @@ export function recordApprovalExecution(params: {
   const normId = trimAscii(params.requestId || '').toLowerCase();
   const args = [
     'mark',
-    '--request-id',
-    normId,
-    '--result',
-    params.result,
+    `--request-id=${normId}`,
+    `--result=${params.result}`,
     '--include-item',
   ];
   if (params.claimId) {
-    args.push('--claim-id', trimAscii(params.claimId));
+    args.push(`--claim-id=${trimAscii(params.claimId)}`);
   }
   if (params.runId) {
-    args.push('--run-id', trimAscii(params.runId));
+    args.push(`--run-id=${trimAscii(params.runId)}`);
   }
   if (params.digest) {
-    args.push('--digest', trimAscii(params.digest).toLowerCase());
+    args.push(`--digest=${trimAscii(params.digest).toLowerCase()}`);
   }
   if (params.at) {
-    args.push('--at', trimAscii(params.at));
+    args.push(`--at=${trimAscii(params.at)}`);
   }
   if (typeof params.nowMs === 'number' && Number.isFinite(params.nowMs)) {
-    args.push('--now-ms', String(Math.floor(params.nowMs)));
+    args.push(`--now-ms=${Math.floor(params.nowMs)}`);
   }
   if (!params.idempotent) {
     args.push('--no-idempotent');

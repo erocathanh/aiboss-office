@@ -343,13 +343,42 @@ def format_utc_ms_iso(ms: int) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def is_lock_disabled_for_test() -> bool:
-    """Single positive-control test switch (Case 15); affects only Python locking."""
-    return (
-        os.environ.get("NODE_ENV") != "production"
-        and os.environ.get("AIBOSS_TEST_DISABLE_APPROVAL_LOCK") == "1"
-        and bool(strip_ascii(os.environ.get("AIBOSS_DATA_DIR") or ""))
+TEST_LEDGER_MARKER_FILENAME = ".test-ledger"
+
+
+def is_lock_disabled_for_test(approvals_dir: Optional[str] = None) -> bool:
+    """Single positive-control test switch (Case 15); isolated from real ledger via 4 mandatory gates (A-4 v07 F21):
+    1. `AIBOSS_TEST_MODE == "1"` (unified test-mode flag shared with S17 hooks)
+    2. `AIBOSS_TEST_DISABLE_APPROVAL_LOCK == "1"`
+    3. `NODE_ENV != "production"`
+    4. `AIBOSS_DATA_DIR` is explicitly set AND `<AIBOSS_DATA_DIR>/approvals/.test-ledger` exists as a regular file.
+    """
+    if os.environ.get("AIBOSS_TEST_MODE") != "1":
+        return False
+    if os.environ.get("AIBOSS_TEST_DISABLE_APPROVAL_LOCK") != "1":
+        return False
+    if os.environ.get("NODE_ENV") == "production":
+        return False
+    raw_data_dir = strip_ascii(os.environ.get("AIBOSS_DATA_DIR") or "")
+    if not raw_data_dir:
+        return False
+    expected_approvals_dir = os.path.join(
+        os.path.abspath(raw_data_dir), "approvals"
     )
+    target_approvals_dir = (
+        os.path.abspath(approvals_dir)
+        if approvals_dir
+        else expected_approvals_dir
+    )
+    if target_approvals_dir != expected_approvals_dir:
+        return False
+    marker_path = os.path.join(
+        target_approvals_dir, TEST_LEDGER_MARKER_FILENAME
+    )
+    try:
+        return os.path.isfile(marker_path)
+    except OSError:
+        return False
 
 
 @contextmanager
@@ -366,7 +395,7 @@ def with_approval_lock(
     - Enforces a monotonic deadline (`timeout_sec`, default 5.0s) and raises `ApprovalLockTimeoutError` (`lock_timeout`).
     """
     global _ACTIVE_REQUEST_ID
-    if is_lock_disabled_for_test():
+    if is_lock_disabled_for_test(approvals_dir):
         yield
         return
 
@@ -1298,7 +1327,7 @@ def run_check_command(
 
         dec = candidate["decision"]
         if consume:
-            if is_lock_disabled_for_test():
+            if is_lock_disabled_for_test(approvals_dir):
                 time.sleep(0.05)
             at_iso = format_utc_ms_iso(now_ms)
             claim_id = hashlib.sha256(
@@ -1489,7 +1518,7 @@ def run_mark_command(
                 f'Digest mismatch for approval request "{req_id_target}".',
             )
 
-        if is_lock_disabled_for_test():
+        if is_lock_disabled_for_test(approvals_dir):
             time.sleep(0.05)
 
         record: Dict[str, Any] = {
