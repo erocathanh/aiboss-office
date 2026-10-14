@@ -64,7 +64,11 @@ export function generateSeatClaudeMd({
       fs.mkdirSync(targetDir, { recursive: true });
     }
 
+    const workingRulesAbs = path.join(repoRoot, 'packs', 'core', 'WORKING-RULES.md');
+    const workingRulesRel = path.relative(targetDir, workingRulesAbs).split(path.sep).join('/');
+
     const content = `# ${seat.name} — seat \`${seat.seat_id}\` of the Marketing department, AIBOSS Office
+@${workingRulesRel}
 
 You are the **${seat.name}** seat of AIBOSS Office (seat id \`${seat.seat_id}\`, department \`marketing\`). Your role: ${seat.role}
 

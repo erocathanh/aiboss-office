@@ -1246,3 +1246,25 @@ test('F26, F27, F28, F29 & F31 (S17f): Hook 2.1 resolves options/config variable
     assert.equal(r.status, 0, `F39 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
   }
 });
+
+test('H2: all 8 marketing seats import @../../../../packs/core/WORKING-RULES.md right after the title and target file exists', () => {
+  const seats = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'data', 'seats.json'), 'utf8'));
+  const workingRulesAbs = path.join(REPO_ROOT, 'packs', 'core', 'WORKING-RULES.md');
+  assert.ok(fs.existsSync(workingRulesAbs), 'packs/core/WORKING-RULES.md must exist');
+
+  for (const seat of seats) {
+    if (seat.department !== 'marketing') continue;
+    const seatDir = path.join(REPO_ROOT, seat.dir);
+    const claudeMdPath = path.join(seatDir, 'CLAUDE.md');
+    const lines = fs.readFileSync(claudeMdPath, 'utf8').split('\n');
+    const expectedRel = path.relative(seatDir, workingRulesAbs).split(path.sep).join('/');
+    assert.equal(
+      lines[1],
+      `@${expectedRel}`,
+      `Seat ${seat.seat_id} CLAUDE.md must have @${expectedRel} right after the title line`
+    );
+    const resolvedTarget = path.resolve(seatDir, expectedRel);
+    assert.ok(fs.existsSync(resolvedTarget), `Resolved WORKING-RULES.md from ${seat.seat_id} must exist on disk`);
+  }
+});
+

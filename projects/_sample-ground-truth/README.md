@@ -1,17 +1,10 @@
-# Sample Ground Truth Project (`_sample-ground-truth`)
-
-This directory serves as the immutable reference and ground-truth sample project for AIBOSS Office.
-
-## Directory Structure
-
-- `inputs/`: Read-only raw inputs (e.g. raw message exports, inquiries). Agents are prohibited from modifying files here (enforced by `lock_raw_inputs` hook and settings deny rules).
-- `wip/`: Work-in-progress workspace. Drafts and interim working files belong here.
-- `outputs/`: Finalized deliverables. Files here (and any files ending in `_final.md`) are immutable once written (enforced by `protect_final_outputs` hook).
-- `references/`: Reference documentation, facts, guidelines. Read-only for agents.
-- `templates/`: Standard reusable templates. Read-only for agents.
-
-## Safety & Harness Rules
-
-1. **Immunity**: The entire `_sample-ground-truth` project is protected against modification or deletion by safety hooks (`protect_final_outputs.py`).
-2. **PII Protection**: Any sensitive Personally Identifiable Information (customer phone numbers, unmasked emails, bank accounts) written outside `inputs/` is blocked by `guard_customer_pii.py`.
-3. **Append-Only Channel**: Project activity records in `CHANNEL.md` can only be appended to, never overwritten.
+# Dự án mẫu đối soát sự thật (`_sample-ground-truth`) — DỮ LIỆU MẪU GIẢ ĐỊNH
+Dự án mẫu này là khung chuẩn chỉ đọc trong AIBOSS Office (thay khung mẫu cũ), dùng để: (1) thử ghế AI mới và 8 bộ kiểm tra an toàn (`hooks`); (2) hướng dẫn chủ doanh nghiệp cách đặt tệp đúng ngăn.
+- `inputs/` (3 tệp thô mẫu: đề bài ẩn danh, CSV 6 dòng gồm 1 tiêu đề + 5 tuần mẫu, biên bản họp giai đoạn 2 — hook `lock_raw_inputs.py` chặn `Write`, `Edit` và lệnh ghi vỏ thường gặp với `ln` (liên kết cứng), các cách khác như `ln -s` máy chưa chặn — luật cấm, người soi kiểm); `references/` (1 định chuẩn `.invalid`) và `templates/` (1 khuôn báo cáo) — ở dự án thường luật cấm ghế sửa, máy chưa chặn, người soi kiểm; riêng dự án mẫu bị khoá cả thư mục (dòng 6).
+- `wip/` (lưu nháp `weekly-project-report_v01_20261013.md` và bản `weekly-project-report_final.md` tạo trước khi xuất) và `outputs/` (lưu bản chốt `weekly-project-report_final.md` có mục `## Ba chi tiết đã lược bỏ`).
+- `CHANNEL.md`: Sổ nhật ký trao đổi và ghi bước (luật bắt chỉ nối thêm vào cuối; ở dự án thường hook chặn `Write`/`Edit` xoá hay sửa nội dung cũ và dấu `>`, các cách khác như `Edit` chèn giữa tệp hay `tee` máy chưa chặn — luật cấm, người soi kiểm; riêng dự án mẫu bị khoá cả thư mục (dòng 6), và chỉ dự án mẫu giữ chỗ `<office-root>`).
+- Bảo vệ thư mục mẫu: Hook `protect_final_outputs.py` chặn `Write`, `Edit`, `MultiEdit`, `NotebookEdit` và các lệnh ghi/xoá vỏ thường gặp (với `ln` (liên kết cứng)) nhắm vào đường dẫn chữ thường `projects/_sample-ground-truth/` (các cách khác như `ln -s`, `python open()`, `unlink`, `rmdir` máy chưa chặn — luật cấm, người soi kiểm).
+## Ba điều máy không được tự quyết
+- AI chuẩn bị: bản nháp báo cáo tuần và 2 phương án đổi khung giờ trong `wip/` / dừng trước: tự chốt sang `outputs/` hoặc tự đổi lịch hẹn của khách.
+- AI chuẩn bị: nội dung tin nhắn nhắc lịch tư vấn mẫu trong `wip/` / dừng trước: gửi tin nhắn hoặc thư điện tử ra ngoài cho khách hàng.
+- AI chuẩn bị: danh sách tệp đề xuất lưu trữ hoặc dọn dẹp trên `CHANNEL.md` / dừng trước: xoá hoặc di chuyển bất kỳ tệp nào của dự án.
