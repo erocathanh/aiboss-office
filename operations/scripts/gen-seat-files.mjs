@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs';
 import { generateSeatClaudeMd } from './gen-seat-claude-md.mjs';
 import { escapeSeatSettingsGlobPath } from '../../src/lib/seat-settings-anchor.ts';
 
@@ -229,6 +230,19 @@ export function generateSeatFiles({
   const seatsPath = path.join(repoRoot, 'data', 'seats.json');
   const seats = JSON.parse(fs.readFileSync(seatsPath, 'utf-8'));
 
+  const officeConfigPath =
+    process.env.AIBOSS_OFFICE_CONFIG_PATH ?? path.join(repoRoot, 'config', 'office.json');
+  let rawLang = 'auto';
+  if (fs.existsSync(officeConfigPath)) {
+    try {
+      const officeCfg = JSON.parse(fs.readFileSync(officeConfigPath, 'utf-8'));
+      if (officeCfg && typeof officeCfg === 'object') {
+        rawLang = officeCfg.language;
+      }
+    } catch {}
+  }
+  const langRule = resolveSeatLanguageRule(rawLang);
+
   // Kiểm tra ghế trên đĩa: quét departments/*/seats/*
   const marketingSeatsDir = path.join(repoRoot, 'departments', 'marketing', 'seats');
   if (fs.existsSync(marketingSeatsDir)) {
@@ -328,6 +342,7 @@ export function generateSeatFiles({
     updatedCount: updatedFilesCount,
     mismatchedFiles,
     driftedCount: mismatchedFiles.length,
+    langRule,
   };
 }
 
