@@ -36,6 +36,9 @@
       }
     }
   },
+  "approvals": {
+    "ttlMinutes": 60
+  },
   "last_edited": {
     "at": "2026-10-12T14:09:00Z",
     "by": "antigravity-aiboss-office-backend"

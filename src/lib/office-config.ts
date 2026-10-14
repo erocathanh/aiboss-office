@@ -24,6 +24,10 @@ export interface OfficeBudgetConfig {
   configErrors?: string[];
 }
 
+export interface OfficeApprovalsConfig {
+  ttlMinutes: number;
+}
+
 export interface OfficeConfig {
   version: number;
   timezone: string;
@@ -40,6 +44,7 @@ export interface OfficeConfig {
     routine: number;
   };
   budget?: OfficeBudgetConfig;
+  approvals?: OfficeApprovalsConfig;
   last_edited: {
     at: string;
     by: string;
@@ -163,9 +168,22 @@ export function sanitizeBudgetConfig(raw?: unknown): OfficeBudgetConfig | undefi
   };
 }
 
+export function sanitizeApprovalsConfig(raw?: unknown): OfficeApprovalsConfig {
+  if (!raw || typeof raw !== 'object') {
+    return { ttlMinutes: 60 };
+  }
+  const a = raw as Record<string, unknown>;
+  const ttl = a.ttlMinutes;
+  if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0) {
+    return { ttlMinutes: ttl };
+  }
+  return { ttlMinutes: 60 };
+}
+
 export const OFFICE_CONFIG: OfficeConfig = {
   ...(officeConfigRaw as OfficeConfig),
   budget: sanitizeBudgetConfig((officeConfigRaw as Record<string, unknown>).budget),
+  approvals: sanitizeApprovalsConfig((officeConfigRaw as Record<string, unknown>).approvals),
 };
 
 export function getOfficeConfigPath(): string {
@@ -187,6 +205,7 @@ export function getOfficeConfig(): OfficeConfig {
         return {
           ...parsed,
           budget: sanitizeBudgetConfig(parsed.budget),
+          approvals: sanitizeApprovalsConfig(parsed.approvals),
         } as OfficeConfig;
       }
     }

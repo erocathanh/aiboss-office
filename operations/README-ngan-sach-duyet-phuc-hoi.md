@@ -167,3 +167,86 @@ Hàm `acquireInstanceLock(dataDir)` trả về kết quả cấu trúc kèm `rea
 - Khi kích hoạt công tắc này trong kiểm thử (`NODE_ENV === 'test'`), tiến trình mới sẽ không chờ mà ném lỗi ngay khi gặp `lease_pending`, chứng minh rõ ràng sự cần thiết của cơ chế chờ.
 - **Bảo vệ Production:** Hàm `isStartupWaitDisabledForTest()` luôn trả về `false` vô điều kiện khi `process.env.NODE_ENV === 'production'`, bảo đảm công tắc kiểm thử hoàn toàn bất hoạt trong môi trường vận hành thực tế.
 
+---
+
+## 5. Sổ Duyệt Hành Động Dạng Máy Trạng Thái (Approval Ledger State Machine) — A-4
+
+Giải pháp A-4 biến sổ duyệt `operations/data/approvals/<YYYY-MM-DD>.jsonl` thành một máy trạng thái tất định nối trực tiếp từ yêu cầu của hook (`request`) → mã băm nội dung (`digest`) → quyết định của người duyệt (`decision`) → thực thi đơn lần (`execution`).
+
+### 5.1. Định dạng Dữ liệu & Công thức `requestId` Tất định
+Toàn bộ dữ liệu nằm chung trong tệp nhật ký theo ngày UTC `operations/data/approvals/<YYYY-MM-DD>.jsonl` (hoặc `<AIBOSS_DATA_DIR>/approvals/<YYYY-MM-DD>.jsonl` khi chạy kiểm thử cô lập), chỉ nối thêm (append-only), không bao giờ sửa đè dòng cũ:
+
+1. **Dòng `request` (do hook `operations/hooks/guard_bulk_send.py` ghi):**
+   - Các dòng do hook hiện hành ghi không có trường `type`:
+     ```json
+     {"ts":"2026-10-14T10:00:00Z","seat":"email-crm","tool":"Bash","host":"api.sendgrid.com","len":248,"sha256":"a1b2...","head60":"curl -X POST ...","reason":"external_host"}
+     ```
+   - Khi đọc sổ, mọi dòng không có `type` (hoặc có `type: "request"`) đều được chuẩn hoá thành bản ghi `type: "request"`.
+   - **Công thức tính `requestId` tất định (dùng chung giữa máy chủ TypeScript và hook H4 của PCN):**
+     ```text
+     requestId = sha256_hex(ts + "|" + seat + "|" + tool + "|" + sha256)[0..15]
+     ```
+     Cụ thể: ghép chuỗi UTF-8 gồm 4 trường `ts`, `seat`, `tool`, `sha256` (chữ thường) phân cách bởi ký tự `|`, băm SHA-256 và lấy **16 ký tự hex chữ thường đầu tiên**.
+     - Trong Python 3:
+       ```python
+       hashlib.sha256(f"{ts}|{seat}|{tool}|{sha256}".encode("utf-8")).hexdigest()[:16]
+       ```
+     - Trong Node.js / TypeScript:
+       ```ts
+       crypto.createHash('sha256').update(`${ts}|${seat}|${tool}|${sha256}`, 'utf8').digest('hex').slice(0, 16)
+       ```
+
+2. **Dòng `decision` (do máy chủ ghi khi người dùng bấm Approve / Deny):**
+   ```json
+   {"type":"decision","requestId":"48b80909c1a4222b","decision":"approved","by":"owner","at":"2026-10-14T10:02:00.000Z","note":"Approved for newsletter","expiresAt":"2026-10-14T11:02:00.000Z"}
+   ```
+   - `decision`: `"approved"` hoặc `"denied"`.
+   - `by`: `"owner"` (khi xác thực qua HTTP Basic Auth) hoặc `"localhost"` (khi gọi trực tiếp trên loopback `127.0.0.1` / `localhost`).
+   - `expiresAt`: Mặc định cộng thêm `approvals.ttlMinutes` (60 phút trong `config/office.json`) kể từ `at`.
+   - Mỗi `requestId` chỉ được quyết định đúng một lần; gọi quyết định lần thứ hai cho cùng `requestId` trả về HTTP `409 Conflict`.
+
+3. **Dòng `execution` (do `approval_mark.py` hoặc máy chủ ghi khi thực thi):**
+   ```json
+   {"type":"execution","requestId":"48b80909c1a4222b","runId":"run-20261014-0001","seatId":"email-crm","at":"2026-10-14T10:03:00.000Z","result":"executed","digest":"a1b2..."}
+   ```
+   - `result`: `"executed"` | `"failed"` | `"digest_mismatch"` | `"expired"`.
+   - Mọi bản ghi khi đọc/ghi và trả qua API đều đi qua bộ lọc whitelist trường nghiêm ngặt (`sanitizeApprovalRequestRecord`, `sanitizeApprovalDecisionRecord`, `sanitizeApprovalExecutionRecord`, `sanitizeApprovalItem`), loại bỏ hoàn toàn mọi trường lạ, nội dung lượt chạy, prompt, hoặc PII.
+
+### 5.2. Máy Trạng Thái Suy Ra Từ Sổ (Derived State Machine)
+Trạng thái của mỗi yêu cầu được suy ra trực tiếp khi gấp (fold) các dòng trong sổ, không giữ biến trạng thái tách rời:
+- `requested` (hiển thị là `pending` trên bộ lọc API) → `approved` | `denied` → `executed` | `failed` | `expired`.
+- **Luật bất biến:** Một yêu cầu mới chỉ có `decision: "approved"` mà chưa có dòng `execution` (`result: "executed"`) thì trạng thái là `approved`, **không bao giờ** được hiển thị là `executed`.
+- Nếu `decision: "approved"` đã quá hạn `expiresAt` (`now >= expiresAt`) mà chưa có dòng `execution` → trạng thái suy ra là `expired`.
+- **Thực thi đơn lần (Single-use):** Mỗi `requestId` chỉ được phép thực thi đúng một lần. Sau khi đã có dòng `execution`, mọi lần kiểm tra tiếp theo qua `approval_check.py` đều bị từ chối với mã thoát `2`.
+
+### 5.3. Hợp Đồng CLI Python Cho Hook H4 (`operations/scripts/`)
+Hai script viết bằng Python 3 chuẩn (không phụ thuộc gói ngoài), tự động đọc sổ ngày hôm nay và ngày hôm qua theo giờ UTC:
+
+1. **Kiểm tra trước khi cho phép thực thi (`operations/scripts/approval_check.py`):**
+   ```bash
+   python3 operations/scripts/approval_check.py --seat <slug> --tool <tool> --sha256 <hex>
+   ```
+   - Nếu tìm thấy yêu cầu của `(seat, tool)` đã có `decision: "approved"`, còn hạn (`now < expiresAt`), chưa có `execution`, và `sha256` khớp chính xác với `--sha256`:
+     - In ra stdout: `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>"}` và thoát mã `0`.
+   - Nếu có yêu cầu đang `approved` của `(seat, tool)` nhưng mã băm `--sha256` khác với `sha256` đã duyệt:
+     - In ra stdout: `{"requestId": "<id>", "status": "digest_mismatch"}` và thoát mã `2`.
+   - Mọi trường hợp khác (`pending`, `denied`, `expired`, `executed`, `failed`, `not_found`):
+     - In ra stdout JSON `{"status": "<lý do>", ...}` và thoát mã `2`.
+
+2. **Đánh dấu đã thực thi (`operations/scripts/approval_mark.py`):**
+   ```bash
+   python3 operations/scripts/approval_mark.py --request-id <id> --result <executed|failed> [--run-id <runId>]
+   ```
+   - Ghi nối một dòng `execution` vào sổ duyệt và thoát mã `0`.
+   - **Idempotent:** Nếu `requestId` đã có dòng `execution` trong sổ, script trả về `{"requestId": "<id>", "status": "executed", "idempotent": true}` và thoát mã `0` mà không ghi trùng dòng thứ hai.
+
+### 5.4. API & Giao diện `/settings`
+- `GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50`: trả danh sách yêu cầu đã qua whitelist kèm tổng số bản ghi khớp.
+- `POST /api/approvals/<requestId>/decision`: nhận `{"decision": "approved" | "denied", "note"?: string}`; trả `404` nếu `requestId` không tồn tại, `409` nếu `requestId` đã được quyết định trước đó.
+- Giao diện `/settings` hiển thị thẻ **Approvals** gồm hai khu vực: **Pending Requests** (hiển thị `seat`, `tool`, `host`, `head60`, `reason`, tuổi, nút `Approve` / `Deny`) và **Decided Ledger** (hiển thị trạng thái thật suy từ sổ kèm `requestId`).
+
+### 5.5. Giới hạn Đã Biết & Cách Dọn Sổ Thử Nghiệm
+- **Giới hạn cách ly người dùng hệ điều hành:** Các ghế hiện chạy dưới cùng tài khoản người dùng hệ điều hành với máy chủ, nên tệp JSONL trên đĩa chưa tách quyền ghi ở tầng OS kernel; việc chặn ghế tự ghi trực tiếp vào thư mục sổ thuộc phạm vi các hook bảo vệ của PCN (H4). Ở tầng ứng dụng, sổ tuân thủ nghiêm ngặt cơ chế append-only và whitelist trường.
+- **Cách xoá sổ thử nghiệm:** Các ca kiểm thử luôn đặt biến môi trường `AIBOSS_DATA_DIR` trỏ vào thư mục tạm trong `/tmp/aiboss-test-approvals-*` và tự dọn sạch bằng `fs.rmSync(testDataDir, { recursive: true, force: true })` trong khối `finally`. Không bao giờ xoá hoặc ghi thử vào `operations/data/approvals/` của máy chủ đang vận hành.
+
+
