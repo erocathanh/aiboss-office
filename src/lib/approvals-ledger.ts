@@ -325,10 +325,66 @@ export function getApprovalsDir(): string {
   return path.join(baseDir, 'approvals');
 }
 
+function extractErrnoReason(err: unknown): string {
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === 'string' && code ? code : 'EIO';
+}
+
+export class ApprovalLockTimeoutError extends Error {
+  readonly code = 'lock_timeout';
+  readonly status = 'lock_timeout';
+
+  constructor() {
+    super('Timed out acquiring approval lock.');
+    this.name = 'ApprovalLockTimeoutError';
+  }
+}
+
+export class ApprovalLockLostError extends Error {
+  readonly code = 'lock_lost';
+  readonly status = 'lock_lost';
+
+  constructor() {
+    super('Approval lock ownership was lost before write.');
+    this.name = 'ApprovalLockLostError';
+  }
+}
+
+export class ApprovalLedgerUnreadableError extends Error {
+  readonly code = 'ledger_unreadable';
+  readonly status = 'ledger_unreadable';
+  readonly file: string;
+  readonly reason: string;
+
+  constructor(filePath: string, reason = 'EACCES') {
+    const base = path.basename(filePath);
+    super(`Approval ledger file is unreadable (${base}).`);
+    this.name = 'ApprovalLedgerUnreadableError';
+    this.file = base;
+    this.reason = reason;
+  }
+}
+
+export class ApprovalIoError extends Error {
+  readonly code = 'io_error';
+  readonly status = 'io_error';
+  readonly reason: string;
+
+  constructor(reason = 'EIO') {
+    super(`Approval ledger I/O error (${reason}).`);
+    this.name = 'ApprovalIoError';
+    this.reason = reason;
+  }
+}
+
 export function ensureApprovalsDir(): void {
   const dir = getApprovalsDir();
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch (err: unknown) {
+    throw new ApprovalIoError(extractErrnoReason(err));
   }
 }
 
@@ -401,17 +457,11 @@ const SHARED_WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 
 function sleepSyncMs(ms: number): void {
   if (ms <= 0) return;
-  Atomics.wait(SHARED_WAIT_BUFFER, 0, 0, ms);
+  Atomics.wait(SHARED_WAIT_BUFFER, 0, 0, Math.ceil(ms));
 }
 
-export class ApprovalLockTimeoutError extends Error {
-  readonly code = 'lock_timeout';
-  readonly status = 'lock_timeout';
-
-  constructor(lockPath: string) {
-    super(`[approvals-ledger] Timed out acquiring approval lock at ${lockPath}`);
-    this.name = 'ApprovalLockTimeoutError';
-  }
+function monotonicNowMs(): number {
+  return Number(process.hrtime.bigint() / 1_000_000n);
 }
 
 interface LockInspection {
@@ -421,25 +471,45 @@ interface LockInspection {
 }
 
 /**
- * Unified stale lock inspection (F1b, F16 — shared with Python `inspect_lock_staleness`):
- * - If lock JSON contains `bootId` that differs from the current OS `bootId`: stale (`isStale: true`)
- *   even if `pid` happens to exist after a machine reboot (F16).
- * - If lock JSON contains a valid positive integer `pid`: stale IFF `!isPidAlive(pid)`
- *   (a live PID on the same boot is NEVER reclaimed, even if held > 30s).
- * - If `pid` cannot be measured (corrupted/unparseable lock file): stale IFF `mtime` age > 30s.
+ * Unified stale lock inspection (F1b, F14, F16 — shared with Python `inspect_lock_staleness`):
+ * - Verifies `statBefore.ino === statAfter.ino` around reading `.approvals.lock` so `ino` matches content.
+ * - Checks `hostname`: if lock `hostname` is present and differs from current `os.hostname()`,
+ *   returns `isStale: false` (never steal a lock created by a different host) (F16).
+ * - On the same host:
+ *   - If lock JSON contains `bootId` that is known and differs from current known OS `bootId`:
+ *     stale (`isStale: true`) even if `pid` happens to exist after a machine reboot (F16).
+ *   - If `bootId` is `'unknown'` or matches: a valid positive integer `pid` is stale IFF `!isPidAlive(pid)`
+ *     (conservative rule: a live PID is NEVER reclaimed, even if held > 30s).
+ *   - If `pid` cannot be measured (corrupted/unparseable lock file): stale IFF `mtime` age > 30s.
  */
 function inspectLockStaleness(lockPath: string, nowMs: number): LockInspection | null {
   try {
-    const stat = fs.statSync(lockPath);
+    const statBefore = fs.statSync(lockPath);
     const raw = fs.readFileSync(lockPath, 'utf-8');
+    const statAfter = fs.statSync(lockPath);
+    if (statBefore.ino !== statAfter.ino) {
+      return null;
+    }
     const trimmed = trimAscii(raw);
     if (trimmed) {
       try {
         const parsed = JSON.parse(trimmed) as {
           pid?: unknown;
           bootId?: unknown;
+          hostname?: unknown;
         };
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const currentHostname = trimAscii(os.hostname());
+          const lockHostname =
+            typeof parsed.hostname === 'string' ? trimAscii(parsed.hostname) : '';
+          if (lockHostname && currentHostname && lockHostname !== currentHostname) {
+            return {
+              isStale: false,
+              ino: statAfter.ino,
+              raw,
+            };
+          }
+
           const currentBootId = getSystemBootId();
           const lockBootId =
             typeof parsed.bootId === 'string' ? trimAscii(parsed.bootId) : '';
@@ -451,7 +521,7 @@ function inspectLockStaleness(lockPath: string, nowMs: number): LockInspection |
           ) {
             return {
               isStale: true,
-              ino: stat.ino,
+              ino: statAfter.ino,
               raw,
             };
           }
@@ -462,7 +532,7 @@ function inspectLockStaleness(lockPath: string, nowMs: number): LockInspection |
           ) {
             return {
               isStale: !isPidAlive(parsed.pid),
-              ino: stat.ino,
+              ino: statAfter.ino,
               raw,
             };
           }
@@ -472,8 +542,8 @@ function inspectLockStaleness(lockPath: string, nowMs: number): LockInspection |
       }
     }
     return {
-      isStale: nowMs - stat.mtimeMs > STALE_UNMEASURABLE_LOCK_MS,
-      ino: stat.ino,
+      isStale: nowMs - statAfter.mtimeMs > STALE_UNMEASURABLE_LOCK_MS,
+      ino: statAfter.ino,
       raw,
     };
   } catch {
@@ -486,9 +556,13 @@ export function isLockFileStale(lockPath: string, nowMs = Date.now()): boolean {
   return info ? info.isStale : false;
 }
 
+const LOCK_ARTIFACT_PID_REGEX =
+  /^\.approvals\.lock\.(?:tmp|stale|rel)-([0-9]+)(?:-|$)/;
+
 /**
  * Best-effort sweep of leftover `.approvals.lock.tmp*` / `.approvals.lock.stale-*` / `.approvals.lock.rel-*`
- * artifacts older than 10 minutes (F16). Never touches `.approvals.lock` itself.
+ * artifacts older than 10 minutes whose creator PID is no longer alive (F16).
+ * Never touches `.approvals.lock` itself and never deletes `.tmp` of a still-living PID.
  */
 function sweepOldLockArtifacts(approvalsDir: string, nowMs: number): void {
   try {
@@ -504,6 +578,13 @@ function sweepOldLockArtifacts(approvalsDir: string, nowMs: number): void {
       }
       inspected += 1;
       if (inspected > 32) break;
+      const pidMatch = LOCK_ARTIFACT_PID_REGEX.exec(name);
+      if (pidMatch && pidMatch[1]) {
+        const artifactPid = parseInt(pidMatch[1], 10);
+        if (isPidAlive(artifactPid)) {
+          continue;
+        }
+      }
       const fullPath = path.join(approvalsDir, name);
       try {
         const st = fs.statSync(fullPath);
@@ -519,21 +600,65 @@ function sweepOldLockArtifacts(approvalsDir: string, nowMs: number): void {
   }
 }
 
+let activeLockDepth = 0;
+let activeLockOwnedIno: number | null = null;
+let activeLockPath: string | null = null;
+
 /**
- * Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b, F14, F15, F16).
- * - (a) Publishes a fully-written lock file `{ pid, token, createdAt, bootId, hostname }`
- *       atomically via `link(tmpPath, lockPath)` (`O_EXCL` semantics).
- * - (b) When `.approvals.lock` is stale, performs a single atomic `rename(lockPath, staleTarget)`.
- *       Only the single process whose `rename` succeeds unlinks `staleTarget` and retries `link`.
- *       Any process whose `rename` fails (`ENOENT` or any error) treats the lock as already reclaimed,
- *       sleeps `25ms` via `Atomics.wait`, and retries. No `.approvals.reclaim.lock` guard is used.
- * - (c) Every loop branch checks the timeout deadline (`timeoutMs`, default 5000ms) before `continue`
- *       and throws `ApprovalLockTimeoutError` (`lock_timeout`) on expiry (fail-closed, never hangs).
+ * Verify that the current process still owns `.approvals.lock` by checking that
+ * `stat(lockPath).ino === activeLockOwnedIno` (F14a).
+ * Called immediately before every ledger append (`decision`, `claim`, `execution`)
+ * and before releasing the lock. If the lock was stolen or unlinked, throws `ApprovalLockLostError`.
+ */
+export function verifyApprovalLockOwnership(lockPath?: string): void {
+  if (isApprovalLockDisabledForTest()) {
+    return;
+  }
+  const targetLockPath = lockPath || activeLockPath || getApprovalLockPath();
+  if (activeLockDepth <= 0 || activeLockOwnedIno === null) {
+    throw new ApprovalLockLostError();
+  }
+  let currentIno: number | null = null;
+  try {
+    currentIno = fs.statSync(targetLockPath).ino;
+  } catch {
+    currentIno = null;
+  }
+  if (currentIno === null || currentIno !== activeLockOwnedIno) {
+    throw new ApprovalLockLostError();
+  }
+}
+
+/**
+ * Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b, F14a/b, F15, F16, F18).
+ * - (a) Owner inode verification (F14a): records `ownedIno` of `tmpPath` (`fstat`/`stat`) before
+ *       `link(tmpPath, lockPath)` and verifies `stat(lockPath).ino === ownedIno` immediately after `link`,
+ *       immediately before EVERY ledger append (`verifyApprovalLockOwnership`), and before releasing.
+ *       If `ino` ever differs or `ENOENT`, aborts without writing a single byte (`ApprovalLockLostError` -> `lock_lost`).
+ * - (b) Reclaimer inode verification before and after `rename` (F14b):
+ *       Records `observedIno` of the stale lock; checks `stat(lockPath).ino === observedIno` right before
+ *       `rename(lockPath, staleTarget)`; after `rename`, checks `stat(staleTarget).ino === observedIno`.
+ *       If `staleIno !== observedIno` (accidentally took a live lock), immediately restores it via
+ *       `rename(staleTarget, lockPath)` (if `lockPath` already exists, leaves `staleTarget`, logs to stderr,
+ *       and retries; the displaced owner will also self-fence via (a)). Only when `staleIno === observedIno`
+ *       does it `unlink(staleTarget)` and retry `link`.
+ * - (c) Every loop branch checks the monotonic timeout deadline (`timeoutMs`, default 5000ms) before `continue`
+ *       and throws `ApprovalLockTimeoutError` (`lock_timeout`) on expiry (F15).
  */
 export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
   if (isApprovalLockDisabledForTest()) {
     return fn();
   }
+  if (activeLockDepth > 0 && activeLockOwnedIno !== null) {
+    verifyApprovalLockOwnership();
+    activeLockDepth += 1;
+    try {
+      return fn();
+    } finally {
+      activeLockDepth -= 1;
+    }
+  }
+
   ensureApprovalsDir();
   const approvalsDir = getApprovalsDir();
   const lockPath = getApprovalLockPath();
@@ -542,7 +667,7 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
 
   const token = `${process.pid}-${nowStart}-${crypto.randomBytes(6).toString('hex')}`;
   const tmpPath = `${lockPath}.tmp-${process.pid}-${token}`;
-  const deadline = Date.now() + timeoutMs;
+  const deadlineMono = monotonicNowMs() + timeoutMs;
 
   const payload = JSON.stringify({
     pid: process.pid,
@@ -551,16 +676,38 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
     bootId: getSystemBootId(),
     hostname: os.hostname(),
   });
-  const tmpFd = fs.openSync(
-    tmpPath,
-    fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
-    0o600
-  );
+  let ownedIno: number;
+  let tmpFd: number;
+  try {
+    tmpFd = fs.openSync(
+      tmpPath,
+      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      0o600
+    );
+  } catch (err: unknown) {
+    throw new ApprovalIoError(extractErrnoReason(err));
+  }
   try {
     fs.writeSync(tmpFd, payload, 0, 'utf-8');
     fs.fsyncSync(tmpFd);
-  } finally {
+    ownedIno = fs.fstatSync(tmpFd).ino;
+  } catch (err: unknown) {
+    try {
+      fs.closeSync(tmpFd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
+    throw new ApprovalIoError(extractErrnoReason(err));
+  }
+  try {
     fs.closeSync(tmpFd);
+  } catch {
+    /* ignore */
   }
 
   let acquired = false;
@@ -568,19 +715,50 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
     while (true) {
       try {
         fs.linkSync(tmpPath, lockPath);
+        let linkedIno: number | null = null;
+        try {
+          linkedIno = fs.statSync(lockPath).ino;
+        } catch {
+          linkedIno = null;
+        }
+        if (linkedIno === null || linkedIno !== ownedIno) {
+          throw new ApprovalLockLostError();
+        }
         acquired = true;
         break;
       } catch (err: unknown) {
-        if ((err as { code?: string })?.code !== 'EEXIST') {
+        if (err instanceof ApprovalLockLostError) {
           throw err;
         }
-        const now = Date.now();
-        if (now >= deadline) {
-          throw new ApprovalLockTimeoutError(lockPath);
+        if ((err as { code?: string })?.code !== 'EEXIST') {
+          throw new ApprovalIoError(extractErrnoReason(err));
+        }
+        const nowMono = monotonicNowMs();
+        if (nowMono >= deadlineMono) {
+          throw new ApprovalLockTimeoutError();
         }
 
-        const inspection = inspectLockStaleness(lockPath, now);
+        const inspection = inspectLockStaleness(lockPath, Date.now());
         if (inspection && inspection.isStale) {
+          const observedIno = inspection.ino;
+          let preRenameIno: number | null = null;
+          try {
+            preRenameIno = fs.statSync(lockPath).ino;
+          } catch {
+            preRenameIno = null;
+          }
+          if (preRenameIno === null || preRenameIno !== observedIno) {
+            const afterPreCheckMono = monotonicNowMs();
+            if (afterPreCheckMono >= deadlineMono) {
+              throw new ApprovalLockTimeoutError();
+            }
+            sleepSyncMs(Math.min(25, Math.max(1, deadlineMono - afterPreCheckMono)));
+            if (monotonicNowMs() >= deadlineMono) {
+              throw new ApprovalLockTimeoutError();
+            }
+            continue;
+          }
+
           const staleTarget = `${lockPath}.stale-${process.pid}-${process.hrtime.bigint().toString()}`;
           let renamed = false;
           try {
@@ -591,35 +769,68 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
           }
 
           if (renamed) {
+            let staleIno: number | null = null;
+            try {
+              staleIno = fs.statSync(staleTarget).ino;
+            } catch {
+              staleIno = null;
+            }
+            if (staleIno === null || staleIno !== observedIno) {
+              // F14b: Mis-reclaimed a newly created live lock! Restore staleTarget -> lockPath immediately:
+              try {
+                if (fs.existsSync(lockPath)) {
+                  throw Object.assign(new Error('Lock path already occupied by new lock'), {
+                    code: 'EEXIST',
+                  });
+                }
+                fs.renameSync(staleTarget, lockPath);
+              } catch (restoreErr: unknown) {
+                process.stderr.write(
+                  `[approvals-ledger] Could not restore mis-reclaimed lock ${path.basename(
+                    staleTarget
+                  )}: ${extractErrnoReason(restoreErr)}\n`
+                );
+              }
+              const afterRestoreMono = monotonicNowMs();
+              if (afterRestoreMono >= deadlineMono) {
+                throw new ApprovalLockTimeoutError();
+              }
+              sleepSyncMs(Math.min(30, Math.max(1, deadlineMono - afterRestoreMono)));
+              if (monotonicNowMs() >= deadlineMono) {
+                throw new ApprovalLockTimeoutError();
+              }
+              continue;
+            }
+
             try {
               fs.unlinkSync(staleTarget);
             } catch {
               /* ignore cleanup error on our own stale file */
             }
-            if (Date.now() >= deadline) {
-              throw new ApprovalLockTimeoutError(lockPath);
+            if (monotonicNowMs() >= deadlineMono) {
+              throw new ApprovalLockTimeoutError();
             }
             continue;
           }
 
-          const afterRenameNow = Date.now();
-          if (afterRenameNow >= deadline) {
-            throw new ApprovalLockTimeoutError(lockPath);
+          const afterRenameMono = monotonicNowMs();
+          if (afterRenameMono >= deadlineMono) {
+            throw new ApprovalLockTimeoutError();
           }
-          sleepSyncMs(Math.min(30, Math.max(1, deadline - afterRenameNow)));
-          if (Date.now() >= deadline) {
-            throw new ApprovalLockTimeoutError(lockPath);
+          sleepSyncMs(Math.min(30, Math.max(1, deadlineMono - afterRenameMono)));
+          if (monotonicNowMs() >= deadlineMono) {
+            throw new ApprovalLockTimeoutError();
           }
           continue;
         }
 
-        const beforeWaitNow = Date.now();
-        if (beforeWaitNow >= deadline) {
-          throw new ApprovalLockTimeoutError(lockPath);
+        const beforeWaitMono = monotonicNowMs();
+        if (beforeWaitMono >= deadlineMono) {
+          throw new ApprovalLockTimeoutError();
         }
-        sleepSyncMs(Math.min(25, Math.max(1, deadline - beforeWaitNow)));
-        if (Date.now() >= deadline) {
-          throw new ApprovalLockTimeoutError(lockPath);
+        sleepSyncMs(Math.min(25, Math.max(1, deadlineMono - beforeWaitMono)));
+        if (monotonicNowMs() >= deadlineMono) {
+          throw new ApprovalLockTimeoutError();
         }
       }
     }
@@ -631,22 +842,25 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
     }
   }
 
+  activeLockDepth = 1;
+  activeLockOwnedIno = ownedIno;
+  activeLockPath = lockPath;
   try {
     return fn();
   } finally {
+    activeLockDepth = 0;
+    activeLockOwnedIno = null;
+    activeLockPath = null;
     if (acquired) {
       try {
-        const currentRaw = trimAscii(fs.readFileSync(lockPath, 'utf-8'));
-        if (currentRaw) {
-          const currentParsed = JSON.parse(currentRaw) as { token?: string };
-          if (currentParsed.token === token) {
-            const relPath = `${lockPath}.rel-${process.pid}-${token}`;
-            try {
-              fs.renameSync(lockPath, relPath);
-              fs.unlinkSync(relPath);
-            } catch {
-              /* ignore */
-            }
+        const currentStat = fs.statSync(lockPath);
+        if (currentStat.ino === ownedIno) {
+          const relPath = `${lockPath}.rel-${process.pid}-${token}`;
+          try {
+            fs.renameSync(lockPath, relPath);
+            fs.unlinkSync(relPath);
+          } catch {
+            /* ignore */
           }
         }
       } catch {
@@ -1012,41 +1226,76 @@ export function getApprovalLogPathForDate(dateStrOrIso?: string): string {
   return path.join(getApprovalsDir(), `${getUtcDateString(d)}.jsonl`);
 }
 
+const STRICT_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Split raw file bytes strictly on LF (`0x0a`) (F2):
+ * Bare CR (`0x0d`) is never treated as a line boundary (identical to Python `raw_bytes.split(b"\n")`).
+ * Lines containing invalid UTF-8 sequences decode to `""` and are discarded per-line.
+ */
+function splitBufferLinesLf(buf: Buffer): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  for (let i = 0; i <= buf.length; i++) {
+    if (i === buf.length || buf[i] === 0x0a) {
+      const slice = buf.subarray(start, i);
+      start = i + 1;
+      try {
+        lines.push(STRICT_UTF8_DECODER.decode(slice));
+      } catch {
+        lines.push('');
+      }
+    }
+  }
+  return lines;
+}
+
 interface ParsedLedgerWithMeta {
   records: ApprovalLedgerRecord[];
   requestSourceFile: Map<string, string>;
 }
 
+/**
+ * Read all `.jsonl` files in the approvals directory (F2, F17):
+ * - If the approvals directory does not exist (`ENOENT`), returns empty ledger.
+ * - Any other error listing the directory or reading ANY `.jsonl` file (`EACCES`, `EIO`, etc.)
+ *   throws `ApprovalLedgerUnreadableError` immediately (fail-closed; never folds partial history) (F17).
+ * - Only malformed JSON lines inside a readable file are skipped per-line.
+ */
 function readApprovalFilesWithMeta(): ParsedLedgerWithMeta {
   const dir = getApprovalsDir();
-  if (!fs.existsSync(dir)) {
-    return { records: [], requestSourceFile: new Map() };
+  let dirEntries: string[];
+  try {
+    dirEntries = fs.readdirSync(dir);
+  } catch (err: unknown) {
+    if ((err as { code?: string })?.code === 'ENOENT') {
+      return { records: [], requestSourceFile: new Map() };
+    }
+    throw new ApprovalLedgerUnreadableError(dir, extractErrnoReason(err));
   }
 
-  const files = fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .sort();
+  const files = dirEntries.filter((f) => f.endsWith('.jsonl')).sort();
 
   const records: ApprovalLedgerRecord[] = [];
   const requestSourceFile = new Map<string, string>();
 
   for (const file of files) {
     const filePath = path.join(dir, file);
+    let fileBuf: Buffer;
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const lines = content.split('\n');
-      for (const line of lines) {
-        const parsed = parseApprovalLedgerLine(line);
-        if (parsed) {
-          records.push(parsed);
-          if (parsed.type === 'request' && !requestSourceFile.has(parsed.requestId)) {
-            requestSourceFile.set(parsed.requestId, filePath);
-          }
+      fileBuf = fs.readFileSync(filePath);
+    } catch (err: unknown) {
+      throw new ApprovalLedgerUnreadableError(filePath, extractErrnoReason(err));
+    }
+    const lines = splitBufferLinesLf(fileBuf);
+    for (const line of lines) {
+      const parsed = parseApprovalLedgerLine(line);
+      if (parsed) {
+        records.push(parsed);
+        if (parsed.type === 'request' && !requestSourceFile.has(parsed.requestId)) {
+          requestSourceFile.set(parsed.requestId, filePath);
         }
       }
-    } catch {
-      /* skip unreadable file gracefully */
     }
   }
 
@@ -1079,19 +1328,26 @@ function resolveTargetFileForRequest(
 }
 
 /**
- * Safe atomic JSONL append (F3, F10):
- * Opens `filePath` with `O_CREAT | O_RDWR | O_APPEND` so the OS kernel guarantees
- * every write is appended at the true end of file (never overwriting concurrent H1 hook appends).
- * Inspects the last byte to prepend `\n` if a crashed process left a partial line without newline,
- * then writes `prefix + serializedJson + '\n'` in a single `writeSync` call with no offset argument.
+ * Safe atomic JSONL append (F3, F10, F14a, F18):
+ * - Verifies lock inode ownership (`verifyApprovalLockOwnership`) before opening and immediately
+ *   before `writeSync` so a displaced lock owner never writes a single byte (`ApprovalLockLostError`) (F14a).
+ * - Opens `filePath` with `O_CREAT | O_RDWR | O_APPEND` so the OS kernel guarantees
+ *   every write is appended at the true end of file (never overwriting concurrent H1 hook appends).
+ * - Wraps any filesystem I/O error in `ApprovalIoError` (F18).
  */
 function appendJsonlLineSafely(filePath: string, serializedJson: string): void {
+  verifyApprovalLockOwnership();
   ensureApprovalsDir();
-  const fd = fs.openSync(
-    filePath,
-    fs.constants.O_CREAT | fs.constants.O_RDWR | fs.constants.O_APPEND,
-    0o644
-  );
+  let fd: number;
+  try {
+    fd = fs.openSync(
+      filePath,
+      fs.constants.O_CREAT | fs.constants.O_RDWR | fs.constants.O_APPEND,
+      0o644
+    );
+  } catch (err: unknown) {
+    throw new ApprovalIoError(extractErrnoReason(err));
+  }
   try {
     const stat = fs.fstatSync(fd);
     let prefix = '';
@@ -1103,10 +1359,20 @@ function appendJsonlLineSafely(filePath: string, serializedJson: string): void {
       }
     }
     const buf = Buffer.from(prefix + serializedJson + '\n', 'utf-8');
+    verifyApprovalLockOwnership();
     fs.writeSync(fd, buf);
     fs.fsyncSync(fd);
+  } catch (err: unknown) {
+    if (err instanceof ApprovalLockLostError) {
+      throw err;
+    }
+    throw new ApprovalIoError(extractErrnoReason(err));
   } finally {
-    fs.closeSync(fd);
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -1120,6 +1386,7 @@ function appendApprovalRecordUnlocked(
   if (isFenced() && !isFenceGuardDisabledForTest()) {
     throw new Error('[approvals-ledger] Instance is fenced. Writes are barred.');
   }
+  verifyApprovalLockOwnership();
   ensureApprovalsDir();
   const filePath = targetFilePath || getApprovalLogPathForDate(record.at);
   let lineObj: Record<string, unknown>;

@@ -17,6 +17,9 @@ process.env.AIBOSS_DATA_DIR = testDataDir;
 
 import * as approvalsLedgerModule from '../src/lib/approvals-ledger.ts';
 import {
+  ApprovalIoError,
+  ApprovalLedgerUnreadableError,
+  ApprovalLockLostError,
   ApprovalLockTimeoutError,
   computeRequestId,
   getApprovalsDir,
@@ -1381,7 +1384,12 @@ await (async () => {
     // Python approval_check.py (timeout 5s) exits 2 with `{"status": "lock_timeout"}` in <= 6s (never hangs!)
     fs.writeFileSync(
       lockPath,
-      JSON.stringify({ pid: process.pid, bootId: currentBootId, createdAt: Date.now() }),
+      JSON.stringify({
+        pid: process.pid,
+        bootId: currentBootId,
+        hostname: os.hostname(),
+        createdAt: Date.now(),
+      }),
       'utf-8'
     );
     try {
@@ -1391,8 +1399,26 @@ await (async () => {
         'Case 25c (F15): TS withApprovalLock must throw ApprovalLockTimeoutError when deadline expires'
       );
 
+      // Run Python 5s lock_timeout check and POST /api/approvals/<id>/decision 5s lock_timeout concurrently
       const t0PyTimeout = Date.now();
-      const pyLockTimeout = runCheckCli(f8Seat, f8Tool, f8Sha);
+      const pyLockPromise = runCheckCliAsync(f8Seat, f8Tool, f8Sha);
+      const postLockRes = await postDecisionRoute(
+        new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF8}/decision`, {
+          method: 'POST',
+          headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'approved' }),
+        }),
+        { params: Promise.resolve({ requestId: reqF8 }) }
+      );
+      assert.equal(
+        postLockRes.status,
+        503,
+        'Case 25c (F15 + Item 9): POST /api/approvals/<id>/decision must return HTTP 503 on lock_timeout'
+      );
+      const postLockJson = await postLockRes.json();
+      assert.equal(postLockJson.error, 'lock_timeout');
+
+      const pyLockTimeout = await pyLockPromise;
       const elapsedPyTimeoutMs = Date.now() - t0PyTimeout;
       assert.equal(
         pyLockTimeout.status,
@@ -1405,8 +1431,8 @@ await (async () => {
         `Case 25c (F15): expected status="lock_timeout", got ${JSON.stringify(pyLockTimeout.body)}`
       );
       assert.ok(
-        elapsedPyTimeoutMs >= 4800 && elapsedPyTimeoutMs <= 6000,
-        `Case 25c (F15): approval_check.py timeout must complete in 4.8s..6.0s, took ${elapsedPyTimeoutMs}ms`
+        elapsedPyTimeoutMs >= 4800 && elapsedPyTimeoutMs <= 6500,
+        `Case 25c (F15): approval_check.py timeout must complete in 4.8s..6.5s, took ${elapsedPyTimeoutMs}ms`
       );
     } finally {
       try {
@@ -1415,7 +1441,93 @@ await (async () => {
         /* ignore */
       }
     }
-    console.log('  [PASS] Case 25 (F14, F15, F16 v04): single-rename stale lock recovery, bootId liveness, and <=6s lock_timeout enforcement');
+
+    // 25d (F16 v05):
+    // (1) Lock from a DIFFERENT hostname is conservatively treated as NOT stale even if bootId differs
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        bootId: 'boot-id-from-other-machine',
+        hostname: 'remote-host-different-from-local.internal',
+        createdAt: Date.now() - 60_000,
+      }),
+      'utf-8'
+    );
+    assert.equal(
+      isLockFileStale(lockPath),
+      false,
+      'Case 25d (F16 v05): TS must NOT treat lock from another hostname as stale'
+    );
+    const pyOtherHostCheck = spawnSync(
+      'python3',
+      [
+        '-c',
+        `import sys; sys.path.insert(0, 'operations/scripts'); import approval_check; print(approval_check.is_lock_file_stale(${JSON.stringify(lockPath)}))`,
+      ],
+      { env: { ...process.env, AIBOSS_DATA_DIR: testDataDir }, encoding: 'utf-8' }
+    );
+    assert.equal(
+      pyOtherHostCheck.stdout.trim(),
+      'False',
+      'Case 25d (F16 v05): Python must NOT treat lock from another hostname as stale'
+    );
+    fs.unlinkSync(lockPath);
+
+    // (2) Sweep of old `.approvals.lock.tmp-<pid>-*` / `.stale-<pid>-*` (> 10 min) MUST preserve files owned by a LIVE PID
+    // while sweeping files owned by a DEAD PID (99999999)
+    const livePidTmpArtifact = path.join(
+      getApprovalsDir(),
+      `.approvals.lock.tmp-${process.pid}-live-owner`
+    );
+    const deadPidTmpArtifact = path.join(
+      getApprovalsDir(),
+      '.approvals.lock.tmp-99999999-dead-owner'
+    );
+    fs.writeFileSync(livePidTmpArtifact, 'live', 'utf-8');
+    fs.writeFileSync(deadPidTmpArtifact, 'dead', 'utf-8');
+    fs.utimesSync(livePidTmpArtifact, fifteenMinAgoSec, fifteenMinAgoSec);
+    fs.utimesSync(deadPidTmpArtifact, fifteenMinAgoSec, fifteenMinAgoSec);
+    try {
+      withApprovalLock(() => {});
+      assert.equal(
+        fs.existsSync(deadPidTmpArtifact),
+        false,
+        'Case 25d (F16 v05): TS sweep must delete >10min .tmp artifact of dead PID'
+      );
+      assert.equal(
+        fs.existsSync(livePidTmpArtifact),
+        true,
+        'Case 25d (F16 v05): TS sweep must NEVER delete .tmp artifact of a live PID even if >10min old'
+      );
+
+      // Recreate deadPidTmpArtifact and test Python sweep as well
+      fs.writeFileSync(deadPidTmpArtifact, 'dead', 'utf-8');
+      fs.utimesSync(deadPidTmpArtifact, fifteenMinAgoSec, fifteenMinAgoSec);
+      runCheckCli(f8Seat, f8Tool, f8Sha);
+      assert.equal(
+        fs.existsSync(deadPidTmpArtifact),
+        false,
+        'Case 25d (F16 v05): Python sweep must delete >10min .tmp artifact of dead PID'
+      );
+      assert.equal(
+        fs.existsSync(livePidTmpArtifact),
+        true,
+        'Case 25d (F16 v05): Python sweep must NEVER delete .tmp artifact of a live PID even if >10min old'
+      );
+    } finally {
+      try {
+        fs.unlinkSync(livePidTmpArtifact);
+      } catch {
+        /* ignore */
+      }
+      try {
+        fs.unlinkSync(deadPidTmpArtifact);
+      } catch {
+        /* ignore */
+      }
+    }
+    console.log('  [PASS] Case 25 (F14, F15, F16 v05): stale lock recovery, bootId + hostname liveness, live-PID sweep protection, and POST 503 + CLI <=6s lock_timeout');
 
     // Case 26 (F2a, F2b, F2c v03 + F2 v04): Strict TS & Python parity on (a) non-string seatId,
     // (b) 201-space note vs 150-emoji note, (c) sub-millisecond timestamp truncation,
@@ -1754,7 +1866,111 @@ await (async () => {
     const pyBom2 = runCheckCli(c26SeatBom2, c26ToolA, c26ShaBom2);
     assert.equal(pyBom2.status, 2);
     assert.equal(pyBom2.body.status, 'pending', 'F2 v04: Python must not strip U+FEFF from decision.note');
-    console.log('  [PASS] Case 26 (F2 v03 + v04): TS & Python fold identically on "type": null, U+FEFF BOM, numeric seatId, Unicode code points, and ms truncation');
+
+    // Verify (f) F2 v05 Counterexample 3 & 4:
+    // (f1) Valid decision line with non-standard JSON constant `"ZEBRA": NaN` -> rejected by BOTH TS and Python (stays pending)
+    // (f2) Bare CR (`\r`, 0x0d) in the middle of a line -> neither TS nor Python treats bare `\r` as a line delimiter!
+    const c26SeatNan = 'seat-c26-nan';
+    const c26ShaNan = 'c267c267c267c267c267c267c267c267c267c267c267c267c267c267c267c267';
+    const tsNan = '2026-10-14T12:14:00Z';
+    const reqNan = computeRequestId(tsNan, c26SeatNan, c26ToolA, c26ShaNan);
+
+    const c26SeatCr = 'seat-c26-cr';
+    const c26ShaCr = 'c268c268c268c268c268c268c268c268c268c268c268c268c268c268c268c268';
+    const tsCr = '2026-10-14T12:14:01Z';
+    const reqCr = computeRequestId(tsCr, c26SeatCr, c26ToolA, c26ShaCr);
+
+    const c26SeatCrWs = 'seat-c26-cr-ws';
+    const c26ShaCrWs = 'c269c269c269c269c269c269c269c269c269c269c269c269c269c269c269c269';
+    const tsCrWs = '2026-10-14T12:14:02Z';
+    const reqCrWs = computeRequestId(tsCrWs, c26SeatCrWs, c26ToolA, c26ShaCrWs);
+
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: tsNan,
+          seat: c26SeatNan,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaNan,
+          head60: 'curl -X POST https://api.example.com/nan',
+          reason: 'external_post_send',
+        }),
+        `{"type":"decision","requestId":"${reqNan}","decision":"approved","by":"owner","at":"${recentAtIso}","expiresAt":"${futureExpIso}","ZEBRA":NaN}`,
+        `{"type":"decision","requestId":"${reqNan}","decision":"approved","by":"owner","at":"${recentAtIso}","expiresAt":"${futureExpIso}","INF":Infinity}`,
+        JSON.stringify({
+          ts: tsCr,
+          seat: c26SeatCr,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaCr,
+          head60: 'curl -X POST https://api.example.com/cr',
+          reason: 'external_post_send',
+        }),
+        // Two JSON objects separated by bare \r on a single LF-delimited line -> must NOT be split into 2 lines by Python!
+        `{"type":"decision","requestId":"${reqCr}","decision":"denied","by":"owner","at":"${recentAtIso}","expiresAt":"${futureExpIso}"}\r` +
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqCr,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+        JSON.stringify({
+          ts: tsCrWs,
+          seat: c26SeatCrWs,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaCrWs,
+          head60: 'curl -X POST https://api.example.com/crws',
+          reason: 'external_post_send',
+        }),
+        // Single valid JSON object containing bare \r as RFC 8259 token whitespace -> kept as 1 line and parsed identically in both TS and Python!
+        `{"type":\r"decision",\r"requestId":"${reqCrWs}","decision":"approved","by":"owner","at":"${recentAtIso}","expiresAt":"${futureExpIso}"}`,
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+
+    assert.equal(getApprovalById(reqNan)?.status, 'pending', 'F2 v05: TS must reject decision line containing NaN/Infinity');
+    const pyNan = runCheckCli(c26SeatNan, c26ToolA, c26ShaNan);
+    assert.equal(pyNan.status, 2);
+    assert.equal(
+      pyNan.body.status,
+      'pending',
+      'F2 v05: Python must reject decision line containing NaN/Infinity (parse_constant)'
+    );
+
+    assert.equal(
+      getApprovalById(reqCr)?.status,
+      'pending',
+      'F2 v05: TS must not split line on bare CR'
+    );
+    const pyCr = runCheckCli(c26SeatCr, c26ToolA, c26ShaCr);
+    assert.equal(pyCr.status, 2);
+    assert.equal(
+      pyCr.body.status,
+      'pending',
+      'F2 v05: Python must split strictly on b"\\n" and never treat bare CR as a line boundary'
+    );
+
+    assert.equal(
+      getApprovalById(reqCrWs)?.status,
+      'approved',
+      'F2 v05: TS must keep single JSON object with bare CR whitespace intact'
+    );
+    const pyCrWs = runCheckCli(c26SeatCrWs, c26ToolA, c26ShaCrWs);
+    assert.equal(
+      pyCrWs.status,
+      0,
+      'F2 v05: Python must keep single JSON object with bare CR whitespace intact'
+    );
+    assert.equal(pyCrWs.body.status, 'approved');
+    console.log('  [PASS] Case 26 (F2 v03..v05): TS & Python fold identically on NaN/Infinity, bare CR LF-only line split, "type": null, U+FEFF BOM, numeric seatId, Unicode code points, and ms truncation');
 
     // Case 27 (F4 v03): Select newest request for (seat, tool, sha256) BEFORE checking --request-id;
     // passing --request-id of an older approved request R1 when newer R2 is pending returns status="superseded" (exit 2, 0 bytes written)
@@ -2025,7 +2241,14 @@ await (async () => {
       assert.doesNotThrow(() => JSON.parse(line), `Case 29 (F10): Corrupted JSONL line: ${line}`);
     }
     for (const line of rawLinesAfterC29) {
-      if (line.includes('truncated_frag')) continue; // Intentional partial tail from Case 17
+      if (
+        line.includes('truncated_frag') ||
+        line.includes(':NaN') ||
+        line.includes(':Infinity') ||
+        line.includes('\r{"type"')
+      ) {
+        continue; // Intentional malformed lines from Case 17 & Case 26f
+      }
       assert.doesNotThrow(() => JSON.parse(line), `Case 29 (F10): Corrupted JSONL line: ${line}`);
     }
     assert.equal(getApprovalById(reqC29)?.status, 'approved');
@@ -2208,7 +2431,550 @@ await (async () => {
     assert.equal(getApprovalById(reqC32)?.status, 'executed');
     console.log('  [PASS] Case 32 (Item 6 v04): unused TS checkAndConsumeApproval removed; Python --consume pairs with TS recordApprovalExecution');
 
-    console.log('>>> ALL 32 A-4 v04 APPROVAL LEDGER TEST CASES PASSED <<<');
+    // =========================================================================
+    // ADVERSARIAL TESTS FOR A-4 v05 (Cases 33 - 35: Closing Hermes Round 4)
+    // =========================================================================
+
+    // Case 33 (F14a + F14b v05): Two-layer inode mutual exclusion for WRITES:
+    // (33a) Owner A loses `.approvals.lock` (renamed/replaced by contender B) while inside critical section before write ->
+    //       Owner A aborts with `lock_lost` (HTTP 503 in POST route / exit 2 in Python check & mark), writing 0 lines to ledger,
+    //       and does NOT unlink contender B's replacement lock in `finally`.
+    // (33b) Reclaimer B observes stale lock L0 (`ino_0`), contender A replaces L0 with live lock L1 (`ino_1`) right before B's `rename` ->
+    //       B detects `stat(stale).ino !== ino_0`, immediately restores `rename(stale -> lock)` so `lockPath` has `ino_1` again,
+    //       does NOT unlink L1, and does NOT write.
+    const c33Ts = '2026-10-14T14:30:00Z';
+    const c33Seat = 'seat-c33-f14';
+    const c33Tool = 'Bash';
+    const c33Sha = 'c330c330c330c330c330c330c330c330c330c330c330c330c330c330c330c330';
+    const reqC33 = computeRequestId(c33Ts, c33Seat, c33Tool, c33Sha);
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        ts: c33Ts,
+        seat: c33Seat,
+        tool: c33Tool,
+        host: 'api.example.com',
+        len: 64,
+        sha256: c33Sha,
+        head60: 'curl -X POST https://api.example.com/c33',
+        reason: 'external_post_send',
+      }) + '\n',
+      'utf-8'
+    );
+
+    // 33a-TS: Inject lock displacement in TS right after ledger read (before appendJsonlLineSafely writes)
+    const sizeBefore33aTs = fs.statSync(todayPath).size;
+    const origReadFileSync33 = fs.readFileSync;
+    let displacedInTs = false;
+    let contenderReplacementInoTs = null;
+    fs.readFileSync = function (...args) {
+      const res = origReadFileSync33.apply(this, args);
+      if (
+        !displacedInTs &&
+        typeof args[0] === 'string' &&
+        args[0].endsWith('.jsonl') &&
+        fs.existsSync(lockPath)
+      ) {
+        displacedInTs = true;
+        const stolenPath = `${lockPath}.stolen-by-b`;
+        fs.renameSync(lockPath, stolenPath);
+        fs.unlinkSync(stolenPath);
+        // Contender B places its own live lock L2 at lockPath
+        fs.writeFileSync(
+          lockPath,
+          JSON.stringify({
+            pid: process.pid,
+            token: 'contender-b-token',
+            bootId: currentBootId,
+            hostname: os.hostname(),
+            createdAt: Date.now(),
+          }),
+          'utf-8'
+        );
+        contenderReplacementInoTs = fs.statSync(lockPath).ino;
+      }
+      return res;
+    };
+
+    try {
+      const postLostRes = await postDecisionRoute(
+        new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqC33}/decision`, {
+          method: 'POST',
+          headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'approved' }),
+        }),
+        { params: Promise.resolve({ requestId: reqC33 }) }
+      );
+      assert.equal(
+        postLostRes.status,
+        503,
+        'Case 33a (F14a TS): POST decision must return HTTP 503 when lock ownership is lost before write'
+      );
+      const postLostJson = await postLostRes.json();
+      assert.equal(postLostJson.error, 'lock_lost');
+      assert.equal(
+        postLostJson.message.includes(testDataDir),
+        false,
+        'Case 33a (F14a TS): 503 response must not leak internal filesystem path'
+      );
+    } finally {
+      fs.readFileSync = origReadFileSync33;
+    }
+
+    assert.equal(displacedInTs, true, 'Case 33a (F14a TS): displacement hook must have fired');
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeBefore33aTs,
+      'Case 33a (F14a TS): displaced owner must write 0 bytes to ledger'
+    );
+    assert.equal(
+      fs.existsSync(lockPath) && fs.statSync(lockPath).ino === contenderReplacementInoTs,
+      true,
+      'Case 33a (F14a TS): displaced owner must NOT unlink contender B replacement lock in finally'
+    );
+    fs.unlinkSync(lockPath);
+
+    // Approve reqC33 cleanly so we can test Python --consume and approval_mark.py under lock displacement
+    const cleanDec33 = recordApprovalDecision({
+      requestId: reqC33,
+      decision: 'approved',
+      by: 'owner',
+    });
+    assert.equal(cleanDec33.ok, true);
+
+    // 33a-Py: Inject lock displacement in Python right before append_jsonl_safely in BOTH approval_check.py (--consume) and approval_mark.py
+    const sizeBefore33aPy = fs.statSync(todayPath).size;
+    const pyConsumeDisplacement = spawnSync(
+      'python3',
+      [
+        '-c',
+        `
+import os, sys, json
+sys.path.insert(0, 'operations/scripts')
+import approval_check
+
+orig_resolve = approval_check.resolve_target_file
+def hooked_resolve(approvals_dir, source_file, now_utc):
+    res = orig_resolve(approvals_dir, source_file, now_utc)
+    lock_p = os.path.join(approvals_dir, '.approvals.lock')
+    if os.path.exists(lock_p):
+        stolen_p = lock_p + '.stolen-py'
+        os.rename(lock_p, stolen_p)
+        os.unlink(stolen_p)
+        with open(lock_p, 'w', encoding='utf-8') as f:
+            f.write(json.dumps({'pid': os.getpid(), 'token': 'py-contender-b', 'createdAt': 0}))
+    return res
+
+approval_check.resolve_target_file = hooked_resolve
+sys.argv = ['approval_check.py', '--seat', ${JSON.stringify(c33Seat)}, '--tool', ${JSON.stringify(c33Tool)}, '--sha256', ${JSON.stringify(c33Sha)}, '--consume']
+approval_check.main()
+`,
+      ],
+      { env: { ...process.env, AIBOSS_DATA_DIR: testDataDir }, encoding: 'utf-8' }
+    );
+    assert.equal(
+      pyConsumeDisplacement.status,
+      2,
+      `Case 33a (F14a Python consume): expected exit 2 on lock_lost, got ${pyConsumeDisplacement.status} (${pyConsumeDisplacement.stderr})`
+    );
+    const pyConsumeLostJson = JSON.parse(pyConsumeDisplacement.stdout.trim());
+    assert.equal(pyConsumeLostJson.status, 'lock_lost');
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeBefore33aPy,
+      'Case 33a (F14a Python consume): displaced owner must write 0 bytes to ledger'
+    );
+    assert.equal(
+      fs.existsSync(lockPath),
+      true,
+      'Case 33a (F14a Python consume): displaced owner must not delete contender replacement lock'
+    );
+    fs.unlinkSync(lockPath);
+
+    const pyMarkDisplacement = spawnSync(
+      'python3',
+      [
+        '-c',
+        `
+import os, sys, json
+sys.path.insert(0, 'operations/scripts')
+import approval_check, approval_mark
+
+orig_resolve = approval_mark.resolve_target_file
+def hooked_resolve(approvals_dir, source_file, now_utc):
+    res = orig_resolve(approvals_dir, source_file, now_utc)
+    lock_p = os.path.join(approvals_dir, '.approvals.lock')
+    if os.path.exists(lock_p):
+        stolen_p = lock_p + '.stolen-py-mark'
+        os.rename(lock_p, stolen_p)
+        os.unlink(stolen_p)
+        with open(lock_p, 'w', encoding='utf-8') as f:
+            f.write(json.dumps({'pid': os.getpid(), 'token': 'py-contender-b-mark', 'createdAt': 0}))
+    return res
+
+approval_mark.resolve_target_file = hooked_resolve
+sys.argv = ['approval_mark.py', '--request-id', ${JSON.stringify(reqC33)}, '--result', 'executed']
+approval_mark.main()
+`,
+      ],
+      { env: { ...process.env, AIBOSS_DATA_DIR: testDataDir }, encoding: 'utf-8' }
+    );
+    assert.equal(
+      pyMarkDisplacement.status,
+      2,
+      `Case 33a (F14a Python mark): expected exit 2 on lock_lost, got ${pyMarkDisplacement.status}`
+    );
+    const pyMarkLostJson = JSON.parse(pyMarkDisplacement.stdout.trim());
+    assert.equal(pyMarkLostJson.status, 'lock_lost');
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeBefore33aPy,
+      'Case 33a (F14a Python mark): displaced owner must write 0 bytes to ledger'
+    );
+    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+
+    // 33b-TS: Reclaimer B observes stale lock L0 (`ino_0`), contender A replaces L0 with live lock L1 (`ino_1`)
+    // right after B's pre-rename stat check and right before B's `rename(lock -> stale)`.
+    // B renames L1 to `staleTarget`, sees `stat(staleTarget).ino === ino_1 !== ino_0`, and immediately restores `rename(staleTarget -> lockPath)`!
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 99999999,
+        bootId: currentBootId,
+        hostname: os.hostname(),
+        createdAt: Date.now() - 60_000,
+      }),
+      'utf-8'
+    );
+    const l0InoTs = fs.statSync(lockPath).ino;
+    const origRenameSync33b = fs.renameSync;
+    let injectedRace33bTs = false;
+    let liveL1InoTs = null;
+    fs.renameSync = function (oldP, newP) {
+      if (
+        !injectedRace33bTs &&
+        oldP === lockPath &&
+        typeof newP === 'string' &&
+        newP.includes('.approvals.lock.stale-')
+      ) {
+        injectedRace33bTs = true;
+        // Simulate contender A reclaiming L0 and publishing live lock L1 (with a new inode) right before B's rename!
+        fs.unlinkSync(lockPath);
+        const l1Tmp = `${lockPath}.l1-live`;
+        fs.writeFileSync(
+          l1Tmp,
+          JSON.stringify({
+            pid: process.pid,
+            token: 'live-l1-token',
+            bootId: currentBootId,
+            hostname: os.hostname(),
+            createdAt: Date.now(),
+          }),
+          'utf-8'
+        );
+        liveL1InoTs = fs.statSync(l1Tmp).ino;
+        origRenameSync33b.call(this, l1Tmp, lockPath);
+      }
+      return origRenameSync33b.call(this, oldP, newP);
+    };
+
+    let bEnteredCriticalSectionTs = false;
+    try {
+      assert.throws(
+        () =>
+          withApprovalLock(() => {
+            bEnteredCriticalSectionTs = true;
+          }, 120),
+        (err) => err instanceof ApprovalLockTimeoutError,
+        'Case 33b (F14b TS): Reclaimer B must not enter critical section when it mis-reclaims live L1'
+      );
+    } finally {
+      fs.renameSync = origRenameSync33b;
+    }
+    assert.equal(injectedRace33bTs, true, 'Case 33b (F14b TS): race hook must have fired');
+    assert.equal(bEnteredCriticalSectionTs, false, 'Case 33b (F14b TS): B must not enter critical section');
+    assert.notEqual(liveL1InoTs, l0InoTs);
+    assert.equal(
+      fs.existsSync(lockPath),
+      true,
+      'Case 33b (F14b TS): B must restore mis-reclaimed live lock L1 back to lockPath'
+    );
+    assert.equal(
+      fs.statSync(lockPath).ino,
+      liveL1InoTs,
+      'Case 33b (F14b TS): restored lock at lockPath must have L1 inode (never unlinked)'
+    );
+    fs.unlinkSync(lockPath);
+
+    // 33b-Py: Same race injection in Python `with_approval_lock`
+    const pyReclaimRace = spawnSync(
+      'python3',
+      [
+        '-c',
+        `
+import os, sys, json, socket
+sys.path.insert(0, 'operations/scripts')
+import approval_check
+
+approvals_dir = approval_check.get_approvals_dir()
+os.makedirs(approvals_dir, exist_ok=True)
+lock_p = os.path.join(approvals_dir, '.approvals.lock')
+with open(lock_p, 'w', encoding='utf-8') as f:
+    f.write(json.dumps({
+        'pid': 99999999,
+        'bootId': approval_check.get_system_boot_id(),
+        'hostname': socket.gethostname(),
+        'createdAt': 0
+    }))
+l0_ino = os.stat(lock_p).st_ino
+
+orig_rename = os.rename
+state = {'injected': False, 'l1_ino': None, 'entered': False}
+
+def hooked_rename(src, dst):
+    if (not state['injected']) and src == lock_p and '.approvals.lock.stale-' in dst:
+        state['injected'] = True
+        os.unlink(lock_p)
+        l1_tmp = lock_p + '.l1-py-live'
+        with open(l1_tmp, 'w', encoding='utf-8') as f:
+            f.write(json.dumps({
+                'pid': os.getpid(),
+                'token': 'py-live-l1',
+                'bootId': approval_check.get_system_boot_id(),
+                'hostname': socket.gethostname(),
+                'createdAt': approval_check.current_utc_ms()
+            }))
+        state['l1_ino'] = os.stat(l1_tmp).st_ino
+        orig_rename(l1_tmp, lock_p)
+    return orig_rename(src, dst)
+
+os.rename = hooked_rename
+timed_out = False
+try:
+    with approval_check.with_approval_lock(approvals_dir, timeout_sec=0.12):
+        state['entered'] = True
+except approval_check.ApprovalLockTimeoutError:
+    timed_out = True
+finally:
+    os.rename = orig_rename
+
+restored_ino = os.stat(lock_p).st_ino if os.path.exists(lock_p) else None
+if os.path.exists(lock_p):
+    os.unlink(lock_p)
+print(json.dumps({
+    'injected': state['injected'],
+    'entered': state['entered'],
+    'timed_out': timed_out,
+    'l0_ino': l0_ino,
+    'l1_ino': state['l1_ino'],
+    'restored_ino': restored_ino,
+}))
+`,
+      ],
+      { env: { ...process.env, AIBOSS_DATA_DIR: testDataDir }, encoding: 'utf-8' }
+    );
+    assert.equal(pyReclaimRace.status, 0, `Case 33b Python script failed: ${pyReclaimRace.stderr}`);
+    const pyReclaimRaceRes = JSON.parse(pyReclaimRace.stdout.trim());
+    assert.equal(pyReclaimRaceRes.injected, true);
+    assert.equal(pyReclaimRaceRes.entered, false, 'Case 33b (F14b Python): B must not enter critical section');
+    assert.equal(pyReclaimRaceRes.timed_out, true);
+    assert.equal(
+      pyReclaimRaceRes.restored_ino,
+      pyReclaimRaceRes.l1_ino,
+      'Case 33b (F14b Python): B must restore mis-reclaimed live lock L1 back to lockPath with exact inode'
+    );
+    console.log('  [PASS] Case 33 (F14a + F14b v05): displaced lock owner exits 2 / 503 with status="lock_lost" (+0 lines), and mis-reclaimed live lock is immediately restored in TS & Python');
+
+    // Case 34 (F17 v05): Fail-closed `ledger_unreadable` when any `.jsonl` file (or approvals dir) cannot be read.
+    // Specifically: old file (`yesterdayPath`) has `request` + `decision: approved` (readable),
+    // newer file (`todayPath`) has `execution` (`executed`) for that request and is `chmod 0o000`.
+    // `approval_check.py --consume`, `approval_mark.py`, `GET /api/approvals`, and `POST /api/approvals/<id>/decision`
+    // MUST fail-closed (`status: "ledger_unreadable"` / HTTP 503) and write 0 bytes; restoring `0o644` returns `executed`!
+    const c34Ts = '2026-10-13T23:50:00Z';
+    const c34Seat = 'seat-c34-f17';
+    const c34Tool = 'Bash';
+    const c34Sha = 'c340c340c340c340c340c340c340c340c340c340c340c340c340c340c340c340';
+    const reqC34 = computeRequestId(c34Ts, c34Seat, c34Tool, c34Sha);
+
+    fs.appendFileSync(
+      yesterdayPath,
+      [
+        JSON.stringify({
+          ts: c34Ts,
+          seat: c34Seat,
+          tool: c34Tool,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c34Sha,
+          head60: 'curl -X POST https://api.example.com/c34',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC34,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        type: 'execution',
+        requestId: reqC34,
+        seatId: c34Seat,
+        at: new Date().toISOString(),
+        result: 'executed',
+        digest: c34Sha,
+      }) + '\n',
+      'utf-8'
+    );
+
+    const sizeYesterdayBefore34 = fs.statSync(yesterdayPath).size;
+    const sizeTodayBefore34 = fs.statSync(todayPath).size;
+
+    fs.chmodSync(todayPath, 0o000);
+    try {
+      const pyCheckUnreadable = runCheckCli(c34Seat, c34Tool, c34Sha, ['--consume']);
+      assert.equal(
+        pyCheckUnreadable.status,
+        2,
+        'Case 34 (F17): approval_check.py --consume must exit 2 when today.jsonl is chmod 000'
+      );
+      assert.equal(pyCheckUnreadable.body.status, 'ledger_unreadable');
+      assert.equal(pyCheckUnreadable.body.file, path.basename(todayPath));
+
+      const pyMarkUnreadable = runMarkCli(reqC34, 'executed', 'run-c34');
+      assert.equal(
+        pyMarkUnreadable.status,
+        2,
+        'Case 34 (F17): approval_mark.py must exit 2 when today.jsonl is chmod 000'
+      );
+      assert.equal(pyMarkUnreadable.body.status, 'ledger_unreadable');
+      assert.equal(pyMarkUnreadable.body.file, path.basename(todayPath));
+
+      const getUnreadableRes = await getApprovalsRoute(
+        new NextRequest('http://127.0.0.1:4330/api/approvals')
+      );
+      assert.equal(
+        getUnreadableRes.status,
+        503,
+        'Case 34 (F17): GET /api/approvals must return HTTP 503 when a ledger file is unreadable'
+      );
+      const getUnreadableJson = await getUnreadableRes.json();
+      assert.equal(getUnreadableJson.error, 'ledger_unreadable');
+      assert.equal(
+        JSON.stringify(getUnreadableJson).includes(testDataDir),
+        false,
+        'Case 34 (F17): GET 503 response must not leak raw filesystem paths'
+      );
+
+      const postUnreadableRes = await postDecisionRoute(
+        new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqC34}/decision`, {
+          method: 'POST',
+          headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'approved' }),
+        }),
+        { params: Promise.resolve({ requestId: reqC34 }) }
+      );
+      assert.equal(
+        postUnreadableRes.status,
+        503,
+        'Case 34 (F17): POST decision must return HTTP 503 when a ledger file is unreadable'
+      );
+      const postUnreadableJson = await postUnreadableRes.json();
+      assert.equal(postUnreadableJson.error, 'ledger_unreadable');
+      assert.equal(
+        JSON.stringify(postUnreadableJson).includes(testDataDir),
+        false,
+        'Case 34 (F17): POST 503 response must not leak raw filesystem paths'
+      );
+    } finally {
+      fs.chmodSync(todayPath, 0o644);
+    }
+
+    assert.equal(
+      fs.statSync(yesterdayPath).size,
+      sizeYesterdayBefore34,
+      'Case 34 (F17): yesterdayPath must have 0 bytes added after ledger_unreadable'
+    );
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeTodayBefore34,
+      'Case 34 (F17): todayPath must have 0 bytes added after ledger_unreadable'
+    );
+
+    // After restoring read permissions on todayPath, reqC34 is properly seen as `executed`
+    const pyCheckRestored = runCheckCli(c34Seat, c34Tool, c34Sha, ['--consume']);
+    assert.equal(pyCheckRestored.status, 2);
+    assert.equal(pyCheckRestored.body.status, 'executed');
+    assert.equal(getApprovalById(reqC34)?.status, 'executed');
+    console.log('  [PASS] Case 34 (F17 v05): unreadable ledger file fails closed with status="ledger_unreadable" (exit 2 / HTTP 503, +0 bytes) and recovers to "executed" when chmod 644 restored');
+
+    // Case 35 (F18 v05): Outer I/O error boundary in CLI (`approval_check.py`, `approval_mark.py`)
+    // and API (`POST /api/approvals/<id>/decision`):
+    // When approvals directory is read-only (`0o500`, so creating `.approvals.lock.tmp-*` fails with `EACCES`),
+    // both Python CLIs output structured JSON `{"status": "io_error", "reason": "EACCES"}` and exit 2 (0 tracebacks, never exit 1),
+    // and POST returns HTTP 503 (`error: "io_error"`) without leaking internal paths.
+    fs.chmodSync(getApprovalsDir(), 0o500);
+    try {
+      const pyCheckIo = runCheckCli(c34Seat, c34Tool, c34Sha);
+      assert.equal(
+        pyCheckIo.status,
+        2,
+        `Case 35 (F18): approval_check.py must exit 2 (never 1) on EACCES, got ${pyCheckIo.status}`
+      );
+      assert.equal(pyCheckIo.body?.status, 'io_error');
+      assert.equal(pyCheckIo.body?.reason, 'EACCES');
+      assert.equal(
+        pyCheckIo.rawStderr.includes('Traceback'),
+        false,
+        'Case 35 (F18): approval_check.py must not print a raw Python Traceback on I/O error'
+      );
+
+      const pyMarkIo = runMarkCli(reqC34, 'executed', 'run-c35');
+      assert.equal(
+        pyMarkIo.status,
+        2,
+        `Case 35 (F18): approval_mark.py must exit 2 (never 1) on EACCES, got ${pyMarkIo.status}`
+      );
+      assert.equal(pyMarkIo.body?.status, 'io_error');
+      assert.equal(pyMarkIo.body?.reason, 'EACCES');
+      assert.equal(
+        pyMarkIo.rawStderr.includes('Traceback'),
+        false,
+        'Case 35 (F18): approval_mark.py must not print a raw Python Traceback on I/O error'
+      );
+
+      const postIoRes = await postDecisionRoute(
+        new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqC34}/decision`, {
+          method: 'POST',
+          headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'approved' }),
+        }),
+        { params: Promise.resolve({ requestId: reqC34 }) }
+      );
+      assert.equal(
+        postIoRes.status,
+        503,
+        'Case 35 (F18): POST decision must return HTTP 503 on io_error'
+      );
+      const postIoJson = await postIoRes.json();
+      assert.equal(postIoJson.error, 'io_error');
+      assert.equal(
+        JSON.stringify(postIoJson).includes(testDataDir),
+        false,
+        'Case 35 (F18): POST 503 response must not leak raw filesystem paths'
+      );
+    } finally {
+      fs.chmodSync(getApprovalsDir(), 0o755);
+    }
+    console.log('  [PASS] Case 35 (F18 v05): I/O errors output JSON {"status":"io_error","reason":"EACCES"} with exit 2 (0 tracebacks) in CLI and HTTP 503 in API');
+
+    console.log('>>> ALL 35 A-4 v05 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

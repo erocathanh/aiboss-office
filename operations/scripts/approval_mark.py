@@ -29,12 +29,13 @@ from approval_check import (
     is_lock_disabled_for_test,
     load_folded_ledger,
     resolve_target_file,
+    run_cli_with_error_boundary,
     strip_ascii,
     with_approval_lock,
 )
 
 
-def main() -> None:
+def _main() -> None:
     parser = argparse.ArgumentParser(
         description="Mark an approved request as executed or failed in the ledger."
     )
@@ -210,6 +211,10 @@ def main() -> None:
             out["claimId"] = effective_claim_id
         print(json.dumps(out))
         sys.exit(0)
+
+
+def main() -> None:
+    run_cli_with_error_boundary(_main, "approval_mark")
 
 
 if __name__ == "__main__":

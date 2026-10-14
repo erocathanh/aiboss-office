@@ -169,7 +169,7 @@ Hàm `acquireInstanceLock(dataDir)` trả về kết quả cấu trúc kèm `rea
 
 ---
 
-## 5. Sổ Duyệt Hành Động Dạng Máy Trạng Thái (Approval Ledger State Machine) — A-4 (v04)
+## 5. Sổ Duyệt Hành Động Dạng Máy Trạng Thái (Approval Ledger State Machine) — A-4 (v05)
 
 Giải pháp A-4 biến sổ duyệt `operations/data/approvals/<YYYY-MM-DD>.jsonl` thành một máy trạng thái tất định nối trực tiếp từ yêu cầu của hook (`request`) → mã băm nội dung (`digest`) → quyết định của người duyệt (`decision`) → thực thi đơn lần (`execution`).
 
@@ -223,39 +223,59 @@ Toàn bộ dữ liệu nằm chung trong tệp nhật ký theo ngày UTC `operat
 ### 5.2. Máy Trạng Thái Suy Ra Từ Sổ, Quy Tắc Đồng Nhất TS/Python & Khoá Nguyên Tử (Derived State Machine)
 Trạng thái của mỗi yêu cầu được suy ra trực tiếp khi gấp (fold) các dòng trong sổ theo quy tắc đồng nhất tuyệt đối giữa TypeScript (`src/lib/approvals-ledger.ts`) và Python (`operations/scripts/approval_check.py`, `operations/scripts/approval_mark.py`):
 - `requested` (hiển thị là `pending` trên bộ lọc API) → `approved` | `denied` → (`claim` nguyên tử) → `executed` | `failed` | `expired`.
-- **Luật chuyển trạng thái & đồng nhất bộ gấp sổ (F2, F4, F5, F10, F11, F14, F15, F16):**
-  1. **Kiểm tra kiểu chuỗi nghiêm ngặt, từ chối `"type": null` & chỉ cắt khoảng trắng ASCII `[ \t\r\n]` (F2):**
+- **Luật chuyển trạng thái & đồng nhất bộ gấp sổ (F2, F4, F5, F10, F11, F14, F15, F16, F17, F18):**
+  1. **Đọc nhị phân tách dòng theo LF (`0x0a`), bộ đọc JSON nghiêm ngặt từ chối `NaN`/`Infinity`, kiểm tra kiểu chuỗi & chỉ cắt khoảng trắng ASCII `[ \t\r\n]` (F2):**
+     - Cả TypeScript (`splitBufferLinesLf` dùng `TextDecoder('utf-8', { fatal: true })`) và Python (`open(file_path, "rb")` + `raw_bytes.split(b"\n")` + `decode("utf-8", errors="strict")`) đều đọc tệp ở chế độ nhị phân và tách dòng **duy nhất theo byte `0x0a` (`\n`)**. Ký tự `CR` đơn (`0x0d`, `\r`) không bao giờ được coi là ranh giới ngắt dòng.
+     - Trong Python, `strict_json_loads` gọi `json.loads(..., parse_constant=_reject_json_constant)` để ném lỗi và loại bỏ mọi dòng chứa `NaN`, `Infinity`, `-Infinity`, đồng nhất tuyệt đối với `JSON.parse` của JavaScript. Dòng không giải mã được UTF-8 hoặc không parse được JSON chuẩn RFC 8259 đều bị bỏ qua theo dòng ở cả hai bên.
      - Một dòng chỉ là `request` khi khoá `"type"` vắng mặt hoặc `type === "request"`; `"type": null` bị loại bỏ ở cả hai bên.
      - Toàn bộ các trường định danh và thời gian (`ts`, `seat`, `tool`, `sha256`, `requestId`, `seatId`, `digest`, `at`, `expiresAt`, `claimId`, `runId`, `note`) đều bắt buộc kiểm tra đúng kiểu chuỗi trước khi xử lý; tuyệt đối không ép kiểu ngầm (`str(...)`) từ số hay boolean.
      - Cả TS (`trimAscii`) và Python (`strip_ascii`) chỉ cắt 4 ký tự khoảng trắng ASCII `[ \t\r\n]` ở hai đầu chuỗi; các ký tự như `U+FEFF` (BOM) hoặc khoảng trắng Unicode được giữ nguyên đồng nhất ở cả hai bên.
-  2. **Chuẩn thời gian ISO-8601 miền năm `1970–9999`, chỉ nhận chữ số ASCII & chống tràn biên múi giờ (F2c, F5):**
+  2. **Đọc sổ lỗi ở mức tệp/thư mục $\rightarrow$ Fail-Closed `ledger_unreadable` (F17):**
+     - Chỉ khi thư mục `approvals` chưa tồn tại (`ENOENT` / `FileNotFoundError`), hệ thống mới coi sổ đang trống (`[]`).
+     - Mọi lỗi liệt kê thư mục hoặc lỗi đọc bất kỳ tệp `.jsonl` nào (`EACCES`, `EPERM`, `EIO`, v.v.) trong `readApprovalFilesWithMeta` (TS) và `list_ledger_files` / `load_folded_ledger` (Python) đều **lập tức dừng gấp sổ và fail-closed** (`ApprovalLedgerUnreadableError`), tuyệt đối không bỏ qua tệp lỗi để gấp phần lịch sử còn lại (tránh việc tệp ngày mới chứa `execution`/`claim` không đọc được làm yêu cầu cũ trông như vẫn đang `approved`).
+     - Khi gặp lỗi này, `approval_check.py` và `approval_mark.py` in JSON `{"status": "ledger_unreadable", "file": "<tên tệp>", "reason": "<mã errno>"}` và thoát mã `2` (0 dòng ghi); các route `GET /api/approvals` và `POST /api/approvals/<requestId>/decision` trả về HTTP `503` (`error: "ledger_unreadable"`) với thông điệp chung an toàn, không lộ đường dẫn tệp nội bộ.
+  3. **Chuẩn thời gian ISO-8601 miền năm `1970–9999`, chỉ nhận chữ số ASCII & chống tràn biên múi giờ (F2c, F5):**
      - Cả TS và Python cùng dùng biểu thức chính quy giới hạn miền năm `1970–9999` và chỉ nhận chữ số ASCII `[0-9]`:
        `^(19[7-9][0-9]|[2-9][0-9]{3})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$`
      - Từ chối hoàn toàn năm trước `1970` (ví dụ `0099-01-01T00:00:00Z`), chữ số Unicode (`٢٠٢٦`), giờ `24:00:00`, hoặc ngày không tồn tại trên lịch (`2026-02-30`).
      - Sau khi quy đổi lệch múi giờ về UTC, cả hai bên đều kiểm tra thời điểm UTC vẫn nằm trong miền `[1970-01-01T00:00:00.000Z, 9999-12-31T23:59:59.999Z]` (`0 <= epochMs <= 253402300799999`) và bọc bắt `(ValueError, OverflowError)` trong Python để các mốc tràn biên như `9999-12-31T23:59:59-00:01` đều bị loại bỏ an toàn (không bao giờ gây crash).
      - Mọi mốc thời gian hợp lệ đều được cắt phần lẻ dưới mili-giây về **số nguyên mili-giây UTC** trước mọi phép so sánh hay sắp xếp, và dùng bộ đếm thứ tự dòng hợp lệ (`order_counter`) đồng nhất giữa TS và Python.
-  3. **Từ chối quyết định có `decision.at` ở tương lai (`not_yet_valid`, dung sai 0) (F11):**
+  4. **Từ chối quyết định có `decision.at` ở tương lai (`not_yet_valid`, dung sai 0) (F11):**
      - Khi `nowMs < decision.atMs` (dung sai `0`), quyết định `approved` chưa có hiệu lực: `approval_check.py` (cả có và không có `--consume`), `approval_mark.py`, và `recordApprovalExecution` đều trả về `status: "not_yet_valid"`, thoát mã `2` và ghi `0` dòng vào sổ.
-  4. **Chọn yêu cầu mới nhất của `(seat, tool, sha256)` TRƯỚC KHI đối chiếu `--request-id` (F4):**
+  5. **Chọn yêu cầu mới nhất của `(seat, tool, sha256)` TRƯỚC KHI đối chiếu `--request-id` (F4):**
      - Khi kiểm tra quyền cho hành động `(seat, tool, sha256)`, `approval_check.py` tìm yêu cầu mới nhất của bộ ba `(seat, tool, sha256)` trước tiên.
      - Nếu người gọi truyền `--request-id <id>`:
        + Nếu `<id>` trùng với yêu cầu mới nhất: tiếp tục kiểm tra trạng thái của yêu cầu đó.
        + Nếu `<id>` thuộc về một yêu cầu cũ hơn của cùng `(seat, tool)` (đã có yêu cầu mới hơn trên sổ): từ chối với `status: "superseded"`, thoát mã `2` và ghi `0` dòng.
        + Nếu `<id>` thuộc về yêu cầu mới nhất của `(seat, tool)` nhưng có `sha256` khác: từ chối với `status: "digest_mismatch"`, thoát mã `2`.
-  5. **Khoá xuyên tiến trình và thu hồi khoá mồ côi qua một lệnh `rename` nguyên tử duy nhất, không dùng guard phụ (F1b, F14, F15, F16):**
-     - **(a) Tạo khoá:** Tiến trình ghi đầy đủ JSON `{ pid, token, createdAt, bootId, hostname }` (`bootId` lấy từ `sysctl -n kern.boottime` trên macOS hoặc `/proc/stat` `btime` trên Linux) vào tệp tạm `.approvals.lock.tmp-<pid>-<token>` rồi xuất bản nguyên tử qua `link(tmpPath, lockPath)` (`O_EXCL`). Khi vào `withApprovalLock` / `with_approval_lock`, tiến trình quét dọn các tệp `.approvals.lock.tmp*`/`.stale-*`/`.rel-*` có `mtime` quá 10 phút (F16).
-     - **(b) Xác định & thu hồi khoá mồ côi bằng một lệnh `rename` duy nhất (F14, F16):**
-       + Nếu `.approvals.lock` có `bootId` khác lần khởi động hiện tại của hệ điều hành $\rightarrow$ coi là mồ côi ngay cả khi `pid` trùng (F16).
-       + Nếu `bootId` khớp và đọc được `pid` nguyên dương $\rightarrow$ khoá chỉ mồ côi khi `!isPidAlive(pid)`. **Tuyệt đối không bao giờ thu hồi khoá của một PID đang sống cùng lần khởi động, kể cả khi giữ khoá quá 30 giây.**
-       + Chỉ khi không đọc được `pid` hợp lệ (tệp hỏng) $\rightarrow$ khoá mồ côi khi tuổi `mtime` vượt quá `30_000` ms (30 giây).
-       + Khi khoá mồ côi, tiến trình gọi thẳng `rename(.approvals.lock, .approvals.lock.stale-<pid>-<ns>)` (hoàn toàn không dùng `.approvals.reclaim.lock`). Vì `rename` nguyên tử, **CHỈ MỘT** tiến trình thành công; tiến trình đó `unlink` tệp `stale` của chính mình rồi quay lại (a). Mọi tiến trình mà `rename` trả `ENOENT`/`OSError` coi như người khác đã thu hồi, ngủ ngắn (`25–30ms`, dùng `Atomics.wait` trong TS / `time.sleep` trong Python, không busy-wait) rồi quay lại (a). Không bao giờ xoá tệp nào theo tên trừ khi chính mình vừa `rename` ra tên riêng.
-     - **(c) Kiểm tra deadline ở MỌI nhánh vòng lặp (`lock_timeout`) (F15):**
-       + Mọi nhánh trong vòng lặp chờ khoá đều kiểm tra hạn chờ (mặc định `5s`) trước khi `continue`. Khi quá hạn, CLI (`approval_check.py`, `approval_mark.py`) in `{"status": "lock_timeout"}` và thoát mã `2`; các route API trả về HTTP `503` (`error: "lock_timeout"`). Luôn fail-closed, không bao giờ treo vô hạn.
-  6. **Ghi nối nguyên tử `O_APPEND` bảo vệ dòng của hook H1 (F3, F10):**
-     - Cả `appendJsonlLineSafely` (TS) và `append_jsonl_safely` (Python) đều mở tệp `.jsonl` với cờ `O_CREAT | O_RDWR | O_APPEND`, kiểm tra byte cuối để thêm `"\n"` nếu dòng trước bị cụt, và ghi bằng một lệnh `write` duy nhất kèm `fsync`.
+  6. **Khoá xuyên tiến trình bảo vệ vùng GHI bằng kiểm tra danh tính inode hai chiều (Chủ khoá & Người thu hồi) (F1b, F14a/b, F15, F16):**
+     - `rename` theo đường dẫn (pathname) đơn thuần không tự chứng minh được chỉ một tiến trình bước vào vùng ghi nếu hai tiến trình cùng quan sát một khoá mồ côi `L0` nhưng tiến trình thứ hai gọi `rename` muộn sau khi tiến trình thứ nhất đã tạo khoá sống `L1`. Do đó, hệ thống đóng kín loại trừ tương hỗ cho thao tác GHI bằng **hai lớp kiểm tra danh tính inode (`ino`)** ở cả TypeScript và Python:
+     - **(a) Chủ khoá kiểm tra danh tính inode (`ownedIno`) trước MỖI lần ghi và trước khi giải phóng (F14a):**
+       + Tiến trình tạo tệp tạm `.approvals.lock.tmp-<pid>-<token>` chứa `{ pid, token, createdAt, bootId, hostname }`, gọi `fsync`, lấy `ownedIno = fstat(tmpFd).ino`, rồi xuất bản nguyên tử qua `link(tmpPath, lockPath)`.
+       + Ngay sau `link`, chủ khoá kiểm tra `stat(lockPath).ino === ownedIno`.
+       + **Ngay trước mỗi thao tác ghi vào sổ** (`decision`, `claim`, `execution` — kiểm tra cả trước `open` và ngay trước lệnh `write` trong `appendJsonlLineSafely` / `append_jsonl_safely`), chủ khoá gọi `verifyApprovalLockOwnership` / `verify_lock_ownership` để xác nhận `stat(lockPath).ino === ownedIno`. Nếu tệp khoá không còn tồn tại (`ENOENT`) hoặc `ino` đã khác `ownedIno` (khoá bị dịch chuyển), chủ khoá **lập tức huỷ bỏ thao tác ghi (0 byte ghi vào sổ)**, ném `ApprovalLockLostError` (`status: "lock_lost"`, thoát mã `2` ở CLI / trả HTTP `503` ở API).
+       + Khi giải phóng khoá trong `finally`, chủ khoá chỉ `rename(lockPath -> relPath)` + `unlink(relPath)` nếu `stat(lockPath).ino === ownedIno`.
+     - **(b) Người thu hồi kiểm tra danh tính inode (`observedIno`) trước và sau `rename`, trả lại ngay nếu lấy nhầm khoá sống (F14b, F16):**
+       + Khi kiểm tra `.approvals.lock` (`inspectLockStaleness` / `inspect_lock_staleness`), tiến trình kiểm tra `statBefore.ino === statAfter.ino` quanh lần đọc tệp:
+         * Nếu `hostname` trong khoá khác `hostname` của máy hiện tại $\rightarrow$ bảo thủ coi là **không mồ côi** (`isStale = false`) vì không thể kiểm tra `kill(pid, 0)` hay `bootId` xuyên máy (F16).
+         * Nếu cùng `hostname` và cả `lock.bootId` lẫn `currentBootId` đều xác định (`!== "unknown"`) và khác nhau $\rightarrow$ khoá mồ côi (`isStale = true`).
+         * Nếu `bootId` khớp hoặc bằng `"unknown"` và đọc được `pid` nguyên dương $\rightarrow$ khoá chỉ mồ côi khi `!isPidAlive(pid)` (bảo thủ: PID còn sống thì tuyệt đối không thu hồi).
+         * Chỉ khi không đọc được `pid` hợp lệ (tệp rỗng/hỏng) $\rightarrow$ khoá mồ côi khi tuổi `mtime > 30_000` ms.
+       + Khi phát hiện khoá mồ côi có `observedIno`, người thu hồi thực hiện:
+         1. `stat(lockPath)` ngay trước `rename`: nếu `ino !== observedIno` thì bỏ qua và thử lại vòng sau.
+         2. Gọi `rename(lockPath, staleTarget)` với `staleTarget = .approvals.lock.stale-<pid>-<ns>`.
+         3. Ngay sau khi `rename` thành công, gọi `stat(staleTarget)`:
+            - Nếu `staleIno === observedIno`: đúng là xác khoá mồ côi đã quan sát $\rightarrow$ `unlink(staleTarget)` và quay lại tạo khoá mới.
+            - Nếu `staleIno !== observedIno`: người thu hồi vừa dịch chuyển nhầm một khoá mới `L1` được tạo sau thời điểm quan sát $\rightarrow$ **lập tức gọi `rename(staleTarget, lockPath)` để hoàn trả khoá về chỗ cũ** (nếu tại `lockPath` đã kịp xuất hiện khoá khác thì giữ nguyên `staleTarget`, ghi cảnh báo `stderr`, không `unlink`, và thử lại từ đầu; còn chủ của `L1` nếu chạm vùng ghi trong khoảng cực ngắn đó cũng bị chặn đứng bởi lớp (a) `lock_lost`).
+       + Khi quét dọn các tệp phụ `.approvals.lock.tmp*`/`.stale-*`/`.rel-*` quá 10 phút (`sweepOldLockArtifacts` / `sweep_old_lock_artifacts`), hệ thống tách `<pid>` từ tên tệp và **không bao giờ xoá tệp nếu `isPidAlive(pid)` còn đúng** (F16).
+     - **(c) Kiểm tra deadline đơn điệu ở MỌI nhánh vòng lặp (`lock_timeout`) (F15):**
+       + Mọi nhánh trong vòng lặp chờ khoá đều kiểm tra đồng hồ đơn điệu (`process.hrtime.bigint()` trong TS / `time.monotonic()` trong Python) so với hạn chờ (mặc định `5s`) trước khi `continue`. Khi quá hạn, CLI in `{"status": "lock_timeout"}` và thoát mã `2`; API trả về HTTP `503` (`error: "lock_timeout"`).
+  7. **Ghi nối nguyên tử `O_APPEND` bảo vệ dòng của hook H1 & Bắt lỗi I/O toàn cục (F3, F10, F18):**
+     - Cả `appendJsonlLineSafely` (TS) và `append_jsonl_safely` (Python) đều xác minh `verifyApprovalLockOwnership` trước khi mở tệp và ngay trước lệnh `write`, mở tệp `.jsonl` với cờ `O_CREAT | O_RDWR | O_APPEND`, kiểm tra byte cuối để thêm `"\n"` nếu dòng trước bị cụt, và ghi bằng một lệnh `write` duy nhất kèm `fsync`.
+     - Mọi lỗi hệ thống tệp (`mkdir`, `open`, `write`, `fsync`, hết dung lượng, quyền truy cập) đều được bọc thành `ApprovalIoError` (`status: "io_error"`, `reason: "<mã errno>"`).
 
 ### 5.3. Hợp Đồng CLI Python Cho Hook H4/H5
-Tiêu thụ duyệt một lần (`claim`) chỉ thực hiện qua `approval_check.py --consume` (hook H4):
+Tiêu thụ duyệt một lần (`claim`) chỉ thực hiện qua `approval_check.py --consume` (hook H4). Cả `approval_check.py` và `approval_mark.py` đều chạy dưới lớp bắt lỗi ngoài cùng `run_cli_with_error_boundary`: mọi lỗi khoá, lỗi đọc sổ, hoặc lỗi I/O đều in một dòng JSON hợp lệ ra `stdout` và thoát mã `2` (không bao giờ in traceback thô hay thoát mã `1` vì lỗi I/O):
 
 1. **Kiểm tra và giữ chỗ nguyên tử trước khi thực thi (`operations/scripts/approval_check.py`):**
    ```bash
@@ -266,33 +286,36 @@ Tiêu thụ duyệt một lần (`claim`) chỉ thực hiện qua `approval_chec
    python3 operations/scripts/approval_check.py --seat <slug> --tool <tool> --sha256 <hex> [--request-id <id>]
    ```
    - Khi yêu cầu mới nhất của `(seat, tool, sha256)` đang `approved`, đã tới giờ hiệu lực (`now >= decision.at`), còn hạn (`now < decision.expiresAt`), chưa có `claim` và chưa có `execution`:
-     - Nếu có `--consume`: ghi nguyên tử dòng `claim` dưới khoá `.approvals.lock`, trả về `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>", "claimId": "<claimId>"}` và thoát mã `0`. Khi hai tiến trình chạy song song, **chỉ đúng một tiến trình thoát `0`**, tiến trình còn lại nhận `status: "claimed"` và thoát mã `2`.
+     - Nếu có `--consume`: kiểm tra `verify_lock_ownership()`, ghi nguyên tử dòng `claim` dưới khoá `.approvals.lock`, trả về `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>", "claimId": "<claimId>"}` và thoát mã `0`. Khi hai tiến trình chạy song song, **chỉ đúng một tiến trình thoát `0`**, tiến trình còn lại nhận `status: "claimed"` và thoát mã `2`.
      - Nếu không có `--consume`: in ra `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>"}` và thoát mã `0`.
    - Nếu `--request-id` trỏ tới yêu cầu cũ hơn của cùng `(seat, tool)`: trả `{"requestId": "<id>", "status": "superseded"}` và thoát mã `2` (0 dòng ghi).
    - Nếu `now < decision.at`: trả `{"requestId": "<id>", "status": "not_yet_valid"}` và thoát mã `2` (0 dòng ghi).
    - Nếu mã băm `--sha256` không khớp với yêu cầu: trả `{"requestId": "<id>", "status": "digest_mismatch"}` và thoát mã `2` (0 dòng ghi).
    - Nếu quá hạn chờ khoá `.approvals.lock` (5s): trả `{"status": "lock_timeout"}` và thoát mã `2`.
+   - Nếu danh tính inode của `.approvals.lock` bị mất trước khi ghi: trả `{"status": "lock_lost"}` và thoát mã `2` (0 dòng ghi).
+   - Nếu bất kỳ tệp `.jsonl` hoặc thư mục sổ không đọc được: trả `{"status": "ledger_unreadable", "file": "<tên tệp>", "reason": "<mã errno>"}` và thoát mã `2` (0 dòng ghi).
+   - Nếu gặp lỗi I/O hệ thống tệp (`mkdir`, `open`, `write`, quyền truy cập): trả `{"status": "io_error", "reason": "<mã errno>"}` và thoát mã `2`.
    - Mọi trường hợp khác (`pending`, `denied`, `expired`, `claimed`, `executed`, `failed`, `not_found`): in ra JSON `{"status": "<lý do>", ...}` và thoát mã `2`.
 
 2. **Đánh dấu kết quả sau khi thực thi (`operations/scripts/approval_mark.py` & `recordApprovalExecution`):**
    ```bash
    python3 operations/scripts/approval_mark.py --request-id <id> --result <executed|failed> [--claim-id <claimId>] [--run-id <runId>]
    ```
-   - Chỉ ghi dòng `execution` khi `requestId` có `decision: "approved"` hợp lệ, `now >= decision.at` và chưa hết hạn (hoặc có `claim` hợp lệ khớp `--claim-id`).
-   - Nếu yêu cầu đang `pending`, `denied`, `not_yet_valid`, `expired`, `already_executed`, hoặc `claim_mismatch`, script thoát mã `2` (hoặc ném `Error` khi gọi `recordApprovalExecution({ ..., throwOnError: true })` trong TS) và **ghi `0` byte vào sổ**.
+   - Chỉ ghi dòng `execution` khi `requestId` có `decision: "approved"` hợp lệ, `now >= decision.at` và chưa hết hạn (hoặc có `claim` hợp lệ khớp `--claim-id`), và khoá `.approvals.lock` vẫn thuộc đúng inode của chủ khoá.
+   - Nếu yêu cầu đang `pending`, `denied`, `not_yet_valid`, `expired`, `already_executed`, `claim_mismatch`, hoặc gặp `lock_timeout` / `lock_lost` / `ledger_unreadable` / `io_error`, script in JSON tương ứng, thoát mã `2` và **ghi `0` byte vào sổ**.
    - **Idempotent:** Nếu gọi lại với cùng `requestId`, cùng `result` và khớp `claimId`, script trả về `{"requestId": "<id>", "status": "<result>", "idempotent": true}` và thoát mã `0` mà không ghi trùng dòng thứ hai.
 
 ### 5.4. API, Quy Tắc Xác Thực (F13) & Giao Diện `/settings`
-- `GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50`: trả danh sách yêu cầu đã qua whitelist kèm tổng số bản ghi khớp.
+- `GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50`: trả danh sách yêu cầu đã qua whitelist kèm tổng số bản ghi khớp. Nếu sổ không đọc được (`ledger_unreadable`) hoặc gặp lỗi I/O (`io_error`), trả về HTTP `503` với thông điệp chung an toàn (không lộ đường dẫn tệp hay thông điệp lỗi thô của hệ thống).
 - `POST /api/approvals/<requestId>/decision`:
   - **Quy tắc xác thực (F7, F13):**
     + Khi `PHONGBAN_USER` và `PHONGBAN_PASS` đã được cấu hình trên máy chủ: **bắt buộc xác thực HTTP Basic Auth trên mọi yêu cầu, kể cả khi `Host` là `localhost` hoặc `127.0.0.1`**. Tên đăng nhập và mật khẩu được đối chiếu thời gian hằng (`crypto.timingSafeEqual` trên SHA-256 digest). Thiếu header `Authorization` hoặc sai thông tin đăng nhập đều trả về HTTP `401 Unauthorized`; khi khớp thông tin đăng nhập thì ghi nhận `by: "owner"`.
     + Chỉ khi `PHONGBAN_USER` / `PHONGBAN_PASS` **chưa được cấu hình** (môi trường phát triển nội bộ): yêu cầu có header `Host` khớp loopback thực sự (`localhost`, `127.0.0.1`, `[::1]`; header `Host` rỗng bị từ chối `false`) mới được chấp nhận với `by: "localhost"` (không bao giờ là `"owner"`), còn yêu cầu từ tên miền khác hoặc thiếu `Host` bị từ chối với HTTP `503`.
     + > **CẢNH BÁO VẬN HÀNH:** Nếu chưa cấu hình `PHONGBAN_USER`/`PHONGBAN_PASS` mà máy chủ bám `0.0.0.0` hoặc đứng sau reverse proxy không lọc `Host`, bất kỳ client nào gửi header `Host: localhost` cũng có thể duyệt yêu cầu — bắt buộc luôn cấu hình `PHONGBAN_USER`/`PHONGBAN_PASS` trên mọi máy có kết nối mạng.
-  - Chỉ nhận `{"decision": "approved" | "denied", "note"?: string}`; trả `400` (0 dòng ghi sổ) nếu `decision` sai, `note: null`, `note` không phải chuỗi, hoặc `note` vượt quá 200 điểm mã Unicode; trả `404` nếu `requestId` không tồn tại; trả `409` nếu `requestId` đã được quyết định trước đó; trả `503` (`lock_timeout`) nếu khoá sổ đang bận quá hạn.
+  - Chỉ nhận `{"decision": "approved" | "denied", "note"?: string}`; trả `400` (0 dòng ghi sổ) nếu `decision` sai, `note: null`, `note` không phải chuỗi, hoặc `note` vượt quá 200 điểm mã Unicode; trả `404` nếu `requestId` không tồn tại; trả `409` nếu `requestId` đã được quyết định trước đó; trả `503` (`lock_timeout`, `lock_lost`, `ledger_unreadable`, `io_error`) với thông điệp chung an toàn nếu khoá sổ đang bận, mất quyền khoá, sổ không đọc được, hoặc gặp lỗi I/O (tuyệt đối không lộ đường dẫn tệp nội bộ hay `err.message` thô).
 - Giao diện `/settings` hiển thị thẻ **Approvals** hoàn toàn bằng tiếng Anh gồm hai khu vực: **Pending Requests** (hiển thị `seat`, `tool`, `host`, `head60`, `reason` đã ánh xạ sang tiếng Anh, tuổi, nút `Approve` / `Deny`) và **Decided Ledger** (hiển thị trạng thái thật suy từ sổ kèm `requestId`).
 
 ### 5.5. Công Tắc Đối Chứng Dương, Giới Hạn Đã Biết & Cách Dọn Sổ Thử Nghiệm
 - **Công tắc đối chứng dương (`AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1`):** Dùng để chứng minh hiệu lực của khoá `.approvals.lock` trong Ca 15 (khi bật biến này ở môi trường test, hai tiến trình `approval_check.py --consume` chạy song song sẽ cùng thoát `0` và làm Ca 15 ĐỎ; khi để mặc định thì đúng 1 tiến trình thoát `0`, 1 tiến trình thoát `2` và Ca 15 XANH). Công tắc này luôn bị vô hiệu hoá hoàn toàn khi `NODE_ENV === 'production'`.
-- **Giới hạn cách ly người dùng hệ điều hành:** Các ghế hiện chạy dưới cùng tài khoản người dùng hệ điều hành với máy chủ, nên tệp JSONL trên đĩa chưa tách quyền ghi ở tầng OS kernel; việc chặn ghế tự ghi trực tiếp vào thư mục sổ thuộc phạm vi các hook bảo vệ của PCN (H4/H5). Ở tầng ứng dụng, sổ tuân thủ nghiêm ngặt cơ chế khoá `.approvals.lock`, ghi nối nguyên tử `O_APPEND`, kiểm tra ranh giới dòng JSONL và whitelist trường.
+- **Giới hạn cách ly người dùng hệ điều hành:** Các ghế hiện chạy dưới cùng tài khoản người dùng hệ điều hành với máy chủ, nên tệp JSONL trên đĩa chưa tách quyền ghi ở tầng OS kernel; việc chặn ghế tự ghi trực tiếp vào thư mục sổ thuộc phạm vi các hook bảo vệ của PCN (H4/H5). Ở tầng ứng dụng, sổ tuân thủ nghiêm ngặt cơ chế khoá `.approvals.lock`, kiểm tra danh tính inode hai chiều, ghi nối nguyên tử `O_APPEND`, kiểm tra ranh giới dòng JSONL và whitelist trường.
 - **Cách xoá sổ thử nghiệm:** Các ca kiểm thử luôn đặt biến môi trường `AIBOSS_DATA_DIR` trỏ vào thư mục tạm trong `/tmp/aiboss-test-approvals-*` và tự dọn sạch bằng `fs.rmSync(testDataDir, { recursive: true, force: true })` trong khối `finally`. Không bao giờ xoá hoặc ghi thử vào `operations/data/approvals/` của máy chủ đang vận hành.

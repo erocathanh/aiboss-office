@@ -26,12 +26,87 @@ ISO_ASCII_RE = re.compile(
 )
 HEX16_RE = re.compile(r"^[0-9a-f]{16}$")
 HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{16,128}$")
+LOCK_ARTIFACT_PID_RE = re.compile(
+    r"^\.approvals\.lock\.(?:tmp|stale|rel)-([0-9]+)(?:-|$)"
+)
 STALE_UNMEASURABLE_LOCK_MS = 30000
 STALE_LOCK_ARTIFACT_SWEEP_MS = 10 * 60000
 MIN_VALID_UTC_MS = 0
 MAX_VALID_UTC_MS = 253402300799999
 
 _CACHED_BOOT_ID: Optional[str] = None
+_ACTIVE_LOCK_INO: Optional[int] = None
+_ACTIVE_LOCK_PATH: Optional[str] = None
+_ACTIVE_REQUEST_ID: Optional[str] = None
+
+
+class ApprovalLockTimeoutError(Exception):
+    def __init__(self, lock_path: str, request_id: Optional[str] = None) -> None:
+        super().__init__(f"Timed out acquiring approval lock {lock_path}")
+        self.code = "lock_timeout"
+        self.status = "lock_timeout"
+        self.lock_path = lock_path
+        self.request_id = request_id
+
+
+class ApprovalLockLostError(Exception):
+    def __init__(self, lock_path: str, request_id: Optional[str] = None) -> None:
+        super().__init__(f"Approval lock ownership lost on {lock_path}")
+        self.code = "lock_lost"
+        self.status = "lock_lost"
+        self.lock_path = lock_path
+        self.request_id = request_id
+
+
+class ApprovalLedgerUnreadableError(Exception):
+    def __init__(
+        self,
+        file_path: str,
+        reason: str = "EIO",
+        request_id: Optional[str] = None,
+    ) -> None:
+        super().__init__(f"Approval ledger unreadable: {file_path} ({reason})")
+        self.code = "ledger_unreadable"
+        self.status = "ledger_unreadable"
+        self.file = os.path.basename(file_path) or file_path
+        self.file_path = file_path
+        self.reason = reason
+        self.request_id = request_id
+
+
+class ApprovalIoError(Exception):
+    def __init__(
+        self,
+        reason: str = "EIO",
+        request_id: Optional[str] = None,
+        detail: str = "",
+    ) -> None:
+        super().__init__(
+            f"Approval I/O error ({reason}){': ' + detail if detail else ''}"
+        )
+        self.code = "io_error"
+        self.status = "io_error"
+        self.reason = reason
+        self.request_id = request_id
+
+
+def _errno_name(exc: BaseException) -> str:
+    if isinstance(exc, OSError) and exc.errno is not None:
+        return errno.errorcode.get(exc.errno, str(exc.errno))
+    if isinstance(exc, PermissionError):
+        return "EACCES"
+    if isinstance(exc, FileNotFoundError):
+        return "ENOENT"
+    return "EIO"
+
+
+def _reject_json_constant(val: str) -> Any:
+    raise ValueError(f"Non-standard JSON constant rejected: {val}")
+
+
+def strict_json_loads(s: str) -> Any:
+    """Parse JSON strictly according to RFC 8259, rejecting NaN/Infinity/-Infinity to match JS JSON.parse (F2)."""
+    return json.loads(s, parse_constant=_reject_json_constant)
 
 
 def strip_ascii(s: str) -> str:
@@ -63,10 +138,11 @@ def find_office_root(start_dir: Optional[str] = None) -> str:
     if os.path.isfile(os.path.join(candidate, "config", "office.json")):
         return candidate
 
-    sys.stderr.write(
-        f"[approval_check] Could not locate AIBOSS Office root from '{start}'\n"
+    raise ApprovalIoError(
+        "ENOENT",
+        _ACTIVE_REQUEST_ID,
+        f"Could not locate AIBOSS Office root from '{start}'",
     )
-    sys.exit(2)
 
 
 def get_approvals_dir() -> str:
@@ -240,16 +316,36 @@ def is_lock_disabled_for_test() -> bool:
 
 
 def inspect_lock_staleness(lock_path: str, now_ms: int) -> Optional[Dict[str, Any]]:
-    """Unified stale lock inspection matching TypeScript `inspectLockStaleness` (F1b, F16)."""
+    """Unified stale lock inspection matching TypeScript `inspectLockStaleness` (F1b, F14b, F16)."""
     try:
-        st = os.stat(lock_path)
+        st_before = os.stat(lock_path)
         with open(lock_path, "r", encoding="utf-8") as fh:
             raw = fh.read()
+        st_after = os.stat(lock_path)
+        if st_before.st_ino != st_after.st_ino:
+            return None
         trimmed = strip_ascii(raw)
         if trimmed:
             try:
-                parsed = json.loads(trimmed)
+                parsed = strict_json_loads(trimmed)
                 if isinstance(parsed, dict):
+                    current_hostname = strip_ascii(socket.gethostname())
+                    raw_hostname = parsed.get("hostname")
+                    lock_hostname = (
+                        strip_ascii(raw_hostname)
+                        if isinstance(raw_hostname, str)
+                        else ""
+                    )
+                    if (
+                        lock_hostname
+                        and current_hostname
+                        and lock_hostname != current_hostname
+                    ):
+                        return {
+                            "is_stale": False,
+                            "ino": st_after.st_ino,
+                            "raw": raw,
+                        }
                     current_boot_id = get_system_boot_id()
                     raw_boot_id = parsed.get("bootId")
                     lock_boot_id = (
@@ -265,7 +361,7 @@ def inspect_lock_staleness(lock_path: str, now_ms: int) -> Optional[Dict[str, An
                     ):
                         return {
                             "is_stale": True,
-                            "ino": st.st_ino,
+                            "ino": st_after.st_ino,
                             "raw": raw,
                         }
                     holder_pid = parsed.get("pid")
@@ -276,15 +372,15 @@ def inspect_lock_staleness(lock_path: str, now_ms: int) -> Optional[Dict[str, An
                     ):
                         return {
                             "is_stale": not is_pid_alive(holder_pid),
-                            "ino": st.st_ino,
+                            "ino": st_after.st_ino,
                             "raw": raw,
                         }
             except Exception:
                 pass
-        age_ms = now_ms - int(st.st_mtime * 1000)
+        age_ms = now_ms - int(st_after.st_mtime * 1000)
         return {
             "is_stale": age_ms > STALE_UNMEASURABLE_LOCK_MS,
-            "ino": st.st_ino,
+            "ino": st_after.st_ino,
             "raw": raw,
         }
     except OSError:
@@ -299,7 +395,7 @@ def is_lock_file_stale(lock_path: str, now_ms: Optional[int] = None) -> bool:
 
 
 def sweep_old_lock_artifacts(approvals_dir: str, now_ms: int) -> None:
-    """Best-effort sweep of leftover `.approvals.lock.tmp*`/`.stale-*`/`.rel-*` files > 10 minutes old (F16)."""
+    """Best-effort sweep of leftover `.approvals.lock.tmp*`/`.stale-*`/`.rel-*` files > 10 minutes old when PID is dead (F16)."""
     try:
         inspected = 0
         for name in os.listdir(approvals_dir):
@@ -312,6 +408,14 @@ def sweep_old_lock_artifacts(approvals_dir: str, now_ms: int) -> None:
             inspected += 1
             if inspected > 32:
                 break
+            m = LOCK_ARTIFACT_PID_RE.match(name)
+            if m:
+                try:
+                    artifact_pid = int(m.group(1))
+                    if artifact_pid > 0 and is_pid_alive(artifact_pid):
+                        continue
+                except ValueError:
+                    pass
             full_path = os.path.join(approvals_dir, name)
             try:
                 st = os.stat(full_path)
@@ -323,15 +427,27 @@ def sweep_old_lock_artifacts(approvals_dir: str, now_ms: int) -> None:
         pass
 
 
-def emit_lock_timeout_and_exit(
-    lock_path: str, request_id: Optional[str] = None
+def verify_lock_ownership(
+    lock_path: Optional[str] = None,
+    request_id: Optional[str] = None,
 ) -> None:
-    out_to: Dict[str, Any] = {"status": "lock_timeout"}
-    if request_id:
-        out_to["requestId"] = request_id
-    print(json.dumps(out_to), flush=True)
-    sys.stderr.write(f"[approval_check] Timed out acquiring lock {lock_path}\n")
-    sys.exit(2)
+    """Verify active lock inode ownership before every ledger write (F14a)."""
+    if is_lock_disabled_for_test():
+        return
+    target_lock = lock_path or _ACTIVE_LOCK_PATH or os.path.join(
+        get_approvals_dir(), ".approvals.lock"
+    )
+    req_id = request_id or _ACTIVE_REQUEST_ID
+    if _ACTIVE_LOCK_INO is None:
+        raise ApprovalLockLostError(target_lock, req_id)
+    try:
+        st = os.stat(target_lock)
+        if st.st_ino != _ACTIVE_LOCK_INO:
+            raise ApprovalLockLostError(target_lock, req_id)
+    except ApprovalLockLostError:
+        raise
+    except OSError as exc:
+        raise ApprovalLockLostError(target_lock, req_id) from exc
 
 
 @contextmanager
@@ -340,18 +456,33 @@ def with_approval_lock(
     timeout_sec: float = 5.0,
     request_id: Optional[str] = None,
 ) -> Iterator[None]:
-    """Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b, F14, F15, F16).
+    """Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b, F14a/b, F15, F16, F18).
 
-    - (a) Publishes `{ pid, token, createdAt, bootId, hostname }` via `os.link(tmp_path, lock_path)`.
-    - (b) Reclaims stale lock via single atomic `os.rename(lock_path, stale_target)` without `.approvals.reclaim.lock`.
-          Only the single winner unlinks `stale_target`; any loser whose `rename` raises `OSError` sleeps 20-50ms and retries.
-    - (c) Every loop branch checks `time.monotonic() >= deadline` before `continue` and exits 2 with `{"status": "lock_timeout"}`.
+    - (a) Publishes `{ pid, token, createdAt, bootId, hostname }` via `os.link(tmp_path, lock_path)` and records `owned_ino`.
+          Verifies `stat(lock_path).st_ino == owned_ino` immediately after link, before every ledger write (`verify_lock_ownership`),
+          and before releasing `.approvals.lock`. Mismatch or `ENOENT` raises `ApprovalLockLostError` (`lock_lost`).
+    - (b) Reclaimer records `observed_ino` from `inspect_lock_staleness`, verifies `stat(lock_path).st_ino == observed_ino`
+          immediately before `os.rename(lock_path, stale_target)`, and verifies `stat(stale_target).st_ino == observed_ino`
+          immediately after `rename`. If `stale_ino != observed_ino`, immediately restores `os.rename(stale_target, lock_path)`
+          and retries without unlinking.
+    - (c) Every loop branch checks `time.monotonic() >= deadline` before `continue` and raises `ApprovalLockTimeoutError`.
     """
+    global _ACTIVE_LOCK_INO, _ACTIVE_LOCK_PATH, _ACTIVE_REQUEST_ID
     if is_lock_disabled_for_test():
         yield
         return
 
-    os.makedirs(approvals_dir, exist_ok=True)
+    prev_ino = _ACTIVE_LOCK_INO
+    prev_lock_path = _ACTIVE_LOCK_PATH
+    prev_req_id = _ACTIVE_REQUEST_ID
+    if request_id is not None:
+        _ACTIVE_REQUEST_ID = request_id
+
+    try:
+        os.makedirs(approvals_dir, exist_ok=True)
+    except OSError as exc:
+        raise ApprovalIoError(_errno_name(exc), request_id, str(exc)) from exc
+
     now_start_ms = current_utc_ms()
     sweep_old_lock_artifacts(approvals_dir, now_start_ms)
 
@@ -369,12 +500,21 @@ def with_approval_lock(
             "hostname": socket.gethostname(),
         }
     ).encode("utf-8")
-    tmp_fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    owned_ino: Optional[int] = None
     try:
-        os.write(tmp_fd, payload)
-        os.fsync(tmp_fd)
-    finally:
-        os.close(tmp_fd)
+        tmp_fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            os.write(tmp_fd, payload)
+            os.fsync(tmp_fd)
+            owned_ino = os.fstat(tmp_fd).st_ino
+        finally:
+            os.close(tmp_fd)
+    except OSError as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise ApprovalIoError(_errno_name(exc), request_id, str(exc)) from exc
 
     acquired = False
     try:
@@ -385,43 +525,78 @@ def with_approval_lock(
                 break
             except OSError as exc:
                 if exc.errno != errno.EEXIST:
-                    raise
+                    raise ApprovalIoError(
+                        _errno_name(exc), request_id, str(exc)
+                    ) from exc
                 if time.monotonic() >= deadline:
-                    emit_lock_timeout_and_exit(lock_path, request_id)
+                    raise ApprovalLockTimeoutError(lock_path, request_id) from exc
 
                 inspection = inspect_lock_staleness(lock_path, current_utc_ms())
                 if inspection and inspection["is_stale"]:
-                    stale_target = f"{lock_path}.stale-{os.getpid()}-{time.time_ns()}"
-                    renamed = False
+                    observed_ino = inspection["ino"]
+                    before_match = False
                     try:
-                        os.rename(lock_path, stale_target)
-                        renamed = True
+                        st_before_rename = os.stat(lock_path)
+                        before_match = st_before_rename.st_ino == observed_ino
                     except OSError:
-                        renamed = False
+                        before_match = False
 
-                    if renamed:
+                    if before_match:
+                        stale_target = (
+                            f"{lock_path}.stale-{os.getpid()}-{time.time_ns()}"
+                        )
+                        renamed = False
                         try:
-                            os.unlink(stale_target)
+                            os.rename(lock_path, stale_target)
+                            renamed = True
                         except OSError:
-                            pass
-                        if time.monotonic() >= deadline:
-                            emit_lock_timeout_and_exit(lock_path, request_id)
-                        continue
+                            renamed = False
+
+                        if renamed:
+                            stale_ino: Optional[int] = None
+                            try:
+                                stale_ino = os.stat(stale_target).st_ino
+                            except OSError:
+                                stale_ino = None
+
+                            if stale_ino is not None and stale_ino == observed_ino:
+                                try:
+                                    os.unlink(stale_target)
+                                except OSError:
+                                    pass
+                                if time.monotonic() >= deadline:
+                                    raise ApprovalLockTimeoutError(
+                                        lock_path, request_id
+                                    )
+                                continue
+
+                            # F14b: Reclaimed a newer live lock whose inode differs from observed_ino -> restore immediately
+                            try:
+                                if os.path.exists(lock_path):
+                                    sys.stderr.write(
+                                        f"[approval_check] Lock reclaim race detected (observed ino={observed_ino}, renamed ino={stale_ino}); new lock exists at {lock_path}, leaving {stale_target}\n"
+                                    )
+                                else:
+                                    os.rename(stale_target, lock_path)
+                            except OSError as restore_exc:
+                                sys.stderr.write(
+                                    f"[approval_check] Failed to restore mis-reclaimed lock {stale_target} -> {lock_path}: {restore_exc}\n"
+                                )
 
                     rem = deadline - time.monotonic()
                     if rem <= 0:
-                        emit_lock_timeout_and_exit(lock_path, request_id)
+                        raise ApprovalLockTimeoutError(lock_path, request_id)
                     time.sleep(min(0.03, max(0.001, rem)))
                     if time.monotonic() >= deadline:
-                        emit_lock_timeout_and_exit(lock_path, request_id)
+                        raise ApprovalLockTimeoutError(lock_path, request_id)
                     continue
 
                 rem = deadline - time.monotonic()
                 if rem <= 0:
-                    emit_lock_timeout_and_exit(lock_path, request_id)
+                    raise ApprovalLockTimeoutError(lock_path, request_id)
                 time.sleep(min(0.025, max(0.001, rem)))
                 if time.monotonic() >= deadline:
-                    emit_lock_timeout_and_exit(lock_path, request_id)
+                    raise ApprovalLockTimeoutError(lock_path, request_id)
     finally:
         try:
             os.unlink(tmp_path)
@@ -429,49 +604,85 @@ def with_approval_lock(
             pass
 
     try:
+        st_verify = os.stat(lock_path)
+        if owned_ino is None or st_verify.st_ino != owned_ino:
+            raise ApprovalLockLostError(lock_path, request_id)
+    except ApprovalLockLostError:
+        raise
+    except OSError as exc:
+        raise ApprovalLockLostError(lock_path, request_id) from exc
+
+    _ACTIVE_LOCK_INO = owned_ino
+    _ACTIVE_LOCK_PATH = lock_path
+    try:
         yield
     finally:
-        if acquired:
+        _ACTIVE_LOCK_INO = prev_ino
+        _ACTIVE_LOCK_PATH = prev_lock_path
+        _ACTIVE_REQUEST_ID = prev_req_id
+        if acquired and owned_ino is not None:
             try:
-                with open(lock_path, "r", encoding="utf-8") as fh:
-                    current_raw = strip_ascii(fh.read())
-                if current_raw:
-                    current_obj = json.loads(current_raw)
-                    if isinstance(current_obj, dict) and current_obj.get("token") == token:
-                        rel_path = f"{lock_path}.rel-{os.getpid()}-{token}"
-                        try:
-                            os.rename(lock_path, rel_path)
-                            os.unlink(rel_path)
-                        except OSError:
-                            pass
-            except Exception:
+                st_rel = os.stat(lock_path)
+                if st_rel.st_ino == owned_ino:
+                    rel_path = f"{lock_path}.rel-{os.getpid()}-{token}"
+                    try:
+                        os.rename(lock_path, rel_path)
+                        os.unlink(rel_path)
+                    except OSError:
+                        pass
+            except OSError:
                 pass
 
 
 def append_jsonl_safely(file_path: str, record: Dict[str, Any]) -> None:
-    """Atomic O_APPEND write with newline boundary check under lock (F3, F10)."""
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    fd = os.open(file_path, os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o644)
+    """Atomic O_APPEND write with newline boundary check and lock ownership verification (F3, F10, F14a, F18)."""
+    verify_lock_ownership()
     try:
-        st = os.fstat(fd)
-        prefix = ""
-        if st.st_size > 0:
-            last_byte = os.pread(fd, 1, st.st_size - 1)
-            if last_byte != b"\n":
-                prefix = "\n"
-        line_bytes = (prefix + json.dumps(record, ensure_ascii=False) + "\n").encode(
-            "utf-8"
-        )
-        os.write(fd, line_bytes)
-        os.fsync(fd)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        fd = os.open(file_path, os.O_CREAT | os.O_RDWR | os.O_APPEND, 0o644)
+    except OSError as exc:
+        raise ApprovalIoError(
+            _errno_name(exc), _ACTIVE_REQUEST_ID, str(exc)
+        ) from exc
+    try:
+        try:
+            st = os.fstat(fd)
+            prefix = ""
+            if st.st_size > 0:
+                last_byte = os.pread(fd, 1, st.st_size - 1)
+                if last_byte != b"\n":
+                    prefix = "\n"
+            line_bytes = (
+                prefix + json.dumps(record, ensure_ascii=False) + "\n"
+            ).encode("utf-8")
+        except OSError as exc:
+            raise ApprovalIoError(
+                _errno_name(exc), _ACTIVE_REQUEST_ID, str(exc)
+            ) from exc
+        verify_lock_ownership()
+        try:
+            os.write(fd, line_bytes)
+            os.fsync(fd)
+        except OSError as exc:
+            raise ApprovalIoError(
+                _errno_name(exc), _ACTIVE_REQUEST_ID, str(exc)
+            ) from exc
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def resolve_target_file(
     approvals_dir: str, source_file: Optional[str], now_utc: datetime
 ) -> str:
-    os.makedirs(approvals_dir, exist_ok=True)
+    try:
+        os.makedirs(approvals_dir, exist_ok=True)
+    except OSError as exc:
+        raise ApprovalIoError(
+            _errno_name(exc), _ACTIVE_REQUEST_ID, str(exc)
+        ) from exc
     today_str = now_utc.strftime("%Y-%m-%d")
     yesterday_str = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d")
     today_path = os.path.join(approvals_dir, f"{today_str}.jsonl")
@@ -488,265 +699,270 @@ def resolve_target_file(
 
 
 def list_ledger_files(approvals_dir: str, now_utc: datetime) -> List[str]:
-    if not os.path.isdir(approvals_dir):
+    """List `.jsonl` ledger files in `approvals_dir`; fail-closed on any directory read error other than ENOENT (F17)."""
+    try:
+        dir_entries = os.listdir(approvals_dir)
+    except FileNotFoundError:
         return []
-    today_name = now_utc.strftime("%Y-%m-%d") + ".jsonl"
-    yesterday_name = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d") + ".jsonl"
+    except OSError as exc:
+        raise ApprovalLedgerUnreadableError(
+            approvals_dir, _errno_name(exc), _ACTIVE_REQUEST_ID
+        ) from exc
 
-    all_jsonl = sorted(
-        f for f in os.listdir(approvals_dir) if f.endswith(".jsonl")
-    )
-    ordered: List[str] = [os.path.join(approvals_dir, f) for f in all_jsonl]
-
-    for priority_name in (yesterday_name, today_name):
-        p = os.path.join(approvals_dir, priority_name)
-        if os.path.isfile(p) and p not in ordered:
-            ordered.append(p)
-    return ordered
+    all_jsonl = sorted(f for f in dir_entries if f.endswith(".jsonl"))
+    return [os.path.join(approvals_dir, f) for f in all_jsonl]
 
 
 def load_folded_ledger(
     approvals_dir: str, now_utc: datetime
 ) -> Dict[str, Dict[str, Any]]:
-    """Fold approval ledger with unified transition and strict type validation matching TypeScript `foldApprovalLedger` (F1, F2, F5, F11)."""
+    """Fold approval ledger with unified transition, strict JSON/LF parsing, and fail-closed file reading matching TypeScript `foldApprovalLedger` (F1, F2, F5, F11, F17)."""
     files = list_ledger_files(approvals_dir, now_utc)
     entries: Dict[str, Dict[str, Any]] = {}
     order_counter = 0
 
     for file_path in files:
         try:
-            with open(file_path, "r", encoding="utf-8") as fh:
-                for raw_line in fh:
-                    line = strip_ascii(raw_line)
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        continue
-                    if not isinstance(obj, dict):
-                        continue
+            with open(file_path, "rb") as fh:
+                raw_bytes = fh.read()
+        except OSError as exc:
+            raise ApprovalLedgerUnreadableError(
+                file_path, _errno_name(exc), _ACTIVE_REQUEST_ID
+            ) from exc
 
-                    has_type_key = "type" in obj
-                    rec_type = obj.get("type")
-                    if (not has_type_key) or rec_type == "request":
-                        raw_ts = obj.get("ts")
-                        raw_seat = obj.get("seat")
-                        raw_tool = obj.get("tool")
-                        raw_sha = obj.get("sha256")
-                        if (
-                            not isinstance(raw_ts, str)
-                            or not isinstance(raw_seat, str)
-                            or not isinstance(raw_tool, str)
-                            or not isinstance(raw_sha, str)
-                        ):
-                            continue
-                        ts = strip_ascii(raw_ts)
-                        seat = strip_ascii(raw_seat)
-                        tool = strip_ascii(raw_tool)
-                        sha256_val = strip_ascii(raw_sha).lower()
-                        if (
-                            not ts
-                            or not seat
-                            or not tool
-                            or not HEX_DIGEST_RE.match(sha256_val)
-                        ):
-                            continue
-                        ts_ms = parse_strict_iso_ms(ts)
-                        if ts_ms is None:
-                            continue
-                        order_counter += 1
-                        req_id = compute_request_id(ts, seat, tool, sha256_val)
-                        if req_id not in entries:
-                            entries[req_id] = {
-                                "requestId": req_id,
-                                "ts": ts,
-                                "ts_ms": ts_ms,
-                                "order_index": order_counter,
-                                "seat": seat,
-                                "tool": tool,
-                                "sha256": sha256_val,
-                                "source_file": file_path,
-                                "decision": None,
-                                "claim": None,
-                                "execution": None,
-                            }
-                    elif rec_type == "decision":
-                        raw_req_id = obj.get("requestId")
-                        dec_val = obj.get("decision")
-                        by_val = obj.get("by")
-                        raw_at = obj.get("at")
-                        raw_exp = obj.get("expiresAt")
-                        if (
-                            not isinstance(raw_req_id, str)
-                            or not isinstance(raw_at, str)
-                            or not isinstance(raw_exp, str)
-                        ):
-                            continue
-                        req_id = strip_ascii(raw_req_id).lower()
-                        at_val = strip_ascii(raw_at)
-                        exp_val = strip_ascii(raw_exp)
-                        if (
-                            not HEX16_RE.match(req_id)
-                            or dec_val not in ("approved", "denied")
-                            or by_val not in ("owner", "localhost")
-                        ):
-                            continue
-                        if "note" in obj:
-                            note_val = obj.get("note")
-                            if not isinstance(note_val, str) or len(note_val) > 200:
-                                continue
-                        at_ms = parse_strict_iso_ms(at_val)
-                        exp_ms = parse_strict_iso_ms(exp_val)
-                        if at_ms is None or exp_ms is None:
-                            continue
-                        order_counter += 1
-                        if req_id not in entries or entries[req_id]["decision"] is not None:
-                            continue
-                        entries[req_id]["decision"] = {
-                            "decision": dec_val,
-                            "by": by_val,
-                            "at": at_val,
-                            "at_ms": at_ms,
-                            "expiresAt": exp_val,
-                            "exp_ms": exp_ms,
-                        }
-                    elif rec_type == "claim":
-                        raw_req_id = obj.get("requestId")
-                        raw_claim_id = obj.get("claimId")
-                        raw_at = obj.get("at")
-                        if (
-                            not isinstance(raw_req_id, str)
-                            or not isinstance(raw_claim_id, str)
-                            or not isinstance(raw_at, str)
-                        ):
-                            continue
-                        if "seatId" in obj and not isinstance(obj.get("seatId"), str):
-                            continue
-                        if "tool" in obj and not isinstance(obj.get("tool"), str):
-                            continue
-                        if "digest" in obj and not isinstance(obj.get("digest"), str):
-                            continue
-                        req_id = strip_ascii(raw_req_id).lower()
-                        claim_id = strip_ascii(raw_claim_id)
-                        seat_id = (
-                            strip_ascii(obj["seatId"])
-                            if isinstance(obj.get("seatId"), str)
-                            else ""
-                        )
-                        tool_val = (
-                            strip_ascii(obj["tool"])
-                            if isinstance(obj.get("tool"), str)
-                            else ""
-                        )
-                        digest_val = (
-                            strip_ascii(obj["digest"]).lower()
-                            if isinstance(obj.get("digest"), str)
-                            else ""
-                        )
-                        at_val = strip_ascii(raw_at)
-                        claim_ms = parse_strict_iso_ms(at_val)
-                        if (
-                            not HEX16_RE.match(req_id)
-                            or not claim_id
-                            or claim_ms is None
-                            or (digest_val != "" and not HEX_DIGEST_RE.match(digest_val))
-                        ):
-                            continue
-                        order_counter += 1
-                        if req_id not in entries:
-                            continue
-                        entry = entries[req_id]
-                        dec = entry["decision"]
-                        if (
-                            dec is None
-                            or dec["decision"] != "approved"
-                            or entry["claim"] is not None
-                            or entry["execution"] is not None
-                        ):
-                            continue
-                        if seat_id and seat_id != entry["seat"]:
-                            continue
-                        if tool_val and tool_val != entry["tool"]:
-                            continue
-                        if digest_val and digest_val != entry["sha256"]:
-                            continue
-                        if claim_ms < dec["at_ms"] or claim_ms >= dec["exp_ms"]:
-                            continue
-                        entry["claim"] = {
-                            "claimId": claim_id,
-                            "seatId": seat_id or entry["seat"],
-                            "tool": tool_val or entry["tool"],
-                            "digest": digest_val or entry["sha256"],
-                            "at": at_val,
-                            "at_ms": claim_ms,
-                        }
-                    elif rec_type == "execution":
-                        raw_req_id = obj.get("requestId")
-                        res_val = obj.get("result")
-                        raw_seat_id = obj.get("seatId")
-                        raw_digest = obj.get("digest")
-                        raw_at = obj.get("at")
-                        if (
-                            not isinstance(raw_req_id, str)
-                            or not isinstance(raw_seat_id, str)
-                            or not isinstance(raw_digest, str)
-                            or not isinstance(raw_at, str)
-                        ):
-                            continue
-                        if "claimId" in obj and not isinstance(obj.get("claimId"), str):
-                            continue
-                        if "runId" in obj and not isinstance(obj.get("runId"), str):
-                            continue
-                        req_id = strip_ascii(raw_req_id).lower()
-                        seat_id = strip_ascii(raw_seat_id)
-                        digest_val = strip_ascii(raw_digest).lower()
-                        at_val = strip_ascii(raw_at)
-                        exec_ms = parse_strict_iso_ms(at_val)
-                        claim_id_val = (
-                            strip_ascii(obj["claimId"])
-                            if isinstance(obj.get("claimId"), str)
-                            and strip_ascii(obj["claimId"])
-                            else None
-                        )
-                        if (
-                            not HEX16_RE.match(req_id)
-                            or not seat_id
-                            or exec_ms is None
-                            or res_val not in ("executed", "failed")
-                            or not HEX_DIGEST_RE.match(digest_val)
-                        ):
-                            continue
-                        order_counter += 1
-                        if req_id not in entries:
-                            continue
-                        entry = entries[req_id]
-                        if entry["execution"] is not None:
-                            continue
-                        dec = entry["decision"]
-                        # F1 & F2: Execution is only valid after an `approved` decision
-                        if dec is None or dec["decision"] != "approved":
-                            continue
-                        # F2: Must match request seat and sha256 digest
-                        if seat_id != entry["seat"] or digest_val != entry["sha256"]:
-                            continue
-                        if exec_ms < dec["at_ms"]:
-                            continue
-                        if entry["claim"] is not None:
-                            if claim_id_val != entry["claim"]["claimId"]:
-                                continue
-                        elif exec_ms >= dec["exp_ms"]:
-                            continue
-                        entry["execution"] = {
-                            "result": res_val,
-                            "seatId": seat_id,
-                            "at": at_val,
-                            "at_ms": exec_ms,
-                            "digest": digest_val,
-                            "claimId": claim_id_val,
-                        }
-        except OSError:
-            continue
+        for raw_line_bytes in raw_bytes.split(b"\n"):
+            try:
+                raw_line = raw_line_bytes.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                continue
+            line = strip_ascii(raw_line)
+            if not line:
+                continue
+            try:
+                obj = strict_json_loads(line)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+
+            has_type_key = "type" in obj
+            rec_type = obj.get("type")
+            if (not has_type_key) or rec_type == "request":
+                raw_ts = obj.get("ts")
+                raw_seat = obj.get("seat")
+                raw_tool = obj.get("tool")
+                raw_sha = obj.get("sha256")
+                if (
+                    not isinstance(raw_ts, str)
+                    or not isinstance(raw_seat, str)
+                    or not isinstance(raw_tool, str)
+                    or not isinstance(raw_sha, str)
+                ):
+                    continue
+                ts = strip_ascii(raw_ts)
+                seat = strip_ascii(raw_seat)
+                tool = strip_ascii(raw_tool)
+                sha256_val = strip_ascii(raw_sha).lower()
+                if (
+                    not ts
+                    or not seat
+                    or not tool
+                    or not HEX_DIGEST_RE.match(sha256_val)
+                ):
+                    continue
+                ts_ms = parse_strict_iso_ms(ts)
+                if ts_ms is None:
+                    continue
+                order_counter += 1
+                req_id = compute_request_id(ts, seat, tool, sha256_val)
+                if req_id not in entries:
+                    entries[req_id] = {
+                        "requestId": req_id,
+                        "ts": ts,
+                        "ts_ms": ts_ms,
+                        "order_index": order_counter,
+                        "seat": seat,
+                        "tool": tool,
+                        "sha256": sha256_val,
+                        "source_file": file_path,
+                        "decision": None,
+                        "claim": None,
+                        "execution": None,
+                    }
+            elif rec_type == "decision":
+                raw_req_id = obj.get("requestId")
+                dec_val = obj.get("decision")
+                by_val = obj.get("by")
+                raw_at = obj.get("at")
+                raw_exp = obj.get("expiresAt")
+                if (
+                    not isinstance(raw_req_id, str)
+                    or not isinstance(raw_at, str)
+                    or not isinstance(raw_exp, str)
+                ):
+                    continue
+                req_id = strip_ascii(raw_req_id).lower()
+                at_val = strip_ascii(raw_at)
+                exp_val = strip_ascii(raw_exp)
+                if (
+                    not HEX16_RE.match(req_id)
+                    or dec_val not in ("approved", "denied")
+                    or by_val not in ("owner", "localhost")
+                ):
+                    continue
+                if "note" in obj:
+                    note_val = obj.get("note")
+                    if not isinstance(note_val, str) or len(note_val) > 200:
+                        continue
+                at_ms = parse_strict_iso_ms(at_val)
+                exp_ms = parse_strict_iso_ms(exp_val)
+                if at_ms is None or exp_ms is None:
+                    continue
+                order_counter += 1
+                if req_id not in entries or entries[req_id]["decision"] is not None:
+                    continue
+                entries[req_id]["decision"] = {
+                    "decision": dec_val,
+                    "by": by_val,
+                    "at": at_val,
+                    "at_ms": at_ms,
+                    "expiresAt": exp_val,
+                    "exp_ms": exp_ms,
+                }
+            elif rec_type == "claim":
+                raw_req_id = obj.get("requestId")
+                raw_claim_id = obj.get("claimId")
+                raw_at = obj.get("at")
+                if (
+                    not isinstance(raw_req_id, str)
+                    or not isinstance(raw_claim_id, str)
+                    or not isinstance(raw_at, str)
+                ):
+                    continue
+                if "seatId" in obj and not isinstance(obj.get("seatId"), str):
+                    continue
+                if "tool" in obj and not isinstance(obj.get("tool"), str):
+                    continue
+                if "digest" in obj and not isinstance(obj.get("digest"), str):
+                    continue
+                req_id = strip_ascii(raw_req_id).lower()
+                claim_id = strip_ascii(raw_claim_id)
+                seat_id = (
+                    strip_ascii(obj["seatId"])
+                    if isinstance(obj.get("seatId"), str)
+                    else ""
+                )
+                tool_val = (
+                    strip_ascii(obj["tool"])
+                    if isinstance(obj.get("tool"), str)
+                    else ""
+                )
+                digest_val = (
+                    strip_ascii(obj["digest"]).lower()
+                    if isinstance(obj.get("digest"), str)
+                    else ""
+                )
+                at_val = strip_ascii(raw_at)
+                claim_ms = parse_strict_iso_ms(at_val)
+                if (
+                    not HEX16_RE.match(req_id)
+                    or not claim_id
+                    or claim_ms is None
+                    or (digest_val != "" and not HEX_DIGEST_RE.match(digest_val))
+                ):
+                    continue
+                order_counter += 1
+                if req_id not in entries:
+                    continue
+                entry = entries[req_id]
+                dec = entry["decision"]
+                if (
+                    dec is None
+                    or dec["decision"] != "approved"
+                    or entry["claim"] is not None
+                    or entry["execution"] is not None
+                ):
+                    continue
+                if seat_id and seat_id != entry["seat"]:
+                    continue
+                if tool_val and tool_val != entry["tool"]:
+                    continue
+                if digest_val and digest_val != entry["sha256"]:
+                    continue
+                if claim_ms < dec["at_ms"] or claim_ms >= dec["exp_ms"]:
+                    continue
+                entry["claim"] = {
+                    "claimId": claim_id,
+                    "seatId": seat_id or entry["seat"],
+                    "tool": tool_val or entry["tool"],
+                    "digest": digest_val or entry["sha256"],
+                    "at": at_val,
+                    "at_ms": claim_ms,
+                }
+            elif rec_type == "execution":
+                raw_req_id = obj.get("requestId")
+                res_val = obj.get("result")
+                raw_seat_id = obj.get("seatId")
+                raw_digest = obj.get("digest")
+                raw_at = obj.get("at")
+                if (
+                    not isinstance(raw_req_id, str)
+                    or not isinstance(raw_seat_id, str)
+                    or not isinstance(raw_digest, str)
+                    or not isinstance(raw_at, str)
+                ):
+                    continue
+                if "claimId" in obj and not isinstance(obj.get("claimId"), str):
+                    continue
+                if "runId" in obj and not isinstance(obj.get("runId"), str):
+                    continue
+                req_id = strip_ascii(raw_req_id).lower()
+                seat_id = strip_ascii(raw_seat_id)
+                digest_val = strip_ascii(raw_digest).lower()
+                at_val = strip_ascii(raw_at)
+                exec_ms = parse_strict_iso_ms(at_val)
+                claim_id_val = (
+                    strip_ascii(obj["claimId"])
+                    if isinstance(obj.get("claimId"), str)
+                    and strip_ascii(obj["claimId"])
+                    else None
+                )
+                if (
+                    not HEX16_RE.match(req_id)
+                    or not seat_id
+                    or exec_ms is None
+                    or res_val not in ("executed", "failed")
+                    or not HEX_DIGEST_RE.match(digest_val)
+                ):
+                    continue
+                order_counter += 1
+                if req_id not in entries:
+                    continue
+                entry = entries[req_id]
+                if entry["execution"] is not None:
+                    continue
+                dec = entry["decision"]
+                # F1 & F2: Execution is only valid after an `approved` decision
+                if dec is None or dec["decision"] != "approved":
+                    continue
+                # F2: Must match request seat and sha256 digest
+                if seat_id != entry["seat"] or digest_val != entry["sha256"]:
+                    continue
+                if exec_ms < dec["at_ms"]:
+                    continue
+                if entry["claim"] is not None:
+                    if claim_id_val != entry["claim"]["claimId"]:
+                        continue
+                elif exec_ms >= dec["exp_ms"]:
+                    continue
+                entry["execution"] = {
+                    "result": res_val,
+                    "seatId": seat_id,
+                    "at": at_val,
+                    "at_ms": exec_ms,
+                    "digest": digest_val,
+                    "claimId": claim_id_val,
+                }
 
     return entries
 
@@ -796,7 +1012,77 @@ def derive_non_active_status(
     return ("approved", dec.get("expiresAt"), None)
 
 
-def main() -> None:
+def run_cli_with_error_boundary(
+    fn: Any, script_name: str = "approval_check"
+) -> None:
+    """Outer CLI boundary catching lock/ledger/I/O errors and outputting structured JSON on exit 2 (F14, F17, F18)."""
+    try:
+        fn()
+    except SystemExit:
+        raise
+    except ApprovalLockTimeoutError as exc:
+        out_to: Dict[str, Any] = {"status": "lock_timeout"}
+        req_id = exc.request_id or _ACTIVE_REQUEST_ID
+        if req_id:
+            out_to["requestId"] = req_id
+        print(json.dumps(out_to), flush=True)
+        sys.stderr.write(f"[{script_name}] {exc}\n")
+        sys.exit(2)
+    except ApprovalLockLostError as exc:
+        out_lost: Dict[str, Any] = {"status": "lock_lost"}
+        req_id = exc.request_id or _ACTIVE_REQUEST_ID
+        if req_id:
+            out_lost["requestId"] = req_id
+        print(json.dumps(out_lost), flush=True)
+        sys.stderr.write(f"[{script_name}] {exc}\n")
+        sys.exit(2)
+    except ApprovalLedgerUnreadableError as exc:
+        out_unr: Dict[str, Any] = {
+            "status": "ledger_unreadable",
+            "file": exc.file,
+            "reason": exc.reason,
+        }
+        req_id = exc.request_id or _ACTIVE_REQUEST_ID
+        if req_id:
+            out_unr["requestId"] = req_id
+        print(json.dumps(out_unr), flush=True)
+        sys.stderr.write(f"[{script_name}] {exc}\n")
+        sys.exit(2)
+    except ApprovalIoError as exc:
+        out_io: Dict[str, Any] = {
+            "status": "io_error",
+            "reason": exc.reason,
+        }
+        req_id = exc.request_id or _ACTIVE_REQUEST_ID
+        if req_id:
+            out_io["requestId"] = req_id
+        print(json.dumps(out_io), flush=True)
+        sys.stderr.write(f"[{script_name}] {exc}\n")
+        sys.exit(2)
+    except OSError as exc:
+        out_os: Dict[str, Any] = {
+            "status": "io_error",
+            "reason": _errno_name(exc),
+        }
+        if _ACTIVE_REQUEST_ID:
+            out_os["requestId"] = _ACTIVE_REQUEST_ID
+        print(json.dumps(out_os), flush=True)
+        sys.stderr.write(f"[{script_name}] I/O error: {exc}\n")
+        sys.exit(2)
+    except Exception as exc:
+        out_err: Dict[str, Any] = {
+            "status": "io_error",
+            "reason": "EIO",
+        }
+        if _ACTIVE_REQUEST_ID:
+            out_err["requestId"] = _ACTIVE_REQUEST_ID
+        print(json.dumps(out_err), flush=True)
+        sys.stderr.write(f"[{script_name}] Unexpected error: {exc}\n")
+        sys.exit(2)
+
+
+def _main() -> None:
+    global _ACTIVE_REQUEST_ID
     parser = argparse.ArgumentParser(
         description="Check if an action has a valid, unexpired, unexecuted approval with matching sha256."
     )
@@ -823,6 +1109,7 @@ def main() -> None:
         if args.request_id and strip_ascii(args.request_id)
         else None
     )
+    _ACTIVE_REQUEST_ID = req_id_filter
 
     approvals_dir = get_approvals_dir()
 
@@ -948,6 +1235,10 @@ def main() -> None:
             )
         )
         sys.exit(0)
+
+
+def main() -> None:
+    run_cli_with_error_boundary(_main, "approval_check")
 
 
 if __name__ == "__main__":

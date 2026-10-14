@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getIsRunnerStarting } from '@/lib/office-runner';
 import {
+  ApprovalIoError,
+  ApprovalLedgerUnreadableError,
+  ApprovalLockLostError,
   ApprovalLockTimeoutError,
   recordApprovalDecision,
   sanitizeApprovalItem,
@@ -119,7 +122,7 @@ interface DecisionRequestBody {
  * - Unknown requestId -> 404
  * - Already decided requestId -> 409
  * - Invalid decision or invalid/overlong note (> 200 Unicode code points, or note: null) -> 400 (0 ledger writes)
- * - Lock timeout -> 503 (lock_timeout)
+ * - Lock timeout / lock lost / ledger unreadable / I/O error -> 503 with generic message (no raw error leak)
  * - Server always computes expiresAt from configured TTL (F8: client expiresAt is ignored)
  */
 export async function POST(
@@ -231,10 +234,8 @@ export async function POST(
       decision: result.decisionRecord,
     });
   } catch (err: unknown) {
-    if (
-      err instanceof ApprovalLockTimeoutError ||
-      (err as { code?: string })?.code === 'lock_timeout'
-    ) {
+    const code = (err as { code?: string })?.code;
+    if (err instanceof ApprovalLockTimeoutError || code === 'lock_timeout') {
       return NextResponse.json(
         {
           error: 'lock_timeout',
@@ -244,9 +245,42 @@ export async function POST(
         { status: 503 }
       );
     }
-    const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof ApprovalLockLostError || code === 'lock_lost') {
+      return NextResponse.json(
+        {
+          error: 'lock_lost',
+          status: 'lock_lost',
+          message: 'Approval ledger lock ownership was lost.',
+        },
+        { status: 503 }
+      );
+    }
+    if (err instanceof ApprovalLedgerUnreadableError || code === 'ledger_unreadable') {
+      return NextResponse.json(
+        {
+          error: 'ledger_unreadable',
+          status: 'ledger_unreadable',
+          message: 'Approval ledger is currently unreadable.',
+        },
+        { status: 503 }
+      );
+    }
+    if (
+      err instanceof ApprovalIoError ||
+      code === 'io_error' ||
+      (typeof code === 'string' && code.startsWith('E'))
+    ) {
+      return NextResponse.json(
+        {
+          error: 'io_error',
+          status: 'io_error',
+          message: 'Approval ledger I/O error.',
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
-      { error: 'internal_error', message },
+      { error: 'internal_error', message: 'Internal server error.' },
       { status: 500 }
     );
   }
