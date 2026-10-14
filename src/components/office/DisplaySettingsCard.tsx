@@ -7,6 +7,7 @@ import {
   readTextSize,
   saveTextSize,
   applyTextSize,
+  syncTextSizeOnStorageEvent,
   DEFAULT_TEXT_SIZE,
 } from './text-size';
 
@@ -19,11 +20,7 @@ export function DisplaySettingsCard() {
     applyTextSize(initial);
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'aiboss-office.text-size') {
-        const next = readTextSize();
-        setSize(next);
-        applyTextSize(next);
-      }
+      syncTextSizeOnStorageEvent(e, setSize);
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
@@ -59,23 +56,23 @@ export function DisplaySettingsCard() {
           <div className="text-size-options" role="radiogroup" aria-label="Text size">
             <button
               type="button"
-              className={`text-size-btn ${size === 'medium' ? 'active' : ''}`}
-              onClick={() => handleChange('medium')}
-              aria-checked={size === 'medium'}
-              role="radio"
-            >
-              {size === 'medium' && <Check size={14} weight="bold" className="text-size-check" />}
-              <span>Medium (Default)</span>
-            </button>
-            <button
-              type="button"
               className={`text-size-btn ${size === 'large' ? 'active' : ''}`}
               onClick={() => handleChange('large')}
               aria-checked={size === 'large'}
               role="radio"
             >
               {size === 'large' && <Check size={14} weight="bold" className="text-size-check" />}
-              <span>Large (≈1.25×)</span>
+              <span>Large (Default)</span>
+            </button>
+            <button
+              type="button"
+              className={`text-size-btn ${size === 'medium' ? 'active' : ''}`}
+              onClick={() => handleChange('medium')}
+              aria-checked={size === 'medium'}
+              role="radio"
+            >
+              {size === 'medium' && <Check size={14} weight="bold" className="text-size-check" />}
+              <span>Medium (Compact)</span>
             </button>
           </div>
         </div>

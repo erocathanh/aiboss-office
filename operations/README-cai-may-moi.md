@@ -93,14 +93,15 @@ EOF
 
 *Lưu ý an toàn*: Không bao giờ commit tệp `.env` lên git repository.
 
-### 4.2. Cấu hình trần ngân sách (`config/office.json`)
-Mở tệp `config/office.json` để kiểm tra và điều chỉnh ngân sách chạy hằng ngày của văn phòng:
+### 4.2. Cấu hình trần ngân sách và ngôn ngữ ghế (`config/office.json`)
+Mở tệp `config/office.json` để kiểm tra và điều chỉnh ngân sách chạy hằng ngày cũng như ngôn ngữ phản hồi của các ghế trong văn phòng:
 
 ```json
 {
   "office_id": "marketing",
   "office_name": "Phòng Marketing AI",
   "currency": "USD",
+  "language": "auto",
   "budget": {
     "daily_limit_usd": 10.0,
     "warning_threshold_ratio": 0.8,
@@ -108,6 +109,7 @@ Mở tệp `config/office.json` để kiểm tra và điều chỉnh ngân sách
   }
 }
 ```
+- `language`: Ngôn ngữ trả lời của các ghế agent (`"auto"` mặc định trả lời theo ngôn ngữ câu hỏi của Owner, hoặc ghim cố định `"vi"` / `"en"`). Khi đổi trường `language`, thay đổi có hiệu lực ở lần chạy `pnpm start` kế tiếp (bước `prestart` tự động chạy `node operations/scripts/gen-seat-claude-md.mjs` một cách idempotent để cập nhật `CLAUDE.md` của các ghế khi nội dung đổi mà không chạm `SOUL.md`, `settings.json` hay `.mcp.json`). Nếu chạy qua LaunchAgent daemon (`pnpm exec next start`), chạy `node operations/scripts/gen-seat-claude-md.mjs` trước khi khởi động lại dịch vụ.
 - `daily_limit_usd`: Trần chi tiêu tối đa mỗi ngày tính bằng USD (ví dụ 10.0 USD). Khi chi phí đạt trần cứng, hệ thống sẽ tự động chặn mọi lượt gọi tiếp theo để bảo vệ tài khoản của bạn.
 - `warning_threshold_ratio`: Mức cảnh báo (0.8 tương đương 80% ngân sách ngày).
 

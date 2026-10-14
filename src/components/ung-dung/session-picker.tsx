@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TomTatPhien } from '@/lib/doc-phien';
 
 export type SessionChoice = TomTatPhien & { co_so_huu?: boolean; owner_seat?: string | null };
-const buttonStyle = { fontSize: 16, minHeight: 40, padding: '6px 12px', cursor: 'pointer' };
+const buttonStyle = { fontSize: 'calc(16px * var(--text-scale, 1))', minHeight: 40, padding: '6px 12px', cursor: 'pointer' };
 const dateText = (stamp: number | null | undefined) => typeof stamp === 'number' && Number.isFinite(stamp)
   ? new Date(stamp).toLocaleString('vi-VN', { hour12: false, timeZoneName: 'short' }) : 'Không rõ';
 

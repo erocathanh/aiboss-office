@@ -67,7 +67,7 @@ export function BudgetSettingsCard({
             Budget Today
           </div>
         </div>
-        <div style={{ padding: '16px', color: '#94a3b8', fontSize: '13px' }}>
+        <div style={{ padding: '16px', color: '#94a3b8', fontSize: 'calc(13px * var(--text-scale, 1))' }}>
           Loading budget status...
         </div>
       </section>
@@ -106,10 +106,10 @@ export function BudgetSettingsCard({
           }}
         >
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
+            <div style={{ fontSize: 'calc(13px * var(--text-scale, 1))', fontWeight: 600, color: '#f1f5f9' }}>
               Office Total Capacity
             </div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
+            <div style={{ fontSize: 'calc(12px * var(--text-scale, 1))', color: '#94a3b8', marginTop: '2px' }}>
               Spent: {formatNanodollars(officeStatus.spentNanodollars)} · Held:{' '}
               {formatNanodollars(officeStatus.heldNanodollars)}
               {officeStatus.unpricedRuns > 0 &&
@@ -241,7 +241,7 @@ export function BudgetSettingsCard({
                     <code
                       style={{
                         fontWeight: 600,
-                        fontSize: '13px',
+                        fontSize: 'calc(13px * var(--text-scale, 1))',
                         color: (isExceeded || isConfigError) ? '#fca5a5' : '#e2e8f0',
                       }}
                     >
@@ -295,7 +295,7 @@ export function BudgetSettingsCard({
 
                   <div
                     style={{
-                      fontSize: '12px',
+                      fontSize: 'calc(12px * var(--text-scale, 1))',
                       color: (isExceeded || isConfigError) ? '#fca5a5' : '#94a3b8',
                       fontFamily: 'monospace',
                     }}
