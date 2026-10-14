@@ -6,6 +6,7 @@
  * Idempotent: only writes a seat's CLAUDE.md when its content has changed.
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -52,6 +53,14 @@ export function generateSeatClaudeMd({
 
   const langRule = resolveSeatLanguageRule(rawLang);
 
+  const workingRulesCandidate = path.join(repoRoot, 'packs', 'core', 'WORKING-RULES.md');
+  const workingRulesPath = fs.existsSync(workingRulesCandidate)
+    ? workingRulesCandidate
+    : path.join(process.cwd(), 'packs', 'core', 'WORKING-RULES.md');
+  const workingRulesRaw = fs.readFileSync(workingRulesPath, 'utf-8');
+  const workingRulesMd5 = crypto.createHash('md5').update(workingRulesRaw, 'utf-8').digest('hex');
+  const workingRulesBody = workingRulesRaw.replace(/\n+$/, '');
+
   let updatedCount = 0;
   let totalCount = 0;
 
@@ -64,11 +73,10 @@ export function generateSeatClaudeMd({
       fs.mkdirSync(targetDir, { recursive: true });
     }
 
-    const workingRulesAbs = path.join(repoRoot, 'packs', 'core', 'WORKING-RULES.md');
-    const workingRulesRel = path.relative(targetDir, workingRulesAbs).split(path.sep).join('/');
-
     const content = `# ${seat.name} — seat \`${seat.seat_id}\` of the Marketing department, AIBOSS Office
-@${workingRulesRel}
+<!-- BEGIN packs/core/WORKING-RULES.md md5:${workingRulesMd5} -->
+${workingRulesBody}
+<!-- END packs/core/WORKING-RULES.md -->
 
 You are the **${seat.name}** seat of AIBOSS Office (seat id \`${seat.seat_id}\`, department \`marketing\`). Your role: ${seat.role}
 

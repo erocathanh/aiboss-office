@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1247,24 +1248,40 @@ test('F26, F27, F28, F29 & F31 (S17f): Hook 2.1 resolves options/config variable
   }
 });
 
-test('H2: all 8 marketing seats import @../../../../packs/core/WORKING-RULES.md right after the title and target file exists', () => {
+test('H2: all 8 marketing seats embed packs/core/WORKING-RULES.md verbatim between BEGIN/END markers right after the title and keep @SOUL.md', () => {
   const seats = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'data', 'seats.json'), 'utf8'));
   const workingRulesAbs = path.join(REPO_ROOT, 'packs', 'core', 'WORKING-RULES.md');
   assert.ok(fs.existsSync(workingRulesAbs), 'packs/core/WORKING-RULES.md must exist');
+
+  const workingRulesRaw = fs.readFileSync(workingRulesAbs, 'utf8');
+  const workingRulesMd5 = crypto.createHash('md5').update(workingRulesRaw, 'utf8').digest('hex');
+  const workingRulesBody = workingRulesRaw.replace(/\n+$/, '');
+  const beginMarker = `<!-- BEGIN packs/core/WORKING-RULES.md md5:${workingRulesMd5} -->`;
+  const endMarker = '<!-- END packs/core/WORKING-RULES.md -->';
 
   for (const seat of seats) {
     if (seat.department !== 'marketing') continue;
     const seatDir = path.join(REPO_ROOT, seat.dir);
     const claudeMdPath = path.join(seatDir, 'CLAUDE.md');
-    const lines = fs.readFileSync(claudeMdPath, 'utf8').split('\n');
-    const expectedRel = path.relative(seatDir, workingRulesAbs).split(path.sep).join('/');
+    const rawClaude = fs.readFileSync(claudeMdPath, 'utf8');
+    const lines = rawClaude.split('\n');
     assert.equal(
       lines[1],
-      `@${expectedRel}`,
-      `Seat ${seat.seat_id} CLAUDE.md must have @${expectedRel} right after the title line`
+      beginMarker,
+      `Seat ${seat.seat_id} CLAUDE.md must have ${beginMarker} right after the title line`
     );
-    const resolvedTarget = path.resolve(seatDir, expectedRel);
-    assert.ok(fs.existsSync(resolvedTarget), `Resolved WORKING-RULES.md from ${seat.seat_id} must exist on disk`);
+    assert.ok(
+      rawClaude.includes(`${beginMarker}\n${workingRulesBody}\n${endMarker}`),
+      `Seat ${seat.seat_id} CLAUDE.md must embed WORKING-RULES.md verbatim between BEGIN and END markers`
+    );
+    assert.ok(
+      !rawClaude.includes('@../../../../packs/core/WORKING-RULES.md'),
+      `Seat ${seat.seat_id} CLAUDE.md must NOT use external @../../../../packs/core/WORKING-RULES.md include`
+    );
+    assert.ok(
+      rawClaude.includes('\n@SOUL.md\n'),
+      `Seat ${seat.seat_id} CLAUDE.md must keep @SOUL.md`
+    );
   }
 });
 
