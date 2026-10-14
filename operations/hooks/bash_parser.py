@@ -42,6 +42,7 @@ class SimpleCommand:
         self.raw_executable: str = ""
         self.redirections: List[Tuple[str, str]] = [] # list of (op, target) e.g. ('>', 'file.txt')
         self.env_vars: Dict[str, str] = {}
+        self.via_xargs: bool = False
         self.parse()
 
     def parse(self):
@@ -68,14 +69,14 @@ class SimpleCommand:
         if not remaining_tokens:
             return
 
-        # Bóc tách wrapper (command, env, sudo, exec, builtin, \)
+        # Bóc tách wrapper (command, env, sudo, exec, builtin, nohup, nice, timeout, xargs, \)
         w_idx = 0
         while w_idx < len(remaining_tokens):
             w = remaining_tokens[w_idx]
             clean_w = w.lstrip('\\')
             base_w = os.path.basename(clean_w).lower()
 
-            if base_w in ('builtin', 'exec'):
+            if base_w in ('builtin', 'exec', 'nohup', 'time'):
                 w_idx += 1
                 continue
             elif base_w == 'command':
@@ -86,18 +87,96 @@ class SimpleCommand:
                 continue
             elif base_w == 'sudo':
                 w_idx += 1
-                while w_idx < len(remaining_tokens) and remaining_tokens[w_idx].startswith('-'):
-                    w_idx += 1
+                sudo_flags_with_val = {'-u', '-g', '-h', '-p', '-U', '-C', '-D', '-R', '-T', '-r', '-t'}
+                while w_idx < len(remaining_tokens):
+                    sw = remaining_tokens[w_idx]
+                    if sw == '--':
+                        w_idx += 1
+                        break
+                    if sw in sudo_flags_with_val:
+                        w_idx += 2
+                        continue
+                    if sw.startswith('-'):
+                        w_idx += 1
+                        continue
+                    break
                 continue
             elif base_w == 'env':
                 w_idx += 1
+                env_flags_with_val = {'-u', '-C', '-S', '--unset', '--chdir', '--split-string'}
                 while w_idx < len(remaining_tokens):
                     cur = remaining_tokens[w_idx]
+                    if cur == '--':
+                        w_idx += 1
+                        break
+                    if cur in env_flags_with_val:
+                        w_idx += 2
+                        continue
                     if cur.startswith('-') or ('=' in cur and not cur.startswith('=')):
                         w_idx += 1
                     else:
                         break
                 continue
+            elif base_w == 'nice':
+                n_idx = w_idx + 1
+                while n_idx < len(remaining_tokens):
+                    nw = remaining_tokens[n_idx]
+                    if nw == '--':
+                        n_idx += 1
+                        break
+                    if nw in ('-n', '--adjustment'):
+                        n_idx += 2
+                        continue
+                    if nw.startswith('-'):
+                        n_idx += 1
+                        continue
+                    break
+                if n_idx < len(remaining_tokens):
+                    w_idx = n_idx
+                    continue
+                break
+            elif base_w == 'timeout':
+                t_idx = w_idx + 1
+                while t_idx < len(remaining_tokens):
+                    tw = remaining_tokens[t_idx]
+                    if tw == '--':
+                        t_idx += 1
+                        break
+                    if tw in ('-k', '--kill-after', '-s', '--signal'):
+                        t_idx += 2
+                        continue
+                    if tw.startswith('-'):
+                        t_idx += 1
+                        continue
+                    break
+                if t_idx + 1 < len(remaining_tokens):
+                    w_idx = t_idx + 1
+                    continue
+                break
+            elif base_w == 'xargs':
+                self.via_xargs = True
+                x_idx = w_idx + 1
+                x_flags_with_val = {
+                    '-n', '-I', '-J', '-s', '-P', '-L', '-E', '-e', '-d', '-a',
+                    '--max-args', '--max-procs', '--max-chars', '--max-lines',
+                    '--delimiter', '--arg-file', '--replace', '--eof',
+                }
+                while x_idx < len(remaining_tokens):
+                    xw = remaining_tokens[x_idx]
+                    if xw == '--':
+                        x_idx += 1
+                        break
+                    if xw in x_flags_with_val:
+                        x_idx += 2
+                        continue
+                    if xw.startswith('-'):
+                        x_idx += 1
+                        continue
+                    break
+                if x_idx < len(remaining_tokens):
+                    w_idx = x_idx
+                    continue
+                break
             else:
                 break
 
@@ -751,6 +830,11 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
     base = cmd.executable
     words = cmd.words
 
+    if getattr(cmd, "via_xargs", False) and base in (
+        'cp', 'install', 'rsync', 'ln', 'mv', 'touch', 'truncate', 'tee', 'sed', 'perl', 'dd'
+    ):
+        targets.append(("$DYNAMIC_WRITE:xargs", f"{base} via xargs"))
+
     if base in ('cp', 'install', 'rsync', 'ln'):
         non_flags = [w.strip("'\"") for w in words[1:] if not w.startswith('-')]
         if len(non_flags) >= 2:
@@ -817,12 +901,13 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 dest = w[3:].strip("'\"")
                 targets.append((dest, "dd output file"))
 
-    # 3. Inline script & heredoc writes (F5, F10, F12: python open, Path.write_*, shutil.copy*, node fs.*FileSync, copyFileSync/cpSync)
+    # 3. Inline script & heredoc writes (F5, F10, F12, F16: python open, Path.write_*, shutil.copy*, node fs.*FileSync, copyFileSync/cpSync)
     combined_raw = "\n".join([cmd.raw_str] + getattr(cmd, "heredoc_bodies", []))
     if (
         base in ('python', 'python3', 'py', 'node')
         or 'open(' in combined_raw
         or 'write_' in combined_raw
+        or 'Path(' in combined_raw
         or 'FileSync' in combined_raw
         or 'cpSync' in combined_raw
         or 'writeFile' in combined_raw
@@ -832,7 +917,7 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         or 'shutil.' in combined_raw
         or 'os.replace' in combined_raw
     ):
-        for call_args in _extract_call_arg_lists(combined_raw, r'\bopen\s*\('):
+        for call_args in _extract_call_arg_lists(combined_raw, r'(?<!\.)\bopen\s*\('):
             if not call_args:
                 continue
             path_expr = call_args[0]
@@ -853,8 +938,37 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
                     targets.append((resolved_target, label))
 
-        for m in re.finditer(r'\bPath\s*\(([^)]+)\)\s*\.\s*write_(?:text|bytes)\b', combined_raw):
-            resolved_target = resolve_script_path_expr(m.group(1))
+        for ctor_args, method_name, method_args in _extract_chained_call_arg_lists(
+            combined_raw,
+            r'\b(?:pathlib\.)?Path\s*\(',
+            r'^\s*\.\s*(write_text|write_bytes|open)\s*\(',
+        ):
+            if not ctor_args:
+                continue
+            resolved_ctor_parts = [resolve_script_path_expr(a) for a in ctor_args]
+            if any(p.startswith('$DYNAMIC_WRITE:') for p in resolved_ctor_parts):
+                resolved_target = f"$DYNAMIC_WRITE:Path({','.join(ctor_args)})"
+            else:
+                resolved_target = os.path.normpath(os.path.join(*resolved_ctor_parts)).replace('\\', '/')
+            if method_name == 'open':
+                mode_expr = None
+                for extra in method_args:
+                    s_extra = extra.strip()
+                    if s_extra.startswith('mode') and '=' in s_extra:
+                        mode_expr = s_extra.split('=', 1)[1].strip()
+                        break
+                if mode_expr is None and len(method_args) >= 1:
+                    first_extra = method_args[0].strip()
+                    if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=', first_extra):
+                        mode_expr = first_extra
+                if mode_expr is None:
+                    continue
+                resolved_mode = resolve_script_path_expr(mode_expr)
+                if not (
+                    resolved_mode.startswith('$DYNAMIC_WRITE:')
+                    or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode)
+                ):
+                    continue
             label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.write"
             targets.append((resolved_target, label))
 
@@ -892,13 +1006,103 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
 
 
 _SINGLE_STRING_LITERAL_RE = re.compile(r"""^(?:'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")$""", re.DOTALL)
+_JOIN_CALL_PREFIX_RE = re.compile(r'^(?:os\.path|posixpath|path)\.join\s*\(', re.DOTALL)
+
+
+def _decode_single_pass_escapes(raw_val: str) -> Optional[str]:
+    out: List[str] = []
+    i = 0
+    n = len(raw_val)
+    while i < n:
+        ch = raw_val[i]
+        if ch != '\\':
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 >= n:
+            return None
+        nxt = raw_val[i + 1]
+        if nxt in ('\\', '/', "'", '"'):
+            out.append(nxt)
+            i += 2
+            continue
+        if nxt == 'x':
+            hex_part = raw_val[i + 2 : i + 4]
+            if len(hex_part) != 2 or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
+                return None
+            out.append(chr(int(hex_part, 16)))
+            i += 4
+            continue
+        if nxt == 'u':
+            if i + 2 < n and raw_val[i + 2] == '{':
+                close_brace = raw_val.find('}', i + 3)
+                if close_brace < 0:
+                    return None
+                hex_part = raw_val[i + 3 : close_brace]
+                if not (1 <= len(hex_part) <= 6) or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
+                    return None
+                code_pt = int(hex_part, 16)
+                if code_pt > 0x10FFFF:
+                    return None
+                out.append(chr(code_pt))
+                i = close_brace + 1
+                continue
+            hex_part = raw_val[i + 2 : i + 6]
+            if len(hex_part) != 4 or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
+                return None
+            out.append(chr(int(hex_part, 16)))
+            i += 6
+            continue
+        if nxt == 'U':
+            hex_part = raw_val[i + 2 : i + 10]
+            if len(hex_part) != 8 or not all(c in '0123456789abcdefABCDEF' for c in hex_part):
+                return None
+            code_pt = int(hex_part, 16)
+            if code_pt > 0x10FFFF:
+                return None
+            out.append(chr(code_pt))
+            i += 10
+            continue
+        if nxt in '01234567':
+            oct_digits = [nxt]
+            j = i + 2
+            while j < n and len(oct_digits) < 3 and raw_val[j] in '01234567':
+                oct_digits.append(raw_val[j])
+                j += 1
+            out.append(chr(int("".join(oct_digits), 8)))
+            i = j
+            continue
+        # Any other escape (\N{...}, \n, \r, \t, \0, or unknown) in a path literal is rejected fail-closed
+        return None
+    return "".join(out)
+
+
+def _decode_string_literal_escapes(raw_val: str) -> Optional[str]:
+    """
+    F16b (S17d): Decode language escapes (\\x2f, \\u002f, octal, \\/, \\\\) in string literals
+    before canonicalization. If any escape cannot be cleanly resolved or leaves a backslash
+    or control character, return None so caller treats it as $DYNAMIC_WRITE (never a safe static path).
+    """
+    cur = raw_val
+    for _ in range(2):
+        if '\\' not in cur:
+            break
+        decoded = _decode_single_pass_escapes(cur)
+        if decoded is None:
+            return None
+        cur = decoded
+    if '\\' in cur or any(ord(c) < 32 for c in cur):
+        return None
+    return cur
 
 
 def resolve_script_path_expr(expr: str) -> str:
     """
-    F10 & F12 (S17c): Resolve a Python/JS path argument expression into either:
-    - a static string path (supporting surrounding whitespace and '+' concatenation of string literals), OR
-    - '$DYNAMIC_WRITE:<expr>' when the expression contains variables, template substitutions, or calls.
+    F10 & F12 (S17c) & F16 (S17d): Resolve a Python/JS path argument expression into either:
+    - a static string path (supporting surrounding whitespace, '+' concatenation of string literals,
+      static os.path.join/path.join calls, and decoded string literal escapes), OR
+    - '$DYNAMIC_WRITE:<expr>' when the expression contains variables, template substitutions,
+      unresolvable escapes, or dynamic calls.
     """
     s = (expr or "").strip()
     if not s:
@@ -907,7 +1111,19 @@ def resolve_script_path_expr(expr: str) -> str:
     m_single = _SINGLE_STRING_LITERAL_RE.match(s)
     if m_single:
         val = m_single.group(1) if m_single.group(1) is not None else m_single.group(2)
-        return val
+        decoded = _decode_string_literal_escapes(val)
+        if decoded is None:
+            return f"$DYNAMIC_WRITE:{s}"
+        return decoded
+
+    # Check if s is a static os.path.join(...) / path.join(...) call
+    m_join = _JOIN_CALL_PREFIX_RE.match(s)
+    if m_join and s.endswith(')'):
+        join_arg_lists = _extract_call_arg_lists(s, r'^(?:os\.path|posixpath|path)\.join\s*\(')
+        if len(join_arg_lists) == 1 and join_arg_lists[0]:
+            resolved_parts = [resolve_script_path_expr(p) for p in join_arg_lists[0]]
+            if all(not rp.startswith('$DYNAMIC_WRITE:') for rp in resolved_parts):
+                return os.path.normpath(os.path.join(*resolved_parts)).replace('\\', '/')
 
     # Check if s is a '+' concatenation of string literals: 'operations/' + 'data/...'
     parts = _split_top_level_plus(s)
@@ -921,7 +1137,11 @@ def resolve_script_path_expr(expr: str) -> str:
                 all_literals = False
                 break
             piece = mp.group(1) if mp.group(1) is not None else mp.group(2)
-            concat_pieces.append(piece)
+            decoded_piece = _decode_string_literal_escapes(piece)
+            if decoded_piece is None:
+                all_literals = False
+                break
+            concat_pieces.append(decoded_piece)
         if all_literals:
             return "".join(concat_pieces)
 
@@ -969,64 +1189,96 @@ def _split_top_level_plus(expr: str) -> List[str]:
     return parts
 
 
+def _scan_balanced_paren_args(text: str, start_idx: int) -> Tuple[Optional[List[str]], int]:
+    """Scan balanced parentheses starting right after '(' at start_idx. Returns (args, close_paren_idx)."""
+    args: List[str] = []
+    cur: List[str] = []
+    quote: Optional[str] = None
+    escape = False
+    depth = 1
+    i = start_idx
+    n = len(text)
+    while i < n and depth > 0:
+        ch = text[i]
+        if escape:
+            cur.append(ch)
+            escape = False
+            i += 1
+            continue
+        if ch == '\\' and quote is not None:
+            cur.append(ch)
+            escape = True
+            i += 1
+            continue
+        if quote is not None:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch
+            cur.append(ch)
+            i += 1
+            continue
+        if ch in ('(', '[', '{'):
+            depth += 1
+            cur.append(ch)
+            i += 1
+            continue
+        if ch in (')', ']', '}'):
+            depth -= 1
+            if depth == 0:
+                arg_str = "".join(cur).strip()
+                if arg_str or args:
+                    args.append(arg_str)
+                return (args, i)
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == ',' and depth == 1:
+            args.append("".join(cur).strip())
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    return (None, i)
+
+
 def _extract_call_arg_lists(text: str, prefix_pattern: str) -> List[List[str]]:
     results: List[List[str]] = []
     for m in re.finditer(prefix_pattern, text):
-        start_idx = m.end()  # right after opening '('
-        args: List[str] = []
-        cur: List[str] = []
-        quote: Optional[str] = None
-        escape = False
-        depth = 1
-        i = start_idx
-        n = len(text)
-        while i < n and depth > 0:
-            ch = text[i]
-            if escape:
-                cur.append(ch)
-                escape = False
-                i += 1
-                continue
-            if ch == '\\' and quote is not None:
-                cur.append(ch)
-                escape = True
-                i += 1
-                continue
-            if quote is not None:
-                cur.append(ch)
-                if ch == quote:
-                    quote = None
-                i += 1
-                continue
-            if ch in ("'", '"', '`'):
-                quote = ch
-                cur.append(ch)
-                i += 1
-                continue
-            if ch in ('(', '[', '{'):
-                depth += 1
-                cur.append(ch)
-                i += 1
-                continue
-            if ch in (')', ']', '}'):
-                depth -= 1
-                if depth == 0:
-                    arg_str = "".join(cur).strip()
-                    if arg_str or args:
-                        args.append(arg_str)
-                    break
-                cur.append(ch)
-                i += 1
-                continue
-            if ch == ',' and depth == 1:
-                args.append("".join(cur).strip())
-                cur = []
-                i += 1
-                continue
-            cur.append(ch)
-            i += 1
-        if depth == 0:
+        args, _ = _scan_balanced_paren_args(text, m.end())
+        if args is not None:
             results.append(args)
+    return results
+
+
+def _extract_chained_call_arg_lists(
+    text: str,
+    prefix_pattern: str,
+    chained_method_pattern: str,
+) -> List[Tuple[List[str], str, List[str]]]:
+    """
+    F16a (S17d): Extract balanced constructor args and chained method args,
+    e.g. Path(os.path.join('operations','data','approvals','x.jsonl')).write_text('x').
+    """
+    results: List[Tuple[List[str], str, List[str]]] = []
+    method_re = re.compile(chained_method_pattern)
+    for m in re.finditer(prefix_pattern, text):
+        ctor_args, close_idx = _scan_balanced_paren_args(text, m.end())
+        if ctor_args is None:
+            continue
+        tail = text[close_idx + 1 :]
+        mm = method_re.match(tail)
+        if not mm:
+            continue
+        method_name = mm.group(1) if mm.lastindex else ""
+        method_args, _ = _scan_balanced_paren_args(tail, mm.end())
+        if method_args is None:
+            method_args = []
+        results.append((ctor_args, method_name, method_args))
     return results
 
 

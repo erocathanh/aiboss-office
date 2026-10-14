@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bash dev/chay-dev.sh",
     "build": "next build",
-    "prestart": "node operations/scripts/gen-seat-files.mjs && node operations/scripts/gen-seat-claude-md.mjs",
+    "prestart": "node operations/scripts/gen-seat-files.mjs",
     "start": "next start -p 4330 -H 127.0.0.1",
     "test": "node operations/scripts/gen-seat-files.mjs && node --import ./tests/register.mjs tests/money.test.mjs && node --import ./tests/register.mjs tests/usage-receipt.test.mjs && node --import ./tests/register.mjs tests/runs-ledger.test.mjs && node --import ./tests/register.mjs tests/costs-ledger.test.mjs && node --import ./tests/register.mjs tests/danh-thuc-route.test.mjs && node --import ./tests/register.mjs tests/session-history.test.mjs && node --import ./tests/register.mjs tests/budget.test.mjs && node --import ./tests/register.mjs tests/ui-1-settings.test.mjs && node --import ./tests/register.mjs tests/s17-seat-isolation.test.mjs",
     "desktop": "pnpm --dir desktop start",

@@ -322,13 +322,19 @@ def check_outbound_http_write_text(cmd: str, allowed_hosts: set[str]) -> str:
 
 
 def check_sc_outbound_http_write(sc: bash_parser.SimpleCommand, allowed_hosts: set[str]) -> str:
-    """F9a: Verify the actual positional target URL of curl/wget/fetch/requests on a parsed SimpleCommand."""
+    """F9a & F15a: Verify the actual positional target URL of curl/wget/fetch/requests on a parsed SimpleCommand."""
     text_v = check_outbound_http_write_text(sc.raw_str, allowed_hosts)
     if text_v:
         return text_v
 
     exe = sc.executable
-    if exe == "curl" and is_curl_write(sc.raw_str):
+    is_sc_curl_write = exe == "curl" and is_curl_write(sc.raw_str)
+    is_sc_wget_write = exe == "wget" and any(p.search(sc.raw_str) for p in WGET_WRITE_PATTERNS)
+
+    if getattr(sc, "via_xargs", False) and (is_sc_curl_write or is_sc_wget_write or is_http_write_command(sc.raw_str)):
+        return "Outbound HTTP write via xargs (dynamic stdin target/arguments) is blocked fail-closed by Hook 2.1."
+
+    if is_sc_curl_write:
         urls, err = _extract_curl_target_urls(sc.words)
         if err:
             return err
@@ -339,7 +345,7 @@ def check_sc_outbound_http_write(sc: bash_parser.SimpleCommand, allowed_hosts: s
             if v:
                 return v
 
-    if exe == "wget" and any(p.search(sc.raw_str) for p in WGET_WRITE_PATTERNS):
+    if is_sc_wget_write:
         urls, err = _extract_wget_target_urls(sc.words)
         if err:
             return err
@@ -426,10 +432,75 @@ TRUSTED_EXEMPT_SKILL_RELPATHS = (
 )
 
 
+def _has_symlink_between(base_dir: str, target_path: str) -> bool:
+    """Return True if target_path or any component between base_dir and target_path is a symlink."""
+    norm_base = os.path.normpath(base_dir)
+    norm_target = os.path.normpath(target_path)
+    try:
+        rel = os.path.relpath(norm_target, norm_base)
+    except ValueError:
+        return True
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return True
+    cur = norm_base
+    if os.path.islink(cur):
+        return True
+    if rel == ".":
+        return False
+    for part in rel.split(os.sep):
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return True
+    return False
+
+
+def _matches_trusted_script_containment(resolved: str, base_root: str, trusted_dir_rel: str, script_rel: str) -> bool:
+    """
+    F15b: Verify that:
+    1. No path component from base_root down to the script is a symlink.
+    2. The realpath of resolved lies strictly inside the realpath of the trusted directory
+       (<REPO_ROOT>/tools/inbox-reader or $HOME/.claude/skills/<skill>/scripts), which itself
+       lies strictly inside realpath(base_root).
+    """
+    if not base_root:
+        return False
+    norm_root = os.path.normpath(os.path.expanduser(base_root))
+    real_root = os.path.realpath(norm_root)
+
+    expected_norm = os.path.normpath(os.path.join(norm_root, script_rel))
+    expected_real = os.path.normpath(os.path.join(real_root, script_rel))
+    if resolved not in (expected_norm, expected_real):
+        return False
+
+    if _has_symlink_between(norm_root, expected_norm) or _has_symlink_between(real_root, expected_real):
+        return False
+
+    trusted_dir_norm = os.path.normpath(os.path.join(norm_root, trusted_dir_rel))
+    expected_trusted_dir_real = os.path.normpath(os.path.join(real_root, trusted_dir_rel))
+    actual_trusted_dir_real = os.path.realpath(trusted_dir_norm)
+    if actual_trusted_dir_real != expected_trusted_dir_real:
+        return False
+
+    real_p = os.path.realpath(resolved)
+    if real_p != expected_real:
+        return False
+
+    try:
+        if os.path.commonpath([real_p, expected_trusted_dir_real]) != expected_trusted_dir_real:
+            return False
+        if os.path.commonpath([real_p, real_root]) != real_root:
+            return False
+    except ValueError:
+        return False
+
+    return True
+
+
 def is_exempt_readonly_script(script_arg: str, cwd: str, project_dir: str, full_cmd: str) -> bool:
     """
-    F9b: Exempt a read-only skill script ONLY when its resolved path and realpath match
-    the hardcoded trusted office skill paths (never by basename alone).
+    F9b & F15b: Exempt a read-only skill script ONLY when its resolved path and realpath are
+    strictly contained within the trusted office directory (<REPO_ROOT>/tools/inbox-reader or
+    $HOME/.claude/skills/<3 skills>/scripts) and no component along the path is a symlink.
     """
     if SKILL_WRITE_FLAGS.search(full_cmd) or re.search(r"(?:^|[\s'\"=])--dong-y(?=$|[\s'\"])", full_cmd):
         return False
@@ -442,20 +513,23 @@ def is_exempt_readonly_script(script_arg: str, cwd: str, project_dir: str, full_
     resolved = os.path.normpath(os.path.join(base_cwd, os.path.expanduser(clean_arg)))
     if os.path.islink(resolved):
         return False
-    real_p = os.path.realpath(resolved)
 
-    trusted_paths: set[str] = set()
-    if project_dir:
-        inbox_tool = os.path.normpath(os.path.join(project_dir, "tools", "inbox-reader", "fetch_page_messages.py"))
-        trusted_paths.add(inbox_tool)
-        trusted_paths.add(os.path.realpath(inbox_tool))
+    if project_dir and _matches_trusted_script_containment(
+        resolved,
+        project_dir,
+        os.path.join("tools", "inbox-reader"),
+        os.path.join("tools", "inbox-reader", "fetch_page_messages.py"),
+    ):
+        return True
 
+    home_dir = os.path.expanduser("~")
     for rel_skill in TRUSTED_EXEMPT_SKILL_RELPATHS:
-        skill_path = os.path.normpath(os.path.expanduser(f"~/.claude/skills/{rel_skill}"))
-        trusted_paths.add(skill_path)
-        trusted_paths.add(os.path.realpath(skill_path))
+        skill_dir_rel = os.path.join(".claude", "skills", os.path.dirname(rel_skill))
+        script_rel = os.path.join(".claude", "skills", rel_skill)
+        if _matches_trusted_script_containment(resolved, home_dir, skill_dir_rel, script_rel):
+            return True
 
-    return resolved in trusted_paths and real_p in trusted_paths
+    return False
 
 
 def check_command_text(

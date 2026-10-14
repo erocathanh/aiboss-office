@@ -61,15 +61,16 @@ cd aiboss-office
   git checkout mvp/marketing
   ```
 
-*Neo quy tắc `deny` tự động và tin cậy thư mục kho mới (S17c F7)*:
+*Neo quy tắc `deny` tự động và tin cậy thư mục kho mới (S17c F7 & S17d F14–F18)*:
 1. **Tự động neo quy tắc `deny` theo đường dẫn thực của kho (không cần bước chạy tay)**:
-   - Khi chạy `pnpm start`, `pnpm test` hoặc dịch vụ LaunchAgent, bước `prestart` tự động thực thi `node operations/scripts/gen-seat-files.mjs` (idempotent — chạy nhiều lần không đổi nội dung nếu gốc kho giữ nguyên) để neo các quy tắc `Edit(//<REPO_ROOT>/projects/**/{references,templates,inputs}/**)` và `Edit(//<REPO_ROOT>/operations/data/**)` trong `.claude/settings.json` theo đúng đường dẫn thực của kho hiện tại.
-   - Đồng thời, trước mỗi lượt gọi ghế (`spawnClaudeSeatProcess`), hệ thống tự động kiểm tra mọi quy tắc `deny` tuyệt đối trong `.claude/settings.json` phải khớp với `//<REPO_ROOT thật>/`; nếu lệch sẽ tự sinh lại tại chỗ và kiểm tra lại, nếu vẫn lệch sẽ từ chối lượt chạy với lỗi `seat_settings_root_mismatch` (fail-closed, tuyệt đối không chạy ghế với `deny` neo sai đường dẫn).
+   - Khi chạy `pnpm start`, `pnpm test` hoặc dịch vụ LaunchAgent, bước `prestart` tự động thực thi `node operations/scripts/gen-seat-files.mjs` (đã tích hợp sẵn bước sinh `CLAUDE.md` nên không cần gọi riêng `gen-seat-claude-md.mjs`; idempotent — chạy nhiều lần không đổi nội dung nếu gốc kho giữ nguyên) để neo các quy tắc `Edit(//<REPO_ROOT>/projects/**/{references,templates,inputs}/**)` và `Edit(//<REPO_ROOT>/operations/data/**)` trong `.claude/settings.json` theo đúng đường dẫn thực của kho hiện tại (dùng chung một hàm escape ký tự glob `* ? [ ] { }` giữa bộ sinh và bộ kiểm).
+   - Đồng thời, trước mỗi lượt gọi ghế (`spawnClaudeSeatProcess`), hệ thống tự động kiểm tra mọi quy tắc `deny` tuyệt đối trong cả `.claude/settings.json` của ghế và `.claude/settings.json` ở gốc kho phải khớp với `//<REPO_ROOT thật>/`; nếu lệch sẽ tự sinh lại tại chỗ và kiểm tra lại, nếu vẫn lệch (ví dụ thiếu quyền ghi) sẽ từ chối lượt chạy với lỗi `seat_settings_root_mismatch` kèm `stderr` của bộ sinh (cắt tối đa 2 KB) và hướng dẫn kiểm tra quyền ghi (fail-closed, tuyệt đối không chạy ghế với `deny` neo sai đường dẫn).
    - Nếu muốn kiểm tra thủ công trạng thái neo hiện tại mà không ghi tệp:
      ```bash
      node operations/scripts/gen-seat-files.mjs --check
      ```
-   - *Lý do thiết kế (giữ tệp sinh trong Git kết hợp kiểm tra lúc spawn)*: Các tệp `.claude/settings.json` và `.mcp.json` vẫn được theo dõi trong Git để có thể kiểm toán trực tiếp toàn bộ sàn `permissions.deny`/`hooks` qua lịch sử diff và dùng ngay ở đường dẫn chuẩn, trong khi cơ chế `prestart` + kiểm tra fail-closed tại `spawnClaudeSeatProcess` bảo đảm bất kỳ bản clone/worktree nào ở đường dẫn khác đều được neo lại tự động và không bao giờ chạy với quy tắc cũ.
+   - *Lưu ý về trạng thái Git (`git status` bẩn) trên bản clone/worktree khác đường dẫn chuẩn (F17)*: Vì các tệp `.claude/settings.json` được theo dõi trong Git với đường dẫn chuẩn của kho chính, ở **lần chạy `pnpm start` hoặc `pnpm test` đầu tiên** trên một bản clone hoặc worktree đặt ở đường dẫn khác (ví dụ `/tmp/...` hoặc thư mục người dùng khác), `gen-seat-files.mjs` sẽ cập nhật lại các tệp `.claude/settings.json` theo đường dẫn cục bộ. Việc `git status` báo các tệp `.claude/settings.json` có thay đổi (`M`) trên bản clone khác đường dẫn là **hoàn toàn bình thường — không commit các thay đổi đường dẫn cục bộ này lên nhánh chung**.
+   - *Nguyên tắc phân tích tĩnh đường dẫn trong bộ hook (`operations/SAN-AN-TOAN-GHE.md`, F16)*: Mọi biểu thức hoặc chuỗi literal đường dẫn không thể giải mã tĩnh một cách chắc chắn (bao gồm biến môi trường, chuỗi nối động, lời gọi hàm lồng, hoặc chuỗi có ký tự escape ngôn ngữ không giải được) **không bao giờ được coi là đường dẫn tĩnh an toàn** mà luôn bị xếp vào nhóm đích ghi động (`$DYNAMIC_WRITE`) và bị chặn fail-closed khi `cwd` nằm trong kho dự án.
 2. **Chấp nhận hộp thoại tin cậy kho (Workspace Trust)**: Mở terminal tại thư mục gốc `aiboss-office` vừa clone và chạy lệnh `claude` tương tác một lần để bấm đồng ý tin cậy thư mục dự án (*Yes, I trust this folder*), sau đó gõ `/exit`. Bước này giúp Claude Code nạp đầy đủ các quy tắc `permissions.allow` và `hooks` trong `.claude/settings.json` của từng ghế.
 
 ---
@@ -132,7 +133,7 @@ Mở tệp `config/office.json` để kiểm tra và điều chỉnh ngân sách
   }
 }
 ```
-- `language`: Ngôn ngữ trả lời của các ghế agent (`"auto"` mặc định trả lời theo ngôn ngữ câu hỏi của Owner, hoặc ghim cố định `"vi"` / `"en"`). Khi đổi trường `language`, thay đổi có hiệu lực ở lần chạy `pnpm start` kế tiếp (bước `prestart` tự động chạy `node operations/scripts/gen-seat-files.mjs && node operations/scripts/gen-seat-claude-md.mjs` một cách idempotent để cập nhật tệp ghế khi nội dung đổi mà không chạm `SOUL.md`). Nếu chạy trực tiếp qua `pnpm exec next start -p 4330 -H 127.0.0.1`, chạy `node operations/scripts/gen-seat-files.mjs && node operations/scripts/gen-seat-claude-md.mjs` trước khi khởi động lại dịch vụ.
+- `language`: Ngôn ngữ trả lời của các ghế agent (`"auto"` mặc định trả lời theo ngôn ngữ câu hỏi của Owner, hoặc ghim cố định `"vi"` / `"en"`). Khi đổi trường `language`, thay đổi có hiệu lực ở lần chạy `pnpm start` kế tiếp (bước `prestart` tự động chạy `node operations/scripts/gen-seat-files.mjs` một cách idempotent để cập nhật cả `.claude/settings.json`, `.mcp.json` và `CLAUDE.md` khi nội dung đổi mà không chạm `SOUL.md`). Nếu chạy trực tiếp qua `pnpm exec next start -p 4330 -H 127.0.0.1`, chạy `node operations/scripts/gen-seat-files.mjs` trước khi khởi động lại dịch vụ.
 - `daily_limit_usd`: Trần chi tiêu tối đa mỗi ngày tính bằng USD (ví dụ 10.0 USD). Khi chi phí đạt trần cứng, hệ thống sẽ tự động chặn mọi lượt gọi tiếp theo để bảo vệ tài khoản của bạn.
 - `warning_threshold_ratio`: Mức cảnh báo (0.8 tương đương 80% ngân sách ngày).
 

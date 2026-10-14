@@ -47,10 +47,10 @@ test('S17-1 & F1/F6: GIONG_TERMINAL ignores legacy GIONG_TERMINAL env var, netwo
 
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.start, 'next start -p 4330 -H 127.0.0.1', 'F6: package.json start script must include -H 127.0.0.1');
-  assert.ok(
-    pkg.scripts.prestart.includes('operations/scripts/gen-seat-files.mjs') &&
-      pkg.scripts.prestart.includes('operations/scripts/gen-seat-claude-md.mjs'),
-    'F7a: package.json prestart must run both gen-seat-files.mjs and gen-seat-claude-md.mjs'
+  assert.equal(
+    pkg.scripts.prestart,
+    'node operations/scripts/gen-seat-files.mjs',
+    'F7a/F17: package.json prestart must run gen-seat-files.mjs (which already runs generateSeatClaudeMd)'
   );
 
   const seatDir = path.join(REPO_ROOT, 'departments', 'marketing', 'seats', 'content-writer');
@@ -498,6 +498,23 @@ test('F5, F10 & F12: lock_raw_inputs.py blocks heredoc writes, string-concat ope
       name: 'f10-node-copyFileSync-dst-protected',
       cmd: "node -e \"require('fs').copyFileSync('a','operations/data/approvals/x.jsonl')\"",
     },
+    {
+      name: 'f16-node-cpSync-dst-protected',
+      cmd: "node -e \"require('fs').cpSync('a','operations/data/approvals/x.jsonl')\"",
+    },
+    {
+      name: 'f16-python-path-join-write-text',
+      cmd: "python3 -c \"import os; from pathlib import Path; Path(os.path.join('operations','data','approvals','x.jsonl')).write_text('x')\"",
+    },
+    {
+      name: 'f16-python-open-hex-escape',
+      cmd: "python3 -c \"open('operations\\\\x2fdata\\\\x2fapprovals\\\\x2fx.jsonl','a').write('x')\"",
+    },
+    {
+      name: 'f16-python-open-unresolvable-escape-dynamic',
+      cmd: "python3 -c \"open('wip\\\\N{SOLIDUS}a.txt','w').write('x')\"",
+      expectMsg: 'đích không đọc được',
+    },
   ];
 
   for (const bc of blockCases) {
@@ -505,11 +522,23 @@ test('F5, F10 & F12: lock_raw_inputs.py blocks heredoc writes, string-concat ope
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: bc.cmd }, cwd: REPO_ROOT }),
       encoding: 'utf8',
     });
-    assert.equal(r.status, 2, `F5/F10 case ${bc.name} must be blocked (exit 2), got ${r.status}`);
+    assert.equal(r.status, 2, `F5/F10/F16 case ${bc.name} must be blocked (exit 2), got ${r.status}`);
     if (bc.expectMsg) {
-      assert.ok(r.stderr.includes(bc.expectMsg), `F5/F10 case ${bc.name} stderr must include "${bc.expectMsg}", got: ${r.stderr}`);
+      assert.ok(r.stderr.includes(bc.expectMsg), `F5/F10/F16 case ${bc.name} stderr must include "${bc.expectMsg}", got: ${r.stderr}`);
     }
   }
+
+  // F16b: Hex-escaped absolute path to protected operations/data must also be blocked even when cwd is outside repo (/tmp)
+  const absHexTarget = path.join(REPO_ROOT, 'operations', 'data', 'approvals', 'x.jsonl').replace(/\//g, '\\x2f');
+  const outCwdRes = spawnSync('/usr/bin/python3', [lockHookPath], {
+    input: JSON.stringify({
+      tool_name: 'Bash',
+      tool_input: { command: `python3 -c "open('${absHexTarget}','a').write('x')"` },
+      cwd: os.tmpdir(),
+    }),
+    encoding: 'utf8',
+  });
+  assert.equal(outCwdRes.status, 2, 'F16b: hex-escaped protected path must be decoded and blocked even when cwd is outside repo');
 
   // Positive controls: printf x > /tmp/ok.txt, copyFileSync('a','wip/b'), and whitespace literals open( 'wip/ok.txt','w')
   for (const allowCmd of [
@@ -525,4 +554,258 @@ test('F5, F10 & F12: lock_raw_inputs.py blocks heredoc writes, string-concat ope
     assert.equal(okRes.status, 0, `F5/F10/F12 positive control (${allowCmd}) must exit 0, stderr: ${okRes.stderr}`);
   }
 });
+
+test('F14, F17 & F18: shared glob escape handles {demo}/[x]/spaces/symlink aliases, missing root settings is rejected, production auto-regen repairs drift, and failed auto-regen surfaces stderr + hint', async () => {
+  const { escapeSeatSettingsGlobPath: sharedEscape } = await import('../src/lib/seat-settings-anchor.ts');
+  const { escapeGlobPath: genEscape } = await import('../operations/scripts/gen-seat-files.mjs');
+  assert.equal(sharedEscape, escapeSeatSettingsGlobPath, 'F14: chay-agent.ts must re-export shared escapeSeatSettingsGlobPath');
+  assert.equal(sharedEscape, genEscape, 'F14: gen-seat-files.mjs must use the exact same escape function');
+
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 's17d-f14-'));
+  try {
+    // Create a clone directory whose name contains {demo}, [x], and spaces, plus a symlink alias
+    const specialRepo = path.join(tmpBase, 'client {demo} [x] office');
+    const symlinkRepo = path.join(tmpBase, 'alias-link-office');
+    fs.mkdirSync(path.join(specialRepo, 'data'), { recursive: true });
+    fs.mkdirSync(path.join(specialRepo, 'departments', 'marketing'), { recursive: true });
+    fs.mkdirSync(path.join(specialRepo, 'config'), { recursive: true });
+    fs.mkdirSync(path.join(specialRepo, 'operations', 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(specialRepo, 'src', 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(specialRepo, 'packs', 'core'), { recursive: true });
+
+    fs.copyFileSync(path.join(REPO_ROOT, 'data', 'seats.json'), path.join(specialRepo, 'data', 'seats.json'));
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'departments', 'marketing', 'department.json'),
+      path.join(specialRepo, 'departments', 'marketing', 'department.json')
+    );
+    fs.copyFileSync(path.join(REPO_ROOT, 'config', 'office.json'), path.join(specialRepo, 'config', 'office.json'));
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'operations', 'scripts', 'gen-seat-files.mjs'),
+      path.join(specialRepo, 'operations', 'scripts', 'gen-seat-files.mjs')
+    );
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'operations', 'scripts', 'gen-seat-claude-md.mjs'),
+      path.join(specialRepo, 'operations', 'scripts', 'gen-seat-claude-md.mjs')
+    );
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'src', 'lib', 'seat-settings-anchor.ts'),
+      path.join(specialRepo, 'src', 'lib', 'seat-settings-anchor.ts')
+    );
+    const workingRulesSrc = path.join(REPO_ROOT, 'packs', 'core', 'WORKING-RULES.md');
+    if (fs.existsSync(workingRulesSrc)) {
+      fs.copyFileSync(workingRulesSrc, path.join(specialRepo, 'packs', 'core', 'WORKING-RULES.md'));
+    }
+
+    fs.symlinkSync(specialRepo, symlinkRepo);
+
+    // 1. F14: Generate settings in repo containing {demo}, [x], spaces -> verify passes!
+    generateSeatFiles({ repoRoot: specialRepo, anchorRoot: specialRepo, quiet: true });
+    const specialSeat = path.join(specialRepo, 'departments', 'marketing', 'seats', 'content-writer');
+    const vSpecial = verifySeatSettingsRootAnchor(specialSeat, specialRepo);
+    assert.equal(
+      vSpecial.valid,
+      true,
+      `F14: verifySeatSettingsRootAnchor must accept repo path with {demo}, [x], and spaces, got: ${JSON.stringify(vSpecial)}`
+    );
+    assert.equal(vSpecial.checkedFiles.length, 2, 'F14/F18: both seat settings and root settings must be checked');
+
+    // 2. F18: Cross-alias verification (seat via symlinkRepo, repoRoot via realpath of specialRepo, plus object signature)
+    const symlinkSeat = path.join(symlinkRepo, 'departments', 'marketing', 'seats', 'content-writer');
+    const realSpecialRepo = fs.realpathSync(specialRepo);
+    const vAlias = verifySeatSettingsRootAnchor({
+      seatDir: symlinkSeat,
+      maNhanSu: 'content-writer',
+      repoRoot: realSpecialRepo,
+    });
+    assert.equal(
+      vAlias.valid,
+      true,
+      `F18: verifySeatSettingsRootAnchor must recognize registered seat across symlink/realpath alias, got: ${JSON.stringify(vAlias)}`
+    );
+    assert.equal(vAlias.checkedFiles.length, 2, 'F18: cross-alias check must still verify both seat and root settings');
+
+    // 3. F18: Missing root .claude/settings.json must be rejected with "missing settings file"
+    const rootSettingsFile = path.join(specialRepo, '.claude', 'settings.json');
+    fs.unlinkSync(rootSettingsFile);
+    const vMissingRoot = verifySeatSettingsRootAnchor(specialSeat, specialRepo);
+    assert.equal(vMissingRoot.valid, false, 'F18: missing root .claude/settings.json must be rejected');
+    assert.ok(
+      (vMissingRoot.reason || '').includes('missing settings file'),
+      `F18: reason must mention "missing settings file", got: ${vMissingRoot.reason}`
+    );
+
+    // 4. Production auto-regeneration path (autoRegenerateSettings omitted / true):
+    // Anchor specialRepo to /opt/fake, then call spawnClaudeSeatProcess with default autoRegenerateSettings
+    generateSeatFiles({ repoRoot: specialRepo, anchorRoot: '/opt/fake', quiet: true });
+    assert.equal(verifySeatSettingsRootAnchor(specialSeat, specialRepo).valid, false);
+    const prevClaudeBin = process.env.DUONG_DAN_CLAUDE;
+    process.env.DUONG_DAN_CLAUDE = '/usr/bin/true';
+    try {
+      const spawned = spawnClaudeSeatProcess({
+        thuMuc: specialSeat,
+        maNhanSu: 'content-writer',
+        repoRoot: specialRepo,
+      });
+      spawned.tien.kill('SIGTERM');
+    } finally {
+      if (prevClaudeBin === undefined) delete process.env.DUONG_DAN_CLAUDE;
+      else process.env.DUONG_DAN_CLAUDE = prevClaudeBin;
+    }
+    const vAfterAutoRegen = verifySeatSettingsRootAnchor(specialSeat, specialRepo);
+    assert.equal(vAfterAutoRegen.valid, true, 'Production auto-regeneration in spawnClaudeSeatProcess must re-anchor settings in place');
+
+    // 5. F17: When auto-regeneration fails, stderr (truncated to 2 KB) + remediation hint must be included in thrown error
+    generateSeatFiles({ repoRoot: specialRepo, anchorRoot: '/opt/fake', quiet: true });
+    fs.writeFileSync(
+      path.join(specialRepo, 'operations', 'scripts', 'gen-seat-files.mjs'),
+      'process.stderr.write("EACCES_SIMULATED: permission denied writing settings.json\\n"); process.exit(1);\n',
+      'utf8'
+    );
+    assert.throws(
+      () => ensureSeatSettingsAnchored(specialSeat, specialRepo, { autoRegenerate: true }),
+      (err) => {
+        const msg = String(err?.message || err);
+        return (
+          msg.includes('seat_settings_root_mismatch') &&
+          msg.includes('EACCES_SIMULATED') &&
+          msg.includes('node operations/scripts/gen-seat-files.mjs --check')
+        );
+      },
+      'F17: ensureSeatSettingsAnchored must surface generator stderr and remediation hint when auto-regen fails'
+    );
+  } finally {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  }
+
+  // F17: package.json prestart must not call gen-seat-claude-md.mjs redundantly
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  assert.equal(
+    pkgJson.scripts.prestart,
+    'node operations/scripts/gen-seat-files.mjs',
+    'F17: prestart must only run gen-seat-files.mjs (which already runs generateSeatClaudeMd)'
+  );
+});
+
+test('F15 & Item 5: Hook 2.1 blocks xargs/wrapped HTTP writes & symlinked skill parent dirs, nested scripts resolve relative to command cwd, and SAN-AN-TOAN-GHE.md defines Threat Model & Residual Risk Register', () => {
+  const hookPath = path.join(REPO_ROOT, 'operations', 'hooks', 'block_public_publish.py');
+
+  // 1. F15a: xargs curl write and wrapped curl write
+  for (const cmd of [
+    'cat wip/endpoint.txt | xargs curl -X POST -d x',
+    'cat wip/endpoint.txt | xargs -n 1 curl -X POST "http://127.0.0.1:4330/api" -d x',
+    'env FOO=1 nohup timeout 5 nice -n 5 command curl -X POST "$DYNAMIC_URL" -d x',
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hookPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F15a: command "${cmd}" must be blocked (exit 2), got ${r.status}`);
+  }
+
+  // 2. F15b: Trusted script exemption must reject symlinked parent directories pointing outside repo/HOME
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 's17d-f15-'));
+  try {
+    const fakeRepo = path.join(tmpDir, 'repo');
+    const fakeHome = path.join(tmpDir, 'home');
+    const outsideDir = path.join(tmpDir, 'outside-evil');
+    fs.mkdirSync(path.join(fakeRepo, 'data'), { recursive: true });
+    fs.mkdirSync(path.join(fakeRepo, 'departments'), { recursive: true });
+    fs.mkdirSync(path.join(fakeRepo, 'tools'), { recursive: true });
+    fs.writeFileSync(path.join(fakeRepo, 'data', 'seats.json'), '[]', 'utf8');
+    fs.mkdirSync(outsideDir, { recursive: true });
+
+    // Create a script inside outsideDir that performs an outbound write
+    const evilInbox = path.join(outsideDir, 'fetch_page_messages.py');
+    fs.writeFileSync(
+      evilInbox,
+      'import urllib.request\nurllib.request.urlopen("https://graph.facebook.com/v25.0/me/feed", data=b"x")\n',
+      'utf8'
+    );
+    // Symlink <fakeRepo>/tools/inbox-reader -> outsideDir
+    fs.symlinkSync(outsideDir, path.join(fakeRepo, 'tools', 'inbox-reader'));
+
+    const symlinkToolRes = spawnSync('/usr/bin/python3', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'python3 tools/inbox-reader/fetch_page_messages.py' },
+        cwd: fakeRepo,
+      }),
+      encoding: 'utf8',
+    });
+    assert.equal(
+      symlinkToolRes.status,
+      2,
+      'F15b: tools/inbox-reader/fetch_page_messages.py through a symlinked parent directory outside repo must NOT be exempt'
+    );
+
+    // Symlink <fakeHome>/.claude/skills/doc-comment-fanpage/scripts -> outsideDir
+    const evilSkillScript = path.join(outsideDir, 'doc-comment.py');
+    fs.writeFileSync(
+      evilSkillScript,
+      'import urllib.request\nurllib.request.urlopen("https://graph.facebook.com/v25.0/me/feed", data=b"x")\n',
+      'utf8'
+    );
+    fs.mkdirSync(path.join(fakeHome, '.claude', 'skills', 'doc-comment-fanpage'), { recursive: true });
+    fs.symlinkSync(outsideDir, path.join(fakeHome, '.claude', 'skills', 'doc-comment-fanpage', 'scripts'));
+
+    const symlinkSkillRes = spawnSync('/usr/bin/python3', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'python3 ~/.claude/skills/doc-comment-fanpage/scripts/doc-comment.py' },
+        cwd: fakeRepo,
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: fakeHome },
+    });
+    assert.equal(
+      symlinkSkillRes.status,
+      2,
+      'F15b: ~/.claude/skills/.../scripts/doc-comment.py through a symlinked scripts dir outside HOME must NOT be exempt'
+    );
+
+    // 3. F9c/Hermes test note: Nested script call resolves relative to command cwd (not dirname of outer script)
+    const subDir = path.join(tmpDir, 'sub');
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(path.join(subDir, 'outer.sh'), '#!/bin/sh\nsh inner.sh\n', 'utf8');
+    // Put inner.sh in subDir (safe echo), but NOT in tmpDir (command cwd)
+    fs.writeFileSync(path.join(subDir, 'inner.sh'), '#!/bin/sh\necho ok\n', 'utf8');
+    const nestedMissingAtCwd = spawnSync('/usr/bin/python3', [hookPath], {
+      input: JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'sh sub/outer.sh' },
+        cwd: tmpDir,
+      }),
+      encoding: 'utf8',
+    });
+    assert.equal(
+      nestedMissingAtCwd.status,
+      2,
+      'F9c: nested script "sh inner.sh" inside sub/outer.sh must resolve relative to command cwd (tmpDir) and fail-closed when missing at cwd'
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // 4. Item 5: Threat Model & Residual Risk Register file exists and contains all 4 required sections
+  const sanAnToanPath = path.join(REPO_ROOT, 'operations', 'SAN-AN-TOAN-GHE.md');
+  assert.ok(fs.existsSync(sanAnToanPath), 'Item 5: operations/SAN-AN-TOAN-GHE.md must exist');
+  const sanAnToanContent = fs.readFileSync(sanAnToanPath, 'utf8');
+  for (const requiredPhrase of [
+    'Mô Hình Đe Doạ',
+    'bypassPermissions',
+    'prompt injection',
+    'Kiến Trúc Hai Lớp Bảo Vệ',
+    'permissions.deny',
+    'Sổ Rủi Ro Tồn Dư',
+    'RR-01',
+    'RR-05',
+    'Tiêu Chí Phân Loại Lỗi và Gộp Nhánh',
+  ]) {
+    assert.ok(
+      sanAnToanContent.includes(requiredPhrase),
+      `Item 5: operations/SAN-AN-TOAN-GHE.md must include "${requiredPhrase}"`
+    );
+  }
+});
+
 

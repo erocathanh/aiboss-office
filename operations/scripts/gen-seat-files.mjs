@@ -11,12 +11,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { generateSeatClaudeMd } from './gen-seat-claude-md.mjs';
+import { escapeSeatSettingsGlobPath } from '../../src/lib/seat-settings-anchor.ts';
 
-export function escapeGlobPath(rawPath) {
-  return String(rawPath)
-    .replace(/([*?[\]{}])/g, '\\$1')
-    .replace(/^\/+/, '');
-}
+export const escapeGlobPath = escapeSeatSettingsGlobPath;
+export { escapeSeatSettingsGlobPath };
 
 export function buildRepoRootDenyRules(repoRoot) {
   const resolvedRoot = path.resolve(repoRoot);
@@ -26,7 +24,7 @@ export function buildRepoRootDenyRules(repoRoot) {
   } catch {}
 
   const rootPrefixes = Array.from(
-    new Set([escapeGlobPath(resolvedRoot), escapeGlobPath(realRoot)])
+    new Set([escapeSeatSettingsGlobPath(resolvedRoot), escapeSeatSettingsGlobPath(realRoot)])
   );
 
   const anchoredProjectRules = [];
@@ -333,7 +331,17 @@ export function generateSeatFiles({
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+let invokedRealPath = invokedPath;
+try {
+  if (invokedPath) invokedRealPath = fs.realpathSync(invokedPath);
+} catch {}
+
+if (
+  invokedPath &&
+  (import.meta.url === pathToFileURL(invokedPath).href ||
+    import.meta.url === pathToFileURL(invokedRealPath).href)
+) {
   const checkOnly = process.argv.includes('--check');
   const quiet = process.argv.includes('--quiet');
   const res = generateSeatFiles({ checkOnly, quiet });

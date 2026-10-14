@@ -93,7 +93,17 @@ Rules that never change: the human owner decides — these gates always wait for
   return { totalCount, updatedCount, langRule };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+let invokedRealPath = invokedPath;
+try {
+  if (invokedPath) invokedRealPath = fs.realpathSync(invokedPath);
+} catch {}
+
+if (
+  invokedPath &&
+  (import.meta.url === pathToFileURL(invokedPath).href ||
+    import.meta.url === pathToFileURL(invokedRealPath).href)
+) {
   generateSeatClaudeMd();
 }
 

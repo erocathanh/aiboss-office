@@ -456,16 +456,40 @@ export function buildClaudeSeatEnv(sourceEnv: NodeJS.ProcessEnv = process.env): 
   return cleanEnv as NodeJS.ProcessEnv;
 }
 
-export function escapeSeatSettingsGlobPath(absPath: string): string {
-  return absPath.replace(/([[\]*?])/g, '\\$1');
+import {
+  escapeSeatSettingsGlobPath,
+  REQUIRED_ANCHORED_DENY_SUFFIXES,
+} from './seat-settings-anchor';
+
+export { escapeSeatSettingsGlobPath };
+
+function safeRealpath(targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    let cur = resolved;
+    const tail: string[] = [];
+    while (cur !== path.dirname(cur)) {
+      try {
+        const realCur = fs.realpathSync(cur);
+        return path.join(realCur, ...tail.reverse());
+      } catch {
+        tail.push(path.basename(cur));
+        cur = path.dirname(cur);
+      }
+    }
+    return resolved;
+  }
 }
 
-const REQUIRED_ANCHORED_DENY_SUFFIXES = [
-  'projects/**/references/**',
-  'projects/**/templates/**',
-  'projects/**/inputs/**',
-  'operations/data/**',
-] as const;
+export interface SeatSettingsAnchorInput {
+  thuMuc?: string;
+  seatDir?: string;
+  maNhanSu?: string | null;
+  repoRoot?: string;
+  autoRegenerate?: boolean;
+}
 
 export interface SeatSettingsAnchorVerification {
   valid: boolean;
@@ -475,24 +499,39 @@ export interface SeatSettingsAnchorVerification {
 }
 
 /**
- * F7b (S17c): Kiểm tra mọi quy tắc deny tuyệt đối (`Edit(//...)`, `Write(//...)`, `Read(//...)`)
- * trong `.claude/settings.json` của ghế phải bắt đầu bằng `//<REPO_ROOT thật>/`.
+ * F7b (S17c) & F14/F18 (S17d): Kiểm tra mọi quy tắc deny tuyệt đối (`Edit(//...)`, `Write(//...)`, `Read(//...)`)
+ * trong `.claude/settings.json` của ghế và gốc kho phải bắt đầu bằng `//<REPO_ROOT thật>/` (dùng chung bộ escape với
+ * `gen-seat-files.mjs`, nhận diện ghế/root theo cả `path.resolve` và `realpath`, và bắt buộc có root `.claude/settings.json`).
  */
 export function verifySeatSettingsRootAnchor(
-  thuMuc: string,
-  repoRoot?: string
+  thuMucOrInput: string | SeatSettingsAnchorInput,
+  repoRootArg?: string
 ): SeatSettingsAnchorVerification {
-  const resolvedRoot = path.resolve(repoRoot ?? findOfficeRootFromDir(thuMuc));
-  let realRoot = resolvedRoot;
-  try {
-    realRoot = fs.realpathSync(resolvedRoot);
-  } catch {}
-
-  const escapedResolved = escapeSeatSettingsGlobPath(resolvedRoot.replace(/^\/+/, ''));
-  const escapedReal = escapeSeatSettingsGlobPath(realRoot.replace(/^\/+/, ''));
-  const allowedAnchorPrefixes = Array.from(new Set([`//${escapedResolved}/`, `//${escapedReal}/`]));
+  const thuMuc =
+    typeof thuMucOrInput === 'string'
+      ? thuMucOrInput
+      : String(thuMucOrInput?.thuMuc ?? thuMucOrInput?.seatDir ?? '');
+  const explicitRepoRoot =
+    typeof thuMucOrInput === 'string' ? repoRootArg : (thuMucOrInput?.repoRoot ?? repoRootArg);
 
   const resolvedThuMuc = path.resolve(thuMuc);
+  const realThuMuc = safeRealpath(resolvedThuMuc);
+  const resolvedRoot = path.resolve(explicitRepoRoot ?? findOfficeRootFromDir(resolvedThuMuc));
+  const realRoot = safeRealpath(resolvedRoot);
+  const thuMucRoot = path.resolve(findOfficeRootFromDir(resolvedThuMuc));
+
+  const candidateRoots = [resolvedRoot, realRoot, thuMucRoot];
+  if (realRoot.startsWith('/private/tmp/') || realRoot === '/private/tmp') {
+    candidateRoots.push(realRoot.slice('/private'.length));
+  }
+  if (realRoot.startsWith('/private/var/') || realRoot === '/private/var') {
+    candidateRoots.push(realRoot.slice('/private'.length));
+  }
+  const verifiedAliasRoots = candidateRoots.filter((c) => safeRealpath(c) === realRoot);
+  const allowedAnchorPrefixes = Array.from(
+    new Set(verifiedAliasRoots.map((c) => `//${escapeSeatSettingsGlobPath(c)}/`))
+  );
+
   const seatSettingsPath = path.join(resolvedThuMuc, '.claude', 'settings.json');
   const rootSettingsPath = path.join(resolvedRoot, '.claude', 'settings.json');
 
@@ -502,9 +541,17 @@ export function verifySeatSettingsRootAnchor(
     if (fs.existsSync(seatsJsonPath)) {
       const seats = JSON.parse(fs.readFileSync(seatsJsonPath, 'utf8')) as Array<{ dir?: string }>;
       if (Array.isArray(seats)) {
-        isRegisteredSeat = seats.some(
-          (s) => s?.dir && path.resolve(resolvedRoot, s.dir) === resolvedThuMuc
-        );
+        isRegisteredSeat = seats.some((s) => {
+          if (!s?.dir) return false;
+          const candidateResolved = path.resolve(resolvedRoot, s.dir);
+          const candidateReal = safeRealpath(path.resolve(realRoot, s.dir));
+          return (
+            candidateResolved === resolvedThuMuc ||
+            candidateReal === realThuMuc ||
+            candidateResolved === realThuMuc ||
+            candidateReal === resolvedThuMuc
+          );
+        });
       }
     }
   } catch {}
@@ -513,7 +560,10 @@ export function verifySeatSettingsRootAnchor(
   if (fs.existsSync(seatSettingsPath) || isRegisteredSeat) {
     filesToCheck.push(seatSettingsPath);
   }
-  if (fs.existsSync(rootSettingsPath) && rootSettingsPath !== seatSettingsPath && isRegisteredSeat) {
+  if (
+    rootSettingsPath !== seatSettingsPath &&
+    (isRegisteredSeat || fs.existsSync(seatSettingsPath) || fs.existsSync(rootSettingsPath))
+  ) {
     filesToCheck.push(rootSettingsPath);
   }
 
@@ -589,20 +639,35 @@ export function verifySeatSettingsRootAnchor(
   };
 }
 
+const SEAT_SETTINGS_REMEDIATION_HINT =
+  'Kiểm quyền ghi tại .claude/settings.json và departments/**/.claude/settings.json, sau đó chạy: node operations/scripts/gen-seat-files.mjs --check';
+
 /**
- * F7b (S17c): Kiểm tra neo settings ghế trước khi spawn; nếu lệch thì thử sinh lại tại chỗ
- * từ `operations/scripts/gen-seat-files.mjs` rồi kiểm lại; nếu vẫn lệch thì ném lỗi `seat_settings_root_mismatch` (fail-closed).
+ * F7b (S17c) & F17 (S17d): Kiểm tra neo settings ghế trước khi spawn; nếu lệch thì thử sinh lại tại chỗ
+ * từ `operations/scripts/gen-seat-files.mjs` rồi kiểm lại; nếu vẫn lệch thì ném lỗi `seat_settings_root_mismatch`
+ * kèm stderr của bộ sinh (cắt tối đa 2 KB) và hướng dẫn xử lý quyền ghi (fail-closed).
  */
 export function ensureSeatSettingsAnchored(
-  thuMuc: string,
-  repoRoot?: string,
+  thuMucOrInput: string | SeatSettingsAnchorInput,
+  repoRootArg?: string,
   options?: { autoRegenerate?: boolean }
 ): SeatSettingsAnchorVerification {
-  const resolvedRoot = path.resolve(repoRoot ?? findOfficeRootFromDir(thuMuc));
+  const thuMuc =
+    typeof thuMucOrInput === 'string'
+      ? thuMucOrInput
+      : String(thuMucOrInput?.thuMuc ?? thuMucOrInput?.seatDir ?? '');
+  const explicitRepoRoot =
+    typeof thuMucOrInput === 'string' ? repoRootArg : (thuMucOrInput?.repoRoot ?? repoRootArg);
+  const resolvedRoot = path.resolve(explicitRepoRoot ?? findOfficeRootFromDir(thuMuc));
   const firstCheck = verifySeatSettingsRootAnchor(thuMuc, resolvedRoot);
   if (firstCheck.valid) return firstCheck;
 
-  const allowAutoRegen = options?.autoRegenerate !== false;
+  const allowAutoRegen =
+    typeof thuMucOrInput === 'object' && thuMucOrInput !== null && 'autoRegenerate' in thuMucOrInput
+      ? thuMucOrInput.autoRegenerate !== false
+      : options?.autoRegenerate !== false;
+
+  let regenStderr = '';
   if (allowAutoRegen) {
     const genScriptPath = path.join(resolvedRoot, 'operations', 'scripts', 'gen-seat-files.mjs');
     const seatsJsonPath = path.join(resolvedRoot, 'data', 'seats.json');
@@ -611,19 +676,29 @@ export function ensureSeatSettingsAnchored(
         execFileSync(process.execPath, [genScriptPath], {
           cwd: resolvedRoot,
           env: { ...process.env, AIBOSS_OFFICE_ROOT: resolvedRoot },
-          stdio: 'ignore',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          encoding: 'utf8',
         });
-      } catch {}
+      } catch (err: unknown) {
+        const rawErr =
+          err && typeof err === 'object' && 'stderr' in err && err.stderr
+            ? String((err as { stderr?: unknown }).stderr)
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        regenStderr = rawErr.trim().slice(0, 2048);
+      }
       const secondCheck = verifySeatSettingsRootAnchor(thuMuc, resolvedRoot);
       if (secondCheck.valid) return secondCheck;
+      const stderrDetail = regenStderr ? ` | gen-seat-files stderr: ${regenStderr}` : '';
       throw new Error(
-        `${secondCheck.reason ?? 'seat_settings_root_mismatch'} (${secondCheck.mismatchedRules.slice(0, 4).join(', ')})`
+        `${secondCheck.reason ?? 'seat_settings_root_mismatch'} (${secondCheck.mismatchedRules.slice(0, 4).join(', ')})${stderrDetail} — ${SEAT_SETTINGS_REMEDIATION_HINT}`
       );
     }
   }
 
   throw new Error(
-    `${firstCheck.reason ?? 'seat_settings_root_mismatch'} (${firstCheck.mismatchedRules.slice(0, 4).join(', ')})`
+    `${firstCheck.reason ?? 'seat_settings_root_mismatch'} (${firstCheck.mismatchedRules.slice(0, 4).join(', ')}) — ${SEAT_SETTINGS_REMEDIATION_HINT}`
   );
 }
 
