@@ -12,6 +12,16 @@ const testDataDir = path.join(
 process.env.AIBOSS_DATA_DIR = testDataDir;
 process.env.CLAUDE_CONFIG_DIR = path.join(testDataDir, 'fake-claude');
 
+// Unref watchdog timers (>= 60s, e.g. hanGio 600s) so they don't keep the test process alive after completion
+const origSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = function (fn, ms, ...args) {
+  const timer = origSetTimeout(fn, ms, ...args);
+  if (typeof ms === 'number' && ms >= 60_000) {
+    timer.unref?.();
+  }
+  return timer;
+};
+
 // Create mock Claude runner script for testing real child process lifecycles
 const mockClaudePath = path.join(testDataDir, 'mock-claude.js');
 fs.mkdirSync(testDataDir, { recursive: true });
@@ -20,6 +30,14 @@ fs.writeFileSync(
   `#!/usr/bin/env node
 const mode = process.env.TEST_MOCK_CLAUDE_MODE || 'sleep-then-exit-0';
 const sessionId = process.env.TEST_MOCK_SESSION_ID || 'a3333333-3333-3333-3333-333333333333';
+
+process.stdin.on('data', () => {});
+process.stdin.on('error', () => {});
+process.on('SIGTERM', () => {
+  setTimeout(() => {
+    process.exit(0);
+  }, 200);
+});
 
 // 1. Emit session_id
 process.stdout.write(JSON.stringify({ type: 'system', session_id: sessionId }) + '\\n');
@@ -35,6 +53,11 @@ if (mode === 'sleep-then-exit-0') {
     process.stdout.write(JSON.stringify({ type: 'result', total_cost_usd: 0.001 }) + '\\n');
     process.exit(0);
   }, 400);
+} else if (mode === 'sleep-long') {
+  setTimeout(() => {
+    process.stdout.write(JSON.stringify({ type: 'result', total_cost_usd: 0.001 }) + '\\n');
+    process.exit(0);
+  }, 2000);
 } else if (mode === 'exit-1') {
   setTimeout(() => {
     process.stderr.write('Mock process non-zero exit\\n');
@@ -70,15 +93,19 @@ import {
   mocTepPhien,
   setLegacyPrefixFilterForTest,
   setDisableViewerGoneGuardForTest,
+  setBypassSlotGateForTest,
   xoaCacheCwd,
 } from '../src/lib/doc-phien.ts';
 import {
   recordRun,
   updateRun,
   getRun,
+  getRuns,
   mergeRunRecordPair,
   generateRunOrWakeId,
 } from '../src/lib/runs-ledger.ts';
+import { stopOfficeRunner } from '../src/lib/office-runner.ts';
+import { gietViec } from '../src/lib/kho-tien-trinh.ts';
 import { readSeatActive } from '../src/lib/seat-active.ts';
 import { GET as getPhienRoute } from '../src/app/api/phien/route.ts';
 import { POST as postChatRoute } from '../src/app/api/chat/route.ts';
@@ -549,12 +576,130 @@ try {
     console.log('  [PASS] T6: coPhien and mocTepPhien accurately verify session existence.');
   }
 
+  // =========================================================================
+  // T7: Slot Conflict Rejection Lifecycle & Single Terminal Assertion (S15b)
+  // =========================================================================
+  {
+    console.log('\n[TEST T7] Slot Conflict Rejection Lifecycle & Single Terminal Assertion:');
+    const t7SessionId1 = 'a7777771-7777-7777-7777-777777777771';
+    const t7SessionId2 = 'a7777772-7777-7777-7777-777777777772';
+    process.env.TEST_MOCK_CLAUDE_MODE = 'sleep-long';
+    process.env.TEST_MOCK_SESSION_ID = t7SessionId1;
+
+    // 1. Start Turn 1 on slot 'o-conflict'
+    const req1 = new NextRequest('http://127.0.0.1:4330/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ma_o: 'o-2',
+        ma_nhan_su: seatId,
+        cau_hoi: 'Lượt 1 đang chạy trên ô o-2',
+      }),
+    });
+
+    const res1 = await postChatRoute(req1);
+    assert.equal(res1.status, 200);
+    const reader1 = res1.body.getReader();
+
+    // Read until Turn 1 establishes session and registers in slot
+    while (true) {
+      const { value, done } = await reader1.read();
+      if (done) break;
+      const text = new TextDecoder().decode(value);
+      if (text.includes('da-noi-mach')) break;
+    }
+
+    // Turn 1 is now living in slot 'o-2'
+    // 2. Start Turn 2 on the SAME slot 'o-2' while Turn 1 is alive
+    // Enable bypassSlotGate to simulate race condition bypassing outer gate and exercising dangKyViec conflict rejection
+    setBypassSlotGateForTest(true);
+    process.env.TEST_MOCK_SESSION_ID = t7SessionId2;
+    const req2 = new NextRequest('http://127.0.0.1:4330/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ma_o: 'o-2',
+        ma_nhan_su: seatId,
+        phien_moi: true,
+        cau_hoi: 'Lượt 2 bị từ chối vì ô đang bận',
+      }),
+    });
+
+    const res2 = await postChatRoute(req2);
+    setBypassSlotGateForTest(false);
+    assert.equal(res2.status, 200);
+    const reader2 = res2.body.getReader();
+
+    // Read until Turn 2 receives rejection error
+    let receivedRejectionError = false;
+    while (true) {
+      const { value, done } = await reader2.read();
+      if (done) break;
+      const text = new TextDecoder().decode(value);
+      if (text.includes('Ô này ĐANG CHẠY một lượt khác')) {
+        receivedRejectionError = true;
+        break;
+      }
+    }
+    assert.ok(receivedRejectionError, 'Turn 2 must receive slot conflict rejection SSE error');
+
+    // Find runId for Turn 2 from runs ledger (most recent run for seat)
+    const runsList = getRuns({ seat: seatId, limit: 10 });
+    assert.ok(runsList.length > 0, 'Runs ledger must contain runs for seat');
+    const run2 = runsList[0];
+    const run2Id = run2.runId;
+
+    // Critical assertion (Hermes Finding 3):
+    // Turn 2's child process is still living / closing in background.
+    // Turn 2 MUST NOT have finishedAt yet! Status must remain 'running' until child actually exits.
+    const run2Immediate = getRun(run2Id);
+    assert.equal(run2Immediate?.status, 'running', 'Turn 2 run status MUST remain running before child terminates');
+    assert.equal(run2Immediate?.finishedAt, undefined, 'Turn 2 run MUST NOT have finishedAt before child terminates');
+
+    // 3. Wait for Turn 2 child to terminate (SIGTERM was sent by guiLenhDung)
+    await new Promise((r) => setTimeout(r, 350));
+
+    // After child process terminates:
+    // Turn 2 MUST transition to 'failed' via khiChet
+    const run2AfterExit = getRun(run2Id);
+    assert.equal(run2AfterExit?.status, 'failed', 'Turn 2 run status MUST transition to failed via khiChet');
+    assert.ok(run2AfterExit?.finishedAt, 'Turn 2 run MUST have finishedAt recorded by khiChet');
+    assert.equal(run2AfterExit?.errorKind, 'result_error', 'Turn 2 errorKind must be result_error');
+
+    // 4. Assert terminal record was written EXACTLY ONCE in ledger
+    const runsDir = path.join(testDataDir, 'runs');
+    let terminalCount = 0;
+    if (fs.existsSync(runsDir)) {
+      const runFiles = fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl'));
+      for (const f of runFiles) {
+        const lines = fs.readFileSync(path.join(runsDir, f), 'utf8').split('\n');
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.runId === run2Id && (parsed.status === 'failed' || parsed.status === 'finished')) {
+              terminalCount++;
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    }
+    assert.equal(terminalCount, 1, 'Terminal status for rejected child MUST be recorded EXACTLY ONCE');
+
+    // Cancel readers and stop Turn 1 child
+    gietViec('o-2');
+    await reader1.cancel();
+    await reader2.cancel();
+    await new Promise((r) => setTimeout(r, 450));
+    console.log('  [PASS] T7: Child rejection preserves running until close; terminal recorded EXACTLY ONCE.');
+  }
+
   console.log('\n================================================================');
-  console.log('ALL S15 v03 TESTS PASSED WITH RIGOROUS POSITIVE & COUNTER PROOFS');
+  console.log('ALL S15b TESTS PASSED WITH RIGOROUS POSITIVE & COUNTER PROOFS');
   console.log('================================================================');
 } finally {
+  stopOfficeRunner();
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true });
   } catch { /* ignore */ }
-  process.exit(0);
 }

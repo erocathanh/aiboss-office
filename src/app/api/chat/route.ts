@@ -3,7 +3,7 @@ import { chayAgent } from '@/lib/chay-agent';
 import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, luuMetadataPhien, isViewerGoneGuardDisabledForTest } from '@/lib/doc-phien';
+import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, luuMetadataPhien, isViewerGoneGuardDisabledForTest, isBypassSlotGateForTest } from '@/lib/doc-phien';
 import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
 import { generateRunOrWakeId, recordRun, updateRun } from '@/lib/runs-ledger';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
    *      đường XOÁ  gặp khong_ro ⇒ an toàn = KHÔNG bắn, GIỮ dòng
    *      cổng GHI   gặp khong_ro ⇒ an toàn = CHẶN, KHÔNG cho đè
    */
-  if (dongO.trang_thai !== 'trong' && dongO.trang_thai !== 'chet') {
+  if (!isBypassSlotGateForTest() && dongO.trang_thai !== 'trong' && dongO.trang_thai !== 'chet') {
     const v = dongO.v;
     const giay = Math.round((Date.now() - v.bat_dau) / 1000);
     /**
@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
    *    Cổng `xacMinhDong` ở trên chặn được ca «đã có tiến trình chạy», nhưng nó KHÔNG chặn được
    *    HAI yêu cầu tới CÙNG LÚC: cả hai cùng thấy sổ trống, cả hai cùng đi tiếp, cả hai cùng sinh.
    */
-  if (!datCho(maO)) {
+  if (!isBypassSlotGateForTest() && !datCho(maO)) {
     return Response.json({
       loi: `Ô ${maO} đang mở một lượt khác ngay lúc này. Thử lại sau vài giây.`,
       trong_app: true,
@@ -260,6 +260,7 @@ export async function POST(req: NextRequest) {
       let childSpawned = false;
       let daThoat = false;
       let daCoLoi = false;
+      let rejectReason: 'tu_choi_dong_cu_con_song' | null = null;
 
       const guiSSE = (chunk: Uint8Array) => {
         if (viewerGone) return;
@@ -352,18 +353,15 @@ export async function POST(req: NextRequest) {
              *    KHÔNG ai nhìn thì **về phía Owner vẫn là MẤT DẤU** — khác duy nhất là người viết
              *    yên tâm hơn. Nên tin này phải đi THẲNG vào ô của Owner.
              */
+            tien.stdin?.on('error', () => { /* swallow EPIPE if child is stopped */ });
             const ghi = dangKyViec(maO, tien, maNhanSu); // để nút DỪNG còn giết được
             traCho(maO);   // dòng sổ ĐÃ CÓ ⇒ cổng `xacMinhDong` tiếp quản ⇒ nhả khoá
             if (ghi.ket === 'tu_choi_dong_cu_con_song') {
               daCoLoi = true;
-              try {
-                updateRun(runId, {
-                  status: 'failed',
-                  errorKind: 'result_error',
-                  finishedAt: new Date().toISOString(),
-                  costStatus: 'unpriced',
-                });
-              } catch { /* bỏ qua */ }
+              rejectReason = 'tu_choi_dong_cu_con_song';
+              // ⭐ S15b: TUYỆT ĐỐI KHÔNG ghi terminal run status ở đây.
+              // guiLenhDung(tien) chỉ mới GỬI lệnh dừng cho con, chưa phải con đã kết thúc.
+              // DUY NHẤT handler khiChet quyết định trạng thái cuối của run khi tiến trình con kết thúc.
               guiSSE(goi({
                 loai: 'loi',
                 thong_diep:
@@ -384,7 +382,7 @@ export async function POST(req: NextRequest) {
             const isClean = ma === 0 && !signal && !daCoLoi;
             const finalStatus = isClean ? 'finished' : 'failed';
             const errorKind = !isClean
-              ? (signal ? 'sigkill' : (ma !== 0 ? 'exit_nonzero' : 'result_error'))
+              ? (rejectReason ? 'result_error' : (signal ? 'sigkill' : (ma !== 0 ? 'exit_nonzero' : 'result_error')))
               : undefined;
             try {
               updateRun(runId, {
@@ -396,7 +394,9 @@ export async function POST(req: NextRequest) {
                 ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
               });
             } catch { /* bỏ qua */ }
-            updateSeatActivePid(maNhanSu, null);
+            if (!rejectReason) {
+              updateSeatActivePid(maNhanSu, null);
+            }
           },
         })) {
           if (mau.loai === 'phien') {
@@ -427,6 +427,8 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         if (!viewerGone) {
           daCoLoi = true;
+          // Valid exception (S15b): If the child has already exited or failed BEFORE spawn,
+          // there is no living child process to wait for in khiChet, so terminal failure must be recorded here.
           if (daThoat || !childSpawned) {
             try {
               updateRun(runId, {
@@ -464,7 +466,8 @@ export async function POST(req: NextRequest) {
 
         // ⭐ DUY NHẤT handler khiChet quyết định trạng thái cuối của run khi tiến trình con kết thúc.
         // Ở finally: TUYỆT ĐỐI KHÔNG ghi 'failed' hay xoá activePid khi tiến trình con CÒN SỐNG (!daThoat).
-        // Chỉ ghi failed ở finally nếu tiến trình con thậm chí chưa từng được spawn (!childSpawned && daCoLoi).
+        // Valid exception (S15b): Record terminal failure ONLY if the child was never spawned (!childSpawned && daCoLoi),
+        // because there will be no child exit handler (khiChet) to ever record it.
         if (!childSpawned && daCoLoi) {
           try {
             updateRun(runId, {

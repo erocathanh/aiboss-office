@@ -102,6 +102,14 @@ export function isViewerGoneGuardDisabledForTest(): boolean {
   return _disableViewerGoneGuardForTest;
 }
 
+let _bypassSlotGateForTest = false;
+export function setBypassSlotGateForTest(bypass: boolean): void {
+  _bypassSlotGateForTest = bypass;
+}
+export function isBypassSlotGateForTest(): boolean {
+  return _bypassSlotGateForTest;
+}
+
 /** Trích xuất trường cwd từ vài dòng đầu của tệp transcript (có cache theo mtime + size). */
 export function layCwdTep(filePath: string): string | null {
   try {
@@ -587,6 +595,15 @@ export function dsPhien(
 
   // 2. Phát hiện các transcript cũ trong ~/.claude/projects/*/*.jsonl có cwd khớp ghế
   // Quét MỌI thư mục con trong gốc kho Claude, KHÔNG lọc theo tên thư mục ở bất kỳ bước nào.
+  /**
+   * PERFORMANCE DEBT NOTE (S15b / Hermes Round 3):
+   * Cold scan across ~/.claude/projects on synchronous request path can take ~9.0s on a fresh clone (~0.73s when warm).
+   * - (a) The initial cold request may experience latency; frontend callers must not interpret a slow fetch/timeout as "empty history".
+   * - (b) Planned future optimization: background worker indexing by cwd, or cooperative asynchronous scanning with event loop yields,
+   *       and an explicit "scanning / discovering" indicator in the UI.
+   * - (c) DO NOT bypass legacy discovery merely because durable metadata exists; doing so would cause older unindexed sessions to disappear.
+   * Proper profiling and optimization will be tracked under task S15c.
+   */
   const gocKho = gocKhoClaude();
   if (fs.existsSync(gocKho)) {
     try {
