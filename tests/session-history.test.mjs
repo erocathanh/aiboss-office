@@ -643,9 +643,68 @@ try {
     assert.equal(res1.status, 200);
     const reader1 = res1.body.getReader();
 
-    // Read until Turn 1 establishes session and registers in slot
+    async function readReaderWithDeadline(reader, deadlineAtMs, label) {
+      const remainingMs = deadlineAtMs - Date.now();
+      if (remainingMs <= 0) {
+        try {
+          await reader.cancel();
+        } catch { /* ignore */ }
+        assert.fail(`Timed out waiting for ${label} within deadline`);
+      }
+      let timer = null;
+      try {
+        return await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => {
+            timer = origSetTimeout(() => {
+              reject(new Error(`Timed out waiting for ${label} within deadline`));
+            }, remainingMs);
+            timer.unref?.();
+          }),
+        ]);
+      } catch (err) {
+        try {
+          await reader.cancel();
+        } catch { /* ignore */ }
+        assert.fail(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (timer !== null) clearTimeout(timer);
+      }
+    }
+
+    async function drainReaderUntilDoneWithDeadline(reader, timeoutMs, label) {
+      const deadlineAtMs = Date.now() + timeoutMs;
+      let combinedText = '';
+      while (true) {
+        const { value, done } = await readReaderWithDeadline(reader, deadlineAtMs, label);
+        if (value) combinedText += new TextDecoder().decode(value);
+        if (done) break;
+      }
+      return combinedText;
+    }
+
+    // Negative control for Criterion 3: an intentionally unclosed stream MUST fail at the deadline instead of hanging
+    {
+      const unclosedStream = new ReadableStream({
+        start() {
+          // Intentionally never enqueue or close
+        },
+      });
+      const unclosedReader = unclosedStream.getReader();
+      const t0Neg = Date.now();
+      await assert.rejects(
+        () => drainReaderUntilDoneWithDeadline(unclosedReader, 80, 'unclosed-stream-negative-control'),
+        /Timed out waiting for unclosed-stream-negative-control within deadline/,
+        'Negative control: unclosed stream must fail at deadline instead of hanging'
+      );
+      const elapsedNeg = Date.now() - t0Neg;
+      assert.ok(elapsedNeg < 2000, `Negative control must fail promptly at deadline (took ${elapsedNeg}ms)`);
+    }
+
+    // Read until Turn 1 establishes session and registers in slot (bounded by 5s deadline)
+    const turn1ReadDeadline = Date.now() + 5000;
     while (true) {
-      const { value, done } = await reader1.read();
+      const { value, done } = await readReaderWithDeadline(reader1, turn1ReadDeadline, 'Turn 1 da-noi-mach SSE');
       if (done) break;
       const text = new TextDecoder().decode(value);
       if (text.includes('da-noi-mach')) break;
@@ -673,29 +732,60 @@ try {
     process.env.TEST_MOCK_CLAUDE_MODE = 'hold-until-release';
     process.env.TEST_MOCK_SESSION_ID = t7SessionId2;
 
+    const turn2Prompt = 'Lượt 2 bị từ chối vì ô đang bận';
     const origKill = ChildProcess.prototype.kill;
+    let turn2Child = null;
+    const gateTimers = new Set();
+
+    function isTurn2FixtureChild(proc) {
+      if (turn2Child !== null) return proc === turn2Child;
+      if (!proc || typeof proc.pid !== 'number' || proc.pid === turn1Pid) return false;
+      if (proc.spawnfile !== mockClaudePath) return false;
+      const newRun = getRuns({ seat: seatId, limit: 10 }).find((r) => !existingRunIds.has(r.runId));
+      if (newRun && newRun.pid === proc.pid) {
+        turn2Child = proc;
+        return true;
+      }
+      return false;
+    }
+
     ChildProcess.prototype.kill = function (signal) {
       if (
-        this.pid !== turn1Pid &&
         signal === 'SIGTERM' &&
         process.env.TEST_MOCK_CLAUDE_MODE === 'hold-until-release' &&
+        isTurn2FixtureChild(this) &&
         !fs.existsSync(readyFile)
       ) {
         const child = this;
         const startGate = Date.now();
-        const waitReadyTimer = origSetTimeout(function pollReadyBeforeKill() {
-          if (fs.existsSync(readyFile) || Date.now() - startGate > 5000) {
-            origKill.call(child, signal);
-          } else {
-            origSetTimeout(pollReadyBeforeKill, 10).unref?.();
-          }
-        }, 10);
-        waitReadyTimer.unref?.();
+        const schedulePoll = () => {
+          const t = origSetTimeout(function pollReadyBeforeKill() {
+            gateTimers.delete(t);
+            if (fs.existsSync(readyFile) || Date.now() - startGate > 5000) {
+              origKill.call(child, signal);
+            } else {
+              schedulePoll();
+            }
+          }, 10);
+          t.unref?.();
+          gateTimers.add(t);
+        };
+        schedulePoll();
         return true;
       }
       return origKill.call(this, signal);
     };
 
+    // Verify unrelated ChildProcess instances are never intercepted by the gate
+    {
+      const fakeOtherChild = Object.create(ChildProcess.prototype);
+      fakeOtherChild.pid = turn1Pid + 99999;
+      fakeOtherChild.spawnfile = mockClaudePath;
+      fakeOtherChild.spawnargs = [mockClaudePath, '-p', 'unrelated-child-prompt'];
+      assert.equal(isTurn2FixtureChild(fakeOtherChild), false, 'Gate must NOT match unrelated child processes');
+    }
+
+    let reader2 = null;
     try {
       setBypassSlotGateForTest(true);
       const req2 = new NextRequest('http://127.0.0.1:4330/api/chat', {
@@ -705,20 +795,21 @@ try {
           ma_o: 'o-2',
           ma_nhan_su: seatId,
           phien_moi: true,
-          cau_hoi: 'Lượt 2 bị từ chối vì ô đang bận',
+          cau_hoi: turn2Prompt,
         }),
       });
 
       const res2 = await postChatRoute(req2);
       setBypassSlotGateForTest(false);
       assert.equal(res2.status, 200);
-      const reader2 = res2.body.getReader();
+      reader2 = res2.body.getReader();
 
-      // Read until Turn 2 receives rejection error
+      // Read until Turn 2 receives rejection error (bounded by 5s deadline interrupting hung reader.read)
       let receivedRejectionError = false;
       let fullStream2Text = '';
+      const turn2RejectDeadline = Date.now() + 5000;
       while (true) {
-        const { value, done } = await reader2.read();
+        const { value, done } = await readReaderWithDeadline(reader2, turn2RejectDeadline, 'Turn 2 rejection SSE');
         if (done) break;
         const text = new TextDecoder().decode(value);
         fullStream2Text += text;
@@ -728,6 +819,7 @@ try {
         }
       }
       assert.ok(receivedRejectionError, 'Turn 2 must receive slot conflict rejection SSE error');
+      assert.ok(turn2Child !== null, 'Gate must have bound exact Turn 2 ChildProcess instance');
 
       // Deterministically locate run2 created for Turn 2
       const runsList = getRuns({ seat: seatId, limit: 10 });
@@ -779,16 +871,8 @@ try {
         run2AfterExit = getRun(run2Id);
       }
 
-      // Read remaining stream 2 until done (event-driven with timeout)
-      const startStreamWait = Date.now();
-      while (true) {
-        if (Date.now() - startStreamWait > 5000) {
-          assert.fail('Timed out waiting for stream 2 to close within 5s');
-        }
-        const { value, done } = await reader2.read();
-        if (value) fullStream2Text += new TextDecoder().decode(value);
-        if (done) break;
-      }
+      // Read remaining stream 2 until done (wrapped in true deadline that interrupts a hung reader2.read())
+      fullStream2Text += await drainReaderUntilDoneWithDeadline(reader2, 5000, 'stream 2 drain after RELEASE');
 
       // After child process terminates and stream 2 is done:
       // Turn 2 MUST transition to 'failed' via khiChet
@@ -848,7 +932,33 @@ try {
       assert.equal(countTerminals(run2Id), 1, 'Terminal status for rejected child MUST remain EXACTLY ONCE after cleanup');
       console.log('  [PASS] T7: Child rejection preserves running until close; terminal recorded EXACTLY ONCE.');
     } finally {
+      setBypassSlotGateForTest(false);
       ChildProcess.prototype.kill = origKill;
+      for (const t of gateTimers) {
+        clearTimeout(t);
+      }
+      gateTimers.clear();
+      try {
+        if (!fs.existsSync(releaseFile)) {
+          fs.writeFileSync(releaseFile, 'RELEASE\n');
+        }
+      } catch { /* ignore */ }
+      if (turn2Child && turn2Child.exitCode === null && turn2Child.signalCode === null) {
+        try {
+          origKill.call(turn2Child, 'SIGTERM');
+        } catch { /* ignore */ }
+      }
+      try {
+        gietViec('o-2');
+      } catch { /* ignore */ }
+      try {
+        await reader1.cancel();
+      } catch { /* ignore */ }
+      if (reader2) {
+        try {
+          await reader2.cancel();
+        } catch { /* ignore */ }
+      }
       delete process.env.TEST_MOCK_READY_FILE;
       delete process.env.TEST_MOCK_RELEASE_FILE;
     }
