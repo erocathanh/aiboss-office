@@ -94,21 +94,10 @@ export function setLegacyPrefixFilterForTest(enabled: boolean): void {
   _enableLegacyPrefixFilterForTest = enabled;
 }
 
-let _disableViewerGoneGuardForTest = false;
-export function setDisableViewerGoneGuardForTest(disabled: boolean): void {
-  _disableViewerGoneGuardForTest = disabled;
-}
-export function isViewerGoneGuardDisabledForTest(): boolean {
-  return _disableViewerGoneGuardForTest;
-}
-
-let _bypassSlotGateForTest = false;
-export function setBypassSlotGateForTest(bypass: boolean): void {
-  _bypassSlotGateForTest = bypass;
-}
-export function isBypassSlotGateForTest(): boolean {
-  return _bypassSlotGateForTest;
-}
+export {
+  setDisableViewerGoneGuardForTest,
+  isViewerGoneGuardDisabledForTest,
+} from './test-seams';
 
 /** Trích xuất trường cwd từ vài dòng đầu của tệp transcript (có cache theo mtime + size). */
 export function layCwdTep(filePath: string): string | null {
