@@ -5,6 +5,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = 'test';
+}
+
 // 1. ISOLATE DATA AND CONFIG DIRS: Tests must NEVER touch operations/data or config/office.json
 const testBaseDir = path.join(
   os.tmpdir(),
@@ -91,6 +95,10 @@ import {
   resetFencingForTest,
   UNINITIALIZED_LOCK_TIMEOUT_MS,
   hasActiveInstanceToken,
+  isFenceGuardDisabledForTest,
+  isInstanceMutexDisabledForTest,
+  isMutexRecheckDisabledForTest,
+  withInstanceMutex,
   __testHooks,
 } from '../src/lib/budget-ledger.ts';
 import {
@@ -98,7 +106,10 @@ import {
   flushInFlightTurns,
   registerInFlightTurnForTest,
   getInFlightTurnCountForTest,
+  tickRunner,
+  logRunnerEvent,
 } from '../src/lib/office-runner.ts';
+import { ghiMocKetThuc } from '../src/lib/kho-phien.ts';
 import {
   isValidNanodollarsString,
   validateDailyCap,
@@ -1791,6 +1802,67 @@ try {
     assert.equal(runMd5Final, runMd5Before, 'runs/*.jsonl MD5 unchanged after late callback attempts');
     assert.equal(costMd5Final, costMd5Before, 'costs/*.jsonl MD5 unchanged after late callback attempts');
 
+    // Subtest 1.4: tickRunner and logRunnerEvent when fenced do NOT write to runner.log.jsonl (Khe ①)
+    const runnerLogFile = path.join(testDataDir, 'runner.log.jsonl');
+    if (!fs.existsSync(runnerLogFile)) fs.writeFileSync(runnerLogFile, '{"event":"seed_log"}\n', 'utf-8');
+    const runnerLogMd5Before = crypto.createHash('md5').update(fs.readFileSync(runnerLogFile)).digest('hex');
+
+    logRunnerEvent({
+      timestamp: new Date().toISOString(),
+      seat: 'marketing-lead',
+      bell_id: 'bell-fenced-test',
+      event: 'skipped',
+      skipped_reason: 'seat_busy_in_process',
+    });
+    const runnerLogMd5AfterLog = crypto.createHash('md5').update(fs.readFileSync(runnerLogFile)).digest('hex');
+    assert.equal(runnerLogMd5AfterLog, runnerLogMd5Before, 'logRunnerEvent must NOT write to runner.log.jsonl when instance is fenced');
+
+    // Also call tickRunner while fenced: must exit immediately returning 0 and leave log unchanged
+    const tickResult = await tickRunner();
+    assert.equal(tickResult, 0, 'tickRunner must return 0 immediately when instance is fenced');
+    const runnerLogMd5AfterTick = crypto.createHash('md5').update(fs.readFileSync(runnerLogFile)).digest('hex');
+    assert.equal(runnerLogMd5AfterTick, runnerLogMd5Before, 'tickRunner must NOT write to runner.log.jsonl when instance is fenced');
+
+    // Subtest 1.5: ghiMocKetThuc does NOT write to o-phien.json when instance is fenced (Khe ①)
+    const oPhienFile = path.join(testDataDir, 'o-phien.json');
+    const initialOPhien = { 'slot-1': { ma_nhan_su: 'marketing-lead', ma_phien: 'phien-1', cap_nhat: Date.now(), moc_ket_thuc: 100 } };
+    fs.writeFileSync(oPhienFile, JSON.stringify(initialOPhien, null, 2), 'utf-8');
+    const oPhienMd5Before = crypto.createHash('md5').update(fs.readFileSync(oPhienFile)).digest('hex');
+
+    ghiMocKetThuc('slot-1', 99999);
+    const oPhienMd5After = crypto.createHash('md5').update(fs.readFileSync(oPhienFile)).digest('hex');
+    assert.equal(oPhienMd5After, oPhienMd5Before, 'ghiMocKetThuc must NOT write to o-phien.json when instance is fenced');
+
+    // Subtest 1.6: In production, test bypass switch is inert: guards STILL block writes! (Khe ①)
+    const prevNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD = '1';
+    try {
+      assert.equal(isFenceGuardDisabledForTest(), false, 'isFenceGuardDisabledForTest must return false when NODE_ENV is production');
+      assert.throws(
+        () => withBudgetLock(() => 'should_throw_in_prod'),
+        /Instance has been fenced/,
+        'withBudgetLock MUST still block writes in production even if AIBOSS_TEST_DISABLE_FENCE_GUARD=1'
+      );
+      ghiMocKetThuc('slot-1', 88888);
+      const oPhienMd5Prod = crypto.createHash('md5').update(fs.readFileSync(oPhienFile)).digest('hex');
+      assert.equal(oPhienMd5Prod, oPhienMd5Before, 'ghiMocKetThuc MUST still be blocked in production');
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      delete process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD;
+    }
+
+    // Subtest 1.7: Positive counterproof for Khe ①: setting __testHooks.disableFenceGuard = true bypasses fence guard
+    __testHooks.disableFenceGuard = true;
+    try {
+      assert.equal(isFenceGuardDisabledForTest(), true);
+      let counterproofExecuted = false;
+      withBudgetLock(() => { counterproofExecuted = true; });
+      assert.equal(counterproofExecuted, true, 'Setting __testHooks.disableFenceGuard = true must bypass fence guard (counterproof)');
+    } finally {
+      __testHooks.disableFenceGuard = undefined;
+    }
+
     // -------------------------------------------------------------
     // Khe ②: Crash between open(O_EXCL) and write metadata does NOT block startup indefinitely
     // -------------------------------------------------------------
@@ -1813,6 +1885,47 @@ try {
     const validMetadata = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
     assert.equal(validMetadata.pid, process.pid, 'Lock file must contain valid JSON metadata after reclaim');
     releaseInstanceLock(testDataDir);
+
+    // Subtest 2.3: Half-written non-empty JSON lock (e.g. crash during write) older than 10s MUST be safely reclaimed!
+    fs.writeFileSync(lockFilePath, '{"pid":123,"tok', 'utf-8');
+    const recentHalfAttempt = acquireInstanceLock(testDataDir);
+    assert.equal(recentHalfAttempt.acquired, false, 'Half-written lock <10s must fail closed');
+
+    // Make it older than 10s via utimesSync
+    fs.utimesSync(lockFilePath, oldTime, oldTime);
+    const halfReclaim = acquireInstanceLock(testDataDir);
+    assert.equal(halfReclaim.acquired, true, 'Half-written non-empty JSON lock >10s must be safely reclaimed (Khe ② recovery)');
+    assert.equal(halfReclaim.pid, process.pid);
+    const validHalfMetadata = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(validHalfMetadata.pid, process.pid, 'Lock file must contain valid JSON metadata after half-written lock reclaim');
+    releaseInstanceLock(testDataDir);
+
+    // Subtest 2.4: Contender modifying half-written lock during beforeReplace causes reclaim to abort
+    fs.writeFileSync(lockFilePath, '{"pid":123,"tok', 'utf-8');
+    fs.utimesSync(lockFilePath, oldTime, oldTime);
+    const contenderHalfToken = `contender-half-${Date.now()}`;
+    __testHooks.beforeReplace = () => {
+      fs.writeFileSync(
+        lockFilePath,
+        JSON.stringify({
+          pid: process.pid,
+          processStartedAt: getProcessStartTime(process.pid),
+          token: contenderHalfToken,
+          leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+          heartbeatAt: new Date().toISOString(),
+          ts: new Date().toISOString(),
+        }),
+        'utf-8'
+      );
+    };
+
+    const halfContenderReclaim = acquireInstanceLock(testDataDir);
+    __testHooks.beforeReplace = undefined;
+    assert.equal(halfContenderReclaim.acquired, false, 'Reclaim of corrupt lock must fail if contender modified content');
+    const diskAfterHalfContender = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(diskAfterHalfContender.token, contenderHalfToken, 'Contender lock must be preserved');
+    fs.unlinkSync(lockFilePath);
+    resetFencingForTest();
 
     // -------------------------------------------------------------
     // Khe ③: Safe handling of legacy v06/v07 directory lock: Live owner protected, dead owner cleaned
@@ -1857,12 +1970,183 @@ try {
     releaseInstanceLock(testDataDir);
 
     // -------------------------------------------------------------
-    // Khe ④: Unified acquire/reclaim/renew/release and lease enforcement
+    // Khe ④: Unified owned mutex, 2-process isolation, decoupled switches & lease enforcement
     // -------------------------------------------------------------
     resetFencingForTest();
     if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
 
-    // Subtest 4.1: Two reclaimers on a dead owner: exactly ONE succeeds, contender slipping in between check and rename is preserved!
+    // Subtest 4.1: Two real child processes: Process 2 cannot steal mutex while Process 1 is alive
+    const mutexTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-mutex-test-'));
+    const mutexReadyFile = path.join(mutexTestDir, 'p1.ready');
+
+    // Process 1: holds mutex for 600ms
+    const p1 = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       import fs from "node:fs";
+       withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+         fs.writeFileSync(process.env.MUTEX_READY_FILE, "ready");
+         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
+       });`
+    ], {
+      env: { ...process.env, NODE_ENV: 'test', MUTEX_TEST_DIR: mutexTestDir, MUTEX_READY_FILE: mutexReadyFile },
+      stdio: 'pipe',
+    });
+
+    // Wait for P1 to acquire mutex
+    while (!fs.existsSync(mutexReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    // Process 2: attempts to acquire mutex with short timeout (150ms). Must time out!
+    const p2Res = spawnSync(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       try {
+         withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+           process.exit(0);
+         }, 150);
+       } catch (err) {
+         process.exit(2);
+       }`
+    ], {
+      env: { ...process.env, NODE_ENV: 'test', MUTEX_TEST_DIR: mutexTestDir },
+    });
+
+    assert.equal(p2Res.status, 2, 'Process 2 must time out with exit code 2 while Process 1 is alive holding mutex (Khe ④)');
+
+    // Wait for P1 to finish cleanly
+    const p1ExitCode = await new Promise((resolve) => p1.on('exit', resolve));
+    assert.equal(p1ExitCode, 0, 'Process 1 must exit cleanly');
+    fs.rmSync(mutexTestDir, { recursive: true, force: true });
+
+    // Subtest 4.2: Dead process mutex recovery: killed process mutex is safely reclaimed
+    const deadMutexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-mutex-kill-'));
+    const killReadyFile = path.join(deadMutexDir, 'kill.ready');
+
+    const pKill = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       import fs from "node:fs";
+       withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+         fs.writeFileSync(process.env.MUTEX_READY_FILE, "ready");
+         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000);
+       });`
+    ], {
+      env: { ...process.env, NODE_ENV: 'test', MUTEX_TEST_DIR: deadMutexDir, MUTEX_READY_FILE: killReadyFile },
+      stdio: 'pipe',
+    });
+
+    while (!fs.existsSync(killReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    // Abruptly kill pKill with SIGKILL and await exit so OS reaps child
+    const pKillExitPromise = new Promise((resolve) => pKill.on('exit', resolve));
+    process.kill(pKill.pid, 'SIGKILL');
+    await pKillExitPromise;
+
+    // Now reclaimer process must successfully reclaim the dead process mutex
+    const pReclaimRes = spawnSync(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+         process.exit(0);
+       }, 2000);`
+    ], {
+      env: { ...process.env, NODE_ENV: 'test', MUTEX_TEST_DIR: deadMutexDir },
+    });
+
+    assert.equal(pReclaimRes.status, 0, 'Reclaimer must successfully reclaim mutex after owner was killed with SIGKILL (Khe ④)');
+    fs.rmSync(deadMutexDir, { recursive: true, force: true });
+
+    // Subtest 4.3: Positive counterproof 1: AIBOSS_TEST_DISABLE_INSTANCE_MUTEX=1 causes concurrent entry
+    const cpMutexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-mutex-cp-'));
+    const cpReadyFile = path.join(cpMutexDir, 'cp.ready');
+
+    const pCp1 = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       import fs from "node:fs";
+       withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+         fs.writeFileSync(process.env.MUTEX_READY_FILE, "ready");
+         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
+       });`
+    ], {
+      env: { ...process.env, NODE_ENV: 'test', MUTEX_TEST_DIR: cpMutexDir, MUTEX_READY_FILE: cpReadyFile },
+      stdio: 'pipe',
+    });
+
+    while (!fs.existsSync(cpReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    const pCp2Res = spawnSync(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       try {
+         withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+           process.exit(0);
+         }, 150);
+       } catch (err) {
+         process.exit(2);
+       }`
+    ], {
+      env: { ...process.env, NODE_ENV: 'test', MUTEX_TEST_DIR: cpMutexDir, AIBOSS_TEST_DISABLE_INSTANCE_MUTEX: '1' },
+    });
+
+    assert.equal(pCp2Res.status, 0, 'When instance mutex is disabled for test, Process 2 enters concurrently (exit code 0 counterproof)');
+    await new Promise((resolve) => pCp1.on('exit', resolve));
+    fs.rmSync(cpMutexDir, { recursive: true, force: true });
+
+    // Subtest 4.4: In production, AIBOSS_TEST_DISABLE_INSTANCE_MUTEX is INERT
+    const prodMutexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-mutex-prod-'));
+    const prodReadyFile = path.join(prodMutexDir, 'prod.ready');
+
+    const pProd1 = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       import fs from "node:fs";
+       withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+         fs.writeFileSync(process.env.MUTEX_READY_FILE, "ready");
+         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
+       });`
+    ], {
+      env: { ...process.env, NODE_ENV: 'production', MUTEX_TEST_DIR: prodMutexDir, MUTEX_READY_FILE: prodReadyFile },
+      stdio: 'pipe',
+    });
+
+    while (!fs.existsSync(prodReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+
+    const pProd2Res = spawnSync(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+       try {
+         withInstanceMutex(process.env.MUTEX_TEST_DIR, () => {
+           process.exit(0);
+         }, 150);
+       } catch (err) {
+         process.exit(2);
+       }`
+    ], {
+      env: { ...process.env, NODE_ENV: 'production', MUTEX_TEST_DIR: prodMutexDir, AIBOSS_TEST_DISABLE_INSTANCE_MUTEX: '1' },
+    });
+
+    assert.equal(pProd2Res.status, 2, 'In production, AIBOSS_TEST_DISABLE_INSTANCE_MUTEX is inert: mutex is enforced (exit code 2)');
+    await new Promise((resolve) => pProd1.on('exit', resolve));
+    fs.rmSync(prodMutexDir, { recursive: true, force: true });
+
+    // Subtest 4.5: Inside-mutex recheck isolation & counterproof (Khe ④ decoupled switch)
     const deadOrigToken = `dead-orig-${Date.now()}`;
     fs.writeFileSync(
       lockFilePath,
@@ -1893,18 +2177,37 @@ try {
       );
     };
 
-    // Reclaimer A attempts to reclaim
+    // Reclaimer A attempts to reclaim with recheck enabled (default):
     const reclaimA = acquireInstanceLock(testDataDir);
-    __testHooks.beforeReplace = undefined; // Clean up hook
-
-    // Reclaimer A must detect owner changed inside mutex, abort reclaim, and NOT overwrite Contender B!
     assert.equal(reclaimA.acquired, false, 'Reclaimer A must lose and not overwrite contender slipping in');
     const diskAfterReclaimA = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
     assert.equal(diskAfterReclaimA.token, contenderToken, 'Contender B lock must remain intact and not overwritten');
-    fs.unlinkSync(lockFilePath); // Clean up contender lock
+
+    // Positive counterproof: Now reset lock to dead owner, and disable ONLY mutex recheck
+    // via __testHooks.disableMutexRecheck = true (keeping withInstanceMutex ACTIVE). Contender is now overwritten!
+    fs.writeFileSync(
+      lockFilePath,
+      JSON.stringify({
+        pid: 999999,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: deadOrigToken,
+        leaseExpiresAt: new Date(Date.now() - 10000).toISOString(),
+        ts: new Date().toISOString(),
+      }),
+      'utf-8'
+    );
+    __testHooks.disableMutexRecheck = true;
+    const recheckDisabledReclaim = acquireInstanceLock(testDataDir);
+    assert.equal(recheckDisabledReclaim.acquired, true, 'When recheck is disabled, reclaimer overwrites contender (counterproof)');
+    const diskAfterBypass = JSON.parse(fs.readFileSync(lockFilePath, 'utf-8'));
+    assert.equal(diskAfterBypass.token, recheckDisabledReclaim.token, 'Contender overwritten when recheck disabled');
+
+    __testHooks.beforeReplace = undefined;
+    __testHooks.disableMutexRecheck = undefined;
+    releaseInstanceLock(testDataDir);
     resetFencingForTest();
 
-    // Subtest 4.2: Renew fails and fences if token on disk was replaced by another process before rename
+    // Subtest 4.6: Renew fails and fences if token on disk was replaced by another process before rename
     const lockToRenew = acquireInstanceLock(testDataDir, 5000);
     assert.equal(lockToRenew.acquired, true);
 
@@ -1933,7 +2236,7 @@ try {
     resetFencingForTest();
     if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
 
-    // Subtest 4.3: Release with condition: foreign lock file must NOT be unlinked
+    // Subtest 4.7: Release with condition: foreign lock file must NOT be unlinked
     // Acquire lock first
     const lockToRelease = acquireInstanceLock(testDataDir, 5000);
     assert.equal(lockToRelease.acquired, true);
@@ -1961,7 +2264,7 @@ try {
     fs.unlinkSync(lockFilePath); // Manual cleanup of intruder lock
     resetFencingForTest();
 
-    // Subtest 4.4: Reclaim enforces BOTH dead process AND expired lease!
+    // Subtest 4.8: Reclaim enforces BOTH dead process AND expired lease!
     // Setup lock held by dead PID 999999 BUT with leaseExpiresAt in the FUTURE (+5000ms)
     fs.writeFileSync(
       lockFilePath,

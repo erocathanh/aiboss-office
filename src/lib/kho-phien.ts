@@ -3,6 +3,7 @@ import path from 'node:path';
 import { SO_O, oTrongTam } from './so-o';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { bindingOf, sameBinding, nextBinding, type WriteBinding } from '@/components/ung-dung/nap-bo-ghe';
+import { isFenced, isFenceGuardDisabledForTest } from './budget-ledger';
 
 /**
  * SỔ GHI "Ô NÀO ĐANG MỞ PHIÊN NÀO" — ghi XUỐNG ĐĨA.
@@ -121,6 +122,9 @@ export function datO(maO: string, maNhanSu: string | null, maPhien: string | nul
 
 /** Ghi mốc "lượt của TA vừa chạy xong" — gọi NGAY SAU khi tiến trình con thoát. */
 export function ghiMocKetThuc(maO: string, mocTep: number, expected?: WriteBinding): void {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    return;
+  }
   const s = doc();
   const cu = s[maO];
   if (!cu) return;

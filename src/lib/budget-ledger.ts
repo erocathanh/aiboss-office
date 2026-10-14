@@ -210,7 +210,34 @@ export const UNINITIALIZED_LOCK_TIMEOUT_MS = 10000;
 
 export const __testHooks: {
   beforeReplace?: () => void;
+  disableFenceGuard?: boolean;
+  disableInstanceMutex?: boolean;
+  disableMutexRecheck?: boolean;
 } = {};
+
+export function isFenceGuardDisabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.disableFenceGuard === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD === '1')
+  );
+}
+
+export function isInstanceMutexDisabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.disableInstanceMutex === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX === '1')
+  );
+}
+
+export function isMutexRecheckDisabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.disableMutexRecheck === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_MUTEX_RECHECK === '1')
+  );
+}
 
 let activeInstanceToken: string | null = null;
 let isInstanceLockRevoked = false;
@@ -241,15 +268,22 @@ export function getInstanceLockMutexPath(dataDir?: string): string {
   return path.join(baseDir, '.instance.lock.mutex');
 }
 
+export interface InstanceMutexMetadata {
+  pid: number;
+  processStartedAt: string;
+  token: string;
+  createdAt: number;
+}
+
 /**
  * Short mutex ensuring mutually exclusive state transitions for all instance lock operations:
  * acquire, reclaim, renew, and release.
+ * - Writes owner metadata {pid, processStartedAt, token, createdAt} immediately on creation.
+ * - Reclaims mutex ONLY when owner process is verified dead via checkProcessLiveness.
+ * - Finally block unlinks ONLY if mutex on disk matches own {pid, token}.
  */
-export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, timeoutMs = 3000): T {
-  if (
-    process.env.NODE_ENV !== 'production' &&
-    process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX === '1'
-  ) {
+export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, timeoutMs = 5000): T {
+  if (isInstanceMutexDisabledForTest()) {
     return fn();
   }
 
@@ -259,6 +293,8 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
     fs.mkdirSync(baseDir, { recursive: true });
   }
 
+  const myToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const myStartedAt = getProcessStartTime(process.pid) || new Date().toISOString();
   const start = Date.now();
   let fd: number | null = null;
 
@@ -266,24 +302,54 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
     try {
       fd = fs.openSync(
         mutexPath,
-        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR,
         0o644
       );
+      // Write owner metadata immediately into fd before entering critical section
+      const info: InstanceMutexMetadata = {
+        pid: process.pid,
+        processStartedAt: myStartedAt,
+        token: myToken,
+        createdAt: Date.now(),
+      };
+      fs.writeSync(fd, JSON.stringify(info), 0, 'utf-8');
       break;
     } catch (err: unknown) {
       if ((err as { code?: string }).code === 'EEXIST') {
-        // Reclaim orphaned mutex if older than 5s
+        // Mutex file exists on disk: inspect owner
+        let heldMutex: InstanceMutexMetadata | null = null;
         try {
-          const stat = fs.statSync(mutexPath);
-          if (Date.now() - stat.mtimeMs > 5000) {
-            try { fs.unlinkSync(mutexPath); } catch {}
+          if (fs.existsSync(mutexPath)) {
+            const raw = fs.readFileSync(mutexPath, 'utf-8');
+            if (raw.trim()) {
+              heldMutex = JSON.parse(raw);
+            }
           }
-        } catch {}
+        } catch {
+          // Unreadable / empty: writer is between openSync and writeSync -> treat as "đang tạo", wait and retry
+        }
+
+        if (heldMutex && typeof heldMutex.pid === 'number') {
+          // Reclaim mutex ONLY when owner process is verified dead via checkProcessLiveness
+          const liveness = checkProcessLiveness(heldMutex.pid, heldMutex.processStartedAt);
+          if (liveness === 'dead') {
+            try {
+              const verifyRaw = fs.readFileSync(mutexPath, 'utf-8');
+              const verifyHeld = JSON.parse(verifyRaw);
+              if (verifyHeld && verifyHeld.token === heldMutex.token && verifyHeld.pid === heldMutex.pid) {
+                fs.unlinkSync(mutexPath);
+              }
+            } catch {
+              /* ignore concurrent unlinks */
+            }
+          }
+          // If alive or unverified: DO NOT UNLINK! Wait and retry.
+        }
 
         if (Date.now() - start > timeoutMs) {
-          throw new Error(`[budget-ledger] Timeout waiting for instance lock mutex (${timeoutMs}ms)`);
+          throw new Error(`[budget-ledger] Timeout waiting for instance lock mutex (${timeoutMs}ms, mutex busy held by PID ${heldMutex?.pid ?? 'unknown'})`);
         }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         continue;
       }
       throw err;
@@ -295,7 +361,18 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
   } finally {
     if (fd !== null) {
       try { fs.closeSync(fd); } catch {}
-      try { fs.unlinkSync(mutexPath); } catch {}
+      // finally chỉ unlink khi re-read mutex còn đúng {pid, token} của mình!
+      try {
+        if (fs.existsSync(mutexPath)) {
+          const currentRaw = fs.readFileSync(mutexPath, 'utf-8');
+          const currentHeld = JSON.parse(currentRaw) as InstanceMutexMetadata;
+          if (currentHeld && currentHeld.token === myToken && currentHeld.pid === process.pid) {
+            fs.unlinkSync(mutexPath);
+          }
+        }
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -305,12 +382,12 @@ export function acquireInstanceLock(
   leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
 ): { acquired: boolean; pid?: number; token?: string } {
   // Khe ①: Once fenced, permanently refuse acquire in the same process
-  if (isInstanceFenced && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isInstanceFenced && !isFenceGuardDisabledForTest()) {
     throw new Error('[budget-ledger] Instance is fenced. Acquiring instance lock is permanently barred.');
   }
 
   return withInstanceMutex(dataDir, () => {
-    if (isInstanceFenced && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+    if (isInstanceFenced && !isFenceGuardDisabledForTest()) {
       throw new Error('[budget-ledger] Instance is fenced. Acquiring instance lock is permanently barred.');
     }
 
@@ -414,13 +491,15 @@ export function acquireInstanceLock(
     const stat = fs.statSync(lockPath);
     let held: InstanceLockMetadata | null = null;
     let isCorruptOrEmpty = false;
+    let initialContent = '';
+    const initialMtimeMs = stat.mtimeMs;
 
     try {
-      const content = fs.readFileSync(lockPath, 'utf-8');
-      if (!content.trim()) {
+      initialContent = fs.readFileSync(lockPath, 'utf-8');
+      if (!initialContent.trim()) {
         isCorruptOrEmpty = true;
       } else {
-        held = JSON.parse(content);
+        held = JSON.parse(initialContent);
       }
     } catch {
       isCorruptOrEmpty = true;
@@ -439,9 +518,16 @@ export function acquireInstanceLock(
 
         __testHooks.beforeReplace?.();
 
-        if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
-          const currentContent = fs.readFileSync(lockPath, 'utf-8');
-          if (currentContent.trim()) {
+        if (!isMutexRecheckDisabledForTest()) {
+          try {
+            const currentStat = fs.statSync(lockPath);
+            const currentContent = fs.readFileSync(lockPath, 'utf-8');
+            // If file was modified or replaced by another contender (content or mtime changed), refuse reclaim!
+            if (currentContent !== initialContent || currentStat.mtimeMs !== initialMtimeMs) {
+              try { fs.unlinkSync(candidateFile); } catch {}
+              return { acquired: false };
+            }
+          } catch {
             try { fs.unlinkSync(candidateFile); } catch {}
             return { acquired: false };
           }
@@ -483,7 +569,7 @@ export function acquireInstanceLock(
         __testHooks.beforeReplace?.();
 
         // In mutex: recheck lockPath to verify lock still matches the exact checked dead owner!
-        if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+        if (!isMutexRecheckDisabledForTest()) {
           let recheck: InstanceLockMetadata | null = null;
           try {
             recheck = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
@@ -576,7 +662,7 @@ export function renewInstanceLock(
       __testHooks.beforeReplace?.();
 
       // In mutex: recheck lockPath before rename!
-      if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+      if (!isMutexRecheckDisabledForTest()) {
         let recheck: InstanceLockMetadata | null = null;
         try {
           recheck = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
@@ -625,7 +711,7 @@ export function releaseInstanceLock(dataDir?: string): void {
       __testHooks.beforeReplace?.();
 
       // In mutex: recheck lockPath before unlink!
-      if (process.env.AIBOSS_TEST_DISABLE_INSTANCE_MUTEX !== '1') {
+      if (!isMutexRecheckDisabledForTest()) {
         let recheck: InstanceLockMetadata | null = null;
         try {
           recheck = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
@@ -682,12 +768,12 @@ export function withBudgetLock<T>(fn: () => T, timeoutMs = 5000): T {
   }
 
   // Hermes Condition (b) & Khe ①: Sticky fencing check — permanently bar writes once fenced
-  if ((isInstanceFenced || isInstanceLockRevoked) && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if ((isInstanceFenced || isInstanceLockRevoked) && !isFenceGuardDisabledForTest()) {
     throw new Error('[budget-ledger] Instance has been fenced (lock revoked or lost). Stopping writes permanently.');
   }
   if (activeInstanceToken && !verifyInstanceLockActive()) {
     fenceInstance();
-    if (process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+    if (!isFenceGuardDisabledForTest()) {
       throw new Error('[budget-ledger] Instance lock token lost or replaced. Stopping writes permanently.');
     }
   }

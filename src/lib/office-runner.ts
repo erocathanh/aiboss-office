@@ -43,6 +43,7 @@ import {
   hasActiveInstanceToken,
   fenceInstance,
   isFenced,
+  isFenceGuardDisabledForTest,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -93,7 +94,7 @@ const inFlightTurns = new Map<string, InFlightTurn>();
  * Ensures every logged start event has a matching end event even during abrupt stops.
  */
 export function flushInFlightTurns(reason: string): void {
-  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
     console.warn('[office-runner] Instance fenced: skipping all flush mutations');
     inFlightTurns.clear();
     return;
@@ -208,6 +209,9 @@ export function isRunnerEnabled(): boolean {
  * Append event to operations/data/runner.log.jsonl.
  */
 export function logRunnerEvent(event: RunnerLogEvent): void {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    return;
+  }
   try {
     const dir = path.dirname(LOG_FILE);
     if (!fs.existsSync(dir)) {
@@ -278,6 +282,10 @@ export async function tickRunner(): Promise<number> {
     let executedInCycle = 0;
 
     for (const y of cho) {
+      if (isFenced()) {
+        stopOfficeRunner();
+        break;
+      }
       if (activeSeats.size >= config.max_parallel) {
         break;
       }
@@ -441,6 +449,11 @@ export async function tickRunner(): Promise<number> {
         }
         activeSeats.delete(y.ma_nhan_su);
         traVeHangDoi(claimed.y.ma);
+        if (isFenced()) {
+          console.warn('[office-runner] Instance fenced during turn initialization. Aborting tick.');
+          stopOfficeRunner();
+          break;
+        }
         continue;
       }
 
@@ -477,7 +490,7 @@ export async function tickRunner(): Promise<number> {
               cauHoi: y.cau_hoi,
               maPhienCu: phienDung,
               khiSinh: (pid) => {
-                if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+                if (isFenced() && !isFenceGuardDisabledForTest()) {
                   return;
                 }
                 const processStartedAt = getProcessStartTime(pid) || undefined;
@@ -498,7 +511,7 @@ export async function tickRunner(): Promise<number> {
           const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
 
           // Khe ①: Bar ALL writer callbacks if instance is fenced
-          if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+          if (isFenced() && !isFenceGuardDisabledForTest()) {
             console.warn('[office-runner] Instance fenced: barring all late completion writes for runId', runId);
             return;
           }
@@ -606,7 +619,7 @@ export async function tickRunner(): Promise<number> {
             errorKind = 'result_error';
           }
 
-          if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+          if (isFenced() && !isFenceGuardDisabledForTest()) {
             console.warn('[office-runner] Instance fenced: barring all late completion writes for runId', runId);
             return;
           }
@@ -638,6 +651,7 @@ export async function tickRunner(): Promise<number> {
           if (result.maPhien) {
             const maP = result.maPhien;
             const ghiLai = () => {
+              if (isFenced() && !isFenceGuardDisabledForTest()) return;
               const oNay = layO(y.ma_o);
               if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP) return;
               const m = mocTepPhien(y.ma_nhan_su, maP);
@@ -649,7 +663,7 @@ export async function tickRunner(): Promise<number> {
             }
           }
         } catch {
-          if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+          if (isFenced() && !isFenceGuardDisabledForTest()) {
             console.warn('[office-runner] Instance fenced: barring error path writes for runId', runId);
             return;
           }

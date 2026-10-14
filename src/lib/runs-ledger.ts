@@ -30,6 +30,7 @@ import {
   findHoldIdForRun,
   reconcileOpenHolds,
   isFenced,
+  isFenceGuardDisabledForTest,
 } from '@/lib/budget-ledger';
 
 export type RunErrorKind =
@@ -241,7 +242,7 @@ function getLogPathForDate(isoDateString?: string): string {
  * Sanitizes rawUsage before write to guarantee no raw strings enter JSONL files.
  */
 function appendRecord(record: LedgerRecord): void {
-  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
     throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
   }
   if (process.env.AIBOSS_TEST_FAIL_APPEND === '1') {
@@ -269,7 +270,7 @@ function getRecordTimestamp(r: LedgerRecord): number {
  * Record a new wake request in the runs ledger.
  */
 export function recordWake(wake: Omit<WakeRecord, 'type'>): WakeRecord {
-  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
     throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
   }
   const full: WakeRecord = {
@@ -285,7 +286,7 @@ export function recordWake(wake: Omit<WakeRecord, 'type'>): WakeRecord {
  * Append an updated state for a wake request.
  */
 export function updateWake(wakeId: string, patch: Partial<WakeRecord>): WakeRecord | null {
-  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
     throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
   }
   const current = getWake(wakeId);
@@ -305,7 +306,7 @@ export function updateWake(wakeId: string, patch: Partial<WakeRecord>): WakeReco
  * Record a new run in the runs ledger.
  */
 export function recordRun(run: Omit<RunRecord, 'type'>): RunRecord {
-  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
     throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
   }
   const full: RunRecord = {
@@ -324,7 +325,7 @@ export function recordRun(run: Omit<RunRecord, 'type'>): RunRecord {
  * Append an updated state for an active run.
  */
 export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord | null {
-  if (isFenced() && process.env.AIBOSS_TEST_DISABLE_FENCE_GUARD !== '1') {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
     throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
   }
   const current = getRun(runId);
