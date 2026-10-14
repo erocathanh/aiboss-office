@@ -28,6 +28,7 @@ import json
 import math
 import os
 import re
+import stat
 import sys
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -347,11 +348,12 @@ TEST_LEDGER_MARKER_FILENAME = ".test-ledger"
 
 
 def is_lock_disabled_for_test(approvals_dir: Optional[str] = None) -> bool:
-    """Single positive-control test switch (Case 15); isolated from real ledger via 4 mandatory gates (A-4 v07 F21):
+    """Single positive-control test switch (Case 15); isolated from real ledger via 4 mandatory gates (A-4 v07/v08 F21, F26):
     1. `AIBOSS_TEST_MODE == "1"` (unified test-mode flag shared with S17 hooks)
     2. `AIBOSS_TEST_DISABLE_APPROVAL_LOCK == "1"`
     3. `NODE_ENV != "production"`
-    4. `AIBOSS_DATA_DIR` is explicitly set AND `<AIBOSS_DATA_DIR>/approvals/.test-ledger` exists as a regular file.
+    4. `AIBOSS_DATA_DIR` is explicitly set AND `<AIBOSS_DATA_DIR>/approvals/.test-ledger` is a true regular file
+       at that exact directory entry (`os.lstat` + `stat.S_ISREG` + `O_NOFOLLOW`; symlinks are strictly rejected).
     """
     if os.environ.get("AIBOSS_TEST_MODE") != "1":
         return False
@@ -376,7 +378,20 @@ def is_lock_disabled_for_test(approvals_dir: Optional[str] = None) -> bool:
         target_approvals_dir, TEST_LEDGER_MARKER_FILENAME
     )
     try:
-        return os.path.isfile(marker_path)
+        st_link = os.lstat(marker_path)
+        if not stat.S_ISREG(st_link.st_mode):
+            return False
+        open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(marker_path, open_flags)
+        try:
+            st_fd = os.fstat(fd)
+        finally:
+            os.close(fd)
+        return (
+            stat.S_ISREG(st_fd.st_mode)
+            and st_fd.st_ino == st_link.st_ino
+            and st_fd.st_dev == st_link.st_dev
+        )
     except OSError:
         return False
 

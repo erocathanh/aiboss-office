@@ -18,11 +18,17 @@ process.env.AIBOSS_DATA_DIR = testDataDir;
 // 4-condition test lock-bypass switch can only ever activate inside this isolated test ledger.
 const testApprovalsDir = path.join(testDataDir, 'approvals');
 fs.mkdirSync(testApprovalsDir, { recursive: true });
-fs.writeFileSync(
-  path.join(testApprovalsDir, '.test-ledger'),
-  'aiboss-test-ledger-marker\n',
-  'utf-8'
-);
+if (process.env.AIBOSS_TEST_MARKER_AS_SYMLINK === '1') {
+  const realTargetPath = path.join(testDataDir, '.real-marker-target');
+  fs.writeFileSync(realTargetPath, 'aiboss-test-ledger-marker\n', 'utf-8');
+  fs.symlinkSync(realTargetPath, path.join(testApprovalsDir, '.test-ledger'));
+} else {
+  fs.writeFileSync(
+    path.join(testApprovalsDir, '.test-ledger'),
+    'aiboss-test-ledger-marker\n',
+    'utf-8'
+  );
+}
 
 const CASE_17_TRUNCATED_FIXTURE_LINE = '{"ts":"2026-10-14T11:16:00Z","seat":"truncated_frag';
 
@@ -113,7 +119,7 @@ function runMarkCli(requestId, result, runId, claimId) {
   return { status: res.status, body: parsed, rawStdout: stdout, rawStderr: res.stderr };
 }
 
-console.log('--- Testing A-4 v07 Approval Ledger & Hook Contract (tests/approvals.test.mjs) ---');
+console.log('--- Testing A-4 v08 Approval Ledger & Hook Contract (tests/approvals.test.mjs) ---');
 
 await (async () => {
   try {
@@ -2816,21 +2822,51 @@ approval_check.main()
     console.log('  [PASS] Case 38 (F18 v06): I/O errors output JSON {"status":"io_error","reason":"EACCES"} with exit 2 (0 tracebacks) in CLI and HTTP 503 in API');
 
     // =========================================================================
-    // ADVERSARIAL TESTS FOR A-4 v07 (Cases 39 - 42: Closing Hermes Round 6 F21..F25)
+    // ADVERSARIAL TESTS FOR A-4 v07 & v08 (Cases 39 - 42: Closing Hermes Rounds 6 & 7 F21..F29)
     // =========================================================================
 
-    // Case 39 (F21 P1 v07): Test bypass switch `is_lock_disabled_for_test` requires ALL 4 conditions
-    // simultaneously (`AIBOSS_TEST_MODE == "1"`, `AIBOSS_TEST_DISABLE_APPROVAL_LOCK == "1"`,
-    // `NODE_ENV != "production"`, `AIBOSS_DATA_DIR` set AND `<AIBOSS_DATA_DIR>/approvals/.test-ledger` regular file),
-    // and TS `buildPythonCliEnv` strips all `AIBOSS_TEST_*` variables unless `NODE_ENV === "test"`.
+    // Case 39 (F21 P1 + F26 P1 + F27 P2 v08):
+    // - `is_lock_disabled_for_test` requires ALL 4 conditions simultaneously:
+    //   (1) `AIBOSS_TEST_MODE == "1"`
+    //   (2) `AIBOSS_TEST_DISABLE_APPROVAL_LOCK == "1"`
+    //   (3) `NODE_ENV != "production"`
+    //   (4) `AIBOSS_DATA_DIR` set AND `<AIBOSS_DATA_DIR>/approvals/.test-ledger` is a TRUE REGULAR FILE
+    //       at that exact directory entry (`os.lstat` + `stat.S_ISREG` + `O_NOFOLLOW`; symlinks are strictly rejected — F26).
+    // - TS `buildPythonCliEnv` strips all `AIBOSS_TEST_*` variables unless `NODE_ENV === "test"` (F27).
     const f21NoMarkerDir = path.join(
       os.tmpdir(),
       'aiboss-f21-nomarker-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
     );
     const f21NoMarkerApprovalsDir = path.join(f21NoMarkerDir, 'approvals');
     fs.mkdirSync(f21NoMarkerApprovalsDir, { recursive: true });
+
+    const f26SymlinkDir = path.join(
+      os.tmpdir(),
+      'aiboss-f26-symlink-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    );
+    const f26SymlinkApprovalsDir = path.join(f26SymlinkDir, 'approvals');
+    fs.mkdirSync(f26SymlinkApprovalsDir, { recursive: true });
+    const f26ExternalRegularFile = path.join(f26SymlinkDir, 'real-regular-file.txt');
+    fs.writeFileSync(f26ExternalRegularFile, 'aiboss-test-ledger-marker\n', 'utf-8');
+    fs.symlinkSync(
+      f26ExternalRegularFile,
+      path.join(f26SymlinkApprovalsDir, '.test-ledger')
+    );
+
+    const f27RealMarkerDir = path.join(
+      os.tmpdir(),
+      'aiboss-f27-realmarker-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    );
+    const f27RealMarkerApprovalsDir = path.join(f27RealMarkerDir, 'approvals');
+    fs.mkdirSync(f27RealMarkerApprovalsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(f27RealMarkerApprovalsDir, '.test-ledger'),
+      'aiboss-test-ledger-marker\n',
+      'utf-8'
+    );
+
     try {
-      // (39a) Verify `is_lock_disabled_for_test` directly across all 4 conditions:
+      // (39a) Verify `is_lock_disabled_for_test` directly across all 4 conditions + symlink rejection (F21, F26, F27):
       const checkBypassFlag = (envOverrides, targetDir) => {
         const res = spawnSync(
           'python3',
@@ -2851,19 +2887,19 @@ approval_check.main()
         return res.stdout.trim();
       };
 
-      // All 4 conditions met on testApprovalsDir (which has .test-ledger) -> True
+      // All 4 conditions met on f27RealMarkerApprovalsDir (which has regular .test-ledger) -> True
       assert.equal(
         checkBypassFlag(
           {
             AIBOSS_TEST_MODE: '1',
             AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
             NODE_ENV: 'test',
-            AIBOSS_DATA_DIR: testDataDir,
+            AIBOSS_DATA_DIR: f27RealMarkerDir,
           },
-          testApprovalsDir
+          f27RealMarkerApprovalsDir
         ),
         'True',
-        'Case 39a (F21): All 4 conditions on dir with .test-ledger must return True'
+        'Case 39a (F21): All 4 conditions on dir with regular .test-ledger must return True'
       );
 
       // Missing condition 1 (AIBOSS_TEST_MODE) -> False
@@ -2872,12 +2908,26 @@ approval_check.main()
           {
             AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
             NODE_ENV: 'test',
-            AIBOSS_DATA_DIR: testDataDir,
+            AIBOSS_DATA_DIR: f27RealMarkerDir,
           },
-          testApprovalsDir
+          f27RealMarkerApprovalsDir
         ),
         'False',
         'Case 39a (F21): Missing AIBOSS_TEST_MODE=1 must return False'
+      );
+
+      // Missing condition 2 (AIBOSS_TEST_DISABLE_APPROVAL_LOCK) when AIBOSS_TEST_MODE=1 + regular .test-ledger exist -> False (F27)
+      assert.equal(
+        checkBypassFlag(
+          {
+            AIBOSS_TEST_MODE: '1',
+            NODE_ENV: 'test',
+            AIBOSS_DATA_DIR: f27RealMarkerDir,
+          },
+          f27RealMarkerApprovalsDir
+        ),
+        'False',
+        'Case 39a (F27): Missing AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1 must return False even with AIBOSS_TEST_MODE=1 and regular .test-ledger'
       );
 
       // Missing condition 3 (NODE_ENV=production) -> False
@@ -2887,9 +2937,9 @@ approval_check.main()
             AIBOSS_TEST_MODE: '1',
             AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
             NODE_ENV: 'production',
-            AIBOSS_DATA_DIR: testDataDir,
+            AIBOSS_DATA_DIR: f27RealMarkerDir,
           },
-          testApprovalsDir
+          f27RealMarkerApprovalsDir
         ),
         'False',
         'Case 39a (F21): NODE_ENV=production must return False even when AIBOSS_TEST_MODE=1 and .test-ledger exist'
@@ -2903,7 +2953,7 @@ approval_check.main()
             AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
             NODE_ENV: 'test',
           },
-          testApprovalsDir
+          f27RealMarkerApprovalsDir
         ),
         'False',
         'Case 39a (F21): Missing AIBOSS_DATA_DIR must return False'
@@ -2921,79 +2971,57 @@ approval_check.main()
           f21NoMarkerApprovalsDir
         ),
         'False',
-        'Case 39a (F21): Directory without .test-ledger marker file must return False even with AIBOSS_TEST_MODE=1 and AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1'
+        'Case 39a (F21): Directory without .test-ledger marker file must return False'
       );
 
-      // (39b) Negative control + API env whitelist check on a ledger directory WITHOUT `.test-ledger`:
-      // Even when `NODE_ENV=development`, `AIBOSS_TEST_MODE=1`, and `AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1`
-      // are present in the server/caller environment, `POST /api/approvals/<id>/decision` strips `AIBOSS_TEST_*`
-      // and 2 concurrent `approval_check.py --consume` processes still enforce `fcntl.flock` (1 approved + 1 claimed)!
-      const f21Date = new Date().toISOString().split('T')[0];
-      const f21LogPath = path.join(f21NoMarkerApprovalsDir, `${f21Date}.jsonl`);
-      const f21Ts = '2026-10-14T16:00:00Z';
-      const f21Seat = 'seat-c39-f21';
-      const f21Tool = 'Bash';
-      const f21Sha = 'c390c390c390c390c390c390c390c390c390c390c390c390c390c390c390c390';
-      const reqC39 = computeRequestId(f21Ts, f21Seat, f21Tool, f21Sha);
-
-      fs.appendFileSync(
-        f21LogPath,
-        JSON.stringify({
-          ts: f21Ts,
-          seat: f21Seat,
-          tool: f21Tool,
-          host: 'api.example.com',
-          len: 64,
-          sha256: f21Sha,
-          head60: 'curl -X POST https://api.example.com/c39-f21',
-          reason: 'external_post_send',
-        }) + '\n',
-        'utf-8'
+      // Condition 4c (F26 P1): `.test-ledger` is a SYMLINK pointing to a regular file -> MUST return False!
+      assert.equal(
+        fs.lstatSync(path.join(f26SymlinkApprovalsDir, '.test-ledger')).isSymbolicLink(),
+        true,
+        'Case 39a (F26): fixture .test-ledger must be a symbolic link'
+      );
+      assert.equal(
+        fs.statSync(path.join(f26SymlinkApprovalsDir, '.test-ledger')).isFile(),
+        true,
+        'Case 39a (F26): symlink target must be a regular file'
+      );
+      assert.equal(
+        checkBypassFlag(
+          {
+            AIBOSS_TEST_MODE: '1',
+            AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
+            NODE_ENV: 'test',
+            AIBOSS_DATA_DIR: f26SymlinkDir,
+          },
+          f26SymlinkApprovalsDir
+        ),
+        'False',
+        'Case 39a (F26 P1): Symlink .test-ledger pointing to a regular file MUST return False (lstat + S_ISREG + O_NOFOLLOW)'
       );
 
-      const savedDataDir = process.env.AIBOSS_DATA_DIR;
-      const savedNodeEnv = process.env.NODE_ENV;
-      const savedTestMode = process.env.AIBOSS_TEST_MODE;
-      const savedDisableLock = process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK;
-      try {
-        process.env.AIBOSS_DATA_DIR = f21NoMarkerDir;
-        process.env.NODE_ENV = 'development';
-        process.env.AIBOSS_TEST_MODE = '1';
-        process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK = '1';
-
-        const postF21Res = await postDecisionRoute(
-          new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqC39}/decision`, {
-            method: 'POST',
-            headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
-            body: JSON.stringify({ decision: 'approved', note: 'F21 negative control approval' }),
-          }),
-          { params: Promise.resolve({ requestId: reqC39 }) }
-        );
-        assert.equal(postF21Res.status, 200, 'Case 39b (F21): POST decision must succeed');
-
-        const spawnNoMarkerConsumer = () =>
+      // Helper to run 2 concurrent `approval_check.py --consume` processes on any ledger directory & explicit env
+      const runTwoConcurrentConsumers = async (dataDir, seat, tool, sha, reqId, envVars) => {
+        const spawnOne = () =>
           new Promise((resolve) => {
             const proc = spawn(
               'python3',
               [
                 CHECK_SCRIPT,
                 '--seat',
-                f21Seat,
+                seat,
                 '--tool',
-                f21Tool,
+                tool,
                 '--sha256',
-                f21Sha,
+                sha,
                 '--request-id',
-                reqC39,
+                reqId,
                 '--consume',
               ],
               {
                 env: {
-                  ...process.env,
-                  NODE_ENV: 'development',
-                  AIBOSS_DATA_DIR: f21NoMarkerDir,
-                  AIBOSS_TEST_MODE: '1',
-                  AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
+                  PATH: process.env.PATH,
+                  ...envVars,
+                  AIBOSS_DATA_DIR: dataDir,
                 },
                 stdio: ['ignore', 'pipe', 'pipe'],
               }
@@ -3006,24 +3034,252 @@ approval_check.main()
               resolve({ code, body: JSON.parse(out.trim()) });
             });
           });
+        const [p1, p2] = await Promise.all([spawnOne(), spawnOne()]);
+        return {
+          codes: [p1.code, p2.code].sort((a, b) => a - b),
+          statuses: [p1.body.status, p2.body.status].sort(),
+          winner: p1.code === 0 ? p1 : p2,
+          loser: p1.code === 2 ? p1 : p2,
+        };
+      };
 
-        const [f21P1, f21P2] = await Promise.all([
-          spawnNoMarkerConsumer(),
-          spawnNoMarkerConsumer(),
-        ]);
-        const f21Codes = [f21P1.code, f21P2.code].sort((a, b) => a - b);
-        const f21Statuses = [f21P1.body.status, f21P2.body.status].sort();
-        assert.deepEqual(
-          f21Codes,
-          [0, 2],
-          `Case 39b (F21): Lock must stay active on dir without .test-ledger! Got exit codes ${JSON.stringify(f21Codes)}`
+      const f21Date = new Date().toISOString().split('T')[0];
+
+      // (39b — F26 P1): End-to-end concurrent `--consume` on directory where `.test-ledger` is a SYMLINK to a regular file
+      // + all 3 env vars (`AIBOSS_TEST_MODE=1`, `AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1`, `NODE_ENV=test`) ->
+      // lock MUST stay active (`codes: [0, 2]`, `statuses: ['approved', 'claimed']`)!
+      const f26LogPath = path.join(f26SymlinkApprovalsDir, `${f21Date}.jsonl`);
+      const f26Ts = '2026-10-14T16:00:00Z';
+      const f26Seat = 'seat-c39-f26-symlink';
+      const f26Tool = 'Bash';
+      const f26Sha = 'c396c396c396c396c396c396c396c396c396c396c396c396c396c396c396c396';
+      const reqF26 = computeRequestId(f26Ts, f26Seat, f26Tool, f26Sha);
+      fs.appendFileSync(
+        f26LogPath,
+        [
+          JSON.stringify({
+            ts: f26Ts,
+            seat: f26Seat,
+            tool: f26Tool,
+            host: 'api.example.com',
+            len: 64,
+            sha256: f26Sha,
+            head60: 'curl -X POST https://api.example.com/c39-f26',
+            reason: 'external_post_send',
+          }),
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqF26,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+        ].join('\n') + '\n',
+        'utf-8'
+      );
+
+      const f26Race = await runTwoConcurrentConsumers(
+        f26SymlinkDir,
+        f26Seat,
+        f26Tool,
+        f26Sha,
+        reqF26,
+        {
+          NODE_ENV: 'test',
+          AIBOSS_TEST_MODE: '1',
+          AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
+        }
+      );
+      assert.deepEqual(
+        f26Race.codes,
+        [0, 2],
+        `Case 39b (F26 P1): Symlink .test-ledger MUST NOT disable flock! Got exit codes ${JSON.stringify(f26Race.codes)}`
+      );
+      assert.deepEqual(f26Race.statuses, ['approved', 'claimed']);
+      assert.equal(f26Race.loser.body.claimId, f26Race.winner.body.claimId);
+
+      // (39c — F27 P2): End-to-end concurrent `--consume` on directory WITH regular `.test-ledger` and `AIBOSS_TEST_MODE=1`,
+      // but MISSING `AIBOSS_TEST_DISABLE_APPROVAL_LOCK` -> lock MUST stay active (`[0, 2]`, `['approved', 'claimed']`)!
+      const f27LogPath = path.join(f27RealMarkerApprovalsDir, `${f21Date}.jsonl`);
+      const f27Ts1 = '2026-10-14T16:01:00Z';
+      const f27Seat1 = 'seat-c39-f27-nodisable';
+      const f27Sha1 = 'c397c397c397c397c397c397c397c397c397c397c397c397c397c397c397c397';
+      const reqF27a = computeRequestId(f27Ts1, f27Seat1, 'Bash', f27Sha1);
+      fs.appendFileSync(
+        f27LogPath,
+        [
+          JSON.stringify({
+            ts: f27Ts1,
+            seat: f27Seat1,
+            tool: 'Bash',
+            host: 'api.example.com',
+            len: 64,
+            sha256: f27Sha1,
+            head60: 'curl -X POST https://api.example.com/c39-f27a',
+            reason: 'external_post_send',
+          }),
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqF27a,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+        ].join('\n') + '\n',
+        'utf-8'
+      );
+
+      const f27RaceNoDisable = await runTwoConcurrentConsumers(
+        f27RealMarkerDir,
+        f27Seat1,
+        'Bash',
+        f27Sha1,
+        reqF27a,
+        {
+          NODE_ENV: 'test',
+          AIBOSS_TEST_MODE: '1',
+        }
+      );
+      assert.deepEqual(
+        f27RaceNoDisable.codes,
+        [0, 2],
+        `Case 39c (F27 P2): Missing AIBOSS_TEST_DISABLE_APPROVAL_LOCK must keep flock active! Got ${JSON.stringify(f27RaceNoDisable.codes)}`
+      );
+      assert.deepEqual(f27RaceNoDisable.statuses, ['approved', 'claimed']);
+
+      // Also verify missing AIBOSS_TEST_MODE (with regular .test-ledger + AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1) -> lock stays active
+      const f27Ts1b = '2026-10-14T16:01:30Z';
+      const f27Seat1b = 'seat-c39-f27-notestmode';
+      const f27Sha1b = 'c39bc39bc39bc39bc39bc39bc39bc39bc39bc39bc39bc39bc39bc39bc39bc39b';
+      const reqF27NoMode = computeRequestId(f27Ts1b, f27Seat1b, 'Bash', f27Sha1b);
+      fs.appendFileSync(
+        f27LogPath,
+        [
+          JSON.stringify({
+            ts: f27Ts1b,
+            seat: f27Seat1b,
+            tool: 'Bash',
+            host: 'api.example.com',
+            len: 64,
+            sha256: f27Sha1b,
+            head60: 'curl -X POST https://api.example.com/c39-f27b',
+            reason: 'external_post_send',
+          }),
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqF27NoMode,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+        ].join('\n') + '\n',
+        'utf-8'
+      );
+      const f27RaceNoMode = await runTwoConcurrentConsumers(
+        f27RealMarkerDir,
+        f27Seat1b,
+        'Bash',
+        f27Sha1b,
+        reqF27NoMode,
+        {
+          NODE_ENV: 'test',
+          AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
+        }
+      );
+      assert.deepEqual(
+        f27RaceNoMode.codes,
+        [0, 2],
+        `Case 39c (F27 P2): Missing AIBOSS_TEST_MODE must keep flock active! Got ${JSON.stringify(f27RaceNoMode.codes)}`
+      );
+      assert.deepEqual(f27RaceNoMode.statuses, ['approved', 'claimed']);
+
+      // (39d — F27 P2): Isolate TS `buildPythonCliEnv()` env stripping!
+      // On `f27RealMarkerDir` (which HAS a real regular `.test-ledger` file), set `NODE_ENV='development'`,
+      // `AIBOSS_TEST_MODE='1'`, `AIBOSS_TEST_DISABLE_APPROVAL_LOCK='1'` in `process.env`, AND hold `fcntl.flock`
+      // on `<f27RealMarkerApprovalsDir>/.approvals.lock` from a child process.
+      // Because `buildPythonCliEnv()` strips `AIBOSS_TEST_*` when `NODE_ENV !== 'test'`, `POST /api/approvals/<id>/decision`
+      // MUST NOT bypass the lock — it must wait on the held `flock` and return HTTP 503 (`error: 'lock_timeout'`)!
+      // (If `buildPythonCliEnv()` were replaced by raw `process.env`, Python would see all 4 bypass conditions including
+      // the real `.test-ledger` file, skip `with_approval_lock`, and return HTTP 200 instead of 503!)
+      const f27Ts2 = '2026-10-14T16:02:00Z';
+      const f27Seat2 = 'seat-c39-f27-api-env';
+      const f27Sha2 = 'c398c398c398c398c398c398c398c398c398c398c398c398c398c398c398c398';
+      const reqF27b = computeRequestId(f27Ts2, f27Seat2, 'Bash', f27Sha2);
+      fs.appendFileSync(
+        f27LogPath,
+        JSON.stringify({
+          ts: f27Ts2,
+          seat: f27Seat2,
+          tool: 'Bash',
+          host: 'api.example.com',
+          len: 64,
+          sha256: f27Sha2,
+          head60: 'curl -X POST https://api.example.com/c39-f27b',
+          reason: 'external_post_send',
+        }) + '\n',
+        'utf-8'
+      );
+
+      const f27LockPath = path.join(f27RealMarkerApprovalsDir, '.approvals.lock');
+      const f27Holder = await new Promise((resolve, reject) => {
+        const child = spawn(
+          'python3',
+          [
+            '-c',
+            `
+import fcntl, os, sys, time
+lp = sys.argv[1]
+fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+fcntl.flock(fd, fcntl.LOCK_EX)
+sys.stdout.write("LOCKED_F27\\n")
+sys.stdout.flush()
+time.sleep(60)
+`,
+            f27LockPath,
+          ],
+          { stdio: ['ignore', 'pipe', 'pipe'] }
         );
-        assert.deepEqual(
-          f21Statuses,
-          ['approved', 'claimed'],
-          `Case 39b (F21): Expected ['approved', 'claimed'] on dir without .test-ledger, got ${JSON.stringify(f21Statuses)}`
+        let buf = '';
+        child.stdout.on('data', (chunk) => {
+          buf += chunk.toString('utf-8');
+          if (buf.includes('LOCKED_F27')) resolve(child);
+        });
+        child.on('error', reject);
+      });
+
+      const savedDataDir = process.env.AIBOSS_DATA_DIR;
+      const savedNodeEnv = process.env.NODE_ENV;
+      const savedTestMode = process.env.AIBOSS_TEST_MODE;
+      const savedDisableLock = process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK;
+      try {
+        process.env.AIBOSS_DATA_DIR = f27RealMarkerDir;
+        process.env.NODE_ENV = 'development';
+        process.env.AIBOSS_TEST_MODE = '1';
+        process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK = '1';
+
+        const postF27HeldRes = await postDecisionRoute(
+          new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF27b}/decision`, {
+            method: 'POST',
+            headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+            body: JSON.stringify({ decision: 'approved', note: 'Must hit lock_timeout 503' }),
+          }),
+          { params: Promise.resolve({ requestId: reqF27b }) }
         );
+        assert.equal(
+          postF27HeldRes.status,
+          503,
+          `Case 39d (F27 P2): With real .test-ledger + AIBOSS_TEST_MODE=1 + AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1 in NODE_ENV=development while flock is held, POST must return HTTP 503 (proving buildPythonCliEnv stripped AIBOSS_TEST_*), got ${postF27HeldRes.status}`
+        );
+        const postF27HeldJson = await postF27HeldRes.json();
+        assert.equal(postF27HeldJson.error, 'lock_timeout');
       } finally {
+        await new Promise((resolve) => {
+          f27Holder.once('exit', resolve);
+          f27Holder.kill('SIGKILL');
+        });
         process.env.AIBOSS_DATA_DIR = savedDataDir;
         if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
         else process.env.NODE_ENV = savedNodeEnv;
@@ -3034,8 +3290,10 @@ approval_check.main()
       }
     } finally {
       fs.rmSync(f21NoMarkerDir, { recursive: true, force: true });
+      fs.rmSync(f26SymlinkDir, { recursive: true, force: true });
+      fs.rmSync(f27RealMarkerDir, { recursive: true, force: true });
     }
-    console.log('  [PASS] Case 39 (F21 P1 v07): Test lock-bypass switch requires all 4 conditions (.test-ledger + AIBOSS_TEST_MODE=1 + AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1 + NODE_ENV!=production) and is stripped by TS outside test');
+    console.log('  [PASS] Case 39 (F21 + F26 P1 + F27 P2 v08): Symlink .test-ledger rejected via lstat+S_ISREG+O_NOFOLLOW; missing DISABLE_LOCK negative control verified; buildPythonCliEnv stripping isolated via held flock -> HTTP 503');
 
     // Case 40 (F23 P2 v07): Option values starting with dash (`"--review"`, `"-x"`, `"--line1\n--line2"`, Unicode)
     // pass cleanly through `--flag=<value>` in `src/lib/approvals-ledger.ts` and return HTTP 200 with exact persistence.
@@ -3118,27 +3376,35 @@ approval_check.main()
     assert.equal(f23BadEmojiRes.status, 400, 'Case 40 (F23): >200 code points starting with -- must still return 400');
     console.log('  [PASS] Case 40 (F23 P2 v07): Dash-prefixed notes ("--review", "-x", "--line1\\n--line2", Unicode) and --run-id pass via --flag=<value> and return HTTP 200');
 
-    // Case 41 (F24 P2 v07): CLI JSON contract verification for `approval_check.py` and `approval_mark.py`
-    // Verifies all v05 keys (`status`, `requestId`, `claimId`, `expiresAt`, `idempotent`) and exit codes (`0` / `2`),
-    // plus additive v06/v07 keys (`ok`, `message`) on `approval_mark.py`.
+    // Case 41 (F24 + F28 P2 v08): CLI JSON contract verification for `approval_check.py` and `approval_mark.py`
+    // Verifies exact key sets AND exact values/types for all v05 keys (`status`, `requestId`, `claimId`, `expiresAt`, `idempotent`)
+    // and exit codes (`0` / `2`), plus additive v06/v07 keys (`ok`, `message`) on `approval_mark.py`.
     const c41Ts = '2026-10-14T16:20:00Z';
     const c41Seat = 'seat-c41-f24';
     const c41Tool = 'Bash';
     const c41Sha = 'c410c410c410c410c410c410c410c410c410c410c410c410c410c410c410c410';
     const reqC41 = computeRequestId(c41Ts, c41Seat, c41Tool, c41Sha);
+    assert.match(reqC41, /^[0-9a-f]{16}$/);
 
-    // 1. not_found branch on check and mark
+    // 1. not_found branch on check (without and with --request-id) and mark
     const checkNotFound41 = runCheckCli(c41Seat, c41Tool, c41Sha);
     assert.equal(checkNotFound41.status, 2);
     assert.deepEqual(Object.keys(checkNotFound41.body).sort(), ['status']);
     assert.equal(checkNotFound41.body.status, 'not_found');
 
+    const checkNotFoundWithReq41 = runCheckCli(c41Seat, c41Tool, c41Sha, ['--request-id', reqC41]);
+    assert.equal(checkNotFoundWithReq41.status, 2);
+    assert.deepEqual(Object.keys(checkNotFoundWithReq41.body).sort(), ['requestId', 'status']);
+    assert.equal(checkNotFoundWithReq41.body.status, 'not_found');
+    assert.equal(checkNotFoundWithReq41.body.requestId, reqC41);
+
     const markNotFound41 = runMarkCli(reqC41, 'executed', 'run-41');
     assert.equal(markNotFound41.status, 2);
+    assert.deepEqual(Object.keys(markNotFound41.body).sort(), ['message', 'ok', 'requestId', 'status']);
     assert.equal(markNotFound41.body.status, 'not_found');
     assert.equal(markNotFound41.body.requestId, reqC41);
     assert.equal(markNotFound41.body.ok, false);
-    assert.equal(typeof markNotFound41.body.message, 'string');
+    assert.ok(typeof markNotFound41.body.message === 'string' && markNotFound41.body.message.length > 0);
 
     // 2. pending branch on check and mark
     fs.appendFileSync(
@@ -3163,10 +3429,11 @@ approval_check.main()
 
     const markPending41 = runMarkCli(reqC41, 'executed', 'run-41');
     assert.equal(markPending41.status, 2);
+    assert.deepEqual(Object.keys(markPending41.body).sort(), ['message', 'ok', 'requestId', 'status']);
     assert.equal(markPending41.body.status, 'pending');
     assert.equal(markPending41.body.requestId, reqC41);
     assert.equal(markPending41.body.ok, false);
-    assert.equal(typeof markPending41.body.message, 'string');
+    assert.ok(typeof markPending41.body.message === 'string' && markPending41.body.message.length > 0);
 
     // 3. approved (non-consume), approved (--consume), claimed, claim_mismatch, executed (idempotent=false & true)
     recordApprovalDecision({
@@ -3180,6 +3447,10 @@ approval_check.main()
     assert.equal(checkApproved41.body.status, 'approved');
     assert.equal(checkApproved41.body.requestId, reqC41);
     assert.equal(typeof checkApproved41.body.expiresAt, 'string');
+    assert.ok(
+      typeof parseIsoTimestampMs(checkApproved41.body.expiresAt) === 'number',
+      'Case 41 (F28): checkApproved41.body.expiresAt must be a valid ISO timestamp'
+    );
 
     const checkConsumed41 = runCheckCli(c41Seat, c41Tool, c41Sha, ['--consume']);
     assert.equal(checkConsumed41.status, 0);
@@ -3189,6 +3460,8 @@ approval_check.main()
     );
     assert.equal(checkConsumed41.body.status, 'approved');
     assert.equal(checkConsumed41.body.requestId, reqC41);
+    assert.equal(checkConsumed41.body.expiresAt, checkApproved41.body.expiresAt);
+    assert.ok(typeof parseIsoTimestampMs(checkConsumed41.body.expiresAt) === 'number');
     assert.match(checkConsumed41.body.claimId, /^[0-9a-f]{16}$/);
 
     const checkClaimed41 = runCheckCli(c41Seat, c41Tool, c41Sha, ['--consume']);
@@ -3198,15 +3471,18 @@ approval_check.main()
       ['claimId', 'expiresAt', 'requestId', 'status']
     );
     assert.equal(checkClaimed41.body.status, 'claimed');
+    assert.equal(checkClaimed41.body.requestId, reqC41, 'Case 41 (F28): claimed response must have requestId === reqC41');
     assert.equal(checkClaimed41.body.claimId, checkConsumed41.body.claimId);
-    assert.equal(typeof checkClaimed41.body.expiresAt, 'string');
+    assert.equal(checkClaimed41.body.expiresAt, checkApproved41.body.expiresAt);
+    assert.ok(typeof parseIsoTimestampMs(checkClaimed41.body.expiresAt) === 'number');
 
     const markMismatch41 = runMarkCli(reqC41, 'executed', 'run-41', '0000000000000000');
     assert.equal(markMismatch41.status, 2);
+    assert.deepEqual(Object.keys(markMismatch41.body).sort(), ['message', 'ok', 'requestId', 'status']);
     assert.equal(markMismatch41.body.status, 'claim_mismatch');
     assert.equal(markMismatch41.body.requestId, reqC41);
     assert.equal(markMismatch41.body.ok, false);
-    assert.equal(typeof markMismatch41.body.message, 'string');
+    assert.ok(typeof markMismatch41.body.message === 'string' && markMismatch41.body.message.length > 0);
 
     const markExecFirst41 = runMarkCli(
       reqC41,
@@ -3215,6 +3491,10 @@ approval_check.main()
       checkConsumed41.body.claimId
     );
     assert.equal(markExecFirst41.status, 0);
+    assert.deepEqual(
+      Object.keys(markExecFirst41.body).sort(),
+      ['claimId', 'idempotent', 'ok', 'requestId', 'status']
+    );
     assert.equal(markExecFirst41.body.status, 'executed');
     assert.equal(markExecFirst41.body.requestId, reqC41);
     assert.equal(markExecFirst41.body.claimId, checkConsumed41.body.claimId);
@@ -3228,99 +3508,255 @@ approval_check.main()
       checkConsumed41.body.claimId
     );
     assert.equal(markExecSecond41.status, 0);
+    assert.deepEqual(
+      Object.keys(markExecSecond41.body).sort(),
+      ['claimId', 'idempotent', 'ok', 'requestId', 'status']
+    );
     assert.equal(markExecSecond41.body.status, 'executed');
     assert.equal(markExecSecond41.body.requestId, reqC41);
+    assert.equal(
+      markExecSecond41.body.claimId,
+      checkConsumed41.body.claimId,
+      'Case 41 (F28): idempotent mark response must preserve claimId'
+    );
     assert.equal(markExecSecond41.body.idempotent, true);
     assert.equal(markExecSecond41.body.ok, true);
-    console.log('  [PASS] Case 41 (F24 P2 v07): CLI JSON contract verified across all check & mark branches (v05 keys + additive ok/message)');
 
-    // Case 42 (F22 P2 v07): Residual risk test when the final JSON segment in `.jsonl` is a complete JSON object
-    // missing ONLY its trailing 1-byte `\n` after `approval_check.py --consume`:
-    // - A second `approval_check.py --consume` still parses the complete final JSON segment and exits 2 (`status: "claimed"`),
-    //   never re-granting `approved`.
-    // - `approval_mark.py --claim-id` repairs the missing `\n` before appending the `execution` line, exits 0 (`status: "executed"`),
-    //   and all lines in the ledger parse cleanly as valid JSON.
-    const c42Ts = '2026-10-14T16:30:00Z';
-    const c42Seat = 'seat-c42-f22';
-    const c42Tool = 'Bash';
-    const c42Sha = 'c420c420c420c420c420c420c420c420c420c420c420c420c420c420c420c420';
-    const reqC42 = computeRequestId(c42Ts, c42Seat, c42Tool, c42Sha);
-
-    fs.appendFileSync(
-      todayPath,
-      JSON.stringify({
-        ts: c42Ts,
-        seat: c42Seat,
-        tool: c42Tool,
-        host: 'api.example.com',
-        len: 64,
-        sha256: c42Sha,
-        head60: 'curl -X POST https://api.example.com/c42-f22',
-        reason: 'external_post_send',
-      }) + '\n',
-      'utf-8'
+    const checkExecuted41 = runCheckCli(c41Seat, c41Tool, c41Sha);
+    assert.equal(checkExecuted41.status, 2);
+    assert.deepEqual(
+      Object.keys(checkExecuted41.body).sort(),
+      ['claimId', 'expiresAt', 'requestId', 'status']
     );
-    recordApprovalDecision({
-      requestId: reqC42,
-      decision: 'approved',
-      by: 'owner',
-    });
+    assert.equal(checkExecuted41.body.status, 'executed');
+    assert.equal(checkExecuted41.body.requestId, reqC41);
+    assert.equal(checkExecuted41.body.claimId, checkConsumed41.body.claimId);
+    assert.equal(checkExecuted41.body.expiresAt, checkApproved41.body.expiresAt);
+    console.log('  [PASS] Case 41 (F24 + F28 P2 v08): CLI JSON contract keys & exact values verified across all check & mark branches (including idempotent claimId, claimed requestId, and ISO expiresAt)');
 
-    const firstConsume42 = runCheckCli(c42Seat, c42Tool, c42Sha, ['--consume']);
-    assert.equal(firstConsume42.status, 0);
-    assert.equal(firstConsume42.body.status, 'approved');
-    const claimId42 = firstConsume42.body.claimId;
-    assert.match(claimId42, /^[0-9a-f]{16}$/);
-
-    // Truncate exactly 1 byte (`\n`) from the end of `todayPath`
-    const statBeforeTrunc42 = fs.statSync(todayPath);
-    const lastByteBuf42 = Buffer.alloc(1);
-    const fd42 = fs.openSync(todayPath, 'r');
-    fs.readSync(fd42, lastByteBuf42, 0, 1, statBeforeTrunc42.size - 1);
-    fs.closeSync(fd42);
-    assert.equal(lastByteBuf42[0], 0x0a, 'Case 42 (F22): last byte before truncation must be LF (0x0a)');
-    fs.truncateSync(todayPath, statBeforeTrunc42.size - 1);
-
-    // Second `--consume` must see `status: "claimed"` (exit 2) and NEVER re-grant `approved`
-    const secondConsume42 = runCheckCli(c42Seat, c42Tool, c42Sha, ['--consume']);
-    assert.equal(
-      secondConsume42.status,
-      2,
-      'Case 42 (F22): second --consume after 1-byte newline truncation must exit 2'
+    // Case 42 (F22 + F29 P2 v08): Dedicated isolated ledger for Case 42 so EVERY SINGLE LINE in the `.jsonl` file
+    // is parsed and verified (0 skipped lines, 0 `.slice(-4)`):
+    // - (42a) Truncating 1 byte (`\n`) after `--consume` -> second `--consume` exits 2 (`status: "claimed"`),
+    //   `approval_mark.py --claim-id` exits 0 (`status: "executed"`) and repairs the missing `\n`, and EVERY line in the ledger parses as valid JSON.
+    // - (42b) Injecting a partial `os.write` that writes `b[:-1]` (complete JSON claim object missing only its trailing `\n`)
+    //   and then raises `OSError(errno.EIO)` during `approval_check.py --consume`:
+    //   - First caller receives `exit 2` with `{"status": "io_error", "reason": "EIO"}` (never `approved`).
+    //   - Subsequent `approval_check.py --consume` folds the complete JSON object at EOF and exits 2 (`status: "claimed"`, with 16-hex `claimId`).
+    //   - `approval_mark.py --claim-id` repairs the missing `\n`, records `executed` (`exit 0`), and EVERY SINGLE LINE in the ledger parses as valid JSON!
+    const c42IsolatedDir = path.join(
+      os.tmpdir(),
+      'aiboss-c42-f29-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
     );
-    assert.equal(
-      secondConsume42.body.status,
-      'claimed',
-      'Case 42 (F22): complete final claim JSON missing only \\n must still fold as claimed'
-    );
-    assert.equal(secondConsume42.body.claimId, claimId42);
+    const c42ApprovalsDir = path.join(c42IsolatedDir, 'approvals');
+    fs.mkdirSync(c42ApprovalsDir, { recursive: true });
+    try {
+      const c42DateStr = new Date().toISOString().split('T')[0];
+      const c42LogPath = path.join(c42ApprovalsDir, `${c42DateStr}.jsonl`);
 
-    // `approval_mark.py` repairs the missing `\n` and records `executed` cleanly
-    const markAfterTrunc42 = runMarkCli(reqC42, 'executed', 'run-c42', claimId42);
-    assert.equal(markAfterTrunc42.status, 0, 'Case 42 (F22): approval_mark.py must succeed and repair missing \\n');
-    assert.equal(markAfterTrunc42.body.status, 'executed');
-    assert.equal(getApprovalById(reqC42)?.status, 'executed');
+      const runCheckC42 = (seat, tool, sha, extra = []) => {
+        const res = spawnSync(
+          'python3',
+          [CHECK_SCRIPT, '--seat', seat, '--tool', tool, '--sha256', sha, ...extra],
+          {
+            env: { ...process.env, AIBOSS_DATA_DIR: c42IsolatedDir },
+            encoding: 'utf-8',
+          }
+        );
+        const out = (res.stdout || '').trim();
+        return { status: res.status, body: out ? JSON.parse(out) : null };
+      };
 
-    // Verify all lines in `todayPath` except the Case 17 fixture line parse as valid JSON
-    const allLinesAfter42 = fs
-      .readFileSync(todayPath, 'utf-8')
-      .trim()
-      .split('\n')
-      .filter(Boolean);
-    for (const line of allLinesAfter42) {
-      if (line === CASE_17_TRUNCATED_FIXTURE_LINE) continue;
-      // Case 35a/35b and Case 36 also injected intentional malformed test lines earlier; check the last 5 lines specifically
-    }
-    const tailLinesAfter42 = allLinesAfter42.slice(-4);
-    for (const line of tailLinesAfter42) {
-      assert.doesNotThrow(
-        () => JSON.parse(line),
-        `Case 42 (F22): Tail line after newline repair must be valid JSON: ${line}`
+      const runMarkC42 = (reqId, result, runId, claimId) => {
+        const args = [
+          MARK_SCRIPT,
+          `--request-id=${reqId}`,
+          `--result=${result}`,
+          `--run-id=${runId}`,
+          `--claim-id=${claimId}`,
+        ];
+        const res = spawnSync('python3', args, {
+          env: { ...process.env, AIBOSS_DATA_DIR: c42IsolatedDir },
+          encoding: 'utf-8',
+        });
+        const out = (res.stdout || '').trim();
+        return { status: res.status, body: out ? JSON.parse(out) : null };
+      };
+
+      // Helper that parses EVERY SINGLE LINE in `c42LogPath` with zero exemptions
+      const assertAllLedgerLinesValidJson = (expectedLineCount, label) => {
+        const rawBytes = fs.readFileSync(c42LogPath);
+        assert.equal(
+          rawBytes[rawBytes.length - 1],
+          0x0a,
+          `Case 42 (${label}): ledger file must end with LF (0x0a)`
+        );
+        const rawText = rawBytes.toString('utf-8');
+        const lines = rawText.split('\n').filter((l) => l.length > 0);
+        for (let idx = 0; idx < lines.length; idx++) {
+          assert.doesNotThrow(
+            () => JSON.parse(lines[idx]),
+            `Case 42 (${label}): line ${idx + 1}/${lines.length} failed JSON.parse: ${lines[idx]}`
+          );
+        }
+        assert.equal(
+          lines.length,
+          expectedLineCount,
+          `Case 42 (${label}): expected ${expectedLineCount} total lines in isolated ledger, got ${lines.length}`
+        );
+      };
+
+      // (42a) Truncate 1 byte (`\n`) after `--consume`
+      const c42TsA = '2026-10-14T16:30:00Z';
+      const c42SeatA = 'seat-c42a-f22';
+      const c42ToolA = 'Bash';
+      const c42ShaA = 'c42ac42ac42ac42ac42ac42ac42ac42ac42ac42ac42ac42ac42ac42ac42ac42a';
+      const reqC42A = computeRequestId(c42TsA, c42SeatA, c42ToolA, c42ShaA);
+
+      fs.appendFileSync(
+        c42LogPath,
+        [
+          JSON.stringify({
+            ts: c42TsA,
+            seat: c42SeatA,
+            tool: c42ToolA,
+            host: 'api.example.com',
+            len: 64,
+            sha256: c42ShaA,
+            head60: 'curl -X POST https://api.example.com/c42a-f22',
+            reason: 'external_post_send',
+          }),
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqC42A,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+        ].join('\n') + '\n',
+        'utf-8'
       );
-    }
-    console.log('  [PASS] Case 42 (F22 P2 v07): 1-byte missing trailing newline on claim line still folds as claimed (exit 2) and is cleanly repaired on mark');
 
-    console.log('>>> ALL 42 A-4 v07 APPROVAL LEDGER TEST CASES PASSED <<<');
+      const firstConsume42a = runCheckC42(c42SeatA, c42ToolA, c42ShaA, ['--consume']);
+      assert.equal(firstConsume42a.status, 0);
+      assert.equal(firstConsume42a.body.status, 'approved');
+      const claimId42a = firstConsume42a.body.claimId;
+      assert.match(claimId42a, /^[0-9a-f]{16}$/);
+
+      const statBeforeTrunc42a = fs.statSync(c42LogPath);
+      const lastByteBuf42a = Buffer.alloc(1);
+      const fd42a = fs.openSync(c42LogPath, 'r');
+      fs.readSync(fd42a, lastByteBuf42a, 0, 1, statBeforeTrunc42a.size - 1);
+      fs.closeSync(fd42a);
+      assert.equal(lastByteBuf42a[0], 0x0a, 'Case 42a (F22): last byte before truncation must be LF');
+      fs.truncateSync(c42LogPath, statBeforeTrunc42a.size - 1);
+
+      const secondConsume42a = runCheckC42(c42SeatA, c42ToolA, c42ShaA, ['--consume']);
+      assert.equal(secondConsume42a.status, 2);
+      assert.equal(secondConsume42a.body.status, 'claimed');
+      assert.equal(secondConsume42a.body.claimId, claimId42a);
+
+      const markAfterTrunc42a = runMarkC42(reqC42A, 'executed', 'run-c42a', claimId42a);
+      assert.equal(markAfterTrunc42a.status, 0);
+      assert.equal(markAfterTrunc42a.body.status, 'executed');
+
+      // Parse EVERY SINGLE LINE in `c42LogPath` (4 lines: request, decision, claim, execution)
+      assertAllLedgerLinesValidJson(4, '42a-post-mark');
+
+      // (42b — F29): Inject `os.write` that writes `b[:-1]` (complete JSON claim object without trailing `\n`)
+      // and raises `OSError(errno.EIO)` on the remaining 1 byte:
+      // - Caller 1 receives `exit 2`, `status: "io_error"`, `reason: "EIO"`.
+      // - Caller 2 (`--consume`) sees `status: "claimed"` (`exit 2`) with the 16-hex `claimId`.
+      // - `approval_mark.py` repairs the missing `\n` and records `executed` (`exit 0`),
+      //   and all 8 lines in `c42LogPath` parse cleanly as valid JSON!
+      const c42TsB = '2026-10-14T16:31:00Z';
+      const c42SeatB = 'seat-c42b-f29';
+      const c42ToolB = 'Bash';
+      const c42ShaB = 'c42bc42bc42bc42bc42bc42bc42bc42bc42bc42bc42bc42bc42bc42bc42bc42b';
+      const reqC42B = computeRequestId(c42TsB, c42SeatB, c42ToolB, c42ShaB);
+
+      fs.appendFileSync(
+        c42LogPath,
+        [
+          JSON.stringify({
+            ts: c42TsB,
+            seat: c42SeatB,
+            tool: c42ToolB,
+            host: 'api.example.com',
+            len: 64,
+            sha256: c42ShaB,
+            head60: 'curl -X POST https://api.example.com/c42b-f29',
+            reason: 'external_post_send',
+          }),
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqC42B,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+        ].join('\n') + '\n',
+        'utf-8'
+      );
+
+      const pyMissingLfEio42b = spawnSync(
+        'python3',
+        [
+          '-c',
+          `
+import errno, os, sys
+sys.path.insert(0, 'operations/scripts')
+import approval_check
+
+orig_write = os.write
+state = {'calls': 0}
+def write_without_final_lf_then_eio(fd, b):
+    state['calls'] += 1
+    if state['calls'] == 1 and b.endswith(b'\\n') and len(b) > 1:
+        return orig_write(fd, b[:-1])
+    raise OSError(errno.EIO, 'Simulated EIO on final LF byte')
+
+os.write = write_without_final_lf_then_eio
+sys.argv = ['approval_check.py', '--seat', ${JSON.stringify(c42SeatB)}, '--tool', ${JSON.stringify(c42ToolB)}, '--sha256', ${JSON.stringify(c42ShaB)}, '--consume']
+approval_check.main()
+`,
+        ],
+        {
+          env: { ...process.env, AIBOSS_DATA_DIR: c42IsolatedDir },
+          encoding: 'utf-8',
+        }
+      );
+      assert.equal(
+        pyMissingLfEio42b.status,
+        2,
+        `Case 42b (F29): injected write missing LF + EIO must exit 2, got ${pyMissingLfEio42b.status}`
+      );
+      const body42bCaller1 = JSON.parse(pyMissingLfEio42b.stdout.trim());
+      assert.equal(body42bCaller1.status, 'io_error');
+      assert.equal(body42bCaller1.reason, 'EIO');
+
+      // Second `--consume` sees `status: "claimed"` (`exit 2`) because the JSON object body was complete
+      const secondConsume42b = runCheckC42(c42SeatB, c42ToolB, c42ShaB, ['--consume']);
+      assert.equal(secondConsume42b.status, 2);
+      assert.equal(secondConsume42b.body.status, 'claimed');
+      assert.equal(secondConsume42b.body.requestId, reqC42B);
+      const claimId42b = secondConsume42b.body.claimId;
+      assert.match(claimId42b, /^[0-9a-f]{16}$/);
+
+      // `approval_mark.py` repairs the missing `\n` and records `executed` (`exit 0`)
+      const markAfterEio42b = runMarkC42(reqC42B, 'executed', 'run-c42b', claimId42b);
+      assert.equal(markAfterEio42b.status, 0);
+      assert.equal(markAfterEio42b.body.status, 'executed');
+
+      // Parse EVERY SINGLE LINE in `c42LogPath` (all 8 lines across 42a + 42b must be valid JSON!)
+      assertAllLedgerLinesValidJson(8, '42b-all-8-lines');
+    } finally {
+      fs.rmSync(c42IsolatedDir, { recursive: true, force: true });
+    }
+    console.log('  [PASS] Case 42 (F22 + F29 P2 v08): Isolated ledger verifies 100% of lines parse as valid JSON after 1-byte LF truncation AND after injected write-missing-LF + EIO');
+
+    console.log('>>> ALL 42 A-4 v08 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

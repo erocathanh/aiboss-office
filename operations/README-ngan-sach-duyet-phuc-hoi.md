@@ -249,29 +249,36 @@ Mọi lệnh CLI đều chạy dưới lớp bắt lỗi ngoài cùng `run_cli_w
    ```bash
    python3 operations/scripts/approval_check.py --seat=<slug> --tool=<tool> --sha256=<hex> [--request-id=<id>] [--consume]
    ```
-   - **Hợp đồng khoá JSON stdout của `approval_check.py` (giữ nguyên 100% các khoá v05):**
+   - **Hợp đồng khoá JSON stdout của `approval_check.py` (giữ nguyên 100% các khoá v05, kê chi tiết theo từng nhánh — F24, F28):**
      - Thành công (`exit 0`, không `--consume`): `{"requestId": "<16-hex>", "status": "approved", "expiresAt": "<ISO>"}`.
      - Thành công (`exit 0`, có `--consume`): `{"requestId": "<16-hex>", "status": "approved", "expiresAt": "<ISO>", "claimId": "<16-hex>"}`.
-     - Từ chối nghiệp vụ (`exit 2`):
-       - `not_found`: `{"status": "not_found"}`.
-       - `superseded` / `digest_mismatch`: `{"requestId": "<16-hex>", "status": "superseded" | "digest_mismatch"}`.
-       - `pending` / `denied` / `expired` / `not_yet_valid` / `claimed` / `executed` / `failed`: `{"requestId": "<16-hex>", "status": "<status>", ...}` (kèm `"expiresAt": "<ISO>"` nếu đã có `decision`, và kèm `"claimId": "<16-hex>"` nếu đã có `claim`/`execution` gắn `claimId`).
+     - Từ chối nghiệp vụ (`exit 2`, không ghi vào sổ):
+       - `not_found`: `{"status": "not_found"}` (khi không truyền `--request-id`) hoặc `{"requestId": "<16-hex>", "status": "not_found"}` (khi truyền `--request-id`).
+       - `superseded`: `{"requestId": "<16-hex>", "latestRequestId": "<16-hex>", "status": "superseded"}`.
+       - `digest_mismatch`: `{"requestId": "<16-hex>", "status": "digest_mismatch"}`.
+       - `pending`: `{"requestId": "<16-hex>", "status": "pending"}`.
+       - `denied` / `expired` / `not_yet_valid`: `{"requestId": "<16-hex>", "status": "denied" | "expired" | "not_yet_valid", "expiresAt": "<ISO>"}` (trường `"expiresAt"` có mặt khi bản ghi `decision` có `expiresAt` khác rỗng).
+       - `claimed`: `{"requestId": "<16-hex>", "status": "claimed", "expiresAt": "<ISO>", "claimId": "<16-hex>"}`.
+       - `executed` / `failed`: `{"requestId": "<16-hex>", "status": "executed" | "failed", "expiresAt": "<ISO>"}` (kèm `"claimId": "<16-hex>"` nếu lần thực thi đó gắn với `claimId`).
      - Lỗi hạ tầng (`exit 2`):
-       - `lock_timeout`: `{"status": "lock_timeout"}` (kèm `"requestId"` nếu có).
-       - `ledger_unreadable`: `{"status": "ledger_unreadable", "file": "<basename>", "reason": "<ERRNO>"}` (kèm `"requestId"` nếu có).
-       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>"}` (kèm `"requestId"` nếu có).
-3. **Đánh dấu kết quả sau khi thực thi (`operations/scripts/approval_mark.py` — Hook H4, Hợp đồng Schema Cộng Thêm F24):**
+       - `lock_timeout` (trước khi ghi, `0` byte ghi): `{"status": "lock_timeout"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`).
+       - `ledger_unreadable` (trước khi ghi, `0` byte ghi): `{"status": "ledger_unreadable", "file": "<basename>", "reason": "<ERRNO>"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`).
+       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`). Nếu lỗi I/O xảy ra trước khi mở/ghi tệp (`EACCES`, `EROFS`), `0` byte được ghi; nếu lỗi xảy ra **sau khi đã bắt đầu ghi** (ví dụ `os.write` bị cụt dòng hoặc lỗi ở bước `fsync`/đọc kiểm tra đuôi), trên đĩa có thể còn lại một dòng cụt chưa hoàn chỉnh — bộ đọc sẽ tự bỏ qua dòng cụt đó, và lần ghi hợp lệ tiếp theo sẽ tự chèn byte `\n` để sửa đuôi tệp.
+3. **Đánh dấu kết quả sau khi thực thi (`operations/scripts/approval_mark.py` — Hook H4, Hợp đồng Schema Cộng Thêm F24, F28):**
    ```bash
    python3 operations/scripts/approval_mark.py --request-id=<id> --result=<executed|failed> [--claim-id=<claimId>] [--run-id=<runId>]
    ```
    - **Hợp đồng khoá JSON stdout của `approval_mark.py` (schema cộng thêm — chỉ thêm khoá, không bỏ, không đổi nghĩa bất kỳ khoá v05 nào; hook H4 đọc theo tên trường):**
      - Thành công (`exit 0`):
-       - Các khoá gốc từ v05 (bắt buộc giữ nguyên tên, kiểu và nghĩa): `"requestId": "<16-hex>"`, `"status": "executed" | "failed"`, `"idempotent": true | false`, và `"claimId": "<16-hex>"` (khi có `claim`).
+       - Các khoá gốc từ v05 (bắt buộc giữ nguyên tên, kiểu và nghĩa): `"requestId": "<16-hex>"`, `"status": "executed" | "failed"`, `"idempotent": true | false`, và `"claimId": "<16-hex>"` (có mặt ở cả lần ghi đầu `idempotent: false` và các lần gọi lặp `idempotent: true` khi bản ghi có `claimId`).
        - Khoá cộng thêm từ v06/v07: `"ok": true`.
      - Từ chối nghiệp vụ (`exit 2`, ghi `0` byte):
        - Các khoá gốc từ v05 (bắt buộc giữ nguyên tên, kiểu và nghĩa): `"requestId": "<16-hex>"`, `"status": "not_found" | "pending" | "denied" | "expired" | "not_yet_valid" | "claim_mismatch" | "already_executed" | "digest_mismatch"`.
        - Các khoá cộng thêm từ v06/v07: `"ok": false`, `"message": "<mô tả lỗi>"`.
-     - Lỗi hạ tầng (`exit 2`, ghi `0` byte): `"status": "lock_timeout" | "ledger_unreadable" | "io_error"` (cùng khuôn với `approval_check.py`).
+     - Lỗi hạ tầng (`exit 2`):
+       - `lock_timeout`: `{"status": "lock_timeout", "requestId": "<16-hex>"}` (trước khi ghi, `0` byte ghi).
+       - `ledger_unreadable`: `{"status": "ledger_unreadable", "file": "<basename>", "reason": "<ERRNO>", "requestId": "<16-hex>"}` (trước khi ghi, `0` byte ghi).
+       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>", "requestId": "<16-hex>"}` (`0` byte nếu lỗi trước khi ghi; nếu lỗi xảy ra sau khi đã bắt đầu ghi như short write thì dòng cụt được bộ đọc bỏ qua và lần ghi kế tiếp tự sửa đuôi).
 
 ### 5.4. API, Quy Tắc Xác Thực (F13) & Giao Diện `/settings`
 - `GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50`: gọi `approval_ledger.py dump --json`, lọc qua `sanitizeApprovalItem` và trả danh sách yêu cầu kèm `total`. Nếu gặp `lock_timeout`, `ledger_unreadable` hoặc `io_error`, trả về HTTP `503` với thông điệp chung an toàn (không lộ đường dẫn tệp nội bộ).
@@ -279,17 +286,17 @@ Mọi lệnh CLI đều chạy dưới lớp bắt lỗi ngoài cùng `run_cli_w
   - **Quy tắc xác thực (F7, F13):** Khi `PHONGBAN_USER` và `PHONGBAN_PASS` đã được cấu hình, bắt buộc HTTP Basic Auth trên mọi yêu cầu (kể cả từ `localhost` / `127.0.0.1`), đối chiếu thời gian hằng qua `crypto.timingSafeEqual` trên SHA-256 digest (`by: "owner"`). Chỉ khi chưa cấu hình `PHONGBAN_USER`/`PHONGBAN_PASS`, yêu cầu từ loopback thực sự (`localhost`, `127.0.0.1`, `[::1]`) mới được chấp nhận với `by: "localhost"`, còn ngoài localhost trả về HTTP `503`.
   - Kiểm tra `decision` và `note` (kiểu chuỗi, $\le 200$ điểm mã Unicode, từ chối `note: null`) tại TS trước khi gọi `approval_ledger.py decide`; trả `400` (0 byte ghi) nếu đầu vào không hợp lệ, `404` nếu không tìm thấy, `409` nếu đã quyết định trước đó, và `503` (`lock_timeout`, `ledger_unreadable`, `io_error`) với thông điệp chung an toàn.
 
-### 5.5. Công Tắc Đối Chứng Dương Cô Lập (F21), Rủi Ro Tồn Dư Đuôi Thiếu `\n` (F22) & Cách Dọn Sổ Thử Nghiệm
-- **Công tắc đối chứng dương cô lập 4 điều kiện (`is_lock_disabled_for_test` — F21):**
+### 5.5. Công Tắc Đối Chứng Dương Cô Lập (F21, F26), Rủi Ro Tồn Dư Đuôi Thiếu `\n` (F22) & Cách Dọn Sổ Thử Nghiệm
+- **Công tắc đối chứng dương cô lập 4 điều kiện (`is_lock_disabled_for_test` — F21, F26):**
   - Công tắc bỏ `fcntl.flock` trong `operations/scripts/approval_ledger.py` chỉ dùng duy nhất cho ca đối chứng dương (Ca 15) và chỉ kích hoạt khi **đồng thời thoả đủ 4 điều kiện**:
     1. `AIBOSS_TEST_MODE == "1"` (cờ chế độ thử thống nhất của toàn kho, dùng chung với hook 2.1 trong S17);
     2. `AIBOSS_TEST_DISABLE_APPROVAL_LOCK == "1"`;
     3. `NODE_ENV != "production"`;
-    4. `AIBOSS_DATA_DIR` được đặt tường minh và **tồn tại tệp đánh dấu `<AIBOSS_DATA_DIR>/approvals/.test-ledger`** (tệp thường do chính bộ kiểm thử tạo trong thư mục tạm của nó).
-  - Ngoài ra, ở tầng TypeScript (`src/lib/approvals-ledger.ts`), hàm `buildPythonCliEnv()` dựng môi trường theo danh sách trắng (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `NODE_ENV`, `AIBOSS_DATA_DIR`, `AIBOSS_OFFICE_ROOT`, `PYTHON*`) và **loại bỏ mọi biến `AIBOSS_TEST_*`** trừ khi `NODE_ENV === "test"`. Nhờ 2 tầng bảo vệ này (danh sách trắng env ở TS + tệp đánh dấu `.test-ledger` ở Python), đường API thật và hook H4 trên sổ thật (`operations/data/approvals`) hoàn toàn miễn nhiễm ngay cả khi môi trường máy chủ đặt nhầm `NODE_ENV=development` hay rò biến `AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1`.
+    4. `AIBOSS_DATA_DIR` được đặt tường minh và **tồn tại tệp đánh dấu `<AIBOSS_DATA_DIR>/approvals/.test-ledger` là tệp thường thật sự tại chính đường dẫn đó**, được kiểm bằng `os.lstat(marker_path)` + `stat.S_ISREG(st_link.st_mode)` kết hợp `os.open(marker_path, os.O_RDONLY | os.O_NOFOLLOW)` + `os.fstat(fd)` (mọi symlink đều bị từ chối và coi như không có tệp đánh dấu — F26).
+  - Ngoài ra, ở tầng TypeScript (`src/lib/approvals-ledger.ts`), hàm `buildPythonCliEnv()` dựng môi trường theo danh sách trắng (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `NODE_ENV`, `AIBOSS_DATA_DIR`, `AIBOSS_OFFICE_ROOT`, `PYTHON*`) và **loại bỏ mọi biến `AIBOSS_TEST_*`** trừ khi `NODE_ENV === "test"`. Nhờ 2 tầng bảo vệ độc lập này (danh sách trắng env ở TS + tệp thường `.test-ledger` kiểm bằng `lstat`/`O_NOFOLLOW` ở Python), đường API thật và hook H4 trên sổ thật (`operations/data/approvals`) luôn giữ khoá `fcntl.flock` ngay cả khi môi trường máy chủ đặt `NODE_ENV=development` và rò các biến `AIBOSS_TEST_*`.
 - **Rủi ro tồn dư khi bản ghi JSON cuối tệp đủ nội dung nhưng thiếu đúng 1 byte `\n` (F22):**
   - Bộ ghi `append_jsonl_safely` đòi hỏi bản ghi trên đĩa phải kết thúc bằng byte `b"\n"` (nếu thiếu byte `b"\n"` do lỗi I/O giữa chừng thì trả `status: "io_error"`, thoát mã `2`). Trong khi đó, bộ đọc `read_and_fold_ledger` tách theo `b"\n"` nên vẫn chấp nhận đoạn cuối tệp nếu bản thân đoạn đó đã là một đối tượng JSON hợp lệ trọn vẹn dù thiếu byte `\n` kết thúc.
   - **Hệ quả an toàn:** Nếu một lệnh `--consume` bị lỗi I/O đúng ở byte `\n` cuối cùng sau khi toàn bộ thân JSON của `claim` đã ghi xuống đĩa, caller nhận `io_error` (chưa nhận được `claimId`), và các lần `--consume` tiếp theo sẽ thấy trạng thái `"claimed"` (`exit 2`) chứ **tuyệt đối không bao giờ tiêu thụ hai lần (`approved` hai lần)**. Lần ghi hợp lệ tiếp theo vào sổ sẽ tự động điền `b"\n"` trước khi nối dòng mới nên cấu trúc tệp JSONL tự hồi phục.
   - **Cách xử lý vận hành:** Nếu một lượt `--consume` hiếm hoi gặp `io_error` đúng vào byte `\n` cuối khiến yêu cầu chuyển sang `claimed` mà tác nhân chưa kịp nhận `claimId`, người vận hành chỉ cần thực hiện lại yêu cầu mới và bấm duyệt lại (`Approve`) cho yêu cầu mới đó trên `/settings`.
-- **Cách xoá sổ thử nghiệm:** Các ca kiểm thử luôn đặt `AIBOSS_DATA_DIR` trỏ vào thư mục tạm trong `/tmp/aiboss-test-approvals-*` (kèm tệp đánh dấu `.test-ledger`) và tự dọn sạch bằng `fs.rmSync(testDataDir, { recursive: true, force: true })` trong khối `finally`.
+- **Cách xoá sổ thử nghiệm:** Các ca kiểm thử luôn đặt `AIBOSS_DATA_DIR` trỏ vào thư mục tạm trong `/tmp/aiboss-test-approvals-*` (kèm tệp thường `.test-ledger`) và tự dọn sạch bằng `fs.rmSync(testDataDir, { recursive: true, force: true })` trong khối `finally`.
 
