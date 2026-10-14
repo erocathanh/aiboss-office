@@ -9,6 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs';
 
 const REPO_ROOT = process.cwd();
 const seatsPath = path.join(REPO_ROOT, 'data', 'seats.json');
@@ -40,20 +41,17 @@ const gatesList = dept.gates || [];
 const gatesStr = gatesList.map((g) => `\`${g}\``).join(', ');
 
 const officeConfigPath = path.join(REPO_ROOT, 'config', 'office.json');
-let officeLang = 'auto';
+let rawLang = 'auto';
 if (fs.existsSync(officeConfigPath)) {
   try {
     const officeCfg = JSON.parse(fs.readFileSync(officeConfigPath, 'utf-8'));
-    if (officeCfg.language) officeLang = officeCfg.language.toLowerCase().trim();
+    if (officeCfg && typeof officeCfg === 'object') {
+      rawLang = officeCfg.language;
+    }
   } catch {}
 }
 
-const langRule =
-  officeLang === 'vi' || officeLang === 'vietnamese'
-    ? 'answer in Vietnamese, keep code and identifiers in English'
-    : officeLang === 'en' || officeLang === 'english'
-    ? 'answer in English'
-    : 'answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English';
+const langRule = resolveSeatLanguageRule(rawLang);
 
 const DENY_RULES = [
   'Edit(projects/**/references/**)',
