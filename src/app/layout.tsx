@@ -16,6 +16,13 @@ export const viewport: Viewport = {
 export default function BoCucGoc({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var s=localStorage.getItem('aiboss-office.text-size')||'large';document.documentElement.setAttribute('data-text-size',s);}catch(e){}`,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

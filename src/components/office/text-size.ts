@@ -5,7 +5,7 @@
  */
 export type TextSize = 'medium' | 'large';
 
-export const DEFAULT_TEXT_SIZE: TextSize = 'medium';
+export const DEFAULT_TEXT_SIZE: TextSize = 'large';
 export const TEXT_SIZE_STORAGE_KEY = 'aiboss-office.text-size';
 
 export function isTextSize(v: unknown): v is TextSize {

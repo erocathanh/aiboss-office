@@ -692,6 +692,12 @@ body { padding-top: var(--cao-bang); }
    TEXT SIZE SCALING (Medium = 1.0, Large = 1.25)
    ═══════════════════════════════════════════════════════════════════ */
 :root {
+  --text-scale: 1.25;
+  --ti-le-chu: 1.25;
+}
+
+html[data-text-size="medium"],
+html[data-co-chu="vua"] {
   --text-scale: 1;
   --ti-le-chu: 1;
 }

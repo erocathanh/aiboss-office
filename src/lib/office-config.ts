@@ -34,6 +34,8 @@ export interface OfficeConfig {
     days: number[];
   };
   ui_language: string;
+  /** Agent response language preference ('auto' | 'vi' | 'en'). Default is 'auto'. */
+  language?: string;
   progress_marks: number[];
   response_time_working_hours: {
     incident: number;
@@ -194,4 +196,16 @@ export function getOfficeConfig(): OfficeConfig {
     /* fallback */
   }
   return OFFICE_CONFIG;
+}
+
+/**
+ * Resolves the configured agent response language preference.
+ * Returns 'vi', 'en', or 'auto' (default).
+ */
+export function getAgentLanguage(config?: OfficeConfig): 'auto' | 'vi' | 'en' {
+  const cfg = config ?? getOfficeConfig();
+  const lang = (cfg.language || '').toLowerCase().trim();
+  if (lang === 'vi' || lang === 'vietnamese') return 'vi';
+  if (lang === 'en' || lang === 'english') return 'en';
+  return 'auto';
 }

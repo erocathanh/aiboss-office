@@ -24,6 +24,7 @@ interface OfficeConfig {
     days: number[];
   };
   ui_language: string;
+  language?: string;
   progress_marks: number[];
   response_time_working_hours: {
     incident: number;
@@ -54,6 +55,7 @@ function loadOfficeConfig(): OfficeConfig {
       timezone_label: 'London',
       working_hours: { start: '09:00', end: '18:00', days: [1, 2, 3, 4, 5] },
       ui_language: 'en',
+      language: 'auto',
       progress_marks: [7, 9, 11, 13, 15, 17, 19, 21],
       response_time_working_hours: { incident: 4, routine: 24 },
       last_edited: { at: '2026-10-12T10:19:00Z', by: 'setup' },
@@ -182,6 +184,12 @@ export default function SettingsPage() {
                 <span className="settings-label">UI Language</span>
                 <span className="settings-value">
                   <code>{config.ui_language}</code> (English)
+                </span>
+              </div>
+              <div className="settings-row">
+                <span className="settings-label">Agent Response Language</span>
+                <span className="settings-value">
+                  <code>{config.language ?? 'auto'}</code> ({config.language === 'vi' ? 'Vietnamese' : config.language === 'en' ? 'English' : 'Auto / Question language'})
                 </span>
               </div>
             </div>

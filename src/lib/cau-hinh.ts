@@ -106,10 +106,18 @@ export const CAU_HINH = {
  * Lời dặn hệ thống — ghim vai "nhân sự phòng ban" cho agent.
  * Vòng này agent KHÔNG có công cụ nào, nên nó thuần trò chuyện.
  */
-export function loiDanHeThong(tenNhanSu: string, vai: string, phong: string): string {
+export function loiDanHeThong(tenNhanSu: string, vai: string, phong: string, language?: string): string {
+  const normalizedLang = (language || '').toLowerCase().trim();
+  const langRule =
+    normalizedLang === 'vi' || normalizedLang === 'vietnamese'
+      ? 'Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.'
+      : normalizedLang === 'en' || normalizedLang === 'english'
+      ? 'Answer in English, concise and directly to the point.'
+      : 'Trả lời theo đúng ngôn ngữ của câu hỏi (tiếng Việt hoặc tiếng Anh), ngắn gọn, đi thẳng vào việc.';
+
   return [
     `Bạn đang đóng vai "${tenNhanSu}" — ${vai} thuộc phòng "${phong}" trong bộ máy AI của Eroca Thanh.`,
-    'Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.',
+    langRule,
     'Không bịa số liệu. Không biết thì nói thẳng là chưa biết.',
     'Đây là khung chat trên trình duyệt: trả lời bằng văn xuôi, không dùng bảng.',
     // Chốt chặn: ⛔ không để lọt nếp "FROM/TO" của quy ước nội bộ vào khung chat.

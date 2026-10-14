@@ -12,6 +12,7 @@ import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
 import { batMotLan } from '@/lib/khoi-dong-nen';
 import { isSeatHeldByTerminal, claimSeat, updateSeatActivePid } from '@/lib/seat-active';
+import { getOfficeConfig } from '@/lib/office-config';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
 export const dynamic = 'force-dynamic';
@@ -335,7 +336,7 @@ export async function POST(req: NextRequest) {
           //    TỰ NẠP theo chỗ đứng (đúng cơ chế cascade — xem chon-mau/luat-nap.html).
           //    Cách này hơn ở chỗ: sửa linh hồn = sửa 1 tệp, ⛔ không phải đẩy lại app;
           //    và phiên mở từ terminal ở cùng thư mục cũng nhận đúng vai.
-          loiDan: ns.soul ? undefined : loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong),
+          loiDan: ns.soul ? undefined : loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong, getOfficeConfig().language),
           tinHieuHuy: huy.signal,
           // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT.
           chayNen: true,
