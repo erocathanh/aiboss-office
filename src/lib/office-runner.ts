@@ -436,6 +436,12 @@ export async function tickRunner(): Promise<number> {
         });
       } catch (err) {
         console.error(`[office-runner] Failed to initialize turn for claimed wake ${confirmedWakeId}:`, err);
+        activeSeats.delete(y.ma_nhan_su);
+        if (isFenced()) {
+          console.warn('[office-runner] Instance fenced during turn initialization. Aborting tick.');
+          stopOfficeRunner();
+          break;
+        }
         if (holdCreated) {
           try {
             releaseHold({
@@ -447,13 +453,7 @@ export async function tickRunner(): Promise<number> {
             /* ignore release failure to ensure cleanup proceeds */
           }
         }
-        activeSeats.delete(y.ma_nhan_su);
         traVeHangDoi(claimed.y.ma);
-        if (isFenced()) {
-          console.warn('[office-runner] Instance fenced during turn initialization. Aborting tick.');
-          stopOfficeRunner();
-          break;
-        }
         continue;
       }
 

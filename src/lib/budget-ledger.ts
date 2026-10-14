@@ -148,6 +148,13 @@ export function getOpenHoldsFilePath(): string {
 }
 
 export function getProcessStartTime(pid: number): string | null {
+  if (process.env.NODE_ENV !== 'production' && __testHooks.mockProcessStartTime !== undefined) {
+    if (__testHooks.mockProcessStartTime === null) return null;
+    return __testHooks.mockProcessStartTime(pid);
+  }
+  if (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_MOCK_NULL_START_TIME === '1') {
+    return null;
+  }
   try {
     const out = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
       encoding: 'utf-8',
@@ -161,7 +168,7 @@ export function getProcessStartTime(pid: number): string | null {
 
 export type ProcessLiveness = 'alive' | 'dead' | 'unverified';
 
-export function checkProcessLiveness(pid: number, expectedStartedAt?: string): ProcessLiveness {
+export function checkProcessLiveness(pid: number, expectedStartedAt?: string | null): ProcessLiveness {
   if (!pid || pid <= 0 || !Number.isInteger(pid)) {
     return 'unverified';
   }
@@ -210,6 +217,11 @@ export const UNINITIALIZED_LOCK_TIMEOUT_MS = 10000;
 
 export const __testHooks: {
   beforeReplace?: () => void;
+  beforeMutexRename?: () => void;
+  useUnlinkForMutex?: boolean;
+  mockProcessStartTime?: ((pid: number) => string | null) | null;
+  fallbackStartTimeForTest?: boolean;
+  disableCorruptMutexRecovery?: boolean;
   disableFenceGuard?: boolean;
   disableInstanceMutex?: boolean;
   disableMutexRecheck?: boolean;
@@ -236,6 +248,30 @@ export function isMutexRecheckDisabledForTest(): boolean {
   return (
     __testHooks.disableMutexRecheck === true ||
     (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_MUTEX_RECHECK === '1')
+  );
+}
+
+export function isUseUnlinkForMutexEnabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.useUnlinkForMutex === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_USE_UNLINK_FOR_MUTEX === '1')
+  );
+}
+
+export function isCorruptMutexRecoveryDisabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.disableCorruptMutexRecovery === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_CORRUPT_MUTEX_RECOVERY === '1')
+  );
+}
+
+export function isFallbackStartTimeEnabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.fallbackStartTimeForTest === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_FALLBACK_START_TIME === '1')
   );
 }
 
@@ -270,17 +306,21 @@ export function getInstanceLockMutexPath(dataDir?: string): string {
 
 export interface InstanceMutexMetadata {
   pid: number;
-  processStartedAt: string;
+  processStartedAt: string | null;
   token: string;
   createdAt: number;
 }
+
+export const UNPARSEABLE_MUTEX_TIMEOUT_MS = 10000;
 
 /**
  * Short mutex ensuring mutually exclusive state transitions for all instance lock operations:
  * acquire, reclaim, renew, and release.
  * - Writes owner metadata {pid, processStartedAt, token, createdAt} immediately on creation.
  * - Reclaims mutex ONLY when owner process is verified dead via checkProcessLiveness.
- * - Finally block unlinks ONLY if mutex on disk matches own {pid, token}.
+ * - Atomic rename to tombstone for reclaim and finally (never raw path unlinks susceptible to TOCTOU races).
+ * - Orphaned unparseable/corrupt mutex recovery with >=10s threshold.
+ * - Never fabricates process start time; null start time returns 'unverified', never 'dead'.
  */
 export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, timeoutMs = 5000): T {
   if (isInstanceMutexDisabledForTest()) {
@@ -294,7 +334,10 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
   }
 
   const myToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const myStartedAt = getProcessStartTime(process.pid) || new Date().toISOString();
+  let myStartedAt: string | null = getProcessStartTime(process.pid) ?? null;
+  if (isFallbackStartTimeEnabledForTest() && !myStartedAt) {
+    myStartedAt = new Date().toISOString();
+  }
   const start = Date.now();
   let fd: number | null = null;
 
@@ -318,29 +361,93 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
       if ((err as { code?: string }).code === 'EEXIST') {
         // Mutex file exists on disk: inspect owner
         let heldMutex: InstanceMutexMetadata | null = null;
+        let isUnparseable = false;
+        let fileAgeMs = 0;
+
         try {
           if (fs.existsSync(mutexPath)) {
+            const stat = fs.statSync(mutexPath);
+            fileAgeMs = Date.now() - stat.mtimeMs;
             const raw = fs.readFileSync(mutexPath, 'utf-8');
             if (raw.trim()) {
               heldMutex = JSON.parse(raw);
+              if (!heldMutex || typeof heldMutex.pid !== 'number') {
+                isUnparseable = true;
+              }
+            } else {
+              isUnparseable = true;
             }
           }
         } catch {
-          // Unreadable / empty: writer is between openSync and writeSync -> treat as "đang tạo", wait and retry
+          isUnparseable = true;
+        }
+
+        // Khe ④B: If mutex file is unparseable/empty (e.g. crashed between openSync and writeSync)
+        // If older than 10s (UNPARSEABLE_MUTEX_TIMEOUT_MS), safely reclaim via atomic rename to tombstone.
+        // If younger than 10s, treat as in-flight creation, wait and retry.
+        if (isUnparseable) {
+          if (fileAgeMs >= UNPARSEABLE_MUTEX_TIMEOUT_MS && !isCorruptMutexRecoveryDisabledForTest()) {
+            try {
+              if (isUseUnlinkForMutexEnabledForTest()) {
+                fs.unlinkSync(mutexPath);
+                continue;
+              } else {
+                const tombstonePath = `${mutexPath}.tombstone-${myToken}`;
+                fs.renameSync(mutexPath, tombstonePath);
+                try { fs.unlinkSync(tombstonePath); } catch {}
+                continue;
+              }
+            } catch {
+              /* ignore race */
+            }
+          }
         }
 
         if (heldMutex && typeof heldMutex.pid === 'number') {
           // Reclaim mutex ONLY when owner process is verified dead via checkProcessLiveness
           const liveness = checkProcessLiveness(heldMutex.pid, heldMutex.processStartedAt);
           if (liveness === 'dead') {
+            let confirmed = false;
             try {
               const verifyRaw = fs.readFileSync(mutexPath, 'utf-8');
               const verifyHeld = JSON.parse(verifyRaw);
               if (verifyHeld && verifyHeld.token === heldMutex.token && verifyHeld.pid === heldMutex.pid) {
-                fs.unlinkSync(mutexPath);
+                confirmed = true;
               }
             } catch {
-              /* ignore concurrent unlinks */
+              /* ignore */
+            }
+
+            if (confirmed) {
+              if (process.env.NODE_ENV !== 'production' && __testHooks.beforeMutexRename) {
+                __testHooks.beforeMutexRename();
+              }
+              try {
+                if (isUseUnlinkForMutexEnabledForTest()) {
+                  fs.unlinkSync(mutexPath);
+                  continue;
+                } else {
+                  const tombstonePath = `${mutexPath}.tombstone-${myToken}`;
+                  fs.renameSync(mutexPath, tombstonePath);
+                  let won = true;
+                  try {
+                    const tombRaw = fs.readFileSync(tombstonePath, 'utf-8');
+                    const tomb = JSON.parse(tombRaw);
+                    if (tomb && tomb.token !== heldMutex.token) {
+                      won = false;
+                      try { fs.renameSync(tombstonePath, mutexPath); } catch {}
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                  if (won) {
+                    try { fs.unlinkSync(tombstonePath); } catch {}
+                    continue;
+                  }
+                }
+              } catch {
+                /* lost atomic rename race (e.g. ENOENT from another reclaimer) */
+              }
             }
           }
           // If alive or unverified: DO NOT UNLINK! Wait and retry.
@@ -361,13 +468,33 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
   } finally {
     if (fd !== null) {
       try { fs.closeSync(fd); } catch {}
-      // finally chỉ unlink khi re-read mutex còn đúng {pid, token} của mình!
+      // finally chỉ unlink khi re-read mutex còn đúng {pid, token} của mình, và dùng atomic rename sang tombstone!
       try {
         if (fs.existsSync(mutexPath)) {
           const currentRaw = fs.readFileSync(mutexPath, 'utf-8');
           const currentHeld = JSON.parse(currentRaw) as InstanceMutexMetadata;
           if (currentHeld && currentHeld.token === myToken && currentHeld.pid === process.pid) {
-            fs.unlinkSync(mutexPath);
+            if (isUseUnlinkForMutexEnabledForTest()) {
+              fs.unlinkSync(mutexPath);
+            } else {
+              const myTombstone = `${mutexPath}.tombstone-${myToken}`;
+              fs.renameSync(mutexPath, myTombstone);
+              let validOwn = true;
+              try {
+                const tombRaw = fs.readFileSync(myTombstone, 'utf-8');
+                const tomb = JSON.parse(tombRaw) as InstanceMutexMetadata;
+                if (!tomb || tomb.token !== myToken || tomb.pid !== process.pid) {
+                  validOwn = false;
+                  try { fs.renameSync(myTombstone, mutexPath); } catch {}
+                }
+              } catch {
+                validOwn = false;
+                try { fs.renameSync(myTombstone, mutexPath); } catch {}
+              }
+              if (validOwn) {
+                try { fs.unlinkSync(myTombstone); } catch {}
+              }
+            }
           }
         }
       } catch {

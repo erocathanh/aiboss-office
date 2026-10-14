@@ -94,10 +94,14 @@ import {
   isFenced,
   resetFencingForTest,
   UNINITIALIZED_LOCK_TIMEOUT_MS,
+  UNPARSEABLE_MUTEX_TIMEOUT_MS,
   hasActiveInstanceToken,
   isFenceGuardDisabledForTest,
   isInstanceMutexDisabledForTest,
   isMutexRecheckDisabledForTest,
+  isUseUnlinkForMutexEnabledForTest,
+  isCorruptMutexRecoveryDisabledForTest,
+  isFallbackStartTimeEnabledForTest,
   withInstanceMutex,
   __testHooks,
 } from '../src/lib/budget-ledger.ts';
@@ -110,6 +114,7 @@ import {
   logRunnerEvent,
 } from '../src/lib/office-runner.ts';
 import { ghiMocKetThuc } from '../src/lib/kho-phien.ts';
+import { xepHang, traVeHangDoi } from '../src/lib/kho-danh-thuc.ts';
 import {
   isValidNanodollarsString,
   validateDailyCap,
@@ -1863,6 +1868,91 @@ try {
       __testHooks.disableFenceGuard = undefined;
     }
 
+    // Subtest 1.8: Loss of authority during admission fences instance and NEVER mutates queue snapshot (Khe ①)
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
+
+    // Acquire valid instance lock first
+    const admLock = acquireInstanceLock(testDataDir);
+    assert.equal(admLock.acquired, true);
+
+    // Seed queue with an item for marketing-lead
+    const danhThucFile = path.join(testDataDir, 'danh-thuc.json');
+    const wakeAdmId = `wake-adm-${Date.now()}`;
+    recordWake({
+      wakeId: wakeAdmId,
+      seatId: 'marketing-lead',
+      status: 'queued',
+      source: 'bell',
+      queuedAt: new Date().toISOString(),
+    });
+    const wakeReq = xepHang({
+      maO: 'slot-adm-1',
+      maNhanSu: 'marketing-lead',
+      tuAi: 'test',
+      cauHoi: 'Test admission fencing',
+      wakeId: wakeAdmId,
+    });
+    assert.ok(wakeReq.ma);
+    const queueMd5BeforeAdm = crypto.createHash('md5').update(fs.readFileSync(danhThucFile)).digest('hex');
+
+    // Simulate authority loss right before checkAdmissionAndRecordHold executes under withBudgetLock:
+    // overwrite lock file with intruder token
+    fs.writeFileSync(
+      lockFilePath,
+      JSON.stringify({
+        pid: 999991,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: `intruder-token-${Date.now()}`,
+        leaseExpiresAt: new Date(Date.now() + 10000).toISOString(),
+        ts: new Date().toISOString(),
+      }),
+      'utf-8'
+    );
+
+    // Now run tickRunner():
+    // 1. tickRunner claims the queue item
+    // 2. checkAdmissionAndRecordHold executes withBudgetLock
+    // 3. withBudgetLock detects lost instance token -> calls fenceInstance() -> throws Error
+    // 4. catch block detects isFenced() === true BEFORE traVeHangDoi -> stops runner and breaks immediately!
+    await tickRunner();
+    assert.equal(isFenced(), true, 'Instance must be fenced upon authority loss during admission');
+
+    // Verify queue file (danh-thuc.json) was NOT mutated by catch block
+    const queueMd5AfterAdm = crypto.createHash('md5').update(fs.readFileSync(danhThucFile)).digest('hex');
+    assert.equal(
+      queueMd5AfterAdm,
+      queueMd5BeforeAdm,
+      'Queue file (danh-thuc.json) must NOT be mutated when instance is fenced during admission (Khe ①)'
+    );
+
+    // Also test traVeHangDoi directly: when fenced, traVeHangDoi returns false and does not write
+    const traVeResult = traVeHangDoi(wakeReq.ma);
+    assert.equal(traVeResult, false, 'traVeHangDoi must return false when instance is fenced (defense-in-depth)');
+    const queueMd5AfterDirect = crypto.createHash('md5').update(fs.readFileSync(danhThucFile)).digest('hex');
+    assert.equal(queueMd5AfterDirect, queueMd5BeforeAdm, 'Queue file unchanged after direct traVeHangDoi attempt');
+
+    // Positive counterproof: When fence guard is disabled, traVeHangDoi mutates queue
+    __testHooks.disableFenceGuard = true;
+    try {
+      const rawQueue = JSON.parse(fs.readFileSync(danhThucFile, 'utf-8'));
+      const targetItem = rawQueue.hang_doi.find((x) => x.ma === wakeReq.ma);
+      assert.ok(targetItem, 'Target item must exist in queue');
+      targetItem.trang_thai = 'dang_giu';
+      fs.writeFileSync(danhThucFile, JSON.stringify(rawQueue, null, 2), 'utf-8');
+      const queueMd5DangGiu = crypto.createHash('md5').update(fs.readFileSync(danhThucFile)).digest('hex');
+
+      const traVeCounterproof = traVeHangDoi(wakeReq.ma);
+      assert.equal(traVeCounterproof, true, 'When fence guard disabled, traVeHangDoi mutates queue (counterproof)');
+      const queueMd5Counterproof = crypto.createHash('md5').update(fs.readFileSync(danhThucFile)).digest('hex');
+      assert.notEqual(queueMd5Counterproof, queueMd5DangGiu, 'Queue mutated when fence guard bypassed (counterproof)');
+    } finally {
+      __testHooks.disableFenceGuard = undefined;
+    }
+
+    resetFencingForTest();
+    if (fs.existsSync(lockFilePath)) fs.unlinkSync(lockFilePath);
+
     // -------------------------------------------------------------
     // Khe ②: Crash between open(O_EXCL) and write metadata does NOT block startup indefinitely
     // -------------------------------------------------------------
@@ -2306,7 +2396,216 @@ try {
     assert.equal(fs.existsSync(lockFilePath), false, 'Lock file cleaned up');
     resetFencingForTest();
 
-    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics)');
+    // -------------------------------------------------------------
+    // Khe ④A: Atomic rename to tombstone prevents TOCTOU unlink race between reclaimers
+    // -------------------------------------------------------------
+    // Subtest 4.9: Two real child processes racing to reclaim a dead mutex:
+    // With atomic rename to tombstone, exactly one winner enters critical section.
+    // Positive counterproof: With AIBOSS_TEST_USE_UNLINK_FOR_MUTEX=1, both enter concurrently!
+    async function runReclaimerRaceTest(useUnlink) {
+      const raceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-race-khe4a-'));
+      const mutexFilePath = path.join(raceDir, '.instance.lock.mutex');
+      const barrierDir = path.join(raceDir, 'barrier');
+      fs.mkdirSync(barrierDir, { recursive: true });
+
+      const r2Paused = path.join(barrierDir, 'r2.paused');
+      const r2Resume = path.join(barrierDir, 'r2.resume');
+      const r1Inside = path.join(barrierDir, 'r1.inside');
+      const concurrentFile = path.join(barrierDir, 'concurrent.log');
+
+      // 1. Write dead mutex
+      fs.writeFileSync(
+        mutexFilePath,
+        JSON.stringify({
+          pid: 999999,
+          processStartedAt: '1970-01-01T00:00:00.000Z',
+          token: 'dead-orig-token',
+          createdAt: 1000,
+        }),
+        'utf-8'
+      );
+
+      // 2. Spawn R2: pauses in beforeMutexRename
+      const r2 = spawn(process.execPath, [
+        '--import', './tests/register.mjs',
+        '-e',
+        `import { withInstanceMutex, __testHooks } from "./src/lib/budget-ledger.ts";
+         import fs from "node:fs";
+         __testHooks.beforeMutexRename = () => {
+           fs.writeFileSync(process.env.R2_PAUSED, "1");
+           while (!fs.existsSync(process.env.R2_RESUME)) {
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+           }
+         };
+         try {
+           withInstanceMutex(process.env.MUTEX_DIR, () => {
+             if (fs.existsSync(process.env.R1_INSIDE)) {
+               fs.writeFileSync(process.env.CONCURRENT_FILE, "CONCURRENT_COLLISION!");
+             }
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+           }, 500);
+           process.exit(0);
+         } catch (err) {
+           process.exit(2);
+         }`
+      ], {
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          MUTEX_DIR: raceDir,
+          R2_PAUSED: r2Paused,
+          R2_RESUME: r2Resume,
+          R1_INSIDE: r1Inside,
+          CONCURRENT_FILE: concurrentFile,
+          ...(useUnlink ? { AIBOSS_TEST_USE_UNLINK_FOR_MUTEX: '1' } : {}),
+        }
+      });
+
+      // Wait until R2 is paused in hook
+      while (!fs.existsSync(r2Paused)) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+
+      // 3. Spawn R1: does not pause, reclaims dead mutex
+      const r1 = spawn(process.execPath, [
+        '--import', './tests/register.mjs',
+        '-e',
+        `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+         import fs from "node:fs";
+         withInstanceMutex(process.env.MUTEX_DIR, () => {
+           fs.writeFileSync(process.env.R1_INSIDE, "1");
+           // Hold mutex for 500ms
+           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+           try { fs.unlinkSync(process.env.R1_INSIDE); } catch {}
+         }, 1000);
+         process.exit(0);`
+      ], {
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          MUTEX_DIR: raceDir,
+          R1_INSIDE: r1Inside,
+          ...(useUnlink ? { AIBOSS_TEST_USE_UNLINK_FOR_MUTEX: '1' } : {}),
+        }
+      });
+
+      // Wait until R1 is inside critical section
+      while (!fs.existsSync(r1Inside)) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+
+      // 4. Resume R2 while R1 is inside critical section!
+      fs.writeFileSync(r2Resume, '1');
+
+      const [codeR1, codeR2] = await Promise.all([
+        new Promise((resolve) => r1.on('close', resolve)),
+        new Promise((resolve) => r2.on('close', resolve)),
+      ]);
+
+      const collided = fs.existsSync(concurrentFile);
+      fs.rmSync(raceDir, { recursive: true, force: true });
+      return { codeR1, codeR2, collided };
+    }
+
+    // Normal mode: atomic rename to tombstone prevents TOCTOU unlink race
+    const raceNormal = await runReclaimerRaceTest(false);
+    assert.equal(raceNormal.codeR1, 0, 'R1 must exit 0');
+    assert.equal(raceNormal.collided, false, 'Atomic rename to tombstone must prevent concurrent entry (Khe ④A)');
+
+    // Counterproof: raw path unlink causes collision
+    const raceCounterproof = await runReclaimerRaceTest(true);
+    assert.equal(raceCounterproof.codeR1, 0, 'R1 must exit 0 in counterproof');
+    assert.equal(raceCounterproof.collided, true, 'Raw path unlink allows concurrent entry (Khe ④A counterproof)');
+
+    // -------------------------------------------------------------
+    // Khe ④B: Corrupt / unparseable mutex recovery
+    // -------------------------------------------------------------
+    // Subtest 4.10: Empty/corrupt mutex recovery with age threshold
+    const corruptTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-corrupt-mutex-'));
+    const corruptMutexFile = path.join(corruptTestDir, '.instance.lock.mutex');
+
+    // 1. Fresh empty mutex (mtime = now): writer may be in flight, must wait and time out!
+    fs.writeFileSync(corruptMutexFile, '');
+    assert.throws(
+      () => withInstanceMutex(corruptTestDir, () => 'should_fail', 200),
+      /Timeout waiting for instance lock mutex/,
+      'Fresh empty mutex (<10s) must fail closed / time out to protect in-flight write (Khe ④B)'
+    );
+
+    // 2. Orphaned empty mutex (mtime = -60s): must be safely reclaimed via atomic tombstone rename!
+    const sixtySecAgo = (Date.now() - 60000) / 1000;
+    fs.utimesSync(corruptMutexFile, sixtySecAgo, sixtySecAgo);
+    const reclaimedResult = withInstanceMutex(corruptTestDir, () => 'corrupt_reclaimed_ok', 1000);
+    assert.equal(reclaimedResult, 'corrupt_reclaimed_ok', 'Orphaned empty mutex (>=10s) must be safely reclaimed (Khe ④B)');
+
+    // 3. Counterproof: disable corrupt mutex recovery
+    fs.writeFileSync(corruptMutexFile, '');
+    fs.utimesSync(corruptMutexFile, sixtySecAgo, sixtySecAgo);
+    __testHooks.disableCorruptMutexRecovery = true;
+    try {
+      assert.throws(
+        () => withInstanceMutex(corruptTestDir, () => 'should_fail', 200),
+        /Timeout waiting for instance lock mutex/,
+        'When corrupt mutex recovery is disabled, orphaned empty mutex times out (Khe ④B counterproof)'
+      );
+    } finally {
+      __testHooks.disableCorruptMutexRecovery = undefined;
+    }
+    fs.rmSync(corruptTestDir, { recursive: true, force: true });
+
+    // -------------------------------------------------------------
+    // Khe ④C: No start time fabrication
+    // -------------------------------------------------------------
+    // Subtest 4.11: Null processStartedAt returns unverified and is never stolen; fallback causes false dead
+    const startTimeTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-starttime-test-'));
+    const startTimeMutexFile = path.join(startTimeTestDir, '.instance.lock.mutex');
+
+    // 1. Living owner with null processStartedAt
+    const livingOwnerPid = process.pid;
+    fs.writeFileSync(
+      startTimeMutexFile,
+      JSON.stringify({
+        pid: livingOwnerPid,
+        processStartedAt: null,
+        token: 'living-owner-null-start',
+        createdAt: Date.now(),
+      }),
+      'utf-8'
+    );
+
+    // Direct checkProcessLiveness check
+    const nullLiveness = checkProcessLiveness(livingOwnerPid, null);
+    assert.equal(nullLiveness, 'unverified', 'checkProcessLiveness must return unverified for null start time (Khe ④C)');
+
+    // Contender must refuse to steal mutex of living owner with null start time
+    assert.throws(
+      () => withInstanceMutex(startTimeTestDir, () => 'should_not_steal', 200),
+      /Timeout waiting for instance lock mutex/,
+      'Contender must refuse to steal mutex from living owner with null start time (Khe ④C)'
+    );
+
+    // 2. Counterproof: If fallback fabricated start time with new Date(), contender sees mismatch -> dead -> steals!
+    const fakeStartTime = new Date(Date.now() - 99999999).toISOString();
+    fs.writeFileSync(
+      startTimeMutexFile,
+      JSON.stringify({
+        pid: livingOwnerPid,
+        processStartedAt: fakeStartTime,
+        token: 'living-owner-fake-start',
+        createdAt: Date.now(),
+      }),
+      'utf-8'
+    );
+
+    const fakeLiveness = checkProcessLiveness(livingOwnerPid, fakeStartTime);
+    assert.equal(fakeLiveness, 'dead', 'Fabricated start time causes living process to be declared dead (Khe ④C counterproof)');
+
+    const stolenResult = withInstanceMutex(startTimeTestDir, () => 'stolen_via_fallback', 1000);
+    assert.equal(stolenResult, 'stolen_via_fallback', 'Contender steals living process mutex when start time was fabricated (counterproof)');
+
+    fs.rmSync(startTimeTestDir, { recursive: true, force: true });
+
+    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics, tombstone mutex rename, unparseable mutex recovery, no start time fabrication)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)
