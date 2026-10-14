@@ -4,7 +4,6 @@ import { getIsRunnerStarting } from '@/lib/office-runner';
 import {
   ApprovalIoError,
   ApprovalLedgerUnreadableError,
-  ApprovalLockLostError,
   ApprovalLockTimeoutError,
   recordApprovalDecision,
   sanitizeApprovalItem,
@@ -122,8 +121,8 @@ interface DecisionRequestBody {
  * - Unknown requestId -> 404
  * - Already decided requestId -> 409
  * - Invalid decision or invalid/overlong note (> 200 Unicode code points, or note: null) -> 400 (0 ledger writes)
- * - Lock timeout / lock lost / ledger unreadable / I/O error -> 503 with generic message (no raw error leak)
- * - Server always computes expiresAt from configured TTL (F8: client expiresAt is ignored)
+ * - Lock timeout / ledger unreadable / I/O error -> 503 with generic message (no raw error leak)
+ * - Server always computes expiresAt from configured TTL via `approval_ledger.py decide` (F8: client expiresAt is ignored)
  */
 export async function POST(
   req: NextRequest,
@@ -185,7 +184,7 @@ export async function POST(
   }
 
   // F6: Validate `note` type (including rejecting `note: null`) and Unicode code point length (<= 200)
-  // BEFORE calling ledger (0 bytes written on failure).
+  // BEFORE calling CLI (0 bytes written on failure).
   let note: string | undefined;
   if ('note' in body && body.note !== undefined) {
     if (typeof body.note !== 'string') {
@@ -241,16 +240,6 @@ export async function POST(
           error: 'lock_timeout',
           status: 'lock_timeout',
           message: 'Timed out waiting for approval ledger lock.',
-        },
-        { status: 503 }
-      );
-    }
-    if (err instanceof ApprovalLockLostError || code === 'lock_lost') {
-      return NextResponse.json(
-        {
-          error: 'lock_lost',
-          status: 'lock_lost',
-          message: 'Approval ledger lock ownership was lost.',
         },
         { status: 503 }
       );

@@ -3,7 +3,6 @@ import { getIsRunnerStarting } from '@/lib/office-runner';
 import {
   ApprovalIoError,
   ApprovalLedgerUnreadableError,
-  ApprovalLockLostError,
   ApprovalLockTimeoutError,
   getApprovals,
   sanitizeApprovalItem,
@@ -25,7 +24,8 @@ const VALID_STATUS_FILTERS = new Set([
 
 /**
  * GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50
- * Returns approval items with their derived state from the append-only approvals ledger.
+ * Returns approval items with their derived state from the append-only approvals ledger
+ * via `operations/scripts/approval_ledger.py dump --json` (A-4 v06).
  */
 export async function GET(req: NextRequest) {
   if (getIsRunnerStarting()) {
@@ -98,16 +98,6 @@ export async function GET(req: NextRequest) {
           error: 'lock_timeout',
           status: 'lock_timeout',
           message: 'Timed out waiting for approval ledger lock.',
-        },
-        { status: 503 }
-      );
-    }
-    if (err instanceof ApprovalLockLostError || code === 'lock_lost') {
-      return NextResponse.json(
-        {
-          error: 'lock_lost',
-          status: 'lock_lost',
-          message: 'Approval ledger lock ownership was lost.',
         },
         { status: 503 }
       );
