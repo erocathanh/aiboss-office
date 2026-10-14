@@ -4,6 +4,7 @@ import { timNhanSu } from '@/lib/nhan-su';
 import { CAU_HINH } from '@/lib/cau-hinh';
 import { xinLuot, xepHang, xemSo, timTheoKhoa, HAN_YEU_CAU_MS } from '@/lib/kho-danh-thuc';
 import { batMotLan } from '@/lib/khoi-dong-nen';
+import { getIsRunnerStarting } from '@/lib/office-runner';
 import {
   generateRunOrWakeId,
   computeIdempotencyKey,
@@ -22,6 +23,12 @@ export const dynamic = 'force-dynamic';
  * Triggers background runner activation via batMotLan on server startup / health check.
  */
 export async function GET() {
+  if (getIsRunnerStarting()) {
+    return Response.json(
+      { error: 'runner_starting', message: 'Office runner is starting up and waiting for startup lock.' },
+      { status: 503 }
+    );
+  }
   batMotLan();
   return Response.json({ ...xemSo(), han_yeu_cau_ms: HAN_YEU_CAU_MS });
 }
@@ -49,6 +56,13 @@ interface Than {
 }
 
 export async function POST(req: NextRequest) {
+  if (getIsRunnerStarting()) {
+    return Response.json(
+      { error: 'runner_starting', message: 'Office runner is starting up and waiting for startup lock.' },
+      { status: 503 }
+    );
+  }
+
   // 🔌 Đánh thức tiến trình nền nếu máy chủ mới mở lần đầu
   batMotLan();
 

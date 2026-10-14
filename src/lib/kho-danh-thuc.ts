@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { baoMauChet } from './bao-mau-chet';
 import { updateWake } from './runs-ledger';
+import { isFenced, isFenceGuardDisabledForTest } from './budget-ledger';
 
 /**
  * SỔ "YÊU CẦU ĐÁNH THỨC" — ghi XUỐNG ĐĨA, cùng chỗ với sổ ô↔phiên.
@@ -285,7 +286,9 @@ function boMau(y: YeuCauDanhThuc, lyDo: string, bayGio: number): void {
         lyDo.includes('bo-qua') ||
         lyDo.includes('busy') ||
         lyDo.includes('held') ||
-        lyDo.includes('terminal')
+        lyDo.includes('terminal') ||
+        lyDo.includes('budget') ||
+        lyDo.includes('config_error')
           ? 'skipped'
           : 'expired';
       updateWake(y.wakeId, {
@@ -321,6 +324,9 @@ export function boYeuCau(ma: string, lyDo: string): boolean {
  * Condition: ONLY reverts if state is 'dang_giu' or 'da_giao'. Refuses to mutate if already 'bo' or 'cho'.
  */
 export function traVeHangDoi(ma: string): boolean {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    return false;
+  }
   const s = doc();
   const y = s.hang_doi.find((x) => x.ma === ma);
   if (!y) return false;

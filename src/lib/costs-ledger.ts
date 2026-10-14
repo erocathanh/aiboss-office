@@ -16,8 +16,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { formatUsdExact, unitsToCents } from './money';
+import { formatNanodollars } from './money-format';
 import type { ModelReceipt } from './usage-receipt';
+import { isFenced, isFenceGuardDisabledForTest } from './budget-ledger';
 
 export interface CostRecord {
   ts: string; // ISO
@@ -161,8 +162,24 @@ export function hasCostReceiptsForRun(runId: string): boolean {
  * Check if priced cost receipt exists for runId.
  */
 export function hasPricedCostReceiptsForRun(runId: string): boolean {
-  const records = readAllCostRecords();
-  return records.some((r) => r.runId === runId && r.priced);
+  const receipts = getCostReceiptsForRun(runId);
+  return receipts.some((r) => r.priced);
+}
+
+/**
+ * Return deduplicated cost receipts for the specified runId, folded by (runId, model)
+ * keeping the newest receipt per model matching the API costs deduplication semantics.
+ */
+export function getCostReceiptsForRun(runId: string): CostRecord[] {
+  const records = readAllCostRecords().filter((r) => r.runId === runId);
+  records.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  const uniqueByModel = new Map<string, CostRecord>();
+  for (const r of records) {
+    if (!uniqueByModel.has(r.model)) {
+      uniqueByModel.set(r.model, r);
+    }
+  }
+  return Array.from(uniqueByModel.values());
 }
 
 /**
@@ -184,6 +201,9 @@ export function getRecordedModelsForRun(runId: string): Set<string> {
  * Throws if disk write fails.
  */
 export function recordCostReceipt(record: CostRecord): CostRecord {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    throw new Error('[costs-ledger] Instance is fenced. Writes are barred.');
+  }
   if (
     process.env.AIBOSS_TEST_FAIL_COST_APPEND === '1' ||
     (process.env.AIBOSS_TEST_FAIL_COST_MODEL &&
@@ -236,18 +256,7 @@ export function recordCostReceipts(
   return recorded;
 }
 
-/**
- * Format exact nanodollars to USD string (e.g. 733263400n -> "$0.73").
- * Accepts BigInt, string, or number.
- */
-export function formatNanodollars(units: bigint | string | number): string {
-  try {
-    const b = typeof units === 'bigint' ? units : BigInt(String(units || '0'));
-    return formatUsdExact(unitsToCents(b));
-  } catch {
-    return '$0.00';
-  }
-}
+export { formatNanodollars } from './money-format';
 
 function makeTotals(): CostTotals {
   return {

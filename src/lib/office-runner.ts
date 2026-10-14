@@ -29,6 +29,24 @@ import {
   type NormalizedUsage,
 } from '@/lib/usage-receipt';
 import { recordCostReceipts, recordCostReceipt } from '@/lib/costs-ledger';
+import {
+  checkAdmissionAndRecordHold,
+  settleHold,
+  releaseHold,
+  reconcileOpenHolds,
+  initBudgetLedger,
+  getProcessStartTime,
+  acquireInstanceLock,
+  releaseInstanceLock,
+  verifyInstanceLockActive,
+  renewInstanceLock,
+  hasActiveInstanceToken,
+  fenceInstance,
+  isFenced,
+  isFenceGuardDisabledForTest,
+  INSTANCE_LOCK_STARTUP_WAIT_MS,
+  isStartupWaitDisabledForTest,
+} from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
 const BASE_DATA_DIR = process.env.AIBOSS_DATA_DIR || path.join(REPO_ROOT, 'operations', 'data');
@@ -57,6 +75,7 @@ export interface RunnerLogEvent {
 }
 
 let runnerTimer: ReturnType<typeof setInterval> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
 let isTickInProgress = false;
 const activeSeats = new Set<string>();
@@ -66,6 +85,7 @@ interface InFlightTurn {
   bell_id: string;
   wakeId: string;
   runId: string;
+  holdId: string;
   startIso: string;
   startTime: number;
 }
@@ -76,6 +96,11 @@ const inFlightTurns = new Map<string, InFlightTurn>();
  * Ensures every logged start event has a matching end event even during abrupt stops.
  */
 export function flushInFlightTurns(reason: string): void {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    console.warn('[office-runner] Instance fenced: skipping all flush mutations');
+    inFlightTurns.clear();
+    return;
+  }
   for (const [seat, turn] of inFlightTurns.entries()) {
     const endIso = new Date().toISOString();
     logRunnerEvent({
@@ -101,8 +126,35 @@ export function flushInFlightTurns(reason: string): void {
         /* ignore ledger write error during shutdown */
       }
     }
+    if (turn.holdId && !isFenced()) {
+      try {
+        releaseHold({
+          holdId: turn.holdId,
+          reason: 'orphaned',
+          ts: endIso,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
     inFlightTurns.delete(seat);
   }
+}
+
+export function registerInFlightTurnForTest(turn: {
+  seat: string;
+  bell_id: string;
+  wakeId: string;
+  runId: string;
+  holdId: string;
+  startIso: string;
+  startTime: number;
+}): void {
+  inFlightTurns.set(turn.seat, turn);
+}
+
+export function getInFlightTurnCountForTest(): number {
+  return inFlightTurns.size;
 }
 
 if (typeof process !== 'undefined') {
@@ -159,6 +211,9 @@ export function isRunnerEnabled(): boolean {
  * Append event to operations/data/runner.log.jsonl.
  */
 export function logRunnerEvent(event: RunnerLogEvent): void {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    return;
+  }
   try {
     const dir = path.dirname(LOG_FILE);
     if (!fs.existsSync(dir)) {
@@ -185,6 +240,28 @@ export async function tickRunner(): Promise<number> {
       return 0;
     }
 
+    // Hermes Condition (b) & Khe ①: Sticky fencing check
+    if (isFenced()) {
+      stopOfficeRunner();
+      return 0;
+    }
+
+    // Hermes Condition (b): Verify lock ownership if runner holds active instance token
+    if (hasActiveInstanceToken()) {
+      if (!verifyInstanceLockActive()) {
+        console.warn('[office-runner] Lost instance lock ownership. Stopping runner immediately.');
+        fenceInstance();
+        stopOfficeRunner();
+        return 0;
+      }
+      if (!renewInstanceLock()) {
+        console.warn('[office-runner] Failed to renew instance lease. Stopping runner immediately.');
+        fenceInstance();
+        stopOfficeRunner();
+        return 0;
+      }
+    }
+
     // Periodically reconcile any pending costs from previous runs
     try {
       reconcilePendingCosts();
@@ -207,6 +284,10 @@ export async function tickRunner(): Promise<number> {
     let executedInCycle = 0;
 
     for (const y of cho) {
+      if (isFenced()) {
+        stopOfficeRunner();
+        break;
+      }
       if (activeSeats.size >= config.max_parallel) {
         break;
       }
@@ -299,12 +380,48 @@ export async function tickRunner(): Promise<number> {
 
       const startIso = new Date().toISOString();
       const startTime = Date.now();
-      const wakeId = claimed.y.wakeId ?? claimed.y.ma;
+      const confirmedWakeId = claimed.y.wakeId ?? claimed.y.ma;
       const runId = generateRunOrWakeId('run');
+      const holdId = generateRunOrWakeId('hold');
 
-      // F1: Wrap ledger writes in try/catch to recover queue item and free activeSeats on throw
+      let holdCreated = false;
+
+      // F1 / Findings A & B: Atomic checkAdmissionAndRecordHold inside recovery block
+      // Any throw frees activeSeats and returns queue item
       try {
-        updateWake(wakeId, {
+        const { admission } = checkAdmissionAndRecordHold({
+          seatId: y.ma_nhan_su,
+          wakeId: confirmedWakeId,
+          holdId,
+          nowIso: startIso,
+        });
+
+        if (!admission.allowed) {
+          logRunnerEvent({
+            timestamp: startIso,
+            seat: y.ma_nhan_su,
+            bell_id: y.ma,
+            event: 'skipped',
+            skipped_reason: admission.reason || 'budget_exceeded',
+          });
+          if (claimed.y.wakeId) {
+            try {
+              updateWake(claimed.y.wakeId, {
+                status: 'skipped',
+                reason: admission.reason || 'budget_exceeded',
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+          activeSeats.delete(y.ma_nhan_su);
+          boYeuCau(claimed.y.ma, admission.reason || 'budget_exceeded');
+          continue;
+        }
+
+        holdCreated = true;
+
+        updateWake(confirmedWakeId, {
           status: 'claimed',
           claimedAt: startIso,
           runId,
@@ -312,15 +429,32 @@ export async function tickRunner(): Promise<number> {
 
         recordRun({
           runId,
-          wakeId,
+          wakeId: confirmedWakeId,
+          holdId,
           seatId: y.ma_nhan_su,
           startedAt: startIso,
           status: 'running',
           attempt: 1,
         });
       } catch (err) {
-        console.error(`[office-runner] Failed to write ledger for claimed wake ${wakeId}:`, err);
+        console.error(`[office-runner] Failed to initialize turn for claimed wake ${confirmedWakeId}:`, err);
         activeSeats.delete(y.ma_nhan_su);
+        if (isFenced()) {
+          console.warn('[office-runner] Instance fenced during turn initialization. Aborting tick.');
+          stopOfficeRunner();
+          break;
+        }
+        if (holdCreated) {
+          try {
+            releaseHold({
+              holdId,
+              reason: 'failed_no_receipt',
+              ts: new Date().toISOString(),
+            });
+          } catch {
+            /* ignore release failure to ensure cleanup proceeds */
+          }
+        }
         traVeHangDoi(claimed.y.ma);
         continue;
       }
@@ -328,8 +462,9 @@ export async function tickRunner(): Promise<number> {
       inFlightTurns.set(y.ma_nhan_su, {
         seat: y.ma_nhan_su,
         bell_id: y.ma,
-        wakeId,
+        wakeId: confirmedWakeId,
         runId,
+        holdId,
         startIso,
         startTime,
       });
@@ -357,7 +492,15 @@ export async function tickRunner(): Promise<number> {
               cauHoi: y.cau_hoi,
               maPhienCu: phienDung,
               khiSinh: (pid) => {
-                updateRun(runId, { pid });
+                if (isFenced() && !isFenceGuardDisabledForTest()) {
+                  return;
+                }
+                const processStartedAt = getProcessStartTime(pid) || undefined;
+                updateRun(runId, {
+                  pid,
+                  processStartedAt,
+                  instanceId: `${pid}-${processStartedAt || Date.now()}`,
+                });
               },
             },
             () => {
@@ -368,6 +511,12 @@ export async function tickRunner(): Promise<number> {
           const endIso = new Date().toISOString();
           const durationMs = Date.now() - startTime;
           const exitCode = result.exitCode ?? (result.loi ? 1 : 0);
+
+          // Khe ①: Bar ALL writer callbacks if instance is fenced
+          if (isFenced() && !isFenceGuardDisabledForTest()) {
+            console.warn('[office-runner] Instance fenced: barring all late completion writes for runId', runId);
+            return;
+          }
 
           // 1. Process cost receipts FIRST (Finding B: record costs before finished, durable costStatus)
           let costStatus: 'recorded' | 'pending' | 'unpriced' = 'pending';
@@ -425,6 +574,32 @@ export async function tickRunner(): Promise<number> {
             }
           }
 
+          // Settle budget hold (A-3)
+          if (costStatus === 'recorded') {
+            const isFullyPriced =
+              extractedReceipts.length > 0 &&
+              extractedReceipts.every((r) => r.priced && r.costNanodollars !== null);
+            const totalActualBig = extractedReceipts.reduce(
+              (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+              0n
+            );
+            settleHold({
+              holdId,
+              runId,
+              actualNanodollars: isFullyPriced ? totalActualBig.toString() : null,
+              priced: isFullyPriced,
+              ts: endIso,
+            });
+          } else if (costStatus === 'unpriced') {
+            settleHold({
+              holdId,
+              runId,
+              actualNanodollars: null,
+              priced: false,
+              ts: endIso,
+            });
+          }
+
           // 2. Map failure to finite RunErrorKind codes (Item 10: sigkill, timeout, exit_nonzero, result_error, spawn_failed, orphaned)
           let finalStatus: 'finished' | 'failed' | 'timeout' | 'killed' = 'finished';
           let errorKind: RunErrorKind | undefined = undefined;
@@ -444,6 +619,11 @@ export async function tickRunner(): Promise<number> {
           } else if (result.loi) {
             finalStatus = 'failed';
             errorKind = 'result_error';
+          }
+
+          if (isFenced() && !isFenceGuardDisabledForTest()) {
+            console.warn('[office-runner] Instance fenced: barring all late completion writes for runId', runId);
+            return;
           }
 
           logRunnerEvent({
@@ -473,6 +653,7 @@ export async function tickRunner(): Promise<number> {
           if (result.maPhien) {
             const maP = result.maPhien;
             const ghiLai = () => {
+              if (isFenced() && !isFenceGuardDisabledForTest()) return;
               const oNay = layO(y.ma_o);
               if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP) return;
               const m = mocTepPhien(y.ma_nhan_su, maP);
@@ -484,6 +665,10 @@ export async function tickRunner(): Promise<number> {
             }
           }
         } catch {
+          if (isFenced() && !isFenceGuardDisabledForTest()) {
+            console.warn('[office-runner] Instance fenced: barring error path writes for runId', runId);
+            return;
+          }
           const endIso = new Date().toISOString();
           let fallbackCostStatus: 'unpriced' | 'pending' = 'unpriced';
           try {
@@ -521,6 +706,23 @@ export async function tickRunner(): Promise<number> {
             errorKind: 'result_error',
             costStatus: fallbackCostStatus,
           });
+          if (isFenced()) {
+            console.warn('[office-runner] Instance fenced: barring late budget mutations for runId', runId);
+          } else if (fallbackCostStatus === 'unpriced') {
+            settleHold({
+              holdId,
+              runId,
+              actualNanodollars: null,
+              priced: false,
+              ts: endIso,
+            });
+          } else {
+            releaseHold({
+              holdId,
+              reason: 'failed_no_receipt',
+              ts: endIso,
+            });
+          }
         } finally {
           inFlightTurns.delete(y.ma_nhan_su);
           activeSeats.delete(y.ma_nhan_su);
@@ -534,40 +736,130 @@ export async function tickRunner(): Promise<number> {
   }
 }
 
+let isRunnerStarting = false;
+
+export function getIsRunnerStarting(): boolean {
+  return isRunnerStarting;
+}
+
+export function setIsRunnerStartingForTest(val: boolean): void {
+  if (process.env.NODE_ENV === 'test') {
+    isRunnerStarting = val;
+  }
+}
+
+export { INSTANCE_LOCK_STARTUP_WAIT_MS };
+
 /**
  * Start the server runner interval loop.
+ *
+ * Protocol v14:
+ * When previous owner process crashed/dead but lease is still active (reason: 'lease_pending'),
+ * or transient contention ('contended', 'unverified'), waits and retries every 500ms
+ * up to INSTANCE_LOCK_STARTUP_WAIT_MS (16 seconds = 6s lease + 10s grace).
+ * If owner process is verified 'alive', throws immediately without waiting.
  */
-export function startOfficeRunner(): boolean {
+export async function startOfficeRunner(
+  dataDir?: string,
+  waitTimeoutMs: number = INSTANCE_LOCK_STARTUP_WAIT_MS,
+  pollIntervalMs: number = 500
+): Promise<boolean> {
   if (isRunning) {
     return false;
   }
 
-  // Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
+  isRunnerStarting = true;
+  const start = Date.now();
+
   try {
-    recoverOrphanedRuns();
-  } catch {
-    /* ignore ledger recovery error */
-  }
+    let lock = acquireInstanceLock(dataDir);
 
-  isRunning = true;
-  const config = readRunnerConfig();
-  const intervalMs = config.interval_s * 1000;
+    while (!lock.acquired) {
+      if (isStartupWaitDisabledForTest()) {
+        // Positive counterproof: startup wait disabled, fail immediately
+        break;
+      }
 
-  // Run initial tick immediately
-  void tickRunner().catch(() => {});
+      if (lock.reason === 'alive' || lock.reason === 'config_error') {
+        // Living process or unresolvable start time: fail immediately!
+        break;
+      }
 
-  runnerTimer = setInterval(() => {
+      // lock.reason === 'lease_pending' | 'contended' | 'unverified':
+      // The lock owner is dead (or transient race), but lease has not expired yet.
+      // Wait and retry up to waitTimeoutMs (default 16 seconds).
+      if (Date.now() - start >= waitTimeoutMs) {
+        break;
+      }
+
+      const remainingMs = waitTimeoutMs - (Date.now() - start);
+      const sleepMs = Math.min(pollIntervalMs, Math.max(10, remainingMs));
+      await new Promise((resolve) => setTimeout(resolve, sleepMs));
+
+      lock = acquireInstanceLock(dataDir);
+    }
+
+    if (!lock.acquired) {
+      throw new Error(
+        `Another office runner instance (PID ${lock.pid ?? 'unknown'}) is already running on AIBOSS_DATA_DIR. Running multiple server instances against the same data directory is not supported.`
+      );
+    }
+
+    // 2. Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
+    try {
+      recoverOrphanedRuns();
+    } catch (err) {
+      console.error('[office-runner] Failed to recover orphaned runs on startup:', err);
+    }
+
+    // 3. Mandatory Precondition (Hermes Item 6): initialize budget ledger checkpoint
+    try {
+      initBudgetLedger();
+      reconcileOpenHolds();
+    } catch (err) {
+      releaseInstanceLock(dataDir);
+      console.error('[office-runner] Critical: failed to initialize budget ledger on startup:', err);
+      throw err; // Do not start runner without budget ledger!
+    }
+
+    isRunning = true;
+    const config = readRunnerConfig();
+    const intervalMs = config.interval_s * 1000;
+
+    // Hermes Condition (b) & Khe ④: Independent 2s lease heartbeat timer for verification & renewal
+    heartbeatTimer = setInterval(() => {
+      if (hasActiveInstanceToken()) {
+        if (!verifyInstanceLockActive(dataDir) || !renewInstanceLock(dataDir)) {
+          console.warn('[office-runner] Heartbeat failed to verify or renew instance lock. Fencing and stopping runner.');
+          fenceInstance();
+          stopOfficeRunner();
+        }
+      }
+    }, 2000);
+    heartbeatTimer.unref?.();
+
+    // Run initial tick immediately
     void tickRunner().catch(() => {});
-  }, intervalMs);
-  runnerTimer.unref?.();
 
-  return true;
+    runnerTimer = setInterval(() => {
+      void tickRunner().catch(() => {});
+    }, intervalMs);
+    runnerTimer.unref?.();
+
+    return true;
+  } finally {
+    isRunnerStarting = false;
+  }
 }
 
 /**
  * Stop the server runner interval loop.
  */
 export function stopOfficeRunner(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
   if (runnerTimer) {
     clearInterval(runnerTimer);
     runnerTimer = null;
@@ -575,6 +867,7 @@ export function stopOfficeRunner(): void {
   flushInFlightTurns('runner stopped');
   isRunning = false;
   activeSeats.clear();
+  releaseInstanceLock();
 }
 
 /**

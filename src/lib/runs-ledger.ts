@@ -20,9 +20,18 @@ import {
 } from '@/lib/usage-receipt';
 import {
   hasPricedCostReceiptsForRun,
+  getCostReceiptsForRun,
   getRecordedModelsForRun,
   recordCostReceipt,
 } from '@/lib/costs-ledger';
+import {
+  settleHold,
+  releaseHold,
+  findHoldIdForRun,
+  reconcileOpenHolds,
+  isFenced,
+  isFenceGuardDisabledForTest,
+} from '@/lib/budget-ledger';
 
 export type RunErrorKind =
   | 'sigkill'
@@ -51,6 +60,7 @@ export interface RunRecord {
   type: 'run';
   runId: string;
   wakeId?: string;
+  holdId?: string;
   seatId: string;
   sessionId?: string;
   startedAt: string; // ISO
@@ -61,6 +71,8 @@ export interface RunRecord {
   errorKind?: RunErrorKind;
   attempt?: number;
   pid?: number;
+  processStartedAt?: string;
+  instanceId?: string;
   costStatus?: 'recorded' | 'pending' | 'unpriced';
   rawUsage?: NormalizedUsage[] | null;
   updatedAt?: string;
@@ -83,7 +95,7 @@ function ensureRunsDir(): void {
 /**
  * Generate an ID in the format prefix-YYYYMMDD-HHMMSS-<6 hex>.
  */
-export function generateRunOrWakeId(prefix: 'wake' | 'run'): string {
+export function generateRunOrWakeId(prefix: 'wake' | 'run' | 'hold'): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
@@ -153,6 +165,7 @@ export function sanitizeRun(run: MergedRunInfo): MergedRunInfo {
     startedAt: run.startedAt,
     status: run.status,
     ...(run.wakeId ? { wakeId: run.wakeId } : {}),
+    ...(run.holdId ? { holdId: run.holdId } : {}),
     ...(run.sessionId ? { sessionId: run.sessionId } : {}),
     ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
     ...(run.exitCode !== undefined ? { exitCode: run.exitCode } : {}),
@@ -160,6 +173,8 @@ export function sanitizeRun(run: MergedRunInfo): MergedRunInfo {
     ...(run.errorKind ? { errorKind: run.errorKind } : {}),
     ...(run.attempt !== undefined ? { attempt: run.attempt } : {}),
     ...(run.pid !== undefined ? { pid: run.pid } : {}),
+    ...(run.processStartedAt ? { processStartedAt: run.processStartedAt } : {}),
+    ...(run.instanceId ? { instanceId: run.instanceId } : {}),
     ...(run.costStatus ? { costStatus: run.costStatus } : {}),
     ...(run.updatedAt ? { updatedAt: run.updatedAt } : {}),
     ...(run.wake ? { wake: sanitizeWake(run.wake) } : {}),
@@ -227,6 +242,9 @@ function getLogPathForDate(isoDateString?: string): string {
  * Sanitizes rawUsage before write to guarantee no raw strings enter JSONL files.
  */
 function appendRecord(record: LedgerRecord): void {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
+  }
   if (process.env.AIBOSS_TEST_FAIL_APPEND === '1') {
     throw new Error('Injected ledger append failure for testing');
   }
@@ -252,6 +270,9 @@ function getRecordTimestamp(r: LedgerRecord): number {
  * Record a new wake request in the runs ledger.
  */
 export function recordWake(wake: Omit<WakeRecord, 'type'>): WakeRecord {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
+  }
   const full: WakeRecord = {
     type: 'wake',
     updatedAt: wake.requestedAt,
@@ -265,6 +286,9 @@ export function recordWake(wake: Omit<WakeRecord, 'type'>): WakeRecord {
  * Append an updated state for a wake request.
  */
 export function updateWake(wakeId: string, patch: Partial<WakeRecord>): WakeRecord | null {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
+  }
   const current = getWake(wakeId);
   if (!current) return null;
   const updated: WakeRecord = {
@@ -282,6 +306,9 @@ export function updateWake(wakeId: string, patch: Partial<WakeRecord>): WakeReco
  * Record a new run in the runs ledger.
  */
 export function recordRun(run: Omit<RunRecord, 'type'>): RunRecord {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
+  }
   const full: RunRecord = {
     type: 'run',
     attempt: 1,
@@ -298,6 +325,9 @@ export function recordRun(run: Omit<RunRecord, 'type'>): RunRecord {
  * Append an updated state for an active run.
  */
 export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord | null {
+  if (isFenced() && !isFenceGuardDisabledForTest()) {
+    throw new Error('[runs-ledger] Instance is fenced. Writes are barred.');
+  }
   const current = getRun(runId);
   if (!current) return null;
   const updated: RunRecord = {
@@ -689,15 +719,50 @@ export function reconcilePendingCosts(): number {
         // CRITICAL (Hermes Finding B & Item 2):
         // Only mark recorded if ALL expected models have been successfully recorded!
         if (allModelsRecorded && expectedReceipts.every((r) => recordedModels.has(r.model))) {
+          const isFullyPriced = expectedReceipts.length > 0 && expectedReceipts.every((r) => r.priced && r.costNanodollars !== null);
+          const totalActualBig = expectedReceipts.reduce(
+            (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+            0n
+          );
+
+          const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+          if (holdId) {
+            settleHold({
+              holdId,
+              runId: run.runId,
+              actualNanodollars: isFullyPriced ? totalActualBig.toString() : null,
+              priced: isFullyPriced,
+              ts: timestampIso,
+            });
+          }
+
           // Tombstone rawUsage with null to wipe it from ledger and readers
-          updateRun(run.runId, { costStatus: 'recorded', rawUsage: null });
+          updateRun(run.runId, { costStatus: isFullyPriced ? 'recorded' : 'unpriced', rawUsage: null });
           reconciledCount++;
         }
       } else {
         // No rawUsage available to price (e.g. unknown model or fallback)
         // Check if any cost receipt exists for runId
         if (recordedModels.size > 0) {
+          const receipts = getCostReceiptsForRun(run.runId);
+          const isFullyPriced = receipts.length > 0 && receipts.every((r) => r.priced && r.costNanodollars !== null);
+          const totalActualBig = receipts.reduce(
+            (acc, r) => acc + (r.costNanodollars ? BigInt(r.costNanodollars) : 0n),
+            0n
+          );
           const hasPriced = hasPricedCostReceiptsForRun(run.runId);
+
+          const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+          if (holdId) {
+            settleHold({
+              holdId,
+              runId: run.runId,
+              actualNanodollars: isFullyPriced ? totalActualBig.toString() : null,
+              priced: isFullyPriced,
+              ts: timestampIso,
+            });
+          }
+
           updateRun(run.runId, { costStatus: hasPriced ? 'recorded' : 'unpriced', rawUsage: null });
           reconciledCount++;
         } else {
@@ -715,6 +780,16 @@ export function reconcilePendingCosts(): number {
               priced: false,
               source: 'claude-stream-json',
             });
+            const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+            if (holdId) {
+              settleHold({
+                holdId,
+                runId: run.runId,
+                actualNanodollars: null,
+                priced: false,
+                ts: timestampIso,
+              });
+            }
             updateRun(run.runId, { costStatus: 'unpriced', rawUsage: null });
             reconciledCount++;
           } catch (err: unknown) {
@@ -724,6 +799,13 @@ export function reconcilePendingCosts(): number {
         }
       }
     }
+  }
+
+  // Also reconcile any open holds whose runs or receipts have settled
+  try {
+    reconcileOpenHolds();
+  } catch {
+    /* ignore hold reconciler error */
   }
 
   return reconciledCount;
@@ -805,6 +887,14 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
           rawUsage: orphanCostStatus === 'pending' ? (sanitizeRawUsage(run.rawUsage) ?? null) : null,
           updatedAt: orphanTime,
         });
+        const holdId = run.holdId || findHoldIdForRun(run.runId, run.wakeId);
+        if (holdId) {
+          releaseHold({
+            holdId,
+            reason: 'orphaned',
+            ts: orphanTime,
+          });
+        }
         orphanedRuns++;
       }
     }
@@ -825,6 +915,13 @@ export function recoverOrphanedRuns(nowMs = Date.now()): { orphanedRuns: number;
         expiredWakes++;
       }
     }
+  }
+
+  // 3. Reconcile open budget holds (release expired/orphaned holds without runs)
+  try {
+    reconcileOpenHolds({ nowIso: new Date(nowMs).toISOString() });
+  } catch {
+    /* ignore hold reconciler error */
   }
 
   return { orphanedRuns, expiredWakes };

@@ -12,6 +12,7 @@ import {
 import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
 import { CostSettingsCard } from '@/components/office/CostSettingsCard';
+import { BudgetSettingsCard } from '@/components/office/BudgetSettingsCard';
 
 interface OfficeConfig {
   version: number;
@@ -147,6 +148,9 @@ export default function SettingsPage() {
 
           {/* Card: Cost Today / This Month Per Seat (A-2) */}
           <CostSettingsCard />
+
+          {/* Card: Budget Today (A-3) */}
+          <BudgetSettingsCard />
 
           {/* Card 2: Office Schedule & Timezone */}
           <section className="settings-card">
