@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import { ChildProcess } from 'node:child_process';
 import { NextRequest } from 'next/server.js';
 
 // Isolate test data directory and Claude CLI config directory
@@ -28,26 +29,46 @@ fs.mkdirSync(testDataDir, { recursive: true });
 fs.writeFileSync(
   mockClaudePath,
   `#!/usr/bin/env node
+const fs = require('node:fs');
 const mode = process.env.TEST_MOCK_CLAUDE_MODE || 'sleep-then-exit-0';
 const sessionId = process.env.TEST_MOCK_SESSION_ID || 'a3333333-3333-3333-3333-333333333333';
+const readyFile = process.env.TEST_MOCK_READY_FILE;
+const releaseFile = process.env.TEST_MOCK_RELEASE_FILE;
 
 process.stdin.on('data', () => {});
 process.stdin.on('error', () => {});
 
-if (mode === 'hold-until-sigterm') {
-  // Install SIGTERM handler BEFORE emitting session_id so it is guaranteed to catch guiLenhDung
+if (mode === 'hold-until-release') {
+  let gotSigterm = false;
   process.on('SIGTERM', () => {
-    setTimeout(() => {
-      process.exit(0);
-    }, 300);
+    gotSigterm = true;
+    if (readyFile) {
+      try {
+        fs.writeFileSync(readyFile, 'READY_SIGTERM\\n');
+      } catch {}
+    }
   });
   // 1. Emit session_id
   process.stdout.write(JSON.stringify({ type: 'system', session_id: sessionId }) + '\\n');
   // 2. Stream chunk
   process.stdout.write(JSON.stringify({
     type: 'stream_event',
-    event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Mock child holding until SIGTERM' } }
+    event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Mock child holding until release file' } }
   }) + '\\n');
+  // 3. Signal READY via file handshake after handler is installed and chunks are emitted
+  if (readyFile) {
+    try {
+      fs.writeFileSync(readyFile, 'READY\\n');
+    } catch {}
+  }
+  // 4. Poll for RELEASE file before exiting; SIGTERM only sets flag and never exits before RELEASE
+  const checkRelease = setInterval(() => {
+    if (releaseFile && fs.existsSync(releaseFile) && gotSigterm) {
+      clearInterval(checkRelease);
+      process.stdout.write(JSON.stringify({ type: 'result', total_cost_usd: 0.001 }) + '\\n');
+      process.exit(0);
+    }
+  }, 20);
 } else {
   process.on('SIGTERM', () => {
     setTimeout(() => {
@@ -125,7 +146,7 @@ import {
   generateRunOrWakeId,
 } from '../src/lib/runs-ledger.ts';
 import { stopOfficeRunner } from '../src/lib/office-runner.ts';
-import { gietViec } from '../src/lib/kho-tien-trinh.ts';
+import { layViec, gietViec } from '../src/lib/kho-tien-trinh.ts';
 import { readSeatActive } from '../src/lib/seat-active.ts';
 import { GET as getPhienRoute } from '../src/app/api/phien/route.ts';
 import { POST as postChatRoute } from '../src/app/api/chat/route.ts';
@@ -603,6 +624,7 @@ try {
     console.log('\n[TEST T7] Slot Conflict Rejection Lifecycle & Single Terminal Assertion:');
     const t7SessionId1 = 'a7777771-7777-7777-7777-777777777771';
     const t7SessionId2 = 'a7777772-7777-7777-7777-777777777772';
+    const existingBeforeTurn1 = new Set(getRuns({ seat: seatId, limit: 10 }).map((r) => r.runId));
     process.env.TEST_MOCK_CLAUDE_MODE = 'sleep-long';
     process.env.TEST_MOCK_SESSION_ID = t7SessionId1;
 
@@ -629,116 +651,207 @@ try {
       if (text.includes('da-noi-mach')) break;
     }
 
+    const run1 = getRuns({ seat: seatId, limit: 10 }).find((r) => !existingBeforeTurn1.has(r.runId));
+    assert.ok(run1, 'Turn 1 run must be found in ledger');
+    const run1Id = run1.runId;
+    const turn1Pid = layViec('o-2')?.pid_de_hien_thi;
+    assert.ok(turn1Pid, 'Turn 1 PID must be registered in slot o-2');
+
     // Turn 1 is now living in slot 'o-2'
     // 2. Start Turn 2 on the SAME slot 'o-2' while Turn 1 is alive
-    // Enable bypassSlotGate to simulate race condition bypassing outer gate and exercising dangKyViec conflict rejection
-    // Use hold-until-sigterm mock mode so child 2 holds alive until SIGTERM is received and handled
+    // Enable bypassSlotGate to simulate race condition bypassing outer gate and exercising dangKyViec conflict rejection.
+    // Use hold-until-release mock mode with READY/RELEASE file handshake:
+    // ensure mock child 2 reaches READY (handler installed + session_id/chunk emitted) before SIGTERM is delivered,
+    // and holds alive after SIGTERM until RELEASE file is written.
     const existingRunIds = new Set(getRuns({ seat: seatId, limit: 10 }).map((r) => r.runId));
-    process.env.TEST_MOCK_CLAUDE_MODE = 'hold-until-sigterm';
+    const readyFile = path.join(testDataDir, 'mock-t7-ready.txt');
+    const releaseFile = path.join(testDataDir, 'mock-t7-release.txt');
+    if (fs.existsSync(readyFile)) fs.unlinkSync(readyFile);
+    if (fs.existsSync(releaseFile)) fs.unlinkSync(releaseFile);
+    process.env.TEST_MOCK_READY_FILE = readyFile;
+    process.env.TEST_MOCK_RELEASE_FILE = releaseFile;
+    process.env.TEST_MOCK_CLAUDE_MODE = 'hold-until-release';
     process.env.TEST_MOCK_SESSION_ID = t7SessionId2;
-    setBypassSlotGateForTest(true);
-    const req2 = new NextRequest('http://127.0.0.1:4330/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ma_o: 'o-2',
-        ma_nhan_su: seatId,
-        phien_moi: true,
-        cau_hoi: 'Lượt 2 bị từ chối vì ô đang bận',
-      }),
-    });
 
-    const res2 = await postChatRoute(req2);
-    setBypassSlotGateForTest(false);
-    assert.equal(res2.status, 200);
-    const reader2 = res2.body.getReader();
-
-    // Read until Turn 2 receives rejection error
-    let receivedRejectionError = false;
-    while (true) {
-      const { value, done } = await reader2.read();
-      if (done) break;
-      const text = new TextDecoder().decode(value);
-      if (text.includes('Ô này ĐANG CHẠY một lượt khác')) {
-        receivedRejectionError = true;
-        break;
-      }
-    }
-    assert.ok(receivedRejectionError, 'Turn 2 must receive slot conflict rejection SSE error');
-
-    // Deterministically locate run2 created for Turn 2
-    const runsList = getRuns({ seat: seatId, limit: 10 });
-    const run2 = runsList.find((r) => !existingRunIds.has(r.runId));
-    assert.ok(run2, 'Turn 2 run must be found in ledger');
-    const run2Id = run2.runId;
-
-    // Critical assertion: While child 2 is holding alive in background (300ms delay after SIGTERM),
-    // Turn 2 MUST NOT have finishedAt yet! Status must remain 'running' until child actually exits.
-    const run2Immediate = getRun(run2Id);
-    assert.equal(run2Immediate?.status, 'running', 'Turn 2 run status MUST remain running before child terminates');
-    assert.equal(run2Immediate?.finishedAt, undefined, 'Turn 2 run MUST NOT have finishedAt before child terminates');
-
-    // Assertion (Hermes criteria 3): Slot o-2 and seat-active of Turn 1 MUST NOT be overwritten by Turn 2!
-    const slotO2 = layO('o-2');
-    assert.equal(slotO2?.ma_phien, t7SessionId1, 'Slot o-2 must preserve Turn 1 session ID');
-    const seatActive = readSeatActive(seatId);
-    assert.equal(seatActive?.session_id, t7SessionId1, 'Seat active must preserve Turn 1 session ID');
-
-    // 3. Poll for Turn 2 child to terminate with failure timeout (max 5s, NO fixed setTimeout)
-    const startWait = Date.now();
-    let run2AfterExit = getRun(run2Id);
-    while (!run2AfterExit?.finishedAt) {
-      if (Date.now() - startWait > 5000) {
-        assert.fail('Timed out waiting for child 2 to terminate and record finishedAt within 5s');
-      }
-      await new Promise((r) => setTimeout(r, 50));
-      run2AfterExit = getRun(run2Id);
-    }
-
-    // After child process terminates:
-    // Turn 2 MUST transition to 'failed' via khiChet
-    assert.equal(run2AfterExit?.status, 'failed', 'Turn 2 run status MUST transition to failed via khiChet');
-    assert.ok(run2AfterExit?.finishedAt, 'Turn 2 run MUST have finishedAt recorded by khiChet');
-    assert.equal(run2AfterExit?.errorKind, 'result_error', 'Turn 2 errorKind must be result_error');
-
-    // Read remaining stream 2 until done
-    while (true) {
-      const { done } = await reader2.read();
-      if (done) break;
-    }
-
-    // 4. Assert terminal record was written EXACTLY ONCE in ledger
-    const countTerminals = (targetRunId) => {
-      const runsDir = path.join(testDataDir, 'runs');
-      let count = 0;
-      if (fs.existsSync(runsDir)) {
-        const runFiles = fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl'));
-        for (const f of runFiles) {
-          const lines = fs.readFileSync(path.join(runsDir, f), 'utf8').split('\n');
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const parsed = JSON.parse(line);
-              if (parsed.runId === targetRunId && (parsed.status === 'failed' || parsed.status === 'finished')) {
-                count++;
-              }
-            } catch { /* ignore */ }
+    const origKill = ChildProcess.prototype.kill;
+    ChildProcess.prototype.kill = function (signal) {
+      if (
+        this.pid !== turn1Pid &&
+        signal === 'SIGTERM' &&
+        process.env.TEST_MOCK_CLAUDE_MODE === 'hold-until-release' &&
+        !fs.existsSync(readyFile)
+      ) {
+        const child = this;
+        const startGate = Date.now();
+        const waitReadyTimer = origSetTimeout(function pollReadyBeforeKill() {
+          if (fs.existsSync(readyFile) || Date.now() - startGate > 5000) {
+            origKill.call(child, signal);
+          } else {
+            origSetTimeout(pollReadyBeforeKill, 10).unref?.();
           }
-        }
+        }, 10);
+        waitReadyTimer.unref?.();
+        return true;
       }
-      return count;
+      return origKill.call(this, signal);
     };
 
-    assert.equal(countTerminals(run2Id), 1, 'Terminal status for rejected child MUST be recorded EXACTLY ONCE after stream done');
+    try {
+      setBypassSlotGateForTest(true);
+      const req2 = new NextRequest('http://127.0.0.1:4330/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ma_o: 'o-2',
+          ma_nhan_su: seatId,
+          phien_moi: true,
+          cau_hoi: 'Lượt 2 bị từ chối vì ô đang bận',
+        }),
+      });
 
-    // Cancel readers and stop Turn 1 child
-    gietViec('o-2');
-    await reader1.cancel();
-    await new Promise((r) => setTimeout(r, 100));
+      const res2 = await postChatRoute(req2);
+      setBypassSlotGateForTest(false);
+      assert.equal(res2.status, 200);
+      const reader2 = res2.body.getReader();
 
-    // Verify terminal count remains 1 after cleanup
-    assert.equal(countTerminals(run2Id), 1, 'Terminal status for rejected child MUST remain EXACTLY ONCE after cleanup');
-    console.log('  [PASS] T7: Child rejection preserves running until close; terminal recorded EXACTLY ONCE.');
+      // Read until Turn 2 receives rejection error
+      let receivedRejectionError = false;
+      let fullStream2Text = '';
+      while (true) {
+        const { value, done } = await reader2.read();
+        if (done) break;
+        const text = new TextDecoder().decode(value);
+        fullStream2Text += text;
+        if (text.includes('Ô này ĐANG CHẠY một lượt khác')) {
+          receivedRejectionError = true;
+          break;
+        }
+      }
+      assert.ok(receivedRejectionError, 'Turn 2 must receive slot conflict rejection SSE error');
+
+      // Deterministically locate run2 created for Turn 2
+      const runsList = getRuns({ seat: seatId, limit: 10 });
+      const run2 = runsList.find((r) => !existingRunIds.has(r.runId));
+      assert.ok(run2, 'Turn 2 run must be found in ledger');
+      const run2Id = run2.runId;
+
+      // Wait for mock child 2 to signal READY_SIGTERM AND for route.ts to have processed child 2's emitted session_id
+      const startReadyWait = Date.now();
+      while (
+        !fs.existsSync(readyFile) ||
+        !fs.readFileSync(readyFile, 'utf8').includes('READY_SIGTERM') ||
+        getRun(run2Id)?.sessionId !== t7SessionId2
+      ) {
+        if (Date.now() - startReadyWait > 5000) {
+          assert.fail('Timed out waiting for child 2 READY_SIGTERM handshake and session_id processing within 5s');
+        }
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      // Critical assertion while child 2 is proven alive, has emitted session_id + chunk, received SIGTERM, and is holding for RELEASE:
+      // Turn 2 MUST NOT have finishedAt yet! Status must remain 'running' until child actually exits.
+      const run2Immediate = getRun(run2Id);
+      assert.equal(run2Immediate?.status, 'running', 'Turn 2 run status MUST remain running before child terminates');
+      assert.equal(run2Immediate?.finishedAt, undefined, 'Turn 2 run MUST NOT have finishedAt before child terminates');
+      assert.equal(run2Immediate?.sessionId, t7SessionId2, 'Turn 2 must have processed rejected child session_id chunk');
+
+      // Assertion (Hermes criteria 3 & 5): Slot o-2 and seat-active of Turn 1 MUST NOT be overwritten by Turn 2!
+      const slotO2 = layO('o-2');
+      assert.equal(slotO2?.ma_phien, t7SessionId1, 'Slot o-2 must preserve Turn 1 session ID while child 2 holds');
+      const seatActive = readSeatActive(seatId);
+      assert.equal(seatActive?.session_id, t7SessionId1, 'Seat active must preserve Turn 1 session ID while child 2 holds');
+
+      // Assertion: Metadata file for rejected session 2 must NOT exist
+      const metadataFile2 = path.join(testDataDir, 'sessions', seatId, `${t7SessionId2}.json`);
+      assert.equal(fs.existsSync(metadataFile2), false, 'Rejected child metadata file must NOT exist while child 2 holds');
+
+      // Signal mock child 2 to release and terminate
+      fs.writeFileSync(releaseFile, 'RELEASE\n');
+
+      // 3. Poll for Turn 2 child to terminate with failure timeout (max 5s, NO fixed setTimeout)
+      const startWait = Date.now();
+      let run2AfterExit = getRun(run2Id);
+      while (!run2AfterExit?.finishedAt) {
+        if (Date.now() - startWait > 5000) {
+          assert.fail('Timed out waiting for child 2 to terminate and record finishedAt within 5s');
+        }
+        await new Promise((r) => setTimeout(r, 20));
+        run2AfterExit = getRun(run2Id);
+      }
+
+      // Read remaining stream 2 until done (event-driven with timeout)
+      const startStreamWait = Date.now();
+      while (true) {
+        if (Date.now() - startStreamWait > 5000) {
+          assert.fail('Timed out waiting for stream 2 to close within 5s');
+        }
+        const { value, done } = await reader2.read();
+        if (value) fullStream2Text += new TextDecoder().decode(value);
+        if (done) break;
+      }
+
+      // After child process terminates and stream 2 is done:
+      // Turn 2 MUST transition to 'failed' via khiChet
+      run2AfterExit = getRun(run2Id);
+      assert.equal(run2AfterExit?.status, 'failed', 'Turn 2 run status MUST transition to failed via khiChet');
+      assert.ok(run2AfterExit?.finishedAt, 'Turn 2 run MUST have finishedAt recorded by khiChet');
+      assert.equal(run2AfterExit?.errorKind, 'result_error', 'Turn 2 errorKind must be result_error');
+
+      // Re-verify ownership, metadata isolation, and SSE chunk suppression after stream 2 done (Hermes criteria 3 & 5)
+      assert.equal(layO('o-2')?.ma_phien, t7SessionId1, 'Slot o-2 must still preserve Turn 1 session ID after stream 2 done');
+      assert.equal(readSeatActive(seatId)?.session_id, t7SessionId1, 'Seat active must still preserve Turn 1 session ID after stream 2 done');
+      assert.equal(fs.existsSync(metadataFile2), false, 'Rejected child metadata file must still NOT exist after stream 2 done');
+      assert.equal(fullStream2Text.includes('da-noi-mach'), false, 'Rejected child da-noi-mach must NOT leak to SSE viewer');
+      assert.equal(
+        fullStream2Text.includes('Mock child holding until release file'),
+        false,
+        'Rejected child text chunk must NOT leak to SSE viewer'
+      );
+
+      // 4. Assert terminal record was written EXACTLY ONCE in ledger
+      const countTerminals = (targetRunId) => {
+        const runsDir = path.join(testDataDir, 'runs');
+        let count = 0;
+        if (fs.existsSync(runsDir)) {
+          const runFiles = fs.readdirSync(runsDir).filter((f) => f.endsWith('.jsonl'));
+          for (const f of runFiles) {
+            const lines = fs.readFileSync(path.join(runsDir, f), 'utf8').split('\n');
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed.runId === targetRunId && (parsed.status === 'failed' || parsed.status === 'finished')) {
+                  count++;
+                }
+              } catch { /* ignore */ }
+            }
+          }
+        }
+        return count;
+      };
+
+      assert.equal(countTerminals(run2Id), 1, 'Terminal status for rejected child MUST be recorded EXACTLY ONCE after stream done');
+
+      // Cleanup: Cancel readers and stop Turn 1 child, then poll until Turn 1 actually terminates (NO fixed sleep)
+      ChildProcess.prototype.kill = origKill;
+      gietViec('o-2');
+      await reader1.cancel();
+      const startWait1 = Date.now();
+      while (!getRun(run1Id)?.finishedAt || layViec('o-2') !== null) {
+        if (Date.now() - startWait1 > 5000) {
+          assert.fail('Timed out waiting for child 1 to terminate and clear slot within 5s');
+        }
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      // Verify terminal count remains 1 after cleanup
+      assert.equal(countTerminals(run2Id), 1, 'Terminal status for rejected child MUST remain EXACTLY ONCE after cleanup');
+      console.log('  [PASS] T7: Child rejection preserves running until close; terminal recorded EXACTLY ONCE.');
+    } finally {
+      ChildProcess.prototype.kill = origKill;
+      delete process.env.TEST_MOCK_READY_FILE;
+      delete process.env.TEST_MOCK_RELEASE_FILE;
+    }
   }
 
   console.log('\n================================================================');
