@@ -10,13 +10,38 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function isStrictLocalhostHost(rawHost: string): boolean {
+  const trimmed = rawHost.trim().toLowerCase();
+  if (!trimmed) {
+    return true;
+  }
+  let hostname = trimmed;
+  if (trimmed.startsWith('[')) {
+    const closeIdx = trimmed.indexOf(']');
+    if (closeIdx < 0) return false;
+    hostname = trimmed.slice(0, closeIdx + 1);
+  } else {
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx >= 0) {
+      hostname = trimmed.slice(0, colonIdx);
+    }
+  }
+  return (
+    hostname === '127.0.0.1' ||
+    hostname === 'localhost' ||
+    hostname === '[::1]' ||
+    hostname === '::1'
+  );
+}
+
 /**
- * Resolve decision actor (F7):
- * - `owner` ONLY when `PHONGBAN_USER` and `PHONGBAN_PASS` are configured and
- *   the `Authorization: Basic ...` header matches both credentials.
- * - When `PHONGBAN_USER` / `PHONGBAN_PASS` are not configured, `by` is never `owner`.
- * - Requests exempted by localhost (per middleware.ts) without valid matching Basic Auth
- *   are attributed as `localhost`.
+ * Resolve decision actor (F7, F13):
+ * - When `PHONGBAN_USER` and `PHONGBAN_PASS` are configured:
+ *   Basic Auth is mandatory EVEN from `localhost` / `127.0.0.1` (F13).
+ *   Missing or wrong credentials return HTTP 401; valid credentials return `by: 'owner'`.
+ * - Only when `PHONGBAN_USER` / `PHONGBAN_PASS` are NOT configured:
+ *   strict loopback (`localhost`, `127.0.0.1`, `[::1]`) is exempted as `by: 'localhost'`,
+ *   while non-localhost requests return HTTP 503.
  */
 function resolveDecisionActor(req: NextRequest): {
   allowed: boolean;
@@ -25,18 +50,21 @@ function resolveDecisionActor(req: NextRequest): {
   message?: string;
 } {
   const authHeader = req.headers.get('authorization') || '';
-  const host = (req.headers.get('host') || '').toLowerCase();
-  const isLocalhost =
-    !host ||
-    host.startsWith('127.0.0.1') ||
-    host.startsWith('localhost') ||
-    host.startsWith('[::1]');
+  const host = req.headers.get('host') || '';
+  const isLocalhost = isStrictLocalhostHost(host);
 
   const envUser = process.env.PHONGBAN_USER;
   const envPass = process.env.PHONGBAN_PASS;
   const hasConfiguredAuth = Boolean(envUser && envPass);
 
-  if (hasConfiguredAuth && authHeader.startsWith('Basic ')) {
+  if (hasConfiguredAuth) {
+    if (!authHeader.startsWith('Basic ')) {
+      return {
+        allowed: false,
+        status: 401,
+        message: 'Authentication required.',
+      };
+    }
     try {
       const decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8');
       const idx = decoded.indexOf(':');
@@ -50,31 +78,21 @@ function resolveDecisionActor(req: NextRequest): {
     } catch {
       /* fall through */
     }
-    if (!isLocalhost) {
-      return {
-        allowed: false,
-        status: 401,
-        message: 'Invalid Basic Auth credentials.',
-      };
-    }
+    return {
+      allowed: false,
+      status: 401,
+      message: 'Invalid Basic Auth credentials.',
+    };
   }
 
   if (isLocalhost) {
     return { allowed: true, by: 'localhost' };
   }
 
-  if (!hasConfiguredAuth) {
-    return {
-      allowed: false,
-      status: 503,
-      message: 'Authentication is not configured on this server.',
-    };
-  }
-
   return {
     allowed: false,
-    status: 401,
-    message: 'Authentication required.',
+    status: 503,
+    message: 'Authentication is not configured on this server.',
   };
 }
 
@@ -88,7 +106,7 @@ interface DecisionRequestBody {
  * Body: { decision: "approved" | "denied", note?: string }
  * - Unknown requestId -> 404
  * - Already decided requestId -> 409
- * - Invalid decision or invalid/overlong note (> 200 chars) -> 400 (no ledger write)
+ * - Invalid decision or invalid/overlong note (> 200 Unicode code points, or note: null) -> 400 (0 ledger writes)
  * - Server always computes expiresAt from configured TTL (F8: client expiresAt is ignored)
  */
 export async function POST(
@@ -150,9 +168,10 @@ export async function POST(
     );
   }
 
-  // F6: Validate `note` type and length (<= 200 chars) BEFORE calling ledger
+  // F6: Validate `note` type (including rejecting `note: null`) and Unicode code point length (<= 200)
+  // BEFORE calling ledger (0 bytes written on failure).
   let note: string | undefined;
-  if (body.note !== undefined && body.note !== null) {
+  if ('note' in body && body.note !== undefined) {
     if (typeof body.note !== 'string') {
       return NextResponse.json(
         {
@@ -162,7 +181,7 @@ export async function POST(
         { status: 400 }
       );
     }
-    if (body.note.length > 200 || body.note.trim().length > 200) {
+    if (Array.from(body.note).length > 200) {
       return NextResponse.json(
         {
           error: 'note_too_long',
@@ -171,10 +190,7 @@ export async function POST(
         { status: 400 }
       );
     }
-    const trimmedNote = body.note.trim();
-    if (trimmedNote.length > 0) {
-      note = trimmedNote;
-    }
+    note = body.note;
   }
 
   try {
@@ -182,7 +198,7 @@ export async function POST(
       requestId,
       decision: decision as ApprovalDecisionValue,
       by: auth.by,
-      note,
+      ...(note !== undefined ? { note } : {}),
     });
 
     if (!result.ok) {

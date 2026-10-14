@@ -16,14 +16,18 @@ const testDataDir = path.join(
 process.env.AIBOSS_DATA_DIR = testDataDir;
 
 import {
+  checkAndConsumeApproval,
   computeRequestId,
   getApprovalsDir,
   getApprovalLogPathForDate,
   getApprovals,
   getApprovalById,
+  isLockFileStale,
+  parseIsoTimestampMs,
   recordApprovalDecision,
   recordApprovalExecution,
   readApprovalRecords,
+  withApprovalLock,
 } from '../src/lib/approvals-ledger.ts';
 import { GET as getApprovalsRoute } from '../src/app/api/approvals/route.ts';
 import { POST as postDecisionRoute } from '../src/app/api/approvals/[requestId]/decision/route.ts';
@@ -95,7 +99,7 @@ function runMarkCli(requestId, result, runId, claimId) {
   return { status: res.status, body: parsed, rawStdout: stdout, rawStderr: res.stderr };
 }
 
-console.log('--- Testing A-4 v02 Approval Ledger & Hook Contract (tests/approvals.test.mjs) ---');
+console.log('--- Testing A-4 v03 Approval Ledger & Hook Contract (tests/approvals.test.mjs) ---');
 
 await (async () => {
   try {
@@ -155,7 +159,9 @@ await (async () => {
     assert.equal(JSON.stringify(getPendingJson).includes('ZEBRA-'), false);
     console.log('  [PASS] Case 3: GET /api/approvals?status=pending returns item with strict field whitelist (0 ZEBRA leaks)');
 
-    // Case 4: POST /api/approvals/<requestId>/decision (approve on localhost -> by: "localhost")
+    // Case 4: POST /api/approvals/<requestId>/decision (approve on localhost when env is unconfigured -> by: "localhost")
+    delete process.env.PHONGBAN_USER;
+    delete process.env.PHONGBAN_PASS;
     const approveReq = new NextRequest(
       `http://127.0.0.1:4330/api/approvals/${reqId1}/decision`,
       {
@@ -263,7 +269,8 @@ await (async () => {
     assert.equal(getExecutedJson.approvals[0].status, 'executed');
     console.log('  [PASS] Case 8: second check after mark exits 2 (status="executed") and API status=executed matches');
 
-    // Case 9: Second non-idempotent execution attempt via recordApprovalExecution is rejected with digest_mismatch
+    // Case 9: Second non-idempotent execution attempt via recordApprovalExecution is rejected with digest_mismatch (0 lines written)
+    const sizeBeforeCase9 = fs.statSync(todayPath).size;
     const secondExecAttempt = recordApprovalExecution({
       requestId: reqId1,
       result: 'executed',
@@ -272,8 +279,9 @@ await (async () => {
     });
     assert.equal(secondExecAttempt.ok, false);
     assert.equal(secondExecAttempt.status, 'digest_mismatch');
+    assert.equal(fs.statSync(todayPath).size, sizeBeforeCase9, 'Case 9: rejected second execution must write 0 bytes');
     assert.equal(getApprovalById(reqId1)?.status, 'executed');
-    console.log('  [PASS] Case 9: second non-idempotent execution on same requestId is rejected as digest_mismatch');
+    console.log('  [PASS] Case 9: second non-idempotent execution on same requestId is rejected as digest_mismatch (0 bytes written)');
 
     // Case 10: Seeded decision with expiresAt in the past -> derived state is expired, approval_check.py exits 2
     const expiredTs = '2026-10-14T10:05:00Z';
@@ -420,6 +428,8 @@ await (async () => {
     const checkDenied = runCheckCli(deniedSeat, deniedTool, deniedSha);
     assert.equal(checkDenied.status, 2);
     assert.equal(checkDenied.body.status, 'denied');
+    delete process.env.PHONGBAN_USER;
+    delete process.env.PHONGBAN_PASS;
     console.log('  [PASS] Case 12: Basic Auth records by="owner", decision="denied" derives denied and exits 2');
 
     // Case 13: Cross-day folding (request in yesterday's file, decision in today's file)
@@ -485,7 +495,7 @@ await (async () => {
       'utf-8'
     );
 
-    const linesBeforeUnapprovedMark = fs.readFileSync(todayPath, 'utf-8').trim().split('\n').length;
+    const sizeBeforeUnapprovedMark = fs.statSync(todayPath).size;
     const markUnapprovedCli = runMarkCli(reqF1a, 'executed');
     assert.equal(markUnapprovedCli.status, 2, 'F1a: approval_mark.py must exit 2 on pending request');
     assert.equal(markUnapprovedCli.body.status, 'pending');
@@ -495,8 +505,8 @@ await (async () => {
     });
     assert.equal(markUnapprovedTs.ok, false);
     assert.equal(markUnapprovedTs.status, 'pending');
-    const linesAfterUnapprovedMark = fs.readFileSync(todayPath, 'utf-8').trim().split('\n').length;
-    assert.equal(linesAfterUnapprovedMark, linesBeforeUnapprovedMark, 'F1a: failed mark on pending must write 0 lines');
+    const sizeAfterUnapprovedMark = fs.statSync(todayPath).size;
+    assert.equal(sizeAfterUnapprovedMark, sizeBeforeUnapprovedMark, 'F1a: failed mark on pending must write 0 bytes');
 
     // Also inject a rogue execution line BEFORE decision: "approved" and verify both TS and Python ignore it
     fs.appendFileSync(
@@ -521,7 +531,7 @@ await (async () => {
     const checkF1a = runCheckCli(f1aSeat, f1aTool, f1aSha);
     assert.equal(checkF1a.status, 0, 'F1a: pre-approval execution line must be ignored by Python fold');
     assert.equal(checkF1a.body.status, 'approved');
-    console.log('  [PASS] Case 14 (F1a): mark before approval is rejected (0 lines written) and pre-approval execution lines are ignored');
+    console.log('  [PASS] Case 14 (F1a): mark before approval is rejected (0 bytes written) and pre-approval execution lines are ignored');
 
     // Case 15 (F1b): Atomic claim/consume under lock — two concurrent `approval_check.py --consume` processes
     // must result in EXACTLY ONE exit 0 and ONE exit 2 (`status: "claimed"`), and `approval_mark.py --claim-id`
@@ -862,8 +872,9 @@ await (async () => {
     assert.equal(getApprovalById(reqF6)?.status, 'pending');
     console.log('  [PASS] Case 20 (F6): overlong (>200 chars) or non-string note returns HTTP 400 without writing to ledger');
 
-    // Case 21 (F7): Strict actor attribution — wrong Basic Auth on localhost -> by="localhost";
-    // unconfigured env with Basic Auth -> by="localhost"; wrong Basic Auth off-localhost -> 401
+    // Case 21 (F7 & F13): Strict actor attribution & mandatory Basic Auth when PHONGBAN_USER/PHONGBAN_PASS are configured
+    // - When PHONGBAN_USER & PHONGBAN_PASS are configured: Basic Auth is required EVEN on localhost (401 on missing/wrong, by="owner" on match)
+    // - When PHONGBAN_USER & PHONGBAN_PASS are NOT configured: localhost is exempted with by="localhost" (never "owner"), and localhost.example.com returns 503
     const f7Ts1 = '2026-10-14T11:35:00Z';
     const f7Ts2 = '2026-10-14T11:35:01Z';
     const f7Seat = 'seat-f7';
@@ -918,7 +929,7 @@ await (async () => {
     );
     assert.equal(remoteWrongRes.status, 401);
 
-    // Localhost with wrong Basic Auth -> allowed via localhost exemption, attributed as by="localhost" (never "owner")
+    // F13: Localhost with wrong Basic Auth when env is configured -> MUST return 401
     const localWrongRes = await postDecisionRoute(
       new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF7a}/decision`, {
         method: 'POST',
@@ -931,13 +942,56 @@ await (async () => {
       }),
       { params: Promise.resolve({ requestId: reqF7a }) }
     );
-    assert.equal(localWrongRes.status, 200);
-    const localWrongJson = await localWrongRes.json();
-    assert.equal(localWrongJson.decision.by, 'localhost', 'F7: wrong Basic Auth on localhost must attribute by="localhost"');
+    assert.equal(localWrongRes.status, 401, 'F13: wrong Basic Auth on localhost must return 401 when PHONGBAN_USER/PHONGBAN_PASS are set');
 
-    // Unconfigured env with Basic Auth on localhost -> attributed as by="localhost" (never "owner")
+    // F13: Localhost with missing Basic Auth when env is configured -> MUST return 401
+    const localNoAuthRes = await postDecisionRoute(
+      new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF7a}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:4330',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved' }),
+      }),
+      { params: Promise.resolve({ requestId: reqF7a }) }
+    );
+    assert.equal(localNoAuthRes.status, 401, 'F13: missing Basic Auth on localhost must return 401 when PHONGBAN_USER/PHONGBAN_PASS are set');
+
+    // F13: Localhost with matching Basic Auth when env is configured -> 200, by="owner"
+    const localMatchingRes = await postDecisionRoute(
+      new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF7a}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:4330',
+          authorization: `Basic ${basicCreds}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved' }),
+      }),
+      { params: Promise.resolve({ requestId: reqF7a }) }
+    );
+    assert.equal(localMatchingRes.status, 200);
+    const localMatchingJson = await localMatchingRes.json();
+    assert.equal(localMatchingJson.decision.by, 'owner');
+
+    // Unconfigured env with Basic Auth on localhost -> attributed as by="localhost" (never "owner"),
+    // and spoofed Host `localhost.example.com` is rejected with 503
     delete process.env.PHONGBAN_USER;
     delete process.env.PHONGBAN_PASS;
+    const spoofedLocalhostRes = await postDecisionRoute(
+      new NextRequest(`http://localhost.example.com/api/approvals/${reqF7b}/decision`, {
+        method: 'POST',
+        headers: {
+          host: 'localhost.example.com',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved' }),
+      }),
+      { params: Promise.resolve({ requestId: reqF7b }) }
+    );
+    assert.equal(spoofedLocalhostRes.status, 503, 'F13: localhost.example.com must not match localhost');
+
     const unconfRes = await postDecisionRoute(
       new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF7b}/decision`, {
         method: 'POST',
@@ -953,7 +1007,7 @@ await (async () => {
     assert.equal(unconfRes.status, 200);
     const unconfJson = await unconfRes.json();
     assert.equal(unconfJson.decision.by, 'localhost', 'F7: unconfigured env must never attribute by="owner"');
-    console.log('  [PASS] Case 21 (F7): actor attribution strictly requires matching configured Basic Auth for by="owner"');
+    console.log('  [PASS] Case 21 (F7 & F13): Basic Auth mandatory on localhost when configured; strict by="owner" vs by="localhost"');
 
     // Case 22 (F8): Public decision API ignores client-supplied `expiresAt`
     const f8Ts = '2026-10-14T11:40:00Z';
@@ -996,35 +1050,35 @@ await (async () => {
     );
     console.log('  [PASS] Case 22 (F8): client expiresAt in POST body is ignored in favor of server TTL');
 
-    // Case 23 (F9): All 7 real Vietnamese H1 reason strings from guard_bulk_send.py map to English
-    // in both API responses and rendered ApprovalsSettingsCard UI (0 Vietnamese characters)
+    // Case 23 (F9): All 7 real verbatim Vietnamese H1 reason strings from guard_bulk_send.py
+    // (lines 107, 120, 124, 132, 136, 159, 162) map to English in both API responses and UI
     const realH1Reasons = [
       {
-        raw: 'Công cụ MCP (mcp__gmail__send) thực hiện gửi dữ liệu ra bên ngoài. Cần chủ phê duyệt trước khi chạy.',
+        raw: 'Công cụ MCP (mcp__gmail__send) thực hiện gửi dữ liệu ra bên ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt.',
         expected: 'mcp_external_send',
       },
       {
-        raw: 'Phát hiện lệnh curl sử dụng tệp cấu hình (-K/--config). Không được phép dùng cờ này để tránh lách bộ lọc bảo mật.',
+        raw: 'Phát hiện lệnh curl sử dụng tệp cấu hình (-K/--config) có thể gửi yêu cầu ra ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt.',
         expected: 'curl_config_flag',
       },
       {
-        raw: 'Phát hiện lệnh truy xuất tin nhắn hộp thư (fetch_page_messages.py). Cần chủ phê duyệt trước khi chạy.',
+        raw: 'Phát hiện lệnh truy xuất tin nhắn hộp thư (fetch_page_messages.py). Lệnh bị chặn và được ghi nhận vào sổ duyệt.',
         expected: 'inbox_message_fetch',
       },
       {
-        raw: 'Phát hiện mã/lệnh kết nối tới graph.facebook.com gửi tin nhắn (/messages). Cần chủ phê duyệt trước khi chạy.',
+        raw: 'Phát hiện mã/lệnh kết nối tới graph.facebook.com gửi tin nhắn (/messages). Lệnh bị chặn và cần chủ trực tiếp duyệt.',
         expected: 'facebook_graph_messages',
       },
       {
-        raw: 'Phát hiện batch request gửi tin nhắn qua graph.facebook.com. Cần chủ phê duyệt trước khi chạy.',
+        raw: 'Phát hiện batch request gửi tin nhắn qua graph.facebook.com. Lệnh bị chặn và cần chủ trực tiếp duyệt.',
         expected: 'facebook_graph_batch',
       },
       {
-        raw: 'Phát hiện lệnh POST gửi tin nhắn/email ra dịch vụ bên ngoài. Cần chủ phê duyệt trước khi chạy.',
+        raw: 'Phát hiện lệnh POST gửi tin nhắn/email ra dịch vụ bên ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt.',
         expected: 'external_post_send',
       },
       {
-        raw: 'Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài (api\\.sendgrid\\.com). Cần chủ phê duyệt trước khi chạy.',
+        raw: 'Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài (api\\.sendgrid\\.com). Lệnh bị chặn và cần chủ trực tiếp duyệt.',
         expected: 'external_endpoint_send',
       },
     ];
@@ -1075,9 +1129,782 @@ await (async () => {
       false,
       'F9: API payload must contain 0 Vietnamese diacritics'
     );
-    console.log('  [PASS] Case 23 (F9): all 7 Vietnamese H1 reasons normalize to English codes in API and UI (0 Vietnamese chars)');
+    console.log('  [PASS] Case 23 (F9): all 7 verbatim Vietnamese H1 reasons normalize to English codes in API and UI (0 Vietnamese chars)');
 
-    console.log('>>> ALL 23 A-4 v02 APPROVAL LEDGER TEST CASES PASSED <<<');
+    // =========================================================================
+    // ADVERSARIAL TESTS FOR A-4 v03 (Cases 24 - 32: Closing Hermes Round 2)
+    // =========================================================================
+
+    // Case 24 (F1a v03): Marking an expired request throws Error in TS (when throwOnError=true),
+    // exits 2 in Python (`status: "expired"`), and writes 0 bytes to the ledger in both.
+    const c24Ts = '2026-10-14T12:00:00Z';
+    const c24Seat = 'seat-c24-expired';
+    const c24Tool = 'Bash';
+    const c24Sha = 'b024b024b024b024b024b024b024b024b024b024b024b024b024b024b024b024';
+    const reqC24 = computeRequestId(c24Ts, c24Seat, c24Tool, c24Sha);
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: c24Ts,
+          seat: c24Seat,
+          tool: c24Tool,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c24Sha,
+          head60: 'curl -X POST https://api.example.com/c24',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC24,
+          decision: 'approved',
+          by: 'owner',
+          at: '2020-01-01T00:00:00.000Z',
+          expiresAt: '2020-01-01T01:00:00.000Z',
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+
+    const sizeBeforeC24 = fs.statSync(todayPath).size;
+    assert.throws(
+      () =>
+        recordApprovalExecution({
+          requestId: reqC24,
+          result: 'executed',
+          throwOnError: true,
+        }),
+      /expired/,
+      'Case 24 (F1a): recordApprovalExecution with throwOnError=true must throw on expired approval'
+    );
+    const c24TsRes = recordApprovalExecution({
+      requestId: reqC24,
+      result: 'executed',
+    });
+    assert.equal(c24TsRes.ok, false);
+    assert.equal(c24TsRes.status, 'expired');
+
+    const c24PyRes = runMarkCli(reqC24, 'executed', 'run-c24');
+    assert.equal(c24PyRes.status, 2, 'Case 24 (F1a): approval_mark.py must exit 2 on expired approval');
+    assert.equal(c24PyRes.body.status, 'expired');
+
+    const sizeAfterC24 = fs.statSync(todayPath).size;
+    assert.equal(
+      sizeAfterC24,
+      sizeBeforeC24,
+      'Case 24 (F1a): failed mark on expired request must write 0 bytes to ledger'
+    );
+    console.log('  [PASS] Case 24 (F1a v03): expired mark throws in TS, exits 2 in Python, and writes 0 bytes to ledger');
+
+    // Case 25 (F1b v03): Safe atomic stale lock recovery (`rename` under `.approvals.reclaim.lock`)
+    // + unified liveness rule (never steal lock held by a live PID even if age > 30s).
+    const lockPath = path.join(getApprovalsDir(), '.approvals.lock');
+    const traceFile = path.join(testDataDir, 'lock-reclaim-trace.txt');
+
+    // 25a: Verify live PID lock > 30s old is NOT considered stale in either TS or Python
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: process.pid, createdAt: Date.now() - 60_000 }),
+      'utf-8'
+    );
+    const pastTimeSec = (Date.now() - 60_000) / 1000;
+    fs.utimesSync(lockPath, pastTimeSec, pastTimeSec);
+    assert.equal(
+      isLockFileStale(lockPath),
+      false,
+      'Case 25 (F1b): TS must NEVER treat a lock held by a live PID as stale even if age > 30s'
+    );
+    const pyLiveCheck = spawnSync(
+      'python3',
+      [
+        '-c',
+        `import sys; sys.path.insert(0, 'operations/scripts'); import approval_check; print(approval_check.is_lock_file_stale(${JSON.stringify(lockPath)}))`,
+      ],
+      { env: { ...process.env, AIBOSS_DATA_DIR: testDataDir }, encoding: 'utf-8' }
+    );
+    assert.equal(
+      pyLiveCheck.stdout.trim(),
+      'False',
+      'Case 25 (F1b): Python must NEVER treat a lock held by a live PID as stale even if age > 30s'
+    );
+    fs.unlinkSync(lockPath);
+
+    // 25b: Seed an orphan lock with a dead PID (99999999) and launch 2 concurrent child processes
+    // that both reclaim the stale lock, record `enter`, sleep 300ms inside the critical section, and record `exit`.
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, createdAt: Date.now() - 60_000 }),
+      'utf-8'
+    );
+    fs.writeFileSync(traceFile, '', 'utf-8');
+
+    const spawnLockWorker = (workerId) =>
+      new Promise((resolve, reject) => {
+        const script = `
+          import fs from 'node:fs';
+          import { withApprovalLock } from './src/lib/approvals-ledger.ts';
+          const trace = process.env.LOCK_TRACE_FILE;
+          const id = process.env.LOCK_WORKER_ID;
+          withApprovalLock(() => {
+            fs.appendFileSync(trace, \`enter:\${id}:\${Date.now()}\\n\`, 'utf-8');
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+            fs.appendFileSync(trace, \`exit:\${id}:\${Date.now()}\\n\`, 'utf-8');
+          });
+        `;
+        const child = spawn(
+          process.execPath,
+          ['--import', './tests/register.mjs', '--input-type=module', '-e', script],
+          {
+            cwd: process.cwd(),
+            env: {
+              ...process.env,
+              AIBOSS_DATA_DIR: testDataDir,
+              LOCK_TRACE_FILE: traceFile,
+              LOCK_WORKER_ID: workerId,
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          }
+        );
+        let stderr = '';
+        child.stderr.on('data', (d) => {
+          stderr += d.toString();
+        });
+        child.on('error', reject);
+        child.on('close', (code) => resolve({ code, stderr }));
+      });
+
+    const [w1, w2] = await Promise.all([spawnLockWorker('W1'), spawnLockWorker('W2')]);
+    assert.equal(w1.code, 0, `Worker W1 failed: ${w1.stderr}`);
+    assert.equal(w2.code, 0, `Worker W2 failed: ${w2.stderr}`);
+
+    const traceLines = fs
+      .readFileSync(traceFile, 'utf-8')
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    assert.equal(traceLines.length, 4, `Expected 4 trace events, got: ${JSON.stringify(traceLines)}`);
+    const actions = traceLines.map((l) => l.split(':')[0]);
+    assert.deepEqual(
+      actions,
+      ['enter', 'exit', 'enter', 'exit'],
+      `Case 25 (F1b): Critical sections overlapped during stale lock recovery! Trace: ${JSON.stringify(traceLines)}`
+    );
+    const leftoverLocks = fs
+      .readdirSync(getApprovalsDir())
+      .filter((f) => f.startsWith('.approvals.'));
+    assert.deepEqual(leftoverLocks, [], 'Case 25 (F1b): all lock/stale/reclaim files must be cleaned up');
+    console.log('  [PASS] Case 25 (F1b v03): atomic stale lock recovery serializes concurrent reclaimers (enter->exit->enter->exit) and protects live PIDs');
+
+    // Case 26 (F2a, F2b, F2c v03): Strict TS & Python parity on (a) non-string seatId,
+    // (b) 201-space note vs 150-emoji note, and (c) sub-millisecond timestamp truncation
+    const c26TsA = '2026-10-14T12:10:00Z';
+    const c26SeatA = '123';
+    const c26ToolA = 'Bash';
+    const c26ShaA = 'c26ac26ac26ac26ac26ac26ac26ac26ac26ac26ac26ac26ac26ac26ac26ac26a';
+    const reqC26A = computeRequestId(c26TsA, c26SeatA, c26ToolA, c26ShaA);
+
+    const c26TsB1 = '2026-10-14T12:10:01Z';
+    const c26SeatB1 = 'seat-c26-b1';
+    const c26ShaB1 = 'c261c261c261c261c261c261c261c261c261c261c261c261c261c261c261c261';
+    const reqC26B1 = computeRequestId(c26TsB1, c26SeatB1, c26ToolA, c26ShaB1);
+
+    const c26TsB2 = '2026-10-14T12:10:02Z';
+    const c26SeatB2 = 'seat-c26-b2';
+    const c26ShaB2 = 'c262c262c262c262c262c262c262c262c262c262c262c262c262c262c262c262';
+    const reqC26B2 = computeRequestId(c26TsB2, c26SeatB2, c26ToolA, c26ShaB2);
+
+    const c26TsC = '2026-10-14T12:10:03Z';
+    const c26SeatC = 'seat-c26-c';
+    const c26ShaC = 'c26cc26cc26cc26cc26cc26cc26cc26cc26cc26cc26cc26cc26cc26cc26cc26c';
+    const reqC26C = computeRequestId(c26TsC, c26SeatC, c26ToolA, c26ShaC);
+
+    const futureExpIso = new Date(Date.now() + 3600_000).toISOString();
+    const recentAtIso = new Date(Date.now() - 60_000).toISOString();
+
+    fs.appendFileSync(
+      todayPath,
+      [
+        // (a) Request for seat "123", approved, followed by execution with numeric seatId: 123
+        JSON.stringify({
+          ts: c26TsA,
+          seat: c26SeatA,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaA,
+          head60: 'curl -X POST https://api.example.com/c26a',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC26A,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+        }),
+        JSON.stringify({
+          type: 'execution',
+          requestId: reqC26A,
+          seatId: 123, // numeric! Must be rejected by isinstance(seatId, str) in Python and typeof in TS
+          at: recentAtIso,
+          result: 'executed',
+          digest: c26ShaA,
+        }),
+        // (b1) Decision with note of 201 spaces (untrimmed code points = 201 > 200 -> invalid decision in both)
+        JSON.stringify({
+          ts: c26TsB1,
+          seat: c26SeatB1,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaB1,
+          head60: 'curl -X POST https://api.example.com/c26b1',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC26B1,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+          note: ' '.repeat(201),
+        }),
+        // (b2) Decision with note of 150 astral emojis (150 Unicode code points <= 200, 300 UTF-16 code units -> valid in both)
+        JSON.stringify({
+          ts: c26TsB2,
+          seat: c26SeatB2,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaB2,
+          head60: 'curl -X POST https://api.example.com/c26b2',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC26B2,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+          note: '🙂'.repeat(150),
+        }),
+        // (c) Sub-millisecond timestamps within the same integer millisecond (.100900Z vs .100100Z)
+        JSON.stringify({
+          ts: c26TsC,
+          seat: c26SeatC,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaC,
+          head60: 'curl -X POST https://api.example.com/c26c',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC26C,
+          decision: 'approved',
+          by: 'owner',
+          at: '2026-10-14T12:10:05.100900Z',
+          expiresAt: futureExpIso,
+        }),
+        JSON.stringify({
+          type: 'execution',
+          requestId: reqC26C,
+          seatId: c26SeatC,
+          at: '2026-10-14T12:10:05.100100Z',
+          result: 'executed',
+          digest: c26ShaC,
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+
+    // Verify (a): numeric seatId: 123 ignored in both TS and Python -> remains approved
+    assert.equal(getApprovalById(reqC26A)?.status, 'approved', 'F2a: TS must ignore numeric seatId');
+    const pyC26A = runCheckCli(c26SeatA, c26ToolA, c26ShaA);
+    assert.equal(pyC26A.status, 0, 'F2a: Python must ignore numeric seatId (no str() coercion)');
+    assert.equal(pyC26A.body.status, 'approved');
+
+    // Verify (b1): 201 spaces in note rejected by both TS and Python -> remains pending
+    assert.equal(getApprovalById(reqC26B1)?.status, 'pending', 'F2b: TS must reject 201-space note');
+    const pyC26B1 = runCheckCli(c26SeatB1, c26ToolA, c26ShaB1);
+    assert.equal(pyC26B1.status, 2);
+    assert.equal(pyC26B1.body.status, 'pending', 'F2b: Python must reject 201-space note');
+
+    // Verify (b2): 150 emojis (150 code points <= 200) accepted by both TS and Python -> approved
+    assert.equal(getApprovalById(reqC26B2)?.status, 'approved', 'F2b: TS must count Unicode code points for emoji note');
+    const pyC26B2 = runCheckCli(c26SeatB2, c26ToolA, c26ShaB2);
+    assert.equal(pyC26B2.status, 0, 'F2b: Python must accept 150-emoji note');
+    assert.equal(pyC26B2.body.status, 'approved');
+
+    // Verify (c): sub-millisecond truncation (.100900Z vs .100100Z -> both 100ms) -> executed in both TS and Python
+    assert.equal(getApprovalById(reqC26C)?.status, 'executed', 'F2c: TS must accept execution in same integer ms');
+    const pyC26C = runCheckCli(c26SeatC, c26ToolA, c26ShaC);
+    assert.equal(pyC26C.status, 2);
+    assert.equal(pyC26C.body.status, 'executed', 'F2c: Python must truncate to integer ms and match TS');
+
+    // Also verify F2c same-ms request tie-break with an invalid line in between:
+    // R_tie_1 (.500900Z -> 500ms, approved) followed by invalid line, followed by R_tie_2 (.500100Z -> 500ms, pending)
+    // Both TS and Python must truncate both to 500ms and pick R_tie_2 (later order_index -> pending)
+    const c26SeatTie = 'seat-c26-tie';
+    const c26ShaTie = 'c26dc26dc26dc26dc26dc26dc26dc26dc26dc26dc26dc26dc26dc26dc26dc26d';
+    const tsTie1 = '2026-10-14T12:10:06.500900Z';
+    const tsTie2 = '2026-10-14T12:10:06.500100Z';
+    const reqTie1 = computeRequestId(tsTie1, c26SeatTie, c26ToolA, c26ShaTie);
+    const reqTie2 = computeRequestId(tsTie2, c26SeatTie, c26ToolA, c26ShaTie);
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: tsTie1,
+          seat: c26SeatTie,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaTie,
+          head60: 'curl -X POST https://api.example.com/tie1',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqTie1,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+        }),
+        '{"type":"decision","requestId":"invalid_line_between"}',
+        JSON.stringify({
+          ts: tsTie2,
+          seat: c26SeatTie,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaTie,
+          head60: 'curl -X POST https://api.example.com/tie2',
+          reason: 'external_post_send',
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+    const pyTie = runCheckCli(c26SeatTie, c26ToolA, c26ShaTie);
+    const tsTie = checkAndConsumeApproval({
+      seat: c26SeatTie,
+      tool: c26ToolA,
+      sha256: c26ShaTie,
+    });
+    assert.equal(pyTie.status, 2);
+    assert.equal(pyTie.body.requestId, reqTie2, 'F2c: Python must pick R_tie_2 on same-ms tie');
+    assert.equal(pyTie.body.status, 'pending');
+    assert.equal(tsTie.ok, false);
+    assert.equal(tsTie.requestId, reqTie2, 'F2c: TS must pick R_tie_2 on same-ms tie');
+    assert.equal(tsTie.status, 'pending');
+    console.log('  [PASS] Case 26 (F2a, F2b, F2c v03): TS & Python fold identically on strict string types, Unicode code points, and ms truncation');
+
+    // Case 27 (F4 v03): Select newest request for (seat, tool, sha256) BEFORE checking --request-id;
+    // passing --request-id of an older approved request R1 when newer R2 is pending returns status="superseded" (exit 2, 0 bytes written)
+    const c27Seat = 'seat-c27-f4';
+    const c27Tool = 'Bash';
+    const c27Sha = 'c270c270c270c270c270c270c270c270c270c270c270c270c270c270c270c270';
+    const c27TsR1 = '2026-10-14T13:00:00Z';
+    const c27TsR2 = '2026-10-14T13:05:00Z';
+    const reqC27R1 = computeRequestId(c27TsR1, c27Seat, c27Tool, c27Sha);
+    const reqC27R2 = computeRequestId(c27TsR2, c27Seat, c27Tool, c27Sha);
+
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        ts: c27TsR1,
+        seat: c27Seat,
+        tool: c27Tool,
+        host: 'api.example.com',
+        len: 64,
+        sha256: c27Sha,
+        head60: 'curl -X POST https://api.example.com/c27',
+        reason: 'external_post_send',
+      }) + '\n',
+      'utf-8'
+    );
+    recordApprovalDecision({
+      requestId: reqC27R1,
+      decision: 'approved',
+      by: 'owner',
+    });
+
+    // Append newer R2 (pending) for the same (seat, tool, sha256)
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        ts: c27TsR2,
+        seat: c27Seat,
+        tool: c27Tool,
+        host: 'api.example.com',
+        len: 64,
+        sha256: c27Sha,
+        head60: 'curl -X POST https://api.example.com/c27',
+        reason: 'external_post_send',
+      }) + '\n',
+      'utf-8'
+    );
+
+    const sizeBeforeC27 = fs.statSync(todayPath).size;
+    const pyC27 = runCheckCli(c27Seat, c27Tool, c27Sha, [
+      '--request-id',
+      reqC27R1,
+      '--consume',
+    ]);
+    assert.equal(pyC27.status, 2, 'Case 27 (F4): --request-id <older R1> must exit 2');
+    assert.equal(pyC27.body.status, 'superseded');
+    assert.equal(pyC27.body.requestId, reqC27R1);
+
+    const tsC27 = checkAndConsumeApproval({
+      seat: c27Seat,
+      tool: c27Tool,
+      sha256: c27Sha,
+      requestId: reqC27R1,
+    });
+    assert.equal(tsC27.ok, false);
+    assert.equal(tsC27.status, 'superseded');
+    assert.equal(tsC27.requestId, reqC27R1);
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeBeforeC27,
+      'Case 27 (F4): superseded check must write 0 bytes to ledger'
+    );
+    console.log('  [PASS] Case 27 (F4 v03): --request-id of older request returns status="superseded" (exit 2, 0 bytes written)');
+
+    // Case 28 (F5 v03): Identical ASCII-only ISO-8601 timestamp validation in TS and Python
+    const invalidTimestamps = [
+      '2026-02-30T00:00:00Z',
+      '2026-10-14T24:00:00Z',
+      '٢٠٢٦-10-14T00:00:00Z',
+    ];
+    for (const badTs of invalidTimestamps) {
+      assert.equal(
+        parseIsoTimestampMs(badTs),
+        null,
+        `Case 28 (F5): TS must reject invalid timestamp ${badTs}`
+      );
+      const pyBad = spawnSync(
+        'python3',
+        [
+          '-c',
+          `import sys; sys.path.insert(0, 'operations/scripts'); import approval_check; print(approval_check.parse_iso_ts_ms(${JSON.stringify(badTs)}))`,
+        ],
+        { encoding: 'utf-8' }
+      );
+      assert.equal(
+        pyBad.stdout.trim(),
+        'None',
+        `Case 28 (F5): Python must reject invalid timestamp ${badTs}`
+      );
+    }
+
+    const validTimestamps = [
+      '2026-10-14T19:46:42.818Z',
+      '2026-10-14T12:00:00+02:00',
+      '2026-10-14T12:00:00.123456Z',
+    ];
+    for (const goodTs of validTimestamps) {
+      const tsMs = parseIsoTimestampMs(goodTs);
+      assert.equal(typeof tsMs, 'number', `Case 28 (F5): TS must accept ${goodTs}`);
+      const pyGoodDirect = spawnSync(
+        'python3',
+        [
+          '-c',
+          `import sys; sys.path.insert(0, 'operations/scripts'); import approval_check; print(approval_check.parse_iso_ts_ms(${JSON.stringify(goodTs)}))`,
+        ],
+        { encoding: 'utf-8' }
+      );
+      assert.equal(
+        Number(pyGoodDirect.stdout.trim()),
+        tsMs,
+        `Case 28 (F5): TS and Python must produce identical ms epoch for ${goodTs}`
+      );
+    }
+    console.log('  [PASS] Case 28 (F5 v03): TS & Python reject 2026-02-30, 24:00:00, and Unicode digits, and match on valid ISO timestamps');
+
+    // Case 29 (F10 v03): O_APPEND atomic write prevents TS/Python from overwriting a concurrent H1 append
+    // that occurs right after fstatSync measures file size.
+    const c29Ts = '2026-10-14T14:00:00Z';
+    const c29Seat = 'seat-c29-f10';
+    const c29Tool = 'Bash';
+    const c29Sha = 'c290c290c290c290c290c290c290c290c290c290c290c290c290c290c290c290';
+    const reqC29 = computeRequestId(c29Ts, c29Seat, c29Tool, c29Sha);
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        ts: c29Ts,
+        seat: c29Seat,
+        tool: c29Tool,
+        host: 'api.example.com',
+        len: 64,
+        sha256: c29Sha,
+        head60: 'curl -X POST https://api.example.com/c29',
+        reason: 'external_post_send',
+      }) + '\n',
+      'utf-8'
+    );
+
+    const linesBeforeC29 = fs
+      .readFileSync(todayPath, 'utf-8')
+      .trim()
+      .split('\n')
+      .filter(Boolean).length;
+
+    const h1ConcurrentTs = '2026-10-14T14:00:01Z';
+    const h1ConcurrentSeat = 'seat-h1-concurrent';
+    const h1ConcurrentSha = 'f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f10f';
+    const reqH1Concurrent = computeRequestId(
+      h1ConcurrentTs,
+      h1ConcurrentSeat,
+      c29Tool,
+      h1ConcurrentSha
+    );
+
+    const origFstatSync = fs.fstatSync;
+    let injectedH1 = false;
+    fs.fstatSync = function (...args) {
+      const statRes = origFstatSync.apply(this, args);
+      if (!injectedH1) {
+        injectedH1 = true;
+        // Simulate guard_bulk_send.py (H1) appending concurrently via open(..., "a") right after fstatSync!
+        const h1Line = JSON.stringify({
+          ts: h1ConcurrentTs,
+          seat: h1ConcurrentSeat,
+          tool: c29Tool,
+          host: 'api.sendgrid.com',
+          len: 128,
+          sha256: h1ConcurrentSha,
+          head60: 'curl -X POST https://api.sendgrid.com/v3/mail/send',
+          reason: 'external_post_send',
+        });
+        spawnSync(
+          'python3',
+          [
+            '-c',
+            `with open(${JSON.stringify(todayPath)}, "a", encoding="utf-8") as f:\n    f.write(${JSON.stringify(h1Line)} + "\\n")\n    f.flush()`,
+          ],
+          { encoding: 'utf-8' }
+        );
+      }
+      return statRes;
+    };
+
+    try {
+      const decC29 = recordApprovalDecision({
+        requestId: reqC29,
+        decision: 'approved',
+        by: 'owner',
+      });
+      assert.equal(decC29.ok, true);
+    } finally {
+      fs.fstatSync = origFstatSync;
+    }
+
+    assert.equal(injectedH1, true, 'Case 29 (F10): H1 concurrent append injection must have fired');
+    const rawLinesAfterC29 = fs
+      .readFileSync(todayPath, 'utf-8')
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    assert.equal(
+      rawLinesAfterC29.length,
+      linesBeforeC29 + 2,
+      `Case 29 (F10): Expected ${linesBeforeC29 + 2} lines after concurrent H1 + TS append, got ${rawLinesAfterC29.length}`
+    );
+    const newLinesC29 = rawLinesAfterC29.slice(linesBeforeC29);
+    assert.equal(newLinesC29.length, 2, 'Case 29 (F10): exactly 2 new lines must be appended');
+    for (const line of newLinesC29) {
+      assert.doesNotThrow(() => JSON.parse(line), `Case 29 (F10): Corrupted JSONL line: ${line}`);
+    }
+    for (const line of rawLinesAfterC29) {
+      if (line.includes('truncated_frag')) continue; // Intentional partial tail from Case 17
+      assert.doesNotThrow(() => JSON.parse(line), `Case 29 (F10): Corrupted JSONL line: ${line}`);
+    }
+    assert.equal(getApprovalById(reqC29)?.status, 'approved');
+    assert.equal(
+      getApprovalById(reqH1Concurrent)?.status,
+      'pending',
+      'Case 29 (F10): Concurrent H1 request line must be preserved intact'
+    );
+    console.log('  [PASS] Case 29 (F10 v03): O_APPEND preserves concurrent H1 request line appended after fstatSync (n + 2 valid JSON lines)');
+
+    // Case 30 (F11 v03): Future decision.at (now < decision.at) -> status="not_yet_valid", exit 2, 0 claims written
+    const c30Ts = '2026-10-14T14:10:00Z';
+    const c30Seat = 'seat-c30-f11';
+    const c30Tool = 'Bash';
+    const c30Sha = 'c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300c300';
+    const reqC30 = computeRequestId(c30Ts, c30Seat, c30Tool, c30Sha);
+    const futureDecisionAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    const futureDecisionExp = new Date(Date.now() + 70 * 60_000).toISOString();
+
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: c30Ts,
+          seat: c30Seat,
+          tool: c30Tool,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c30Sha,
+          head60: 'curl -X POST https://api.example.com/c30',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqC30,
+          decision: 'approved',
+          by: 'owner',
+          at: futureDecisionAt,
+          expiresAt: futureDecisionExp,
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+
+    const sizeBeforeC30 = fs.statSync(todayPath).size;
+    const pyC30First = runCheckCli(c30Seat, c30Tool, c30Sha, ['--consume']);
+    assert.equal(pyC30First.status, 2, 'Case 30 (F11): future decision.at must exit 2');
+    assert.equal(pyC30First.body.status, 'not_yet_valid');
+
+    const pyC30Second = runCheckCli(c30Seat, c30Tool, c30Sha, ['--consume']);
+    assert.equal(pyC30Second.status, 2);
+    assert.equal(
+      pyC30Second.body.status,
+      'not_yet_valid',
+      'Case 30 (F11): second --consume must also report not_yet_valid (never claimed)'
+    );
+
+    const pyC30Mark = runMarkCli(reqC30, 'executed', 'run-c30');
+    assert.equal(pyC30Mark.status, 2);
+    assert.equal(pyC30Mark.body.status, 'not_yet_valid');
+
+    const tsC30 = checkAndConsumeApproval({
+      seat: c30Seat,
+      tool: c30Tool,
+      sha256: c30Sha,
+    });
+    assert.equal(tsC30.ok, false);
+    assert.equal(tsC30.status, 'not_yet_valid');
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeBeforeC30,
+      'Case 30 (F11): future decision.at must write 0 bytes to ledger'
+    );
+    console.log('  [PASS] Case 30 (F11 v03): future decision.at returns status="not_yet_valid" (exit 2) and writes 0 claims/executions');
+
+    // Case 31 (F6 v03): POST /api/approvals/<id>/decision with {"decision":"approved","note":null}
+    // or 201-space note returns HTTP 400 and leaves ledger byte size unchanged
+    const sizeBeforeC31 = fs.statSync(todayPath).size;
+    const nullNoteRes = await postDecisionRoute(
+      new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF6}/decision`, {
+        method: 'POST',
+        headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved', note: null }),
+      }),
+      { params: Promise.resolve({ requestId: reqF6 }) }
+    );
+    assert.equal(nullNoteRes.status, 400, 'Case 31 (F6): note: null must return HTTP 400');
+    const nullNoteJson = await nullNoteRes.json();
+    assert.equal(nullNoteJson.error, 'invalid_note');
+
+    const spaces201Res = await postDecisionRoute(
+      new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF6}/decision`, {
+        method: 'POST',
+        headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+        body: JSON.stringify({ decision: 'approved', note: ' '.repeat(201) }),
+      }),
+      { params: Promise.resolve({ requestId: reqF6 }) }
+    );
+    assert.equal(spaces201Res.status, 400, 'Case 31 (F6): 201 spaces in note must return HTTP 400');
+
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeBeforeC31,
+      'Case 31 (F6): note: null and 201-space note must write 0 bytes to ledger'
+    );
+    console.log('  [PASS] Case 31 (F6 v03): note: null and 201-space note return HTTP 400 with 0 bytes written');
+
+    // Case 32 (F12 v03): Direct test of exported TypeScript checkAndConsumeApproval function
+    const c32Ts = '2026-10-14T14:20:00Z';
+    const c32Seat = 'seat-c32-f12';
+    const c32Tool = 'Bash';
+    const c32Sha = 'c320c320c320c320c320c320c320c320c320c320c320c320c320c320c320c320';
+    const reqC32 = computeRequestId(c32Ts, c32Seat, c32Tool, c32Sha);
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        ts: c32Ts,
+        seat: c32Seat,
+        tool: c32Tool,
+        host: 'api.example.com',
+        len: 64,
+        sha256: c32Sha,
+        head60: 'curl -X POST https://api.example.com/c32',
+        reason: 'external_post_send',
+      }) + '\n',
+      'utf-8'
+    );
+
+    const c32Pending = checkAndConsumeApproval({
+      seat: c32Seat,
+      tool: c32Tool,
+      sha256: c32Sha,
+    });
+    assert.equal(c32Pending.ok, false);
+    assert.equal(c32Pending.status, 'pending');
+
+    recordApprovalDecision({
+      requestId: reqC32,
+      decision: 'approved',
+      by: 'owner',
+    });
+
+    const c32Consumed = checkAndConsumeApproval({
+      seat: c32Seat,
+      tool: c32Tool,
+      sha256: c32Sha,
+      requestId: reqC32,
+    });
+    assert.equal(c32Consumed.ok, true);
+    assert.equal(c32Consumed.status, 'approved');
+    assert.equal(c32Consumed.requestId, reqC32);
+    assert.ok(c32Consumed.claimId && c32Consumed.claimId.length === 16);
+
+    const sizeAfterFirstConsume = fs.statSync(todayPath).size;
+    const c32Second = checkAndConsumeApproval({
+      seat: c32Seat,
+      tool: c32Tool,
+      sha256: c32Sha,
+    });
+    assert.equal(c32Second.ok, false);
+    assert.equal(c32Second.status, 'claimed');
+    assert.equal(c32Second.claimId, c32Consumed.claimId);
+    assert.equal(
+      fs.statSync(todayPath).size,
+      sizeAfterFirstConsume,
+      'Case 32 (F12): second checkAndConsumeApproval must write 0 bytes'
+    );
+
+    const c32Exec = recordApprovalExecution({
+      requestId: reqC32,
+      result: 'executed',
+      claimId: c32Consumed.claimId,
+      runId: 'run-c32',
+      throwOnError: true,
+    });
+    assert.equal(c32Exec.ok, true);
+    assert.equal(c32Exec.status, 'executed');
+    assert.equal(getApprovalById(reqC32)?.status, 'executed');
+    console.log('  [PASS] Case 32 (F12 v03): exported TypeScript checkAndConsumeApproval atomically claims and pairs with recordApprovalExecution');
+
+    console.log('>>> ALL 32 A-4 v03 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

@@ -5,26 +5,26 @@ Usage:
   python3 operations/scripts/approval_mark.py --request-id <id> --result <executed|failed> [--claim-id <claimId>] [--run-id <runId>]
 
 Behavior:
-  - Acquires cross-process lock `<approvals_dir>/.approvals.lock` (O_CREAT | O_EXCL) across
-    read -> validate -> append (F1).
+  - Acquires cross-process lock `<approvals_dir>/.approvals.lock` (O_CREAT | O_EXCL via atomic link)
+    across read -> validate -> append (F1b).
   - Uses the unified fold and transition rules from `approval_check.py` / `approvals-ledger.ts` (F1, F2, F5).
-  - Refuses to record execution (exits 2) unless `requestId` has a valid `approved` decision
-    that is not expired (or has an active matching claim).
+  - Refuses to record execution (exits 2, 0 lines written) unless `requestId` has a valid `approved`
+    decision with `at <= now` (F11) and `now < expiresAt` (F1a) (or has an active matching claim).
   - When `--claim-id` is provided, verifies it matches the active `claim` on `requestId` (exits 2 on mismatch).
-  - Ensures safe JSONL line boundaries before appending (prepending `\\n` if the target file has a partial tail without newline) (F3).
+  - Uses `O_APPEND` for atomic single-write append and repairs partial tail line boundaries (F3, F10).
   - Idempotent when called again for the same already-executed request with matching result/claimId (exits 0 without duplicate append).
 """
 
 import argparse
 from datetime import datetime, timezone
 import json
-import os
 import sys
 import time
 from typing import Any, Dict, Optional
 
 from approval_check import (
     append_jsonl_safely,
+    current_utc_ms,
     get_approvals_dir,
     is_lock_disabled_for_test,
     load_folded_ledger,
@@ -63,6 +63,7 @@ def main() -> None:
 
     with with_approval_lock(approvals_dir):
         now_utc = datetime.now(timezone.utc)
+        now_ms = current_utc_ms(now_utc)
         entries = load_folded_ledger(approvals_dir, now_utc)
         entry = entries.get(req_id_target)
 
@@ -117,12 +118,21 @@ def main() -> None:
             )
             sys.exit(2)
 
-        exp_dt = dec.get("exp_dt")
-        at_dt = dec.get("at_dt")
-        if exp_dt is None or at_dt is None or now_utc < at_dt:
+        exp_ms = dec.get("exp_ms")
+        at_ms = dec.get("at_ms")
+        if exp_ms is None or at_ms is None:
             print(
                 json.dumps(
                     {"requestId": req_id_target, "status": "expired"}
+                )
+            )
+            sys.exit(2)
+
+        # F11: Future decision.at -> not_yet_valid, exit 2, 0 lines written
+        if now_ms < at_ms:
+            print(
+                json.dumps(
+                    {"requestId": req_id_target, "status": "not_yet_valid"}
                 )
             )
             sys.exit(2)
@@ -152,7 +162,8 @@ def main() -> None:
                     )
                 )
                 sys.exit(2)
-            if now_utc >= exp_dt:
+            # F1a: Expired -> exit 2, 0 lines written
+            if now_ms >= exp_ms:
                 print(
                     json.dumps(
                         {
