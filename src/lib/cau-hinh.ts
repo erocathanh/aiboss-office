@@ -24,7 +24,9 @@ function soThuc(ten: string, macDinh: number): number {
 
 export const CAU_HINH = {
   /** Đường dẫn lệnh claude. Đổi qua biến môi trường nếu máy khác. */
-  lenhClaude: process.env.DUONG_DAN_CLAUDE ?? 'claude',
+  get lenhClaude(): string {
+    return process.env.DUONG_DAN_CLAUDE ?? 'claude';
+  },
 
   /**
    * Thư mục làm việc của tiến trình claude con.

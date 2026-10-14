@@ -3,7 +3,7 @@ import { chayAgent } from '@/lib/chay-agent';
 import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, luuMetadataPhien } from '@/lib/doc-phien';
+import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, luuMetadataPhien, isViewerGoneGuardDisabledForTest } from '@/lib/doc-phien';
 import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
 import { generateRunOrWakeId, recordRun, updateRun } from '@/lib/runs-ledger';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
@@ -253,24 +253,38 @@ export async function POST(req: NextRequest) {
 
   let maPhienDaDung: string | null = maPhienCu;
   const runId = generateRunOrWakeId('run');
+  let viewerGone = false;
 
   const luong = new ReadableStream<Uint8Array>({
     async start(dieu) {
+      let childSpawned = false;
+      let daThoat = false;
+      let daCoLoi = false;
+
+      const guiSSE = (chunk: Uint8Array) => {
+        if (viewerGone) return;
+        try {
+          dieu.enqueue(chunk);
+        } catch {
+          if (!isViewerGoneGuardDisabledForTest()) {
+            viewerGone = true;
+          } else {
+            throw new Error('SSE enqueue error after client disconnected');
+          }
+        }
+      };
+
       // Nhịp giữ sống mỗi 20 giây (Cloudflare cắt kết nối rảnh ở 125 giây → 524).
       // Dòng bắt đầu bằng ':' là CHÚ THÍCH trong chuẩn SSE — trình duyệt bỏ qua.
       const nhip = setInterval(() => {
-        try { dieu.enqueue(new TextEncoder().encode(': nhip\n\n')); } catch { /* đã đóng */ }
+        guiSSE(new TextEncoder().encode(': nhip\n\n'));
       }, 20_000);
 
-      let daThoat = false;
-      let exitCodeThuc: number | null = null;
-      let daCoLoi = false;
-
       try {
-        dieu.enqueue(goi({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) }));
+        guiSSE(goi({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) }));
         // ⛔ Không im lặng: báo thẳng là đã mất bản ghi phiên cũ.
         if (matBanGhi) {
-          dieu.enqueue(goi({
+          guiSSE(goi({
             loai: 'mat-ban-ghi',
             thong_diep:
               'Không đọc được bản ghi phiên cũ (đã đo 2 lần) — lượt này mở PHIÊN MỚI. ' +
@@ -292,7 +306,7 @@ export async function POST(req: NextRequest) {
           const tra = traChuoi(maNhanSu, maPhienCu, cauHoi);
           if (tra) {
             cauGui = cauHoi + String.fromCharCode(10, 10) + tra.loi_dan;
-            dieu.enqueue(goi({
+            guiSSE(goi({
               loai: 'tra-chuoi', do_phu: tra.do_phu, so_tang: tra.so_tang,
               so_khop: tra.khop.length, tu_khoa: tra.tu_khoa,
             }));
@@ -324,6 +338,7 @@ export async function POST(req: NextRequest) {
           // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT.
           chayNen: true,
           khiSinh: (tien) => {
+            childSpawned = true;
             if (tien.pid) {
               try { updateRun(runId, { pid: tien.pid }); } catch { /* bỏ qua */ }
             }
@@ -349,7 +364,7 @@ export async function POST(req: NextRequest) {
                   costStatus: 'unpriced',
                 });
               } catch { /* bỏ qua */ }
-              dieu.enqueue(goi({
+              guiSSE(goi({
                 loai: 'loi',
                 thong_diep:
                   `Ô này ĐANG CHẠY một lượt khác (${ghi.ma_nhan_su_cu}, pid ${ghi.pid_cu}, ` +
@@ -362,10 +377,10 @@ export async function POST(req: NextRequest) {
             }
           },
           // ⚰️ Rút khỏi sổ ĐÚNG LÚC CON CHẾT và ghi nhận trạng thái cuối cùng vào runs-ledger.
+          // DUY NHẤT handler khiChet quyết định trạng thái cuối của run khi tiến trình con kết thúc.
           khiChet: (tien, ma, signal) => {
             xoaViec(maO, tien);
             daThoat = true;
-            exitCodeThuc = ma;
             const isClean = ma === 0 && !signal && !daCoLoi;
             const finalStatus = isClean ? 'finished' : 'failed';
             const errorKind = !isClean
@@ -395,41 +410,39 @@ export async function POST(req: NextRequest) {
               cwd: thuMucAgent(maNhanSu),
             });
             try { updateRun(runId, { sessionId: mau.ma_phien }); } catch { /* bỏ qua */ }
-            dieu.enqueue(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
+            // ⭐ Lưu metadata bền NGAY LẬP TỨC khi nhận được session ID (Hermes v2 finding 6)
+            try { luuMetadataPhien(maNhanSu, mau.ma_phien, cauHoi, runId); } catch { /* bỏ qua */ }
+            guiSSE(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
           } else if (mau.loai === 'chu') {
-            dieu.enqueue(goi({ loai: 'chu', chu: mau.chu }));
+            guiSSE(goi({ loai: 'chu', chu: mau.chu }));
           } else if (mau.loai === 'loi') {
             daCoLoi = true;
+            guiSSE(goi({ loai: 'loi', thong_diep: mau.thong_diep }));
+          } else if (mau.loai === 'xong') {
+            // ⛔ Không đẩy mã phiên ra trình duyệt. Chi phí thì cho xem để Owner canh tiền.
+            try { updateRun(runId, { costStatus: 'unpriced' }); } catch { /* bỏ qua */ }
+            guiSSE(goi({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token }));
+          }
+        }
+      } catch (e) {
+        if (!viewerGone) {
+          daCoLoi = true;
+          if (daThoat || !childSpawned) {
             try {
               updateRun(runId, {
                 status: 'failed',
-                errorKind: 'result_error',
                 finishedAt: new Date().toISOString(),
+                errorKind: 'result_error',
                 costStatus: 'unpriced',
                 ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
               });
             } catch { /* bỏ qua */ }
-            dieu.enqueue(goi({ loai: 'loi', thong_diep: mau.thong_diep }));
-          } else if (mau.loai === 'xong') {
-            // ⛔ Không đẩy mã phiên ra trình duyệt. Chi phí thì cho xem để Owner canh tiền.
-            try { updateRun(runId, { costStatus: 'unpriced' }); } catch { /* bỏ qua */ }
-            dieu.enqueue(goi({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token }));
+            updateSeatActivePid(maNhanSu, null);
           }
+          guiSSE(
+            goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
+          );
         }
-      } catch (e) {
-        daCoLoi = true;
-        try {
-          updateRun(runId, {
-            status: 'failed',
-            finishedAt: new Date().toISOString(),
-            errorKind: 'result_error',
-            costStatus: 'unpriced',
-            ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
-          });
-        } catch { /* bỏ qua */ }
-        dieu.enqueue(
-          goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
-        );
       } finally {
         traCho(maO);   // phòng ca chết TRƯỚC khi kịp sinh ⇒ khoá vẫn được nhả
         clearInterval(nhip);
@@ -449,31 +462,16 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Cập nhật trạng thái run:
-        // - Nếu tiến trình đã kết thúc (daThoat = true): ghi nhận kết quả thật dựa trên exitCodeThuc và daCoLoi
-        // - Nếu xảy ra lỗi (daCoLoi = true): ghi nhận 'failed'
-        // - Nếu người xem rời đi / hủy kết nối SSE mà tiến trình con còn chạy (chayNen: true):
-        //   KHÔNG được đánh dấu 'finished' sớm; giữ 'running', trạng thái cuối do khiChet ghi.
-        if (daThoat) {
-          const isClean = exitCodeThuc === 0 && !daCoLoi;
-          try {
-            updateRun(runId, {
-              status: isClean ? 'finished' : 'failed',
-              finishedAt: new Date().toISOString(),
-              exitCode: exitCodeThuc ?? (isClean ? 0 : 1),
-              costStatus: 'unpriced',
-              ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
-            });
-          } catch { /* bỏ qua */ }
-          updateSeatActivePid(maNhanSu, null);
-        } else if (daCoLoi) {
+        // ⭐ DUY NHẤT handler khiChet quyết định trạng thái cuối của run khi tiến trình con kết thúc.
+        // Ở finally: TUYỆT ĐỐI KHÔNG ghi 'failed' hay xoá activePid khi tiến trình con CÒN SỐNG (!daThoat).
+        // Chỉ ghi failed ở finally nếu tiến trình con thậm chí chưa từng được spawn (!childSpawned && daCoLoi).
+        if (!childSpawned && daCoLoi) {
           try {
             updateRun(runId, {
               status: 'failed',
               finishedAt: new Date().toISOString(),
               errorKind: 'result_error',
               costStatus: 'unpriced',
-              ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
             });
           } catch { /* bỏ qua */ }
           updateSeatActivePid(maNhanSu, null);
@@ -494,6 +492,9 @@ export async function POST(req: NextRequest) {
        * Chỉ ngừng ĐƯỜNG XEM; việc bên dưới chạy tiếp và tự ghi vào bản ghi phiên,
        * nên mở lại app là đọc được đầy đủ.
        */
+      if (!isViewerGoneGuardDisabledForTest()) {
+        viewerGone = true;
+      }
       dongMotLan();
     },
   });

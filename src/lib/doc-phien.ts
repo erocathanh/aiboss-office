@@ -77,10 +77,42 @@ export function khoPhienCua(maNhanSu: string): string {
   return path.join(gocKhoClaude(), maHoaDuongDan(thuMucAgent(maNhanSu)));
 }
 
-/** Trích xuất trường cwd từ vài dòng đầu của tệp transcript. */
+interface CwdCacheEntry {
+  mtimeMs: number;
+  size: number;
+  cwd: string | null;
+}
+
+const transcriptCwdCache = new Map<string, CwdCacheEntry>();
+
+export function xoaCacheCwd(): void {
+  transcriptCwdCache.clear();
+}
+
+let _enableLegacyPrefixFilterForTest = false;
+export function setLegacyPrefixFilterForTest(enabled: boolean): void {
+  _enableLegacyPrefixFilterForTest = enabled;
+}
+
+let _disableViewerGoneGuardForTest = false;
+export function setDisableViewerGoneGuardForTest(disabled: boolean): void {
+  _disableViewerGoneGuardForTest = disabled;
+}
+export function isViewerGoneGuardDisabledForTest(): boolean {
+  return _disableViewerGoneGuardForTest;
+}
+
+/** Trích xuất trường cwd từ vài dòng đầu của tệp transcript (có cache theo mtime + size). */
 export function layCwdTep(filePath: string): string | null {
   try {
+    const st = fs.statSync(filePath);
+    const cached = transcriptCwdCache.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+      return cached.cwd;
+    }
+
     const fd = fs.openSync(filePath, 'r');
+    let foundCwd: string | null = null;
     try {
       const buffer = Buffer.alloc(128 * 1024);
       const count = fs.readSync(fd, buffer, 0, buffer.length, 0);
@@ -93,17 +125,20 @@ export function layCwdTep(filePath: string): string | null {
         try {
           const parsed = JSON.parse(trimmed);
           if (typeof parsed?.cwd === 'string' && parsed.cwd.length > 0) {
-            return parsed.cwd;
+            foundCwd = parsed.cwd;
+            break;
           }
         } catch { /* bỏ qua dòng JSON lỗi */ }
       }
     } finally {
       fs.closeSync(fd);
     }
+
+    transcriptCwdCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, cwd: foundCwd });
+    return foundCwd;
   } catch {
     return null;
   }
-  return null;
 }
 
 /** Xác minh tệp transcript có đúng thuộc về ghế trong instance này không qua realpath(cwd). */
@@ -438,47 +473,27 @@ export function timCacKhoCuaGhe(maNhanSu: string): string[] {
   if (!fs.existsSync(gocKho)) return [];
 
   const ketQua = new Set<string>();
-  let tm = '';
-  try {
-    tm = thuMucAgent(sach);
-  } catch {
-    return [];
-  }
 
-  // 1. Thư mục mã hoá trực tiếp
-  const directPath = path.join(gocKho, maHoaDuongDan(tm));
-  if (fs.existsSync(directPath)) {
-    ketQua.add(directPath);
-  }
-
-  // 2. Đường thô chưa giải liên kết mềm
-  const ns = timNhanSu(sach);
-  if (ns?.thu_muc) {
-    const rawPath = path.join(gocKho, maHoaDuongDan(path.normalize(ns.thu_muc)));
-    if (fs.existsSync(rawPath)) {
-      ketQua.add(rawPath);
-    }
-  }
-
-  // 3. Quét các thư mục trong gocKho có prefix khớp hoặc danh sách thư mục nhỏ (như môi trường test)
   try {
     const entries = fs.readdirSync(gocKho, { withFileTypes: true });
-    const encodedPrefix = maHoaDuongDan(tm).slice(0, Math.min(40, maHoaDuongDan(tm).length));
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const dName = entry.name;
-      if (entries.length > 50 && !dName.startsWith(encodedPrefix)) {
-        continue;
+      if (_enableLegacyPrefixFilterForTest) {
+        let tm = '';
+        try { tm = thuMucAgent(sach); } catch { /* ignore */ }
+        const encodedPrefix = maHoaDuongDan(tm).slice(0, Math.min(40, maHoaDuongDan(tm).length));
+        if (entries.length > 50 && !entry.name.startsWith(encodedPrefix)) {
+          continue;
+        }
       }
-      const dirPath = path.join(gocKho, dName);
-      if (ketQua.has(dirPath)) continue;
-
+      const dirPath = path.join(gocKho, entry.name);
       try {
         const files = fs.readdirSync(dirPath).filter((f) => f.endsWith('.jsonl'));
-        if (files.length > 0) {
-          const sampleFile = path.join(dirPath, files[0]);
-          if (thuocVeGhe(sampleFile, sach)) {
+        for (const file of files) {
+          const filePath = path.join(dirPath, file);
+          if (thuocVeGhe(filePath, sach)) {
             ketQua.add(dirPath);
+            break;
           }
         }
       } catch { /* bỏ qua */ }
@@ -571,36 +586,49 @@ export function dsPhien(
   }
 
   // 2. Phát hiện các transcript cũ trong ~/.claude/projects/*/*.jsonl có cwd khớp ghế
-  const cacKho = timCacKhoCuaGhe(maNhanSu);
-  for (const kho of cacKho) {
-    if (!fs.existsSync(kho)) continue;
-    let entries: string[] = [];
+  // Quét MỌI thư mục con trong gốc kho Claude, KHÔNG lọc theo tên thư mục ở bất kỳ bước nào.
+  const gocKho = gocKhoClaude();
+  if (fs.existsSync(gocKho)) {
     try {
-      entries = fs.readdirSync(kho);
-    } catch {
-      continue;
-    }
+      const projectDirs = fs.readdirSync(gocKho, { withFileTypes: true });
+      for (const entry of projectDirs) {
+        if (!entry.isDirectory()) continue;
+        if (_enableLegacyPrefixFilterForTest) {
+          let tm = '';
+          try { tm = thuMucAgent(maNhanSu); } catch { /* ignore */ }
+          const encodedPrefix = maHoaDuongDan(tm).slice(0, Math.min(40, maHoaDuongDan(tm).length));
+          if (projectDirs.length > 50 && !entry.name.startsWith(encodedPrefix)) {
+            continue;
+          }
+        }
+        const dirPath = path.join(gocKho, entry.name);
+        let entries: string[] = [];
+        try {
+          entries = fs.readdirSync(dirPath);
+        } catch {
+          continue;
+        }
 
-    for (const t of entries) {
-      if (!t.endsWith('.jsonl')) continue;
-      const p = path.join(kho, t);
-      let st: fs.Stats;
-      try {
-        st = fs.statSync(p);
-      } catch {
-        continue;
-      }
-      if (!st.isFile() || st.size === 0) continue;
+        for (const t of entries) {
+          if (!t.endsWith('.jsonl')) continue;
+          const p = path.join(dirPath, t);
+          let st: fs.Stats;
+          try {
+            st = fs.statSync(p);
+          } catch {
+            continue;
+          }
+          if (!st.isFile() || st.size === 0) continue;
 
-      const ma = t.replace(/\.jsonl$/, '');
+          const ma = t.replace(/\.jsonl$/, '');
 
-      // Xác minh lại transcript có đúng thuộc về ghế này không
-      if (!thuocVeGhe(p, maNhanSu)) continue;
+          // Xác minh transcript thuộc về ghế qua in-memory cache của layCwdTep
+          if (!thuocVeGhe(p, maNhanSu)) continue;
 
-      const tonTai = banDo.get(ma);
-      if (tonTai && tonTai.transcript === 'found' && tonTai.moc >= st.mtimeMs && tonTai.size_bytes >= st.size) {
-        continue;
-      }
+          const tonTai = banDo.get(ma);
+          if (tonTai && tonTai.transcript === 'found' && tonTai.moc >= st.mtimeMs && tonTai.size_bytes >= st.size) {
+            continue;
+          }
 
       const trData = trichXuatTinCuoiVaSoLuot(p);
       const tinCuoi = trData.tinCuoi || tonTai?.tin_cuoi || '';
@@ -614,20 +642,24 @@ export function dsPhien(
         dang_chay = false;
       }
 
-      banDo.set(ma, {
-        ma,
-        started_at: tonTai?.started_at ?? (() => { try { return firstRecordedTimestamp(p, st.size); } catch { return null; } })(),
-        file_created_at: st.birthtimeMs > 0 ? st.birthtimeMs : (tonTai?.file_created_at ?? null),
-        size_bytes: st.size,
-        transcript: 'found',
-        moc: st.mtimeMs,
-        moc_doc: new Date(st.mtimeMs).toLocaleString('vi-VN', { hour12: false }),
-        tin_cuoi: tinCuoi.slice(0, 90),
-        so_luot: Math.max(1, soLuot),
-        dang_chay,
-      });
+        banDo.set(ma, {
+          ma,
+          started_at: tonTai?.started_at ?? (() => { try { return firstRecordedTimestamp(p, st.size); } catch { return null; } })(),
+          file_created_at: st.birthtimeMs > 0 ? st.birthtimeMs : (tonTai?.file_created_at ?? null),
+          size_bytes: st.size,
+          transcript: 'found',
+          moc: st.mtimeMs,
+          moc_doc: new Date(st.mtimeMs).toLocaleString('vi-VN', { hour12: false }),
+          tin_cuoi: tinCuoi.slice(0, 90),
+          so_luot: Math.max(1, soLuot),
+          dang_chay,
+        });
+      }
     }
+  } catch {
+    /* ignore readdir error */
   }
+}
 
   // 3. Quét thêm các phiên từ runs-ledger nếu có
   try {

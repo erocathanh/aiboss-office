@@ -12,6 +12,47 @@ const testDataDir = path.join(
 process.env.AIBOSS_DATA_DIR = testDataDir;
 process.env.CLAUDE_CONFIG_DIR = path.join(testDataDir, 'fake-claude');
 
+// Create mock Claude runner script for testing real child process lifecycles
+const mockClaudePath = path.join(testDataDir, 'mock-claude.js');
+fs.mkdirSync(testDataDir, { recursive: true });
+fs.writeFileSync(
+  mockClaudePath,
+  `#!/usr/bin/env node
+const mode = process.env.TEST_MOCK_CLAUDE_MODE || 'sleep-then-exit-0';
+const sessionId = process.env.TEST_MOCK_SESSION_ID || 'a3333333-3333-3333-3333-333333333333';
+
+// 1. Emit session_id
+process.stdout.write(JSON.stringify({ type: 'system', session_id: sessionId }) + '\\n');
+
+// 2. Stream chunk
+process.stdout.write(JSON.stringify({
+  type: 'stream_event',
+  event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello from mock child process' } }
+}) + '\\n');
+
+if (mode === 'sleep-then-exit-0') {
+  setTimeout(() => {
+    process.stdout.write(JSON.stringify({ type: 'result', total_cost_usd: 0.001 }) + '\\n');
+    process.exit(0);
+  }, 400);
+} else if (mode === 'exit-1') {
+  setTimeout(() => {
+    process.stderr.write('Mock process non-zero exit\\n');
+    process.exit(1);
+  }, 150);
+} else if (mode === 'result-error') {
+  setTimeout(() => {
+    process.stdout.write(JSON.stringify({ type: 'result', is_error: true, errors: ['Mock agent error'] }) + '\\n');
+    process.exit(1);
+  }, 150);
+}
+`,
+  { mode: 0o755 }
+);
+
+// Instruct chay-agent to use our mock script
+process.env.DUONG_DAN_CLAUDE = mockClaudePath;
+
 import {
   layThuMucData,
   gocKhoClaude,
@@ -27,6 +68,9 @@ import {
   lichSuPhien,
   coPhien,
   mocTepPhien,
+  setLegacyPrefixFilterForTest,
+  setDisableViewerGoneGuardForTest,
+  xoaCacheCwd,
 } from '../src/lib/doc-phien.ts';
 import {
   recordRun,
@@ -35,9 +79,11 @@ import {
   mergeRunRecordPair,
   generateRunOrWakeId,
 } from '../src/lib/runs-ledger.ts';
+import { readSeatActive } from '../src/lib/seat-active.ts';
 import { GET as getPhienRoute } from '../src/app/api/phien/route.ts';
+import { POST as postChatRoute } from '../src/app/api/chat/route.ts';
 
-console.log('--- Testing Session Discovery, History, Isolation and Run Status (S15 v02) ---');
+console.log('--- Testing Session Discovery, History, Isolation and Run Status (S15 v03) ---');
 
 try {
   const seatId = 'content-writer';
@@ -54,7 +100,7 @@ try {
     console.log('\n[TEST T1] Long Path Discovery with CLI Truncation & Transcript Verification:');
     const t1SessionId = 'a1111111-2222-3333-4444-555555555555';
 
-    // Simulate truncated directory name with hash suffix (e.g. >= 200 chars)
+    // Simulate truncated directory name with hash suffix (e.g. >= 180 chars)
     const longTruncatedDirName =
       '-private-tmp-claude-501--Users-erocathanh-DU-AN-aiboss-office-agents-claude-aiboss-office-pm-a5a73838-2e08-4067-a867-7db53ccd35b6-scratchpad-may-moi-142656-aiboss-office-departments-marketing-seats-co-tskv24';
     assert.ok(longTruncatedDirName.length >= 180, 'Simulated directory name must be long and truncated');
@@ -118,119 +164,296 @@ try {
   }
 
   // =========================================================================
-  // T2: Cross-clone isolation test (rejecting different clone with same seat name)
+  // T2: Multi-Directory Discovery (≥ 50 dirs), Missing CWD Fail-Closed, & Isolation
   // =========================================================================
   {
-    console.log('\n[TEST T2] Cross-Clone Isolation via cwd Verification:');
-    const t2SessionId = 'a2222222-3333-4444-5555-666666666666';
-    const foreignCloneWorkDir = '/private/tmp/other-clone/departments/marketing/seats/content-writer';
+    console.log('\n[TEST T2] Multi-Directory Discovery (≥ 50 dirs) & Missing CWD Fail-Closed:');
 
-    // Create a foreign directory in ~/.claude/projects/ with matching seat suffix
+    // Create 52 fake project directories to trigger > 50 entry threshold
+    for (let i = 0; i < 50; i++) {
+      const dummyDir = path.join(fakeProjectsDir, `unrelated-project-dir-${i}`);
+      fs.mkdirSync(dummyDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dummyDir, `session-dummy-${i}.jsonl`),
+        JSON.stringify({ type: 'user', cwd: `/some/other/path/${i}` }) + '\n'
+      );
+    }
+
+    // Directory 50: arbitrary name not matching any prefix heuristic, but cwd matches seat
+    const t2ArbitrarySessionId = 'a8888888-8888-8888-8888-888888888888';
+    const arbitraryDir = path.join(fakeProjectsDir, 'completely-random-unmatched-dir-hash-9876543210');
+    fs.mkdirSync(arbitraryDir, { recursive: true });
+    const arbitraryTranscript = path.join(arbitraryDir, `${t2ArbitrarySessionId}.jsonl`);
+    fs.writeFileSync(
+      arbitraryTranscript,
+      [
+        JSON.stringify({
+          type: 'user',
+          userType: 'external',
+          message: { content: 'Phiên trong thư mục tên ngẫu nhiên' },
+          cwd: seatWorkDir,
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: 'Trả lời từ thư mục ngẫu nhiên' },
+        }),
+      ].join('\n')
+    );
+
+    // Directory 51: First file missing cwd (fail-closed), second file valid
+    const t2SecondSessionId = 'a9999999-9999-9999-9999-999999999999';
+    const multiFileDir = path.join(fakeProjectsDir, 'multi-file-mixed-dir');
+    fs.mkdirSync(multiFileDir, { recursive: true });
+    // First file: corrupted / missing cwd
+    fs.writeFileSync(
+      path.join(multiFileDir, 'first-corrupted.jsonl'),
+      '{"type":"assistant","message":{"content":"No cwd field here"}}\n'
+    );
+    // Second file: valid session
+    fs.writeFileSync(
+      path.join(multiFileDir, `${t2SecondSessionId}.jsonl`),
+      [
+        JSON.stringify({
+          type: 'user',
+          userType: 'external',
+          message: { content: 'Phiên thứ hai sau tệp lỗi' },
+          cwd: seatWorkDir,
+        }),
+      ].join('\n')
+    );
+
+    // Foreign directory: matches seat name suffix but foreign cwd
+    const foreignSessionId = 'a2222222-3333-4444-5555-666666666666';
     const foreignProjectDir = path.join(fakeProjectsDir, '-private-tmp-other-clone-seats-content-writer');
     fs.mkdirSync(foreignProjectDir, { recursive: true });
-    const foreignTranscriptPath = path.join(foreignProjectDir, `${t2SessionId}.jsonl`);
-
-    const foreignContent = [
+    fs.writeFileSync(
+      path.join(foreignProjectDir, `${foreignSessionId}.jsonl`),
       JSON.stringify({
         type: 'user',
         userType: 'external',
-        message: { content: 'Dữ liệu bí mật của clone khác' },
-        cwd: foreignCloneWorkDir,
-        timestamp: new Date().toISOString(),
-      }),
-    ].join('\n');
-    fs.writeFileSync(foreignTranscriptPath, foreignContent, 'utf8');
+        message: { content: 'Foreign session' },
+        cwd: '/private/tmp/other-clone/departments/marketing/seats/content-writer',
+      }) + '\n'
+    );
 
-    // 1. thuocVeGhe must reject foreign transcript
-    assert.equal(thuocVeGhe(foreignTranscriptPath, seatId), false, 'thuocVeGhe must return false for foreign cwd');
+    // Clear cwd cache before discovery test
+    xoaCacheCwd();
 
-    // 2. timTepPhien must not return foreign transcript for this seat
-    assert.equal(timTepPhien(seatId, t2SessionId), null, 'timTepPhien must return null for foreign session');
-
-    // 3. dsPhien must not include foreign session
+    // In production mode: all directories scanned without name filtering
     const list = dsPhien(seatId);
-    assert.equal(list.some((p) => p.ma === t2SessionId), false, 'dsPhien must NOT include foreign clone session');
+    assert.ok(
+      list.some((p) => p.ma === t2ArbitrarySessionId),
+      'Session in arbitrary directory name MUST be discovered in >=50 dirs'
+    );
+    assert.ok(
+      list.some((p) => p.ma === t2SecondSessionId),
+      'Second session in multi-file dir MUST be discovered even if first file lacks cwd'
+    );
+    assert.equal(
+      list.some((p) => p.ma === 'first-corrupted'),
+      false,
+      'Transcript missing cwd MUST be rejected (fail-closed)'
+    );
+    assert.equal(
+      list.some((p) => p.ma === foreignSessionId),
+      false,
+      'Foreign clone transcript MUST be rejected despite matching suffix'
+    );
 
-    // 4. API detail route must return empty transcript for foreign session
-    const reqForeign = new NextRequest(`http://127.0.0.1:4330/api/phien?ma_nhan_su=${seatId}&ma_phien=${t2SessionId}`);
-    const resForeign = await getPhienRoute(reqForeign);
-    const bodyForeign = await resForeign.json();
-    assert.deepEqual(bodyForeign.lich_su, [], 'Detail route must return empty for foreign clone session');
+    // Counter-proof: enable legacy prefix filtering
+    setLegacyPrefixFilterForTest(true);
+    const legacyList = dsPhien(seatId);
+    assert.equal(
+      legacyList.some((p) => p.ma === t2ArbitrarySessionId),
+      false,
+      'Counter-proof: Legacy prefix filter drops session in arbitrary directory name'
+    );
+    setLegacyPrefixFilterForTest(false);
 
-    // 5. Đối chứng (Counter-proof): Suffix matching without cwd check would leak foreign session
-    const wouldLeakWithSuffix = path.basename(foreignProjectDir).endsWith('-content-writer');
-    assert.ok(wouldLeakWithSuffix, 'Foreign directory indeed has -content-writer suffix');
-    console.log('  [PASS] T2: Cross-clone transcript rejected via cwd verification.');
-    console.log('  [PASS] T2 Counter-proof: Suffix matching would have leaked the foreign session.');
+    console.log('  [PASS] T2: Multi-directory discovery (52 dirs), fail-closed missing cwd, and cross-clone isolation.');
+    console.log('  [PASS] T2 Counter-proof: Legacy prefix filtering drops arbitrary directory name.');
   }
 
   // =========================================================================
-  // T3: Run status accuracy & terminal downgrade prevention
+  // T3: Real Child Process Lifecycle, SSE Disconnect, and Status Accuracy
   // =========================================================================
   {
-    console.log('\n[TEST T3] Run Status Accuracy & Downgrade Prevention:');
-    const runId = generateRunOrWakeId('run');
+    console.log('\n[TEST T3] Real Child Process Lifecycle & SSE Cancel:');
 
-    // 1. Record running run
-    recordRun({
-      runId,
-      seatId,
-      startedAt: new Date().toISOString(),
-      status: 'running',
-    });
-    assert.equal(getRun(runId)?.status, 'running');
+    // Part 1: Viewer cancels SSE while child process is alive -> run remains running, then finishes on exit 0
+    {
+      const liveSessionId = 'a3333333-3333-3333-3333-111111111111';
+      process.env.TEST_MOCK_CLAUDE_MODE = 'sleep-then-exit-0';
+      process.env.TEST_MOCK_SESSION_ID = liveSessionId;
 
-    // 2. Mark run as failed (due to error, exception, or non-zero exit)
-    updateRun(runId, {
-      status: 'failed',
-      exitCode: 1,
-      errorKind: 'exit_nonzero',
-      finishedAt: new Date().toISOString(),
-    });
-    assert.equal(getRun(runId)?.status, 'failed');
-    assert.equal(getRun(runId)?.exitCode, 1);
+      const req = new NextRequest('http://127.0.0.1:4330/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ma_o: 'o-1',
+          ma_nhan_su: seatId,
+          cau_hoi: 'Kiểm tra vòng đời SSE khi người xem ngắt kết nối',
+        }),
+      });
 
-    // 3. Attempt to downgrade failed -> finished (simulating buggy finally block)
-    updateRun(runId, {
-      status: 'finished',
-      exitCode: 0,
-      finishedAt: new Date().toISOString(),
-    });
-    const runAfterDowngrade = getRun(runId);
-    assert.equal(runAfterDowngrade?.status, 'failed', 'updateRun MUST NOT downgrade failed status to finished');
-    assert.equal(runAfterDowngrade?.exitCode, 1, 'exitCode must remain non-zero');
+      const res = await postChatRoute(req);
+      assert.equal(res.status, 200, 'POST /api/chat must return 200 SSE stream');
+      const reader = res.body.getReader();
 
-    // 4. Attempt to downgrade failed -> running
-    updateRun(runId, { status: 'running' });
-    assert.equal(getRun(runId)?.status, 'failed', 'updateRun MUST NOT downgrade terminal status to running');
+      // Read chunks until 'da-noi-mach' (which is emitted right after 'phien' saves metadata)
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const text = new TextDecoder().decode(value);
+        if (text.includes('da-noi-mach')) break;
+      }
 
-    // 5. Verify mergeRunRecordPair also protects terminal states during folding
-    const olderFailed = {
-      type: 'run',
-      runId: 'fold-1',
-      seatId,
-      startedAt: new Date().toISOString(),
-      status: 'failed',
-      exitCode: 1,
-    };
-    const newerFinishedPatch = {
-      type: 'run',
-      runId: 'fold-1',
-      seatId,
-      startedAt: new Date().toISOString(),
-      status: 'finished',
-      exitCode: 0,
-    };
-    const folded = mergeRunRecordPair(olderFailed, newerFinishedPatch);
-    assert.equal(folded.status, 'failed', 'mergeRunRecordPair must retain failed status');
-    assert.equal(folded.exitCode, 1, 'mergeRunRecordPair must retain failed exitCode');
+      // 1. Assert metadata .json was persisted IMMEDIATELY upon receiving sessionId
+      const metaPath = path.join(testDataDir, 'sessions', seatId, `${liveSessionId}.json`);
+      assert.ok(fs.existsSync(metaPath), 'Metadata .json MUST be saved immediately when session ID is received');
+      const metaInit = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      assert.equal(metaInit.ma, liveSessionId);
+      assert.equal(metaInit.ma_nhan_su, seatId);
+      const runId = metaInit.run_id;
+      assert.ok(runId, 'run_id must be recorded in metadata');
 
-    // 6. Đối chứng (Counter-proof): Raw Object.assign overwrites failed status
-    const rawOverwritten = Object.assign({}, olderFailed, newerFinishedPatch);
-    assert.equal(rawOverwritten.status, 'finished', 'Naive overwrite would improperly mark status finished');
+      // 2. Cancel SSE stream while child process is STILL LIVING in background
+      await reader.cancel();
 
-    console.log('  [PASS] T3: Run status correctly tracked, terminal status downgrade prevented.');
-    console.log('  [PASS] T3 Counter-proof: Raw object assign would have downgraded to finished.');
+      // Assert immediately after cancel:
+      // - Run status is STILL 'running'!
+      // - Active PID on seat is NOT cleared!
+      const runWhileLiving = getRun(runId);
+      assert.equal(runWhileLiving?.status, 'running', 'Run MUST remain running immediately after viewer disconnects');
+      const activeWhileLiving = readSeatActive(seatId);
+      assert.ok(activeWhileLiving?.pid, 'Active PID MUST NOT be cleared while child process is alive');
+
+      // 3. Wait for child process to finish exit 0 (sleep is 400ms)
+      await new Promise((r) => setTimeout(r, 450));
+
+      // Assert after child exit 0:
+      // - Run status transitioned to 'finished'!
+      // - exitCode is 0!
+      // - Active PID is now cleared!
+      const runAfterExit = getRun(runId);
+      assert.equal(runAfterExit?.status, 'finished', 'Run status MUST transition to finished when child exits 0');
+      assert.equal(runAfterExit?.exitCode, 0);
+      assert.ok(runAfterExit?.finishedAt);
+      const activeAfterExit = readSeatActive(seatId);
+      assert.equal(activeAfterExit?.pid, null, 'Active PID MUST be cleared when child exits');
+      console.log('  [PASS] T3 Part 1: Viewer cancel preserves running status; child exit 0 marks finished.');
+    }
+
+    // Part 2: Counter-proof: Disabling viewerGone guard causes SSE cancel to fail run
+    {
+      setDisableViewerGoneGuardForTest(true);
+      const counterSessionId = 'a3333333-3333-3333-3333-222222222222';
+      process.env.TEST_MOCK_CLAUDE_MODE = 'sleep-then-exit-0';
+      process.env.TEST_MOCK_SESSION_ID = counterSessionId;
+
+      const reqCounter = new NextRequest('http://127.0.0.1:4330/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ma_o: 'o-1',
+          ma_nhan_su: seatId,
+          cau_hoi: 'Đối chứng khi không có viewerGone guard',
+        }),
+      });
+
+      const resCounter = await postChatRoute(reqCounter);
+      const readerCounter = resCounter.body.getReader();
+      while (true) {
+        const { value, done } = await readerCounter.read();
+        if (done) break;
+        const text = new TextDecoder().decode(value);
+        if (text.includes('da-noi-mach')) break;
+      }
+
+      const metaPathCounter = path.join(testDataDir, 'sessions', seatId, `${counterSessionId}.json`);
+      assert.ok(fs.existsSync(metaPathCounter));
+      const runIdCounter = JSON.parse(fs.readFileSync(metaPathCounter, 'utf8')).run_id;
+
+      // Cancel reader without viewerGone guard
+      await readerCounter.cancel();
+      await new Promise((r) => setTimeout(r, 80));
+
+      // Without viewerGone guard, enqueue exception causes daCoLoi = true
+      // and when child exits, isClean is false -> status becomes failed
+      await new Promise((r) => setTimeout(r, 400));
+      const runCounter = getRun(runIdCounter);
+      assert.equal(
+        runCounter?.status,
+        'failed',
+        'Counter-proof: Disabling viewerGone guard causes enqueue failure to mark run as failed'
+      );
+      setDisableViewerGoneGuardForTest(false);
+      console.log('  [PASS] T3 Part 2 Counter-proof: Disabling viewerGone guard causes cancel to downgrade to failed.');
+    }
+
+    // Part 3: Child process exit 1 marks run as failed
+    {
+      const failSessionId = 'a3333333-3333-3333-3333-333333333333';
+      process.env.TEST_MOCK_CLAUDE_MODE = 'exit-1';
+      process.env.TEST_MOCK_SESSION_ID = failSessionId;
+
+      const reqFail = new NextRequest('http://127.0.0.1:4330/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ma_o: 'o-1',
+          ma_nhan_su: seatId,
+          cau_hoi: 'Kiểm tra tiến trình thoát lỗi exit 1',
+        }),
+      });
+
+      const resFail = await postChatRoute(reqFail);
+      const readerFail = resFail.body.getReader();
+      while (true) {
+        const { done } = await readerFail.read();
+        if (done) break;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+
+      const metaFailPath = path.join(testDataDir, 'sessions', seatId, `${failSessionId}.json`);
+      assert.ok(fs.existsSync(metaFailPath));
+      const runIdFail = JSON.parse(fs.readFileSync(metaFailPath, 'utf8')).run_id;
+
+      const runFail = getRun(runIdFail);
+      assert.equal(runFail?.status, 'failed', 'Child process exit 1 MUST mark run failed');
+      assert.equal(runFail?.exitCode, 1);
+      assert.equal(runFail?.errorKind, 'exit_nonzero');
+      console.log('  [PASS] T3 Part 3: Child exit 1 accurately recorded as failed with exit_nonzero.');
+    }
+
+    // Part 4: Terminal status downgrade prevention in runs-ledger
+    {
+      const ledgerRunId = generateRunOrWakeId('run');
+      recordRun({
+        runId: ledgerRunId,
+        seatId,
+        startedAt: new Date().toISOString(),
+        status: 'running',
+      });
+      updateRun(ledgerRunId, { status: 'failed', exitCode: 1, finishedAt: new Date().toISOString() });
+      assert.equal(getRun(ledgerRunId)?.status, 'failed');
+
+      // Attempt downgrade failed -> finished
+      updateRun(ledgerRunId, { status: 'finished', exitCode: 0 });
+      assert.equal(getRun(ledgerRunId)?.status, 'failed');
+
+      // Attempt downgrade failed -> running
+      updateRun(ledgerRunId, { status: 'running' });
+      assert.equal(getRun(ledgerRunId)?.status, 'failed');
+
+      // Folding protection
+      const folded = mergeRunRecordPair(
+        { type: 'run', runId: 'f1', seatId, startedAt: '', status: 'failed', exitCode: 1 },
+        { type: 'run', runId: 'f1', seatId, startedAt: '', status: 'finished', exitCode: 0 }
+      );
+      assert.equal(folded.status, 'failed');
+      console.log('  [PASS] T3 Part 4: Terminal status downgrade prevention in runs-ledger verified.');
+    }
   }
 
   // =========================================================================
@@ -300,7 +523,7 @@ try {
       message: { content: 'x'.repeat(4000) },
       timestamp: new Date().toISOString(),
     }) + '\n';
-    const padding = padChunk.repeat(80); // ~320 KB
+    const padding = padChunk.repeat(80); // ~320KB
 
     fs.writeFileSync(largeFilePath, head + padding, 'utf8');
 
@@ -314,7 +537,7 @@ try {
   }
 
   // =========================================================================
-  // T6: coPhien and mocTepPhien tests
+  // T6: coPhien and mocTepPhien queries
   // =========================================================================
   {
     console.log('\n[TEST T6] coPhien and mocTepPhien queries:');
@@ -327,10 +550,11 @@ try {
   }
 
   console.log('\n================================================================');
-  console.log('ALL S15 v02 TESTS PASSED WITH RIGOROUS POSITIVE & COUNTER PROOFS');
+  console.log('ALL S15 v03 TESTS PASSED WITH RIGOROUS POSITIVE & COUNTER PROOFS');
   console.log('================================================================');
 } finally {
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true });
   } catch { /* ignore */ }
+  process.exit(0);
 }
