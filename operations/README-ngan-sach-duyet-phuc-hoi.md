@@ -118,3 +118,52 @@ Tài liệu kỹ thuật giải pháp A-3 (Budget Hold & Daily Caps) cho hệ th
     * `fallbackStartTimeForTest` (`AIBOSS_TEST_FALLBACK_START_TIME=1`): Dùng cho đối chứng dương Khe ④C: khôi phục fallback `|| now` để chứng minh chủ sống bị chiếm đoạt mutex.
   + **Ràng buộc thời hạn Lease:** Thao tác reclaim chỉ được phép diễn ra khi đồng thời thoả mãn: tiến trình chủ cũ đã chết thật sự (`liveness === 'dead'`) VÀ thời hạn lease đã hết (`now >= leaseExpiresAt`).
   + **Thu hồi nguyên tử qua POSIX `rename` đè tệp:** Tuyệt đối không bao giờ xoá tệp khoá trước khi ghi mới, bảo đảm đường dẫn `.instance.lock` không bao giờ bị gián đoạn hay để hở khoảng trống TOCTOU cho bên thứ ba.
+
+---
+
+## 4. Khởi Động Lại Sau Crash & Chờ Hết Hạn Lease (Crash Restart & Finite Lease Wait) — A-3 v14
+
+Trong môi trường quản lý tiến trình tự động (như `launchd` trên macOS hoặc `systemd` trên Linux), khi một tiến trình máy chủ bị crash hoặc tắt đột ngột (ví dụ qua `SIGKILL` hoặc khởi động lại dịch vụ), máy chủ mới có thể được khởi động lại ngay lập tức (trong vòng 1–2 giây) trên cùng thư mục dữ liệu (`AIBOSS_DATA_DIR`).
+
+Tại thời điểm máy chủ mới khởi động:
+- Tệp khoá `.instance.lock` của máy chủ cũ vẫn còn trên đĩa.
+- Chủ khoá cũ đã chết thực tế (`checkProcessLiveness` trả về `'dead'`).
+- Nhưng thời hạn thuê khoá (`leaseExpiresAt`) của chủ cũ có thể vẫn còn hiệu lực trong vài giây tiếp theo (`DEFAULT_INSTANCE_LEASE_MS = 6000` ms, tức 6 giây).
+
+### 4.1. Phân loại lý do từ chối khoá (`AcquireInstanceLockResult.reason`)
+Hàm `acquireInstanceLock(dataDir)` trả về kết quả cấu trúc kèm `reason` và `retryAfterMs`:
+1. `'alive'`: Chủ khoá cũ đang chạy thực tế trên máy chủ (`checkProcessLiveness` trả về `alive`).
+   - *Hành vi:* Ném lỗi ngay lập tức trong vòng $\le 1$ giây, tuyệt đối không chờ. Điều này bảo đảm việc chạy hai máy chủ thật đồng thời trên cùng thư mục dữ liệu bị chặn đứng ngay lập tức với thông báo lỗi to.
+2. `'lease_pending'`: Chủ khoá cũ đã chết (`dead`), nhưng thời hạn lease chưa kết thúc (`now < leaseExpiresAt`).
+   - *Hành vi:* Đi kèm `retryAfterMs = leaseExpiresAt - now`. Đây là trạng thái an toàn để tiến trình mới chờ và thu hồi khoá sau khi lease kết thúc.
+3. `'unverified'`: Trạng thái tạm thời khi truy vấn hệ điều hành (`ps`) chưa xác định được thời gian tiến trình.
+   - *Hành vi:* Chờ và thử lại ngắn hạn.
+4. `'contended'`: Tranh chấp lock hoặc mutex tạm thời giữa các tiến trình đang khởi động.
+   - *Hành vi:* Chờ và thử lại ngắn hạn.
+5. `'config_error'`: Tiến trình mới không thể xác định thời điểm bắt đầu của chính mình từ hệ điều hành.
+   - *Hành vi:* Từ chối khởi động ngay lập tức (fail-closed).
+
+### 4.2. Cơ chế chờ có giới hạn trong `startOfficeRunner` (`INSTANCE_LOCK_STARTUP_WAIT_MS = 16000`)
+- **Vấn đề trên Next.js:** Khi Next.js chạy hook khởi động `register()` trong `src/instrumentation.ts`, nếu hook ném ngoại lệ không xử lý, Next.js đánh dấu chuẩn bị máy chủ thất bại và phục vụ HTTP 500 cho mọi yêu cầu kế tiếp mà không tự hồi phục.
+- **Giải pháp:** `startOfficeRunner` thực hiện vòng lặp chờ và thử lại mỗi 500ms:
+  - Nếu gặp `lease_pending`, `contended`, hoặc `unverified`, tiến trình chờ cho đến khi lease của chủ cũ hết hạn hoặc tối đa `INSTANCE_LOCK_STARTUP_WAIT_MS = 16000` ms (16 giây = 6 giây lease tối đa + 10 giây dự phòng cho độ trễ hệ thống và I/O).
+  - Ngay khi lease hết hạn, thao tác reclaim nguyên tử thu hồi quyền sở hữu khoá cho tiến trình mới và máy chủ khởi động thành công.
+  - Nếu gặp `alive` hoặc `config_error`, hàm ném lỗi ngay lập tức mà không chờ.
+  - Nếu sau 16 giây vẫn không cấp được khoá, hàm ném lỗi fatal như cũ (ngăn chặn treo tiến trình vô hạn).
+
+### 4.3. Bảo vệ API trong giai đoạn chờ khởi động: HTTP 503 `runner_starting`
+- Trong thời gian `startOfficeRunner` đang chờ thu hồi khoá khởi động, hàm `getIsRunnerStarting()` trả về `true`.
+- Các route API chính của hệ thống (`GET /api/budget`, `GET /api/danh-thuc`, `POST /api/danh-thuc`) kiểm tra `getIsRunnerStarting()` ở đầu hàm và trả về HTTP 503:
+  ```json
+  {
+    "error": "runner_starting",
+    "message": "Office runner is starting up and waiting for startup lock."
+  }
+  ```
+- Cơ chế này thay thế hoàn toàn lỗi HTTP 500 fatal bằng phản hồi 503 tạm thời chuẩn HTTP, báo cho client và hệ thống giám sát biết máy chủ đang trong quá trình chuyển tiếp khởi động an toàn.
+
+### 4.4. Công tắc đối chứng dương và an toàn môi trường Production
+- Để kiểm thử và đối chứng tự động, hệ thống cung cấp công tắc `__testHooks.disableStartupWait` và biến môi trường `AIBOSS_TEST_DISABLE_STARTUP_WAIT=1`.
+- Khi kích hoạt công tắc này trong kiểm thử (`NODE_ENV === 'test'`), tiến trình mới sẽ không chờ mà ném lỗi ngay khi gặp `lease_pending`, chứng minh rõ ràng sự cần thiết của cơ chế chờ.
+- **Bảo vệ Production:** Hàm `isStartupWaitDisabledForTest()` luôn trả về `false` vô điều kiện khi `process.env.NODE_ENV === 'production'`, bảo đảm công tắc kiểm thử hoàn toàn bất hoạt trong môi trường vận hành thực tế.
+

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getBudgetStatus } from '@/lib/budget-ledger';
 import { getOfficeConfig } from '@/lib/office-config';
+import { getIsRunnerStarting } from '@/lib/office-runner';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,16 @@ function getKnownSeats(): Set<string> {
  */
 export async function GET(req: NextRequest) {
   try {
+    if (getIsRunnerStarting()) {
+      return NextResponse.json(
+        {
+          error: 'runner_starting',
+          message: 'Office runner is starting up and waiting for startup lock.',
+        },
+        { status: 503 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const seat = searchParams.get('seat') ?? undefined;
 

@@ -104,6 +104,8 @@ import {
   isCorruptMutexRecoveryDisabledForTest,
   isFallbackStartTimeEnabledForTest,
   withInstanceMutex,
+  INSTANCE_LOCK_STARTUP_WAIT_MS,
+  isStartupWaitDisabledForTest,
   __testHooks,
 } from '../src/lib/budget-ledger.ts';
 import {
@@ -113,6 +115,9 @@ import {
   getInFlightTurnCountForTest,
   tickRunner,
   logRunnerEvent,
+  getIsRunnerStarting,
+  setIsRunnerStartingForTest,
+  startOfficeRunner,
 } from '../src/lib/office-runner.ts';
 import { ghiMocKetThuc } from '../src/lib/kho-phien.ts';
 import { xepHang, traVeHangDoi } from '../src/lib/kho-danh-thuc.ts';
@@ -138,6 +143,7 @@ import { boYeuCau } from '../src/lib/kho-danh-thuc.ts';
 import { formatNanodollars } from '../src/lib/money-format.ts';
 import { MAX_MONEY_UNITS } from '../src/lib/money.ts';
 import { GET as getBudgetRoute } from '../src/app/api/budget/route.ts';
+import { GET as getDanhThucRoute, POST as postDanhThucRoute } from '../src/app/api/danh-thuc/route.ts';
 
 console.log('--- Testing src/lib/budget-ledger.ts & A-3 Budget Holds (Hardened Fixture) ---');
 
@@ -1618,7 +1624,34 @@ try {
       }
     }
 
-    console.log('  [PASS] Case 23: GET /api/budget route returns 200, 404, and 503 snapshot_not_ready as expected');
+    // 5. Runner starting -> 503 runner_starting (v14)
+    setIsRunnerStartingForTest(true);
+    try {
+      const budgetStartingRes = await getBudgetRoute(officeReq);
+      assert.equal(budgetStartingRes.status, 503, 'GET /api/budget must return 503 when runner is starting');
+      const budgetStartingJson = await budgetStartingRes.json();
+      assert.equal(budgetStartingJson.error, 'runner_starting');
+
+      const danhThucGetReq = new Request('http://127.0.0.1:4330/api/danh-thuc');
+      const danhThucGetRes = await getDanhThucRoute(danhThucGetReq);
+      assert.equal(danhThucGetRes.status, 503, 'GET /api/danh-thuc must return 503 when runner is starting');
+      const danhThucGetJson = await danhThucGetRes.json();
+      assert.equal(danhThucGetJson.error, 'runner_starting');
+
+      const danhThucPostReq = new Request('http://127.0.0.1:4330/api/danh-thuc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ma_nhan_su: 'marketing-lead', cau_hoi: 'hello' }),
+      });
+      const danhThucPostRes = await postDanhThucRoute(danhThucPostReq);
+      assert.equal(danhThucPostRes.status, 503, 'POST /api/danh-thuc must return 503 when runner is starting');
+      const danhThucPostJson = await danhThucPostRes.json();
+      assert.equal(danhThucPostJson.error, 'runner_starting');
+    } finally {
+      setIsRunnerStartingForTest(false);
+    }
+
+    console.log('  [PASS] Case 23: GET /api/budget route returns 200, 404, and 503 (snapshot_not_ready & runner_starting) as expected');
   }
 
   // Case 24: Multi-partition checkpoint positions & cross-midnight replay (Finding M2)
@@ -3007,7 +3040,251 @@ try {
 
     fs.rmSync(startTimeTestDir, { recursive: true, force: true });
 
-    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics, claim-file mutex protocol, owner post-write inode check, unparseable mutex recovery, no start time fabrication)');
+    // -------------------------------------------------------------
+    // Khe ④D / Subtest 4.12: Crash restart wait with dead owner + pending lease (A-3 v14)
+    // -------------------------------------------------------------
+    // Part 1: Process A acquires lock (lease 6s), gets SIGKILL.
+    // Process B starts within 1s, waits for lease expiry, acquires lock in <= 16s and exits 0.
+    const crashTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-crash-wait-'));
+    const aReadyFile = path.join(crashTestDir, 'a.ready');
+    const bAcquiredFile = path.join(crashTestDir, 'b.acquired');
+
+    const procAScript = `
+      import { acquireInstanceLock } from './src/lib/budget-ledger.ts';
+      import fs from 'node:fs';
+      const lock = acquireInstanceLock(process.env.AIBOSS_DATA_DIR);
+      if (lock.acquired) {
+        fs.writeFileSync(process.env.A_READY_FILE, String(process.pid));
+        // Keep process running so it holds the lock until SIGKILL
+        setInterval(() => {}, 1000);
+      } else {
+        process.exit(1);
+      }
+    `;
+
+    const procA = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', '-e', procAScript],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: crashTestDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          A_READY_FILE: aReadyFile,
+        },
+      }
+    );
+
+    // Wait for Process A to acquire lock
+    while (!fs.existsSync(aReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    const pidA = Number(fs.readFileSync(aReadyFile, 'utf-8'));
+    assert.equal(pidA, procA.pid);
+
+    // Verify lock file exists on disk
+    const crashLockFile = path.join(crashTestDir, '.instance.lock');
+    assert.ok(fs.existsSync(crashLockFile), '.instance.lock must exist on disk after Process A acquire');
+    const lockDataA = JSON.parse(fs.readFileSync(crashLockFile, 'utf-8'));
+    assert.equal(lockDataA.pid, procA.pid);
+
+    // Kill Process A abruptly with SIGKILL
+    const killedPromiseA = new Promise((resolve) => procA.on('close', resolve));
+    procA.kill('SIGKILL');
+    await killedPromiseA;
+
+    // Verify Process A is dead
+    assert.equal(isProcessAlive(pidA), false, 'Process A must be dead after SIGKILL');
+
+    // Spawn Process B immediately within 1s
+    const bStartTs = Date.now();
+    const procBScript = `
+      import { startOfficeRunner } from './src/lib/office-runner.ts';
+      import fs from 'node:fs';
+      const startT = Date.now();
+      try {
+        const ok = await startOfficeRunner(process.env.AIBOSS_DATA_DIR);
+        if (ok) {
+          fs.writeFileSync(process.env.B_ACQUIRED_FILE, String(Date.now() - startT));
+          process.exit(0);
+        } else {
+          process.exit(1);
+        }
+      } catch (err) {
+        process.exit(2);
+      }
+    `;
+
+    const procB = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', '-e', procBScript],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: crashTestDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          B_ACQUIRED_FILE: bAcquiredFile,
+        },
+      }
+    );
+
+    const codeB = await new Promise((resolve) => procB.on('close', resolve));
+    const totalWaitB = Date.now() - bStartTs;
+
+    assert.equal(codeB, 0, 'Process B must acquire lock and exit 0 after waiting for lease expiry');
+    assert.ok(fs.existsSync(bAcquiredFile), 'Process B must have recorded acquisition file');
+    assert.ok(
+      totalWaitB <= INSTANCE_LOCK_STARTUP_WAIT_MS,
+      `Process B startup wait (${totalWaitB}ms) must be within INSTANCE_LOCK_STARTUP_WAIT_MS (${INSTANCE_LOCK_STARTUP_WAIT_MS}ms)`
+    );
+
+    // Verify lock file on disk was successfully transitioned to Process B
+    const lockDataB = JSON.parse(fs.readFileSync(crashLockFile, 'utf-8'));
+    assert.equal(lockDataB.pid, procB.pid, 'Lock on disk must now belong to Process B');
+    fs.rmSync(crashTestDir, { recursive: true, force: true });
+
+    // Part 2: Living owner rejection in <= 1s
+    const livingTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-living-owner-'));
+    const livingReadyFile = path.join(livingTestDir, 'living.ready');
+
+    const livingProcA = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', '-e', procAScript],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: livingTestDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          A_READY_FILE: livingReadyFile,
+        },
+      }
+    );
+
+    while (!fs.existsSync(livingReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    const pidLivingA = Number(fs.readFileSync(livingReadyFile, 'utf-8'));
+    assert.equal(pidLivingA, livingProcA.pid);
+
+    // Spawn Process B against living owner: must reject in <= 1s with reason alive
+    const livingBStart = Date.now();
+    const livingProcBScript = `
+      import { startOfficeRunner } from './src/lib/office-runner.ts';
+      const startT = Date.now();
+      try {
+        await startOfficeRunner(process.env.AIBOSS_DATA_DIR);
+        process.exit(0); // Should NOT succeed!
+      } catch (err) {
+        const elapsed = Date.now() - startT;
+        if (elapsed <= 1000 && err.message.includes('already running')) {
+          process.exit(42); // Rejected immediately in <= 1s
+        }
+        process.exit(1);
+      }
+    `;
+
+    const livingProcB = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', '-e', livingProcBScript],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: livingTestDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+        },
+      }
+    );
+
+    const codeLivingB = await new Promise((resolve) => livingProcB.on('close', resolve));
+    const livingWaitB = Date.now() - livingBStart;
+
+    // Terminate living Process A cleanly
+    livingProcA.kill('SIGKILL');
+    await new Promise((resolve) => livingProcA.on('close', resolve));
+
+    assert.equal(codeLivingB, 42, 'Process B must reject living owner immediately with error');
+    assert.ok(livingWaitB <= 1000, `Process B against living owner must fail in <= 1000ms (took ${livingWaitB}ms)`);
+    fs.rmSync(livingTestDir, { recursive: true, force: true });
+
+    // Part 3: Positive counterproof: disable startup wait (AIBOSS_TEST_DISABLE_STARTUP_WAIT=1)
+    // -> Process B fails immediately on dead owner with pending lease
+    const cpWaitTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-counterproof-wait-'));
+    const cpWaitReadyFile = path.join(cpWaitTestDir, 'cp.ready');
+
+    const cpWaitProcA = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', '-e', procAScript],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: cpWaitTestDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          A_READY_FILE: cpWaitReadyFile,
+        },
+      }
+    );
+
+    while (!fs.existsSync(cpWaitReadyFile)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    const pidCpWaitA = Number(fs.readFileSync(cpWaitReadyFile, 'utf-8'));
+    cpWaitProcA.kill('SIGKILL');
+    await new Promise((resolve) => cpWaitProcA.on('close', resolve));
+    assert.equal(isProcessAlive(pidCpWaitA), false);
+
+    // Spawn Process B with AIBOSS_TEST_DISABLE_STARTUP_WAIT=1
+    const cpWaitProcBScript = `
+      import { startOfficeRunner } from './src/lib/office-runner.ts';
+      try {
+        await startOfficeRunner(process.env.AIBOSS_DATA_DIR);
+        process.exit(0); // Should fail when wait is disabled
+      } catch (err) {
+        if (err.message.includes('already running')) {
+          process.exit(43); // Failed immediately as expected
+        }
+        process.exit(1);
+      }
+    `;
+
+    const cpWaitProcB = spawn(
+      process.execPath,
+      ['--import', './tests/register.mjs', '-e', cpWaitProcBScript],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          AIBOSS_DATA_DIR: cpWaitTestDir,
+          AIBOSS_CONFIG_DIR: testConfigDir,
+          AIBOSS_TEST_DISABLE_STARTUP_WAIT: '1',
+        },
+      }
+    );
+
+    const codeCpWaitB = await new Promise((resolve) => cpWaitProcB.on('close', resolve));
+    assert.equal(codeCpWaitB, 43, 'Disabling startup wait causes Process B to fail immediately on dead owner (counterproof)');
+    fs.rmSync(cpWaitTestDir, { recursive: true, force: true });
+
+    // Part 4: Production inertness of isStartupWaitDisabledForTest
+    const prevNodeEnvWait = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    process.env.AIBOSS_TEST_DISABLE_STARTUP_WAIT = '1';
+    try {
+      assert.equal(
+        isStartupWaitDisabledForTest(),
+        false,
+        'isStartupWaitDisabledForTest must return false when NODE_ENV is production'
+      );
+    } finally {
+      process.env.NODE_ENV = prevNodeEnvWait;
+      delete process.env.AIBOSS_TEST_DISABLE_STARTUP_WAIT;
+    }
+
+    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics, claim-file mutex protocol, owner post-write inode check, unparseable mutex recovery, no start time fabrication, crash restart wait for lease expiry)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)

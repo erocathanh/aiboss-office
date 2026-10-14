@@ -44,6 +44,8 @@ import {
   fenceInstance,
   isFenced,
   isFenceGuardDisabledForTest,
+  INSTANCE_LOCK_STARTUP_WAIT_MS,
+  isStartupWaitDisabledForTest,
 } from '@/lib/budget-ledger';
 
 const REPO_ROOT = process.cwd();
@@ -734,64 +736,120 @@ export async function tickRunner(): Promise<number> {
   }
 }
 
+let isRunnerStarting = false;
+
+export function getIsRunnerStarting(): boolean {
+  return isRunnerStarting;
+}
+
+export function setIsRunnerStartingForTest(val: boolean): void {
+  if (process.env.NODE_ENV === 'test') {
+    isRunnerStarting = val;
+  }
+}
+
+export { INSTANCE_LOCK_STARTUP_WAIT_MS };
+
 /**
  * Start the server runner interval loop.
+ *
+ * Protocol v14:
+ * When previous owner process crashed/dead but lease is still active (reason: 'lease_pending'),
+ * or transient contention ('contended', 'unverified'), waits and retries every 500ms
+ * up to INSTANCE_LOCK_STARTUP_WAIT_MS (16 seconds = 6s lease + 10s grace).
+ * If owner process is verified 'alive', throws immediately without waiting.
  */
-export function startOfficeRunner(): boolean {
+export async function startOfficeRunner(
+  dataDir?: string,
+  waitTimeoutMs: number = INSTANCE_LOCK_STARTUP_WAIT_MS,
+  pollIntervalMs: number = 500
+): Promise<boolean> {
   if (isRunning) {
     return false;
   }
 
-  // 1. Single-instance startup lock (Condition b):
-  const lock = acquireInstanceLock();
-  if (!lock.acquired) {
-    throw new Error(
-      `Another office runner instance (PID ${lock.pid ?? 'unknown'}) is already running on AIBOSS_DATA_DIR. Running multiple server instances against the same data directory is not supported.`
-    );
-  }
+  isRunnerStarting = true;
+  const start = Date.now();
 
-  // 2. Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
   try {
-    recoverOrphanedRuns();
-  } catch (err) {
-    console.error('[office-runner] Failed to recover orphaned runs on startup:', err);
-  }
+    let lock = acquireInstanceLock(dataDir);
 
-  // 3. Mandatory Precondition (Hermes Item 6): initialize budget ledger checkpoint
-  try {
-    initBudgetLedger();
-    reconcileOpenHolds();
-  } catch (err) {
-    releaseInstanceLock();
-    console.error('[office-runner] Critical: failed to initialize budget ledger on startup:', err);
-    throw err; // Do not start runner without budget ledger!
-  }
-
-  isRunning = true;
-  const config = readRunnerConfig();
-  const intervalMs = config.interval_s * 1000;
-
-  // Hermes Condition (b) & Khe ④: Independent 2s lease heartbeat timer for verification & renewal
-  heartbeatTimer = setInterval(() => {
-    if (hasActiveInstanceToken()) {
-      if (!verifyInstanceLockActive() || !renewInstanceLock()) {
-        console.warn('[office-runner] Heartbeat failed to verify or renew instance lock. Fencing and stopping runner.');
-        fenceInstance();
-        stopOfficeRunner();
+    while (!lock.acquired) {
+      if (isStartupWaitDisabledForTest()) {
+        // Positive counterproof: startup wait disabled, fail immediately
+        break;
       }
+
+      if (lock.reason === 'alive' || lock.reason === 'config_error') {
+        // Living process or unresolvable start time: fail immediately!
+        break;
+      }
+
+      // lock.reason === 'lease_pending' | 'contended' | 'unverified':
+      // The lock owner is dead (or transient race), but lease has not expired yet.
+      // Wait and retry up to waitTimeoutMs (default 16 seconds).
+      if (Date.now() - start >= waitTimeoutMs) {
+        break;
+      }
+
+      const remainingMs = waitTimeoutMs - (Date.now() - start);
+      const sleepMs = Math.min(pollIntervalMs, Math.max(10, remainingMs));
+      await new Promise((resolve) => setTimeout(resolve, sleepMs));
+
+      lock = acquireInstanceLock(dataDir);
     }
-  }, 2000);
-  heartbeatTimer.unref?.();
 
-  // Run initial tick immediately
-  void tickRunner().catch(() => {});
+    if (!lock.acquired) {
+      throw new Error(
+        `Another office runner instance (PID ${lock.pid ?? 'unknown'}) is already running on AIBOSS_DATA_DIR. Running multiple server instances against the same data directory is not supported.`
+      );
+    }
 
-  runnerTimer = setInterval(() => {
+    // 2. Safe restart recovery (A-1 Item 5): recover orphaned running runs and expire old queued wakes
+    try {
+      recoverOrphanedRuns();
+    } catch (err) {
+      console.error('[office-runner] Failed to recover orphaned runs on startup:', err);
+    }
+
+    // 3. Mandatory Precondition (Hermes Item 6): initialize budget ledger checkpoint
+    try {
+      initBudgetLedger();
+      reconcileOpenHolds();
+    } catch (err) {
+      releaseInstanceLock(dataDir);
+      console.error('[office-runner] Critical: failed to initialize budget ledger on startup:', err);
+      throw err; // Do not start runner without budget ledger!
+    }
+
+    isRunning = true;
+    const config = readRunnerConfig();
+    const intervalMs = config.interval_s * 1000;
+
+    // Hermes Condition (b) & Khe ④: Independent 2s lease heartbeat timer for verification & renewal
+    heartbeatTimer = setInterval(() => {
+      if (hasActiveInstanceToken()) {
+        if (!verifyInstanceLockActive(dataDir) || !renewInstanceLock(dataDir)) {
+          console.warn('[office-runner] Heartbeat failed to verify or renew instance lock. Fencing and stopping runner.');
+          fenceInstance();
+          stopOfficeRunner();
+        }
+      }
+    }, 2000);
+    heartbeatTimer.unref?.();
+
+    // Run initial tick immediately
     void tickRunner().catch(() => {});
-  }, intervalMs);
-  runnerTimer.unref?.();
 
-  return true;
+    runnerTimer = setInterval(() => {
+      void tickRunner().catch(() => {});
+    }, intervalMs);
+    runnerTimer.unref?.();
+
+    return true;
+  } finally {
+    isRunnerStarting = false;
+  }
 }
 
 /**

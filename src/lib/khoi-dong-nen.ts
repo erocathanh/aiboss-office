@@ -110,12 +110,12 @@ export function batMotLan(): void {
   if (daBat || dangBat) return;
   dangBat = true;
 
-  setImmediate(() => {
+  setImmediate(async () => {
     try {
       if (process.env.CHAY_NEN === '1') {
         console.warn('[chay-nen] CHAY_NEN ignored: office-runner is the single engine');
       }
-      startOfficeRunner();
+      await startOfficeRunner();
       daBat = true; // ✅ CHỈ đặt ở CUỐI nhánh thành công
     } catch (e) {
       console.error('[office-runner] Failed to start:', e instanceof Error ? e.message : e);

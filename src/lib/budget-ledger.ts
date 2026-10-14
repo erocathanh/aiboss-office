@@ -214,6 +214,22 @@ export interface InstanceLockMetadata {
 
 export const DEFAULT_INSTANCE_LEASE_MS = 6000;
 export const UNINITIALIZED_LOCK_TIMEOUT_MS = 10000;
+export const INSTANCE_LOCK_STARTUP_WAIT_MS = DEFAULT_INSTANCE_LEASE_MS + 10000; // 16000ms
+
+export type InstanceLockFailureReason =
+  | 'alive'
+  | 'unverified'
+  | 'lease_pending'
+  | 'contended'
+  | 'config_error';
+
+export interface AcquireInstanceLockResult {
+  acquired: boolean;
+  pid?: number;
+  token?: string;
+  reason?: InstanceLockFailureReason;
+  retryAfterMs?: number;
+}
 
 export const __testHooks: {
   beforeReplace?: () => void;
@@ -222,6 +238,7 @@ export const __testHooks: {
   beforeMutexUnlinkAfterClaim?: () => void;
   disableOwnerInodeCheck?: boolean;
   disableReclaimerRecheck?: boolean;
+  disableStartupWait?: boolean;
   mockProcessStartTime?: ((pid: number) => string | null) | null;
   fallbackStartTimeForTest?: boolean;
   disableCorruptMutexRecovery?: boolean;
@@ -229,6 +246,14 @@ export const __testHooks: {
   disableInstanceMutex?: boolean;
   disableMutexRecheck?: boolean;
 } = {};
+
+export function isStartupWaitDisabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.disableStartupWait === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_STARTUP_WAIT === '1')
+  );
+}
 
 export function isFenceGuardDisabledForTest(): boolean {
   if (process.env.NODE_ENV === 'production') return false;
@@ -591,7 +616,7 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
 export function acquireInstanceLock(
   dataDir?: string,
   leaseMs: number = DEFAULT_INSTANCE_LEASE_MS
-): { acquired: boolean; pid?: number; token?: string } {
+): AcquireInstanceLockResult {
   // Khe ①: Once fenced, permanently refuse acquire in the same process
   if (isInstanceFenced && !isFenceGuardDisabledForTest()) {
     throw new Error('[budget-ledger] Instance is fenced. Acquiring instance lock is permanently barred.');
@@ -622,9 +647,12 @@ export function acquireInstanceLock(
           legacyPid = legacy?.pid;
           if (typeof legacy?.pid === 'number') {
             const liveness = checkProcessLiveness(legacy.pid, legacy.processStartedAt);
-            if (liveness === 'alive' || liveness === 'unverified') {
-              // Live v07 instance running or unverified: DO NOT DELETE, REFUSE STARTUP!
-              return { acquired: false, pid: legacy.pid };
+            if (liveness === 'alive') {
+              // Live v07 instance running: DO NOT DELETE, REFUSE STARTUP!
+              return { acquired: false, pid: legacy.pid, reason: 'alive' };
+            }
+            if (liveness === 'unverified') {
+              return { acquired: false, pid: legacy.pid, reason: 'unverified' };
             }
             if (liveness === 'dead') {
               canCleanLegacy = true;
@@ -649,10 +677,10 @@ export function acquireInstanceLock(
         try {
           fs.rmSync(lockPath, { recursive: true, force: true });
         } catch {
-          return { acquired: false, pid: legacyPid };
+          return { acquired: false, pid: legacyPid, reason: 'contended' };
         }
       } else {
-        return { acquired: false, pid: legacyPid };
+        return { acquired: false, pid: legacyPid, reason: 'contended' };
       }
     }
 
@@ -660,7 +688,7 @@ export function acquireInstanceLock(
     const currentStartTime = getProcessStartTime(currentPid);
     if (!currentStartTime) {
       // Hermes Condition (b): Cannot reliably verify own start time from OS -> fail closed!
-      return { acquired: false };
+      return { acquired: false, reason: 'config_error' };
     }
 
     const token = `${currentPid}-${now}-${Math.random().toString(36).slice(2)}`;
@@ -720,7 +748,11 @@ export function acquireInstanceLock(
     if (isCorruptOrEmpty) {
       const fileAgeMs = now - stat.mtimeMs;
       if (fileAgeMs < UNINITIALIZED_LOCK_TIMEOUT_MS) {
-        return { acquired: false };
+        return {
+          acquired: false,
+          reason: 'contended',
+          retryAfterMs: Math.max(0, UNINITIALIZED_LOCK_TIMEOUT_MS - fileAgeMs),
+        };
       }
       // Older than 10s without valid metadata: orphaned lock from crashed startup!
       const candidateFile = path.join(baseDir, `.instance-candidate-${token}`);
@@ -736,18 +768,18 @@ export function acquireInstanceLock(
             // If file was modified or replaced by another contender (content or mtime changed), refuse reclaim!
             if (currentContent !== initialContent || currentStat.mtimeMs !== initialMtimeMs) {
               try { fs.unlinkSync(candidateFile); } catch {}
-              return { acquired: false };
+              return { acquired: false, reason: 'contended' };
             }
           } catch {
             try { fs.unlinkSync(candidateFile); } catch {}
-            return { acquired: false };
+            return { acquired: false, reason: 'contended' };
           }
         }
 
         fs.renameSync(candidateFile, lockPath);
       } catch {
         try { fs.unlinkSync(candidateFile); } catch {}
-        return { acquired: false };
+        return { acquired: false, reason: 'contended' };
       }
 
       activeInstanceToken = token;
@@ -758,8 +790,11 @@ export function acquireInstanceLock(
     // Lock has valid metadata:
     if (held && typeof held.pid === 'number') {
       const liveness = checkProcessLiveness(held.pid, held.processStartedAt);
-      if (liveness === 'alive' || liveness === 'unverified') {
-        return { acquired: false, pid: held.pid };
+      if (liveness === 'alive') {
+        return { acquired: false, pid: held.pid, reason: 'alive' };
+      }
+      if (liveness === 'unverified') {
+        return { acquired: false, pid: held.pid, reason: 'unverified' };
       }
 
       // liveness === 'dead':
@@ -767,7 +802,12 @@ export function acquireInstanceLock(
       if (held.leaseExpiresAt) {
         const leaseExpiryTime = new Date(held.leaseExpiresAt).getTime();
         if (!isNaN(leaseExpiryTime) && now < leaseExpiryTime) {
-          return { acquired: false, pid: held.pid };
+          return {
+            acquired: false,
+            pid: held.pid,
+            reason: 'lease_pending',
+            retryAfterMs: Math.max(0, leaseExpiryTime - now),
+          };
         }
       }
 
@@ -788,14 +828,14 @@ export function acquireInstanceLock(
           if (!recheck || recheck.token !== held.token || recheck.pid !== held.pid) {
             // Lock was replaced by another contender! Refuse reclaim, do not overwrite!
             try { fs.unlinkSync(candidateFile); } catch {}
-            return { acquired: false, pid: recheck?.pid };
+            return { acquired: false, pid: recheck?.pid, reason: 'contended' };
           }
         }
 
         fs.renameSync(candidateFile, lockPath);
       } catch {
         try { fs.unlinkSync(candidateFile); } catch {}
-        return { acquired: false };
+        return { acquired: false, reason: 'contended' };
       }
 
       activeInstanceToken = token;
@@ -803,7 +843,7 @@ export function acquireInstanceLock(
       return { acquired: true, pid: currentPid, token };
     }
 
-    return { acquired: false };
+    return { acquired: false, reason: 'contended' };
   });
 }
 
