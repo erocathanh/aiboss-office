@@ -7,6 +7,7 @@ import {
   readTextSize,
   saveTextSize,
   applyTextSize,
+  syncTextSizeOnStorageEvent,
   DEFAULT_TEXT_SIZE,
 } from './text-size';
 
@@ -19,11 +20,7 @@ export function DisplaySettingsCard() {
     applyTextSize(initial);
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'aiboss-office.text-size') {
-        const next = readTextSize();
-        setSize(next);
-        applyTextSize(next);
-      }
+      syncTextSizeOnStorageEvent(e, setSize);
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);

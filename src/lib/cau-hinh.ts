@@ -106,12 +106,13 @@ export const CAU_HINH = {
  * Lời dặn hệ thống — ghim vai "nhân sự phòng ban" cho agent.
  * Vòng này agent KHÔNG có công cụ nào, nên nó thuần trò chuyện.
  */
-export function loiDanHeThong(tenNhanSu: string, vai: string, phong: string, language?: string): string {
-  const normalizedLang = (language || '').toLowerCase().trim();
+export function loiDanHeThong(tenNhanSu: string, vai: string, phong: string, language?: unknown): string {
+  const normalizedLang = typeof language === 'string' ? language.trim().toLowerCase() : 'auto';
+  const effectiveLang = normalizedLang === 'vi' || normalizedLang === 'en' ? normalizedLang : 'auto';
   const langRule =
-    normalizedLang === 'vi' || normalizedLang === 'vietnamese'
+    effectiveLang === 'vi'
       ? 'Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào việc.'
-      : normalizedLang === 'en' || normalizedLang === 'english'
+      : effectiveLang === 'en'
       ? 'Answer in English, concise and directly to the point.'
       : 'Trả lời theo đúng ngôn ngữ của câu hỏi (tiếng Việt hoặc tiếng Anh), ngắn gọn, đi thẳng vào việc.';
 

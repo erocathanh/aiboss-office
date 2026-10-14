@@ -199,13 +199,23 @@ export function getOfficeConfig(): OfficeConfig {
 }
 
 /**
+ * Normalizes a raw language value into 'vi', 'en', or 'auto' (default).
+ * Non-string or unrecognized values safely fall back to 'auto'.
+ */
+export function normalizeAgentLanguage(language: unknown): 'auto' | 'vi' | 'en' {
+  if (typeof language !== 'string') return 'auto';
+  const normalized = language.trim().toLowerCase();
+  if (normalized === 'vi') return 'vi';
+  if (normalized === 'en') return 'en';
+  return 'auto';
+}
+
+/**
  * Resolves the configured agent response language preference.
  * Returns 'vi', 'en', or 'auto' (default).
  */
 export function getAgentLanguage(config?: OfficeConfig): 'auto' | 'vi' | 'en' {
   const cfg = config ?? getOfficeConfig();
-  const lang = (cfg.language || '').toLowerCase().trim();
-  if (lang === 'vi' || lang === 'vietnamese') return 'vi';
-  if (lang === 'en' || lang === 'english') return 'en';
-  return 'auto';
+  return normalizeAgentLanguage(cfg?.language);
 }
+

@@ -13,6 +13,7 @@ import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
 import { CostSettingsCard } from '@/components/office/CostSettingsCard';
 import { BudgetSettingsCard } from '@/components/office/BudgetSettingsCard';
+import { getAgentLanguage } from '@/lib/office-config';
 
 interface OfficeConfig {
   version: number;
@@ -110,6 +111,7 @@ const GATE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
 
 export default function SettingsPage() {
   const config = loadOfficeConfig();
+  const effectiveLanguage = getAgentLanguage(config);
   const gates = loadMarketingGates();
 
   return (
@@ -189,7 +191,7 @@ export default function SettingsPage() {
               <div className="settings-row">
                 <span className="settings-label">Agent Response Language</span>
                 <span className="settings-value">
-                  <code>{config.language ?? 'auto'}</code> ({config.language === 'vi' ? 'Vietnamese' : config.language === 'en' ? 'English' : 'Auto / Question language'})
+                  <code>{effectiveLanguage}</code> ({effectiveLanguage === 'vi' ? 'Vietnamese' : effectiveLanguage === 'en' ? 'English' : 'Auto / Question language'})
                 </span>
               </div>
             </div>

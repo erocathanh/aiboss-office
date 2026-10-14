@@ -49,7 +49,7 @@ import type { ChildProcess } from 'node:child_process';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
 import { isSeatHeldByTerminal, claimSeat, updateSeatActivePid } from '@/lib/seat-active';
-import { getOfficeConfig } from '@/lib/office-config';
+import { getOfficeConfig, getAgentLanguage } from '@/lib/office-config';
 
 /** Sự kiện lõi bắn ra. Cùng HÌNH DẠNG với thứ `/api/chat` đang đẩy qua SSE. */
 export type SuKienLuot =
@@ -184,7 +184,7 @@ export async function chayMotLuot(
       maNhanSu,
       // 👑 Ghế có LINH HỒN RIÊNG thì KHÔNG nhét qua lời dặn hệ thống — linh hồn nằm ở
       //    `CLAUDE.md` trong thư mục ghế và Claude Code tự nạp theo chỗ đứng.
-      loiDan: ns.soul ? undefined : loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong, getOfficeConfig().language),
+      loiDan: ns.soul ? undefined : loiDanHeThong(ns.nhan, ns.vai, ns.ten_phong, getAgentLanguage(getOfficeConfig())),
       tinHieuHuy,
       // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT. Với bộ chạy nền thì
       //    KHÔNG có người xem nào ngay từ đầu — đúng thứ ta cần.

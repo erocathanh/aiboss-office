@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DS_TIN } from '@/lib/demo-tin-khach';
+import { readTextSize, applyTextSize, syncTextSizeOnStorageEvent } from '@/components/office/text-size';
 
 /**
  * Trang «danh sách câu soạn sẵn» — kết quả mà PHÒNG CHĂM KHÁCH trả về.
@@ -21,26 +22,35 @@ import { DS_TIN } from '@/lib/demo-tin-khach';
 export default function TinKhach() {
   const [daBam, setDaBam] = useState<number | null>(null);
 
+  useEffect(() => {
+    applyTextSize(readTextSize());
+    const handleStorage = (e: StorageEvent) => {
+      syncTextSizeOnStorageEvent(e);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   return (
     <main className="khu-tin">
       <style dangerouslySetInnerHTML={{ __html: `
         .khu-tin{min-height:100dvh;padding:22px 18px 40px;max-width:900px;margin:0 auto}
-        .khu-tin h1{font-size:19px;margin:0 0 4px}
-        .khu-tin .phu{opacity:.6;font-size:13px;margin:0 0 18px}
+        .khu-tin h1{font-size:calc(19px * var(--text-scale, 1));margin:0 0 4px}
+        .khu-tin .phu{opacity:.6;font-size:calc(13px * var(--text-scale, 1));margin:0 0 18px}
         .khu-tin .the{border:1px solid rgba(255,255,255,.12);border-radius:13px;
           padding:13px 15px;margin-bottom:11px}
         .khu-tin .dau{display:flex;align-items:baseline;gap:9px;margin-bottom:7px}
-        .khu-tin .dau b{font-size:14px}
-        .khu-tin .loai{font-size:11px;opacity:.65;border:1px solid rgba(255,255,255,.18);
+        .khu-tin .dau b{font-size:calc(14px * var(--text-scale, 1))}
+        .khu-tin .loai{font-size:calc(11px * var(--text-scale, 1));opacity:.65;border:1px solid rgba(255,255,255,.18);
           padding:1px 8px;border-radius:20px}
-        .khu-tin .hoi{font-size:13px;opacity:.72;margin:0 0 8px}
-        .khu-tin .tra{font-size:13.5px;line-height:1.6;background:rgba(255,255,255,.05);
+        .khu-tin .hoi{font-size:calc(13px * var(--text-scale, 1));opacity:.72;margin:0 0 8px}
+        .khu-tin .tra{font-size:calc(13.5px * var(--text-scale, 1));line-height:1.6;background:rgba(255,255,255,.05);
           border-radius:9px;padding:9px 12px;margin:0 0 9px}
         .khu-tin .trong{opacity:.55;font-style:italic}
-        .khu-tin .can-doc{font-size:12px;color:#e8b45c;margin:0 0 9px}
-        .khu-tin button{font-size:13px;font-weight:700;padding:8px 15px;border-radius:9px;
+        .khu-tin .can-doc{font-size:calc(12px * var(--text-scale, 1));color:#e8b45c;margin:0 0 9px}
+        .khu-tin button{font-size:calc(13px * var(--text-scale, 1));font-weight:700;padding:8px 15px;border-radius:9px;
           border:1px solid rgba(230,177,69,.55);background:transparent;color:#e6b145;cursor:pointer}
-        .khu-tin .noi-that{margin-top:8px;font-size:12.5px;color:#e8955c;line-height:1.55}
+        .khu-tin .noi-that{margin-top:8px;font-size:calc(12.5px * var(--text-scale, 1));color:#e8955c;line-height:1.55}
       ` }} />
 
       <h1>Câu soạn sẵn — chờ anh chị duyệt</h1>
