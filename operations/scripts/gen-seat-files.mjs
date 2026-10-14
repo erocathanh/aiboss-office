@@ -209,10 +209,24 @@ function buildSettingsJson(hooksBasePath, baseDenyRules, seatPermissions = null)
   };
 }
 
+function writeOrCheckFile(filePath, expectedContent, checkOnly, mismatchedFiles) {
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null;
+  if (existing !== expectedContent) {
+    mismatchedFiles.push(filePath);
+    if (!checkOnly) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, expectedContent, 'utf-8');
+      return true;
+    }
+  }
+  return false;
+}
+
 export function generateSeatFiles({
   repoRoot = process.cwd(),
   anchorRoot = process.env.AIBOSS_REPO_ROOT || repoRoot,
   quiet = false,
+  checkOnly = false,
 } = {}) {
   const seatsPath = path.join(repoRoot, 'data', 'seats.json');
   const seats = JSON.parse(fs.readFileSync(seatsPath, 'utf-8'));
@@ -236,8 +250,18 @@ export function generateSeatFiles({
     }
   }
 
-  // 1. Generate CLAUDE.md via shared generateSeatClaudeMd
-  const { totalCount: claudeCount } = generateSeatClaudeMd({ repoRoot, quiet: true });
+  const mismatchedFiles = [];
+  let claudeCount = 0;
+  let updatedFilesCount = 0;
+
+  // 1. Generate or check CLAUDE.md via shared generateSeatClaudeMd
+  if (!checkOnly) {
+    const res = generateSeatClaudeMd({ repoRoot, quiet: true });
+    claudeCount = res.totalCount;
+    updatedFilesCount += res.updatedCount;
+  } else {
+    claudeCount = seats.filter((s) => s.department === 'marketing').length;
+  }
 
   const baseDenyRules = buildRepoRootDenyRules(anchorRoot);
   let seatSettingsCount = 0;
@@ -247,19 +271,18 @@ export function generateSeatFiles({
     if (seat.department !== 'marketing') continue;
 
     const targetDir = path.join(repoRoot, seat.dir);
-    if (!fs.existsSync(targetDir)) {
+    if (!checkOnly && !fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
 
     // 2. Generate .claude/settings.json per seat (merging seat.permissions)
     const claudeDir = path.join(targetDir, '.claude');
-    if (!fs.existsSync(claudeDir)) {
-      fs.mkdirSync(claudeDir, { recursive: true });
-    }
     const seatHooksPath = '$CLAUDE_PROJECT_DIR/../../../../operations/hooks';
     const seatSettings = buildSettingsJson(seatHooksPath, baseDenyRules, seat.permissions);
     const seatSettingsPath = path.join(claudeDir, 'settings.json');
-    fs.writeFileSync(seatSettingsPath, JSON.stringify(seatSettings, null, 2) + '\n', 'utf-8');
+    if (writeOrCheckFile(seatSettingsPath, JSON.stringify(seatSettings, null, 2) + '\n', checkOnly, mismatchedFiles)) {
+      updatedFilesCount++;
+    }
     seatSettingsCount++;
 
     // 3. Generate .mcp.json per seat
@@ -270,32 +293,54 @@ export function generateSeatFiles({
         : ['agent-broker'];
     const mcpConfig = buildMcpJson(mcpList);
     const mcpPath = path.join(targetDir, '.mcp.json');
-    fs.writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + '\n', 'utf-8');
+    if (writeOrCheckFile(mcpPath, JSON.stringify(mcpConfig, null, 2) + '\n', checkOnly, mismatchedFiles)) {
+      updatedFilesCount++;
+    }
     seatMcpCount++;
   }
 
   // 4. Generate .claude/settings.json at repo root
   const rootClaudeDir = path.join(repoRoot, '.claude');
-  if (!fs.existsSync(rootClaudeDir)) {
-    fs.mkdirSync(rootClaudeDir, { recursive: true });
-  }
   const rootHooksPath = '$CLAUDE_PROJECT_DIR/operations/hooks';
   const rootSettings = buildSettingsJson(rootHooksPath, baseDenyRules, null);
   const rootSettingsPath = path.join(rootClaudeDir, 'settings.json');
-  fs.writeFileSync(rootSettingsPath, JSON.stringify(rootSettings, null, 2) + '\n', 'utf-8');
-
-  if (!quiet) {
-    console.log(`[gen-seat-files] Generated ${claudeCount} CLAUDE.md files`);
-    console.log(`[gen-seat-files] Generated ${seatSettingsCount} seat .claude/settings.json files`);
-    console.log(`[gen-seat-files] Generated ${seatMcpCount} seat .mcp.json files`);
-    console.log(`[gen-seat-files] Generated 1 root .claude/settings.json file: ${rootSettingsPath}`);
+  if (writeOrCheckFile(rootSettingsPath, JSON.stringify(rootSettings, null, 2) + '\n', checkOnly, mismatchedFiles)) {
+    updatedFilesCount++;
   }
 
-  return { claudeCount, seatSettingsCount, seatMcpCount, rootSettingsPath };
+  if (!quiet) {
+    if (checkOnly) {
+      if (mismatchedFiles.length === 0) {
+        console.log(`[gen-seat-files: CHECK] OK — all seat & root settings match anchor root ${path.resolve(anchorRoot)}`);
+      } else {
+        console.error(`[gen-seat-files: CHECK] MISMATCH (${mismatchedFiles.length} file(s) out of sync with ${path.resolve(anchorRoot)}):`);
+        for (const f of mismatchedFiles) console.error(`  - ${f}`);
+      }
+    } else {
+      console.log(`[gen-seat-files] Checked ${claudeCount} CLAUDE.md, ${seatSettingsCount} seat settings, ${seatMcpCount} .mcp.json, 1 root settings (${updatedFilesCount} updated)`);
+    }
+  }
+
+  return {
+    claudeCount,
+    seatSettingsCount,
+    seatMcpCount,
+    rootSettingsPath,
+    updatedFilesCount,
+    updatedCount: updatedFilesCount,
+    mismatchedFiles,
+    driftedCount: mismatchedFiles.length,
+  };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  generateSeatFiles();
+  const checkOnly = process.argv.includes('--check');
+  const quiet = process.argv.includes('--quiet');
+  const res = generateSeatFiles({ checkOnly, quiet });
+  if (checkOnly && res.mismatchedFiles.length > 0) {
+    process.exit(1);
+  }
 }
+
 
 

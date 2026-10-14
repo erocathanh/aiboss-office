@@ -817,35 +817,217 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 dest = w[3:].strip("'\"")
                 targets.append((dest, "dd output file"))
 
-    # 3. Inline script & heredoc writes (python/python3 -c / <<EOF open(...,'w'/'a'), Path(...).write_text, node fs.writeFileSync/appendFileSync)
+    # 3. Inline script & heredoc writes (F5, F10, F12: python open, Path.write_*, shutil.copy*, node fs.*FileSync, copyFileSync/cpSync)
     combined_raw = "\n".join([cmd.raw_str] + getattr(cmd, "heredoc_bodies", []))
     if (
         base in ('python', 'python3', 'py', 'node')
         or 'open(' in combined_raw
         or 'write_' in combined_raw
         or 'FileSync' in combined_raw
+        or 'cpSync' in combined_raw
         or 'writeFile' in combined_raw
         or 'appendFile' in combined_raw
+        or 'copyFile' in combined_raw
+        or 'rename' in combined_raw
         or 'shutil.' in combined_raw
+        or 'os.replace' in combined_raw
     ):
-        for m in re.finditer(r"""\bopen\s*\(\s*['"]([^'"]+)['"]\s*,\s*(?:mode\s*=\s*)?['"](?:[wax]|[rwax]\+)[^'"]*['"]""", combined_raw):
-            targets.append((m.group(1), "python open write"))
-        for m in re.finditer(r"""\bopen\s*\(\s*(?!['"])([^,)]+)\s*,\s*(?:mode\s*=\s*)?['"](?:[wax]|[rwax]\+)[^'"]*['"]""", combined_raw):
-            targets.append((f"$DYNAMIC_WRITE:open({m.group(1).strip()})", "python open dynamic write"))
+        for call_args in _extract_call_arg_lists(combined_raw, r'\bopen\s*\('):
+            if not call_args:
+                continue
+            path_expr = call_args[0]
+            mode_expr = None
+            for extra in call_args[1:]:
+                s_extra = extra.strip()
+                if s_extra.startswith('mode') and '=' in s_extra:
+                    mode_expr = s_extra.split('=', 1)[1].strip()
+                    break
+            if mode_expr is None and len(call_args) >= 2:
+                first_extra = call_args[1].strip()
+                if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=', first_extra):
+                    mode_expr = first_extra
+            if mode_expr is not None:
+                resolved_mode = resolve_script_path_expr(mode_expr)
+                if resolved_mode.startswith('$DYNAMIC_WRITE:') or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode):
+                    resolved_target = resolve_script_path_expr(path_expr)
+                    label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
+                    targets.append((resolved_target, label))
 
-        for m in re.finditer(r"""\bPath\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*write_(?:text|bytes)\b""", combined_raw):
-            targets.append((m.group(1), "python Path.write"))
-        for m in re.finditer(r"""\bPath\s*\(\s*(?!['"])([^)]+)\s*\)\s*\.\s*write_(?:text|bytes)\b""", combined_raw):
-            targets.append((f"$DYNAMIC_WRITE:Path({m.group(1).strip()}).write", "python Path dynamic write"))
+        for m in re.finditer(r'\bPath\s*\(([^)]+)\)\s*\.\s*write_(?:text|bytes)\b', combined_raw):
+            resolved_target = resolve_script_path_expr(m.group(1))
+            label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.write"
+            targets.append((resolved_target, label))
 
-        for m in re.finditer(r"""\b(?:writeFileSync|appendFileSync|writeFile|appendFile|copyFileSync|cpSync)\s*\(\s*['"]([^'"]+)['"]""", combined_raw):
-            targets.append((m.group(1), "node fs write"))
-        for m in re.finditer(r"""\b(?:writeFileSync|appendFileSync|writeFile|appendFile|copyFileSync|cpSync)\s*\(\s*(?!['"])([^,)]+)""", combined_raw):
-            targets.append((f"$DYNAMIC_WRITE:fs({m.group(1).strip()})", "node fs dynamic write"))
+        for call_args in _extract_call_arg_lists(
+            combined_raw,
+            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream)\s*\(',
+        ):
+            if not call_args:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[0])
+            label = "node fs dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs write"
+            targets.append((resolved_target, label))
 
-        for m in re.finditer(r"""\bshutil\.(?:copy|copy2|copyfile|move)\s*\([^,]+,\s*['"]([^'"]+)['"]""", combined_raw):
-            targets.append((m.group(1), "python shutil write"))
+        for call_args in _extract_call_arg_lists(
+            combined_raw,
+            r'\b(?:copyFileSync|cpSync|copyFile|renameSync|rename)\s*\(',
+        ):
+            if len(call_args) < 2:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[1])
+            label = "node fs dynamic copy/rename" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs copy/rename"
+            targets.append((resolved_target, label))
+
+        for call_args in _extract_call_arg_lists(
+            combined_raw,
+            r'\b(?:shutil\.(?:copy|copy2|copyfile|move)|os\.(?:replace|rename))\s*\(',
+        ):
+            if len(call_args) < 2:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[1])
+            label = "python shutil/os dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python shutil write"
+            targets.append((resolved_target, label))
 
     return targets
+
+
+_SINGLE_STRING_LITERAL_RE = re.compile(r"""^(?:'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")$""", re.DOTALL)
+
+
+def resolve_script_path_expr(expr: str) -> str:
+    """
+    F10 & F12 (S17c): Resolve a Python/JS path argument expression into either:
+    - a static string path (supporting surrounding whitespace and '+' concatenation of string literals), OR
+    - '$DYNAMIC_WRITE:<expr>' when the expression contains variables, template substitutions, or calls.
+    """
+    s = (expr or "").strip()
+    if not s:
+        return "$DYNAMIC_WRITE:empty"
+
+    m_single = _SINGLE_STRING_LITERAL_RE.match(s)
+    if m_single:
+        val = m_single.group(1) if m_single.group(1) is not None else m_single.group(2)
+        return val
+
+    # Check if s is a '+' concatenation of string literals: 'operations/' + 'data/...'
+    parts = _split_top_level_plus(s)
+    if len(parts) > 1:
+        concat_pieces: List[str] = []
+        all_literals = True
+        for part in parts:
+            p_strip = part.strip()
+            mp = _SINGLE_STRING_LITERAL_RE.match(p_strip)
+            if not mp:
+                all_literals = False
+                break
+            piece = mp.group(1) if mp.group(1) is not None else mp.group(2)
+            concat_pieces.append(piece)
+        if all_literals:
+            return "".join(concat_pieces)
+
+    return f"$DYNAMIC_WRITE:{s}"
+
+
+def _split_top_level_plus(expr: str) -> List[str]:
+    parts: List[str] = []
+    cur: List[str] = []
+    quote: Optional[str] = None
+    escape = False
+    depth = 0
+    for ch in expr:
+        if escape:
+            cur.append(ch)
+            escape = False
+            continue
+        if ch == '\\' and quote is not None:
+            cur.append(ch)
+            escape = True
+            continue
+        if quote is not None:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch
+            cur.append(ch)
+            continue
+        if ch in ('(', '[', '{'):
+            depth += 1
+            cur.append(ch)
+            continue
+        if ch in (')', ']', '}'):
+            depth = max(0, depth - 1)
+            cur.append(ch)
+            continue
+        if ch == '+' and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    parts.append("".join(cur))
+    return parts
+
+
+def _extract_call_arg_lists(text: str, prefix_pattern: str) -> List[List[str]]:
+    results: List[List[str]] = []
+    for m in re.finditer(prefix_pattern, text):
+        start_idx = m.end()  # right after opening '('
+        args: List[str] = []
+        cur: List[str] = []
+        quote: Optional[str] = None
+        escape = False
+        depth = 1
+        i = start_idx
+        n = len(text)
+        while i < n and depth > 0:
+            ch = text[i]
+            if escape:
+                cur.append(ch)
+                escape = False
+                i += 1
+                continue
+            if ch == '\\' and quote is not None:
+                cur.append(ch)
+                escape = True
+                i += 1
+                continue
+            if quote is not None:
+                cur.append(ch)
+                if ch == quote:
+                    quote = None
+                i += 1
+                continue
+            if ch in ("'", '"', '`'):
+                quote = ch
+                cur.append(ch)
+                i += 1
+                continue
+            if ch in ('(', '[', '{'):
+                depth += 1
+                cur.append(ch)
+                i += 1
+                continue
+            if ch in (')', ']', '}'):
+                depth -= 1
+                if depth == 0:
+                    arg_str = "".join(cur).strip()
+                    if arg_str or args:
+                        args.append(arg_str)
+                    break
+                cur.append(ch)
+                i += 1
+                continue
+            if ch == ',' and depth == 1:
+                args.append("".join(cur).strip())
+                cur = []
+                i += 1
+                continue
+            cur.append(ch)
+            i += 1
+        if depth == 0:
+            results.append(args)
+    return results
+
 
 

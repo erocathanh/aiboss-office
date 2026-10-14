@@ -148,8 +148,152 @@ def is_http_write_command(cmd: str) -> bool:
     return False
 
 
-def check_outbound_http_write(cmd: str, allowed_hosts: set[str]) -> str:
-    """F3a: Fail-closed outbound HTTP write verification."""
+CURL_FLAGS_WITH_VALUE = {
+    "-X", "--request",
+    "-d", "--data", "--data-raw", "--data-binary", "--data-ascii", "--data-urlencode",
+    "-F", "--form", "--form-string", "--json",
+    "-H", "--header",
+    "-u", "--user",
+    "-A", "--user-agent",
+    "-e", "--referer",
+    "-o", "--output",
+    "-T", "--upload-file",
+    "-b", "--cookie",
+    "-c", "--cookie-jar",
+    "-D", "--dump-header",
+    "-w", "--write-out",
+    "-m", "--max-time", "--connect-timeout",
+    "-x", "--proxy",
+    "--resolve", "--cacert", "--cert", "--key", "--proto",
+}
+
+WGET_FLAGS_WITH_VALUE = {
+    "--post-data", "--post-file", "--body-data", "--body-file", "--method",
+    "--header", "-O", "--output-document", "-o", "--output-file",
+    "-P", "--directory-prefix", "-U", "--user-agent", "--referer",
+    "-T", "--timeout", "-t", "--tries",
+}
+
+_STRICT_STATIC_URL_LITERAL_RE = re.compile(r"""^(['"])(https?://[^'"$`{}\s]+)\1$""")
+
+
+def _validate_static_target_url(raw_url: str, allowed_hosts: set[str]) -> str:
+    clean_url = (raw_url or "").strip().strip("'\"").rstrip(".,;:")
+    if (
+        not clean_url
+        or any(ch in clean_url for ch in ("$", "`", "{", "}", "\n", "\r", " ", "\t"))
+        or not clean_url.lower().startswith(("http://", "https://"))
+    ):
+        return f"Outbound HTTP write with dynamic or non-literal target URL ({raw_url}) is blocked fail-closed by Hook 2.1."
+    try:
+        parsed = urlparse(clean_url)
+        host = (parsed.hostname or "").lower()
+    except Exception:
+        host = ""
+    if not host:
+        return f"Outbound HTTP write with unparseable target URL ({clean_url}) is blocked fail-closed by Hook 2.1."
+    if host in GRAPH_DOMAINS or any(host.endswith("." + d) for d in GRAPH_DOMAINS):
+        return "Writing or posting to Meta Graph API (POST/DELETE/PUT or data/form payload) is blocked by Hook 2.1."
+    if host not in allowed_hosts:
+        return f"Outbound HTTP write to non-whitelisted host '{host}' is blocked fail-closed by Hook 2.1."
+    return ""
+
+
+def _extract_curl_target_urls(words: list[str]) -> tuple[list[str], str]:
+    urls: list[str] = []
+    i = 1
+    n = len(words)
+    while i < n:
+        w = words[i]
+        if w in ("-K", "--config") or w.startswith("-K") or w.startswith("--config="):
+            return ([], "Outbound HTTP write using curl -K/--config is blocked fail-closed by Hook 2.1.")
+        if w == "--url":
+            if i + 1 >= n:
+                return ([], "Outbound HTTP write with missing --url value is blocked fail-closed by Hook 2.1.")
+            urls.append(words[i + 1])
+            i += 2
+            continue
+        if w.startswith("--url="):
+            urls.append(w.split("=", 1)[1])
+            i += 1
+            continue
+        if w in CURL_FLAGS_WITH_VALUE:
+            i += 2
+            continue
+        if w.startswith("-"):
+            i += 1
+            continue
+        urls.append(w)
+        i += 1
+    return (urls, "")
+
+
+def _extract_wget_target_urls(words: list[str]) -> tuple[list[str], str]:
+    urls: list[str] = []
+    i = 1
+    n = len(words)
+    while i < n:
+        w = words[i]
+        if w in ("-i", "--input-file") or w.startswith("--input-file="):
+            return ([], "Outbound HTTP write using wget -i/--input-file is blocked fail-closed by Hook 2.1.")
+        if w in WGET_FLAGS_WITH_VALUE:
+            i += 2
+            continue
+        if w.startswith("-"):
+            i += 1
+            continue
+        urls.append(w)
+        i += 1
+    return (urls, "")
+
+
+def _extract_code_http_write_target_urls(text: str) -> tuple[list[str], str]:
+    urls: list[str] = []
+
+    # 1. requests.request(method, url, ...) / httpx.request(method, url, ...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text, r"\b(?:requests|httpx|client|session)\.request\s*\("
+    ):
+        url_expr = None
+        for extra in call_args:
+            s_extra = extra.strip()
+            if s_extra.startswith("url") and "=" in s_extra:
+                url_expr = s_extra.split("=", 1)[1].strip()
+                break
+        if url_expr is None and len(call_args) >= 2:
+            url_expr = call_args[1].strip()
+        if not url_expr:
+            return ([], "Outbound HTTP write without resolvable target URL argument is blocked fail-closed by Hook 2.1.")
+        m = _STRICT_STATIC_URL_LITERAL_RE.match(url_expr)
+        if not m:
+            return ([], f"Outbound HTTP write with dynamic or concatenated target URL ({url_expr}) is blocked fail-closed by Hook 2.1.")
+        urls.append(m.group(2))
+
+    # 2. requests/httpx/axios/urllib/fetch where 1st positional arg (or url=...) is the target URL
+    for call_args in bash_parser._extract_call_arg_lists(
+        text,
+        r"(?:\b(?:requests|httpx|axios|client|session)\.(?:post|put|delete|patch)|\burllib\.request\.(?:Request|urlopen)|\bfetch)\s*\(",
+    ):
+        if not call_args:
+            return ([], "Outbound HTTP write without target URL argument is blocked fail-closed by Hook 2.1.")
+        url_expr = None
+        for extra in call_args:
+            s_extra = extra.strip()
+            if s_extra.startswith("url") and "=" in s_extra:
+                url_expr = s_extra.split("=", 1)[1].strip()
+                break
+        if url_expr is None:
+            url_expr = call_args[0].strip()
+        m = _STRICT_STATIC_URL_LITERAL_RE.match(url_expr)
+        if not m:
+            return ([], f"Outbound HTTP write with dynamic or concatenated target URL ({url_expr}) is blocked fail-closed by Hook 2.1.")
+        urls.append(m.group(2))
+
+    return (urls, "")
+
+
+def check_outbound_http_write_text(cmd: str, allowed_hosts: set[str]) -> str:
+    """F3a & F9a: Fail-closed outbound HTTP write verification on command/script text."""
     low = cmd.lower()
 
     # Check specific Meta Graph mutations even if disguised
@@ -157,33 +301,59 @@ def check_outbound_http_write(cmd: str, allowed_hosts: set[str]) -> str:
         if is_curl_write(cmd) or any(p.search(cmd) for p in CODE_HTTP_WRITE_PATTERNS) or any(p.search(cmd) for p in GRAPH_SPECIFIC_MUTATION_PATTERNS):
             return "Writing or posting to Meta Graph API (POST/DELETE/PUT or data/form payload) is blocked by Hook 2.1."
 
-    if not is_http_write_command(cmd):
-        return ""
-
     # Block string concatenation of URLs in write requests
-    for pat in URL_CONCAT_PATTERNS:
-        if pat.search(cmd):
-            return "Outbound HTTP write with dynamically concatenated URL is blocked fail-closed by Hook 2.1."
+    if is_http_write_command(cmd):
+        for pat in URL_CONCAT_PATTERNS:
+            if pat.search(cmd):
+                return "Outbound HTTP write with dynamically concatenated URL is blocked fail-closed by Hook 2.1."
 
-    urls = STATIC_URL_RE.findall(cmd)
-    if not urls:
-        return "Outbound HTTP write without a static literal whitelisted URL is blocked fail-closed by Hook 2.1."
+    if any(p.search(cmd) for p in CODE_HTTP_WRITE_PATTERNS):
+        urls, err = _extract_code_http_write_target_urls(cmd)
+        if err:
+            return err
+        if not urls:
+            return "Outbound HTTP write without a static literal whitelisted target URL is blocked fail-closed by Hook 2.1."
+        for u in urls:
+            v = _validate_static_target_url(u, allowed_hosts)
+            if v:
+                return v
 
-    for raw_url in urls:
-        clean_url = raw_url.rstrip(".,;:")
-        if "$" in clean_url or "`" in clean_url or "{" in clean_url or "}" in clean_url:
-            return f"Outbound HTTP write with dynamic variable in URL ({clean_url}) is blocked fail-closed by Hook 2.1."
-        try:
-            parsed = urlparse(clean_url)
-            host = (parsed.hostname or "").lower()
-        except Exception:
-            host = ""
-        if not host:
-            return f"Outbound HTTP write with unparseable URL ({clean_url}) is blocked fail-closed by Hook 2.1."
-        if host in GRAPH_DOMAINS or any(host.endswith("." + d) for d in GRAPH_DOMAINS):
-            return "Writing or posting to Meta Graph API (POST/DELETE/PUT or data/form payload) is blocked by Hook 2.1."
-        if host not in allowed_hosts:
-            return f"Outbound HTTP write to non-whitelisted host '{host}' is blocked fail-closed by Hook 2.1."
+    return ""
+
+
+def check_sc_outbound_http_write(sc: bash_parser.SimpleCommand, allowed_hosts: set[str]) -> str:
+    """F9a: Verify the actual positional target URL of curl/wget/fetch/requests on a parsed SimpleCommand."""
+    text_v = check_outbound_http_write_text(sc.raw_str, allowed_hosts)
+    if text_v:
+        return text_v
+
+    exe = sc.executable
+    if exe == "curl" and is_curl_write(sc.raw_str):
+        urls, err = _extract_curl_target_urls(sc.words)
+        if err:
+            return err
+        if not urls:
+            return "Outbound curl write without a positional or --url target URL is blocked fail-closed by Hook 2.1."
+        for u in urls:
+            v = _validate_static_target_url(u, allowed_hosts)
+            if v:
+                return v
+
+    if exe == "wget" and any(p.search(sc.raw_str) for p in WGET_WRITE_PATTERNS):
+        urls, err = _extract_wget_target_urls(sc.words)
+        if err:
+            return err
+        if not urls:
+            return "Outbound wget write without a positional target URL is blocked fail-closed by Hook 2.1."
+        for u in urls:
+            v = _validate_static_target_url(u, allowed_hosts)
+            if v:
+                return v
+
+    for hd_body in getattr(sc, "heredoc_bodies", []):
+        hd_v = check_outbound_http_write_text(hd_body, allowed_hosts)
+        if hd_v:
+            return hd_v
 
     return ""
 
@@ -249,16 +419,43 @@ def extract_candidate_script_paths(sc: bash_parser.SimpleCommand) -> list[str]:
     return candidates
 
 
-def is_exempt_readonly_script(script_arg: str, full_cmd: str) -> bool:
-    clean_arg = script_arg.strip("'\"")
-    base = os.path.basename(clean_arg)
-    if base == "fetch_page_messages.py":
-        if not SKILL_WRITE_FLAGS.search(full_cmd):
-            return True
-    if any(s in clean_arg for s in SKILL_SCRIPTS):
-        if not SKILL_WRITE_FLAGS.search(full_cmd):
-            return True
-    return False
+TRUSTED_EXEMPT_SKILL_RELPATHS = (
+    "doc-comment-fanpage/scripts/doc-comment.py",
+    "tra-loi-inbox-fanpage/scripts/inbox.py",
+    "dang-bai-fanpage/scripts/dang-bai.py",
+)
+
+
+def is_exempt_readonly_script(script_arg: str, cwd: str, project_dir: str, full_cmd: str) -> bool:
+    """
+    F9b: Exempt a read-only skill script ONLY when its resolved path and realpath match
+    the hardcoded trusted office skill paths (never by basename alone).
+    """
+    if SKILL_WRITE_FLAGS.search(full_cmd) or re.search(r"(?:^|[\s'\"=])--dong-y(?=$|[\s'\"])", full_cmd):
+        return False
+
+    clean_arg = (script_arg or "").strip("'\"")
+    if not clean_arg or "$" in clean_arg or "`" in clean_arg:
+        return False
+
+    base_cwd = cwd or project_dir or os.getcwd()
+    resolved = os.path.normpath(os.path.join(base_cwd, os.path.expanduser(clean_arg)))
+    if os.path.islink(resolved):
+        return False
+    real_p = os.path.realpath(resolved)
+
+    trusted_paths: set[str] = set()
+    if project_dir:
+        inbox_tool = os.path.normpath(os.path.join(project_dir, "tools", "inbox-reader", "fetch_page_messages.py"))
+        trusted_paths.add(inbox_tool)
+        trusted_paths.add(os.path.realpath(inbox_tool))
+
+    for rel_skill in TRUSTED_EXEMPT_SKILL_RELPATHS:
+        skill_path = os.path.normpath(os.path.expanduser(f"~/.claude/skills/{rel_skill}"))
+        trusted_paths.add(skill_path)
+        trusted_paths.add(os.path.realpath(skill_path))
+
+    return resolved in trusted_paths and real_p in trusted_paths
 
 
 def check_command_text(
@@ -291,8 +488,7 @@ def check_command_text(
 
     # 1. Check for Facebook/Meta token file reads in command text (including heredocs)
     if has_fb_token_path(raw_cmd) or has_fb_token_path(cmd):
-        if "fetch_page_messages.py" not in cmd:
-            return "Reading or accessing Facebook/Meta token files via Bash/Python/Node is blocked by Hook 2.1."
+        return "Reading or accessing Facebook/Meta token files via Bash/Python/Node is blocked by Hook 2.1."
 
     # 2. Check for --dong-y flag or fanpage skill publish/reply/send flags (with or without --dong-y)
     if re.search(r"(?:^|[\s'\"=])--dong-y(?=$|[\s'\"])", cmd) or re.search(r"(?:^|[\s'\"=])--dong-y(?=$|[\s'\"])", raw_cmd):
@@ -304,11 +500,11 @@ def check_command_text(
         return "Calling a fanpage or inbox skill with publish/reply/send flags is blocked for office seats by Hook 2.1."
 
     # 3. Check outbound HTTP writes on full command text (and heredocs)
-    http_violation = check_outbound_http_write(cmd, allowed_hosts)
+    http_violation = check_outbound_http_write_text(cmd, allowed_hosts)
     if http_violation:
         return http_violation
     if raw_cmd != cmd:
-        http_violation_raw = check_outbound_http_write(raw_cmd, allowed_hosts)
+        http_violation_raw = check_outbound_http_write_text(raw_cmd, allowed_hosts)
         if http_violation_raw:
             return http_violation_raw
 
@@ -319,7 +515,7 @@ def check_command_text(
         return f"Bash syntax error in Hook 2.1 ({e}); blocking fail-closed."
 
     for sc in commands:
-        sc_violation = check_outbound_http_write(sc.raw_str, allowed_hosts)
+        sc_violation = check_sc_outbound_http_write(sc, allowed_hosts)
         if sc_violation:
             return sc_violation
 
@@ -329,7 +525,7 @@ def check_command_text(
                 return hd_violation
 
         for script_arg in extract_candidate_script_paths(sc):
-            if is_exempt_readonly_script(script_arg, raw_cmd):
+            if is_exempt_readonly_script(script_arg, sc.cwd, project_dir, raw_cmd):
                 continue
 
             clean_script = script_arg.strip("'\"")
@@ -337,36 +533,39 @@ def check_command_text(
                 return f"Executing script via dynamic path ({script_arg}) is blocked fail-closed by Hook 2.1."
 
             resolved_script = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(clean_script)))
+            if not os.path.lexists(resolved_script):
+                return f"Script target '{clean_script}' does not exist at '{resolved_script}'; blocked fail-closed by Hook 2.1."
+
             real_script = os.path.realpath(resolved_script)
             if real_script in visited_files:
                 continue
 
-            if os.path.lexists(resolved_script):
-                if not os.path.isfile(real_script):
-                    return f"Script target '{clean_script}' is not a regular readable file; blocked fail-closed by Hook 2.1."
-                try:
-                    file_size = os.path.getsize(real_script)
-                except OSError as e:
-                    return f"Cannot stat script '{clean_script}' ({e}); blocked fail-closed by Hook 2.1."
-                if file_size > MAX_SCRIPT_INSPECT_BYTES:
-                    return f"Script '{clean_script}' ({file_size} bytes) exceeds 200 KB inspection limit; blocked fail-closed by Hook 2.1."
-                try:
-                    with open(real_script, "r", encoding="utf-8", errors="replace") as sf:
-                        script_content = sf.read()
-                except OSError as e:
-                    return f"Cannot read script '{clean_script}' ({e}); blocked fail-closed by Hook 2.1."
+            if not os.path.isfile(real_script):
+                return f"Script target '{clean_script}' is not a regular readable file; blocked fail-closed by Hook 2.1."
+            try:
+                file_size = os.path.getsize(real_script)
+            except OSError as e:
+                return f"Cannot stat script '{clean_script}' ({e}); blocked fail-closed by Hook 2.1."
+            if file_size > MAX_SCRIPT_INSPECT_BYTES:
+                return f"Script '{clean_script}' ({file_size} bytes) exceeds 200 KB inspection limit; blocked fail-closed by Hook 2.1."
+            try:
+                with open(real_script, "r", encoding="utf-8", errors="replace") as sf:
+                    script_content = sf.read()
+            except OSError as e:
+                return f"Cannot read script '{clean_script}' ({e}); blocked fail-closed by Hook 2.1."
 
-                visited_files.add(real_script)
-                sub_violation = check_command_text(
-                    script_content,
-                    os.path.dirname(real_script),
-                    project_dir,
-                    allowed_hosts,
-                    depth + 1,
-                    visited_files,
-                )
-                if sub_violation:
-                    return sub_violation
+            visited_files.add(real_script)
+            # F9c: Relative script calls inside a script resolve against the command's cwd (sc.cwd), not dirname(real_script)
+            sub_violation = check_command_text(
+                script_content,
+                sc.cwd,
+                project_dir,
+                allowed_hosts,
+                depth + 1,
+                visited_files,
+            )
+            if sub_violation:
+                return sub_violation
 
     return ""
 

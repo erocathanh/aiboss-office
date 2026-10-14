@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -386,8 +386,9 @@ export function buildClaudeSeatSettingsJson(options?: { repoRoot?: string; homeD
 export const SEAT_ISOLATION_SETTINGS_JSON = buildClaudeSeatSettingsJson();
 
 /**
- * F3b (S17b): Danh sách trắng biến môi trường được phép truyền xuống tiến trình con Claude.
+ * F3b (S17b) & F13 (S17c): Danh sách trắng biến môi trường được phép truyền xuống tiến trình con Claude.
  * Tuyệt đối KHÔNG truyền nguyên `process.env` và KHÔNG truyền `AIBOSS_DISABLE_HOOK_2_1` hay `AIBOSS_TEST_MODE`.
+ * F13: giữ các biến proxy tiêu chuẩn (cả chữ hoa và chữ thường) cho máy phụ thuộc корпоративный/local proxy.
  */
 export const CLAUDE_SEAT_ENV_WHITELIST = [
   'PATH',
@@ -406,6 +407,14 @@ export const CLAUDE_SEAT_ENV_WHITELIST = [
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'all_proxy',
   'CLAUDE_CONFIG_DIR',
   'ANTHROPIC_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
@@ -447,6 +456,177 @@ export function buildClaudeSeatEnv(sourceEnv: NodeJS.ProcessEnv = process.env): 
   return cleanEnv as NodeJS.ProcessEnv;
 }
 
+export function escapeSeatSettingsGlobPath(absPath: string): string {
+  return absPath.replace(/([[\]*?])/g, '\\$1');
+}
+
+const REQUIRED_ANCHORED_DENY_SUFFIXES = [
+  'projects/**/references/**',
+  'projects/**/templates/**',
+  'projects/**/inputs/**',
+  'operations/data/**',
+] as const;
+
+export interface SeatSettingsAnchorVerification {
+  valid: boolean;
+  reason?: string;
+  checkedFiles: string[];
+  mismatchedRules: string[];
+}
+
+/**
+ * F7b (S17c): Kiểm tra mọi quy tắc deny tuyệt đối (`Edit(//...)`, `Write(//...)`, `Read(//...)`)
+ * trong `.claude/settings.json` của ghế phải bắt đầu bằng `//<REPO_ROOT thật>/`.
+ */
+export function verifySeatSettingsRootAnchor(
+  thuMuc: string,
+  repoRoot?: string
+): SeatSettingsAnchorVerification {
+  const resolvedRoot = path.resolve(repoRoot ?? findOfficeRootFromDir(thuMuc));
+  let realRoot = resolvedRoot;
+  try {
+    realRoot = fs.realpathSync(resolvedRoot);
+  } catch {}
+
+  const escapedResolved = escapeSeatSettingsGlobPath(resolvedRoot.replace(/^\/+/, ''));
+  const escapedReal = escapeSeatSettingsGlobPath(realRoot.replace(/^\/+/, ''));
+  const allowedAnchorPrefixes = Array.from(new Set([`//${escapedResolved}/`, `//${escapedReal}/`]));
+
+  const resolvedThuMuc = path.resolve(thuMuc);
+  const seatSettingsPath = path.join(resolvedThuMuc, '.claude', 'settings.json');
+  const rootSettingsPath = path.join(resolvedRoot, '.claude', 'settings.json');
+
+  let isRegisteredSeat = false;
+  try {
+    const seatsJsonPath = path.join(resolvedRoot, 'data', 'seats.json');
+    if (fs.existsSync(seatsJsonPath)) {
+      const seats = JSON.parse(fs.readFileSync(seatsJsonPath, 'utf8')) as Array<{ dir?: string }>;
+      if (Array.isArray(seats)) {
+        isRegisteredSeat = seats.some(
+          (s) => s?.dir && path.resolve(resolvedRoot, s.dir) === resolvedThuMuc
+        );
+      }
+    }
+  } catch {}
+
+  const filesToCheck: string[] = [];
+  if (fs.existsSync(seatSettingsPath) || isRegisteredSeat) {
+    filesToCheck.push(seatSettingsPath);
+  }
+  if (fs.existsSync(rootSettingsPath) && rootSettingsPath !== seatSettingsPath && isRegisteredSeat) {
+    filesToCheck.push(rootSettingsPath);
+  }
+
+  if (filesToCheck.length === 0) {
+    return { valid: true, checkedFiles: [], mismatchedRules: [] };
+  }
+
+  const mismatchedRules: string[] = [];
+  for (const settingsFile of filesToCheck) {
+    if (!fs.existsSync(settingsFile)) {
+      return {
+        valid: false,
+        reason: `seat_settings_root_mismatch: missing settings file ${settingsFile}`,
+        checkedFiles: filesToCheck,
+        mismatchedRules: [`<missing:${settingsFile}>`],
+      };
+    }
+
+    let parsed: { permissions?: { deny?: unknown } };
+    try {
+      parsed = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    } catch {
+      return {
+        valid: false,
+        reason: `seat_settings_root_mismatch: invalid JSON in ${settingsFile}`,
+        checkedFiles: filesToCheck,
+        mismatchedRules: [`<invalid_json:${settingsFile}>`],
+      };
+    }
+
+    const denyList = Array.isArray(parsed?.permissions?.deny)
+      ? (parsed.permissions.deny as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+
+    const absRules = denyList.filter((r) => /^(?:Edit|Write|Read)\(\/\//.test(r));
+    if (absRules.length === 0) {
+      mismatchedRules.push(`${settingsFile}:<no_absolute_deny_rules>`);
+      continue;
+    }
+
+    for (const rule of absRules) {
+      const openIdx = rule.indexOf('(//');
+      const innerPath = openIdx >= 0 ? rule.slice(openIdx + 1, -1) : '';
+      const matchesPrefix = allowedAnchorPrefixes.some((prefix) => innerPath.startsWith(prefix));
+      if (!matchesPrefix) {
+        mismatchedRules.push(rule);
+      }
+    }
+
+    for (const suffix of REQUIRED_ANCHORED_DENY_SUFFIXES) {
+      const hasRequired = allowedAnchorPrefixes.some((prefix) =>
+        denyList.includes(`Edit(${prefix}${suffix})`)
+      );
+      if (!hasRequired) {
+        mismatchedRules.push(`${settingsFile}:missing:Edit(${allowedAnchorPrefixes[0]}${suffix})`);
+      }
+    }
+  }
+
+  if (mismatchedRules.length > 0) {
+    return {
+      valid: false,
+      reason: `seat_settings_root_mismatch: anchored deny rules do not match repo root ${resolvedRoot}`,
+      checkedFiles: filesToCheck,
+      mismatchedRules,
+    };
+  }
+
+  return {
+    valid: true,
+    checkedFiles: filesToCheck,
+    mismatchedRules: [],
+  };
+}
+
+/**
+ * F7b (S17c): Kiểm tra neo settings ghế trước khi spawn; nếu lệch thì thử sinh lại tại chỗ
+ * từ `operations/scripts/gen-seat-files.mjs` rồi kiểm lại; nếu vẫn lệch thì ném lỗi `seat_settings_root_mismatch` (fail-closed).
+ */
+export function ensureSeatSettingsAnchored(
+  thuMuc: string,
+  repoRoot?: string,
+  options?: { autoRegenerate?: boolean }
+): SeatSettingsAnchorVerification {
+  const resolvedRoot = path.resolve(repoRoot ?? findOfficeRootFromDir(thuMuc));
+  const firstCheck = verifySeatSettingsRootAnchor(thuMuc, resolvedRoot);
+  if (firstCheck.valid) return firstCheck;
+
+  const allowAutoRegen = options?.autoRegenerate !== false;
+  if (allowAutoRegen) {
+    const genScriptPath = path.join(resolvedRoot, 'operations', 'scripts', 'gen-seat-files.mjs');
+    const seatsJsonPath = path.join(resolvedRoot, 'data', 'seats.json');
+    if (fs.existsSync(genScriptPath) && fs.existsSync(seatsJsonPath)) {
+      try {
+        execFileSync(process.execPath, [genScriptPath], {
+          cwd: resolvedRoot,
+          env: { ...process.env, AIBOSS_OFFICE_ROOT: resolvedRoot },
+          stdio: 'ignore',
+        });
+      } catch {}
+      const secondCheck = verifySeatSettingsRootAnchor(thuMuc, resolvedRoot);
+      if (secondCheck.valid) return secondCheck;
+      throw new Error(
+        `${secondCheck.reason ?? 'seat_settings_root_mismatch'} (${secondCheck.mismatchedRules.slice(0, 4).join(', ')})`
+      );
+    }
+  }
+
+  throw new Error(
+    `${firstCheck.reason ?? 'seat_settings_root_mismatch'} (${firstCheck.mismatchedRules.slice(0, 4).join(', ')})`
+  );
+}
+
 export interface ThamSoDungDoiSoClaude {
   thuMuc: string;
   maNhanSu?: string | null;
@@ -456,6 +636,8 @@ export interface ThamSoDungDoiSoClaude {
   loiDan?: string;
   argv?: string[];
   env?: NodeJS.ProcessEnv;
+  repoRoot?: string;
+  autoRegenerateSettings?: boolean;
 }
 
 /**
@@ -467,7 +649,7 @@ export function buildClaudeSeatArgv(ts: ThamSoDungDoiSoClaude): string[] {
   const giongTerminal = chayNhuTerminal(env);
   const hanCheMangNgoai = !giongTerminal && ngheRaNgoai(argv);
   const congCuCam = hanCheMangNgoai ? CAM_KHI_HAN_CHE : [];
-  const repoRoot = findOfficeRootFromDir(ts.thuMuc);
+  const repoRoot = ts.repoRoot ? path.resolve(ts.repoRoot) : findOfficeRootFromDir(ts.thuMuc);
   const mcpConfigArg = resolveSeatMcpConfig(ts.maNhanSu, ts.thuMuc, repoRoot);
   const settingsJson = buildClaudeSeatSettingsJson({ repoRoot, homeDir: env.HOME || os.homedir() });
   const outputFormat = ts.outputFormat ?? 'stream-json';
@@ -514,8 +696,9 @@ export function buildClaudeSeatArgv(ts: ThamSoDungDoiSoClaude): string[] {
 }
 
 /**
- * F1b & F3b (S17b): Điểm spawn `claude` DUY NHẤT trong toàn bộ mã nguồn `src/`.
- * Luôn đi qua `buildClaudeSeatArgv` và `buildClaudeSeatEnv`.
+ * F1b & F3b (S17b) & F7b (S17c): Điểm spawn `claude` DUY NHẤT trong toàn bộ mã nguồn `src/`.
+ * Luôn kiểm tra neo `.claude/settings.json` theo gốc kho thật trước khi spawn (fail-closed nếu lệch),
+ * và đi qua `buildClaudeSeatArgv` cùng `buildClaudeSeatEnv`.
  */
 export function spawnClaudeSeatProcess(ts: ThamSoDungDoiSoClaude): {
   tien: ChildProcessWithoutNullStreams;
@@ -523,7 +706,11 @@ export function spawnClaudeSeatProcess(ts: ThamSoDungDoiSoClaude): {
   env: NodeJS.ProcessEnv;
 } {
   fs.mkdirSync(ts.thuMuc, { recursive: true });
-  const doiSo = buildClaudeSeatArgv(ts);
+  const repoRoot = ts.repoRoot ? path.resolve(ts.repoRoot) : findOfficeRootFromDir(ts.thuMuc);
+  ensureSeatSettingsAnchored(ts.thuMuc, repoRoot, {
+    autoRegenerate: ts.autoRegenerateSettings,
+  });
+  const doiSo = buildClaudeSeatArgv({ ...ts, repoRoot });
   const env = buildClaudeSeatEnv(ts.env ?? process.env);
   const tien = spawn(CAU_HINH.lenhClaude, doiSo, {
     cwd: ts.thuMuc,

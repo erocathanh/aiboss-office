@@ -8,7 +8,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>exec pnpm exec next start -p __PORT__ -H 127.0.0.1</string>
+        <string>node operations/scripts/gen-seat-files.mjs &amp;&amp; node operations/scripts/gen-seat-claude-md.mjs &amp;&amp; exec pnpm exec next start -p __PORT__ -H 127.0.0.1</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO_DIR__</string>

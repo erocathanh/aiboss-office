@@ -61,11 +61,15 @@ cd aiboss-office
   git checkout mvp/marketing
   ```
 
-*Neo lại quy tắc `deny` và tin cậy thư mục kho mới (S17b F4 & Mục 8)*:
-1. **Khi tải kho về đường dẫn mới hoặc dời kho sang thư mục khác** (ví dụ ngoài `/Users/<ten>/Projects/aiboss-office`), bắt buộc chạy lại bộ sinh tệp ghế để neo các quy tắc `Edit(//<REPO_ROOT>/projects/**/{references,templates,inputs}/**)` và `Edit(//<REPO_ROOT>/operations/data/**)` trong `.claude/settings.json` theo đúng đường dẫn thực của kho:
-   ```bash
-   node operations/scripts/gen-seat-files.mjs
-   ```
+*Neo quy tắc `deny` tự động và tin cậy thư mục kho mới (S17c F7)*:
+1. **Tự động neo quy tắc `deny` theo đường dẫn thực của kho (không cần bước chạy tay)**:
+   - Khi chạy `pnpm start`, `pnpm test` hoặc dịch vụ LaunchAgent, bước `prestart` tự động thực thi `node operations/scripts/gen-seat-files.mjs` (idempotent — chạy nhiều lần không đổi nội dung nếu gốc kho giữ nguyên) để neo các quy tắc `Edit(//<REPO_ROOT>/projects/**/{references,templates,inputs}/**)` và `Edit(//<REPO_ROOT>/operations/data/**)` trong `.claude/settings.json` theo đúng đường dẫn thực của kho hiện tại.
+   - Đồng thời, trước mỗi lượt gọi ghế (`spawnClaudeSeatProcess`), hệ thống tự động kiểm tra mọi quy tắc `deny` tuyệt đối trong `.claude/settings.json` phải khớp với `//<REPO_ROOT thật>/`; nếu lệch sẽ tự sinh lại tại chỗ và kiểm tra lại, nếu vẫn lệch sẽ từ chối lượt chạy với lỗi `seat_settings_root_mismatch` (fail-closed, tuyệt đối không chạy ghế với `deny` neo sai đường dẫn).
+   - Nếu muốn kiểm tra thủ công trạng thái neo hiện tại mà không ghi tệp:
+     ```bash
+     node operations/scripts/gen-seat-files.mjs --check
+     ```
+   - *Lý do thiết kế (giữ tệp sinh trong Git kết hợp kiểm tra lúc spawn)*: Các tệp `.claude/settings.json` và `.mcp.json` vẫn được theo dõi trong Git để có thể kiểm toán trực tiếp toàn bộ sàn `permissions.deny`/`hooks` qua lịch sử diff và dùng ngay ở đường dẫn chuẩn, trong khi cơ chế `prestart` + kiểm tra fail-closed tại `spawnClaudeSeatProcess` bảo đảm bất kỳ bản clone/worktree nào ở đường dẫn khác đều được neo lại tự động và không bao giờ chạy với quy tắc cũ.
 2. **Chấp nhận hộp thoại tin cậy kho (Workspace Trust)**: Mở terminal tại thư mục gốc `aiboss-office` vừa clone và chạy lệnh `claude` tương tác một lần để bấm đồng ý tin cậy thư mục dự án (*Yes, I trust this folder*), sau đó gõ `/exit`. Bước này giúp Claude Code nạp đầy đủ các quy tắc `permissions.allow` và `hooks` trong `.claude/settings.json` của từng ghế.
 
 ---
@@ -103,9 +107,10 @@ PHONGBAN_PASS=mat_khau_quan_tri_cua_ban
 EOF
 ```
 
-*Danh sách trắng biến môi trường truyền xuống tiến trình con Claude (`CLAUDE_SEAT_ENV_WHITELIST` — S17b F3b)*:
+*Danh sách trắng biến môi trường truyền xuống tiến trình con Claude (`CLAUDE_SEAT_ENV_WHITELIST` — S17b F3b & S17c F13)*:
 - Khi ứng dụng sinh tiến trình `claude` (ở cả runner, `/api/chat` và `/api/fork`), hệ thống **không** truyền nguyên `process.env` mà chỉ lọc qua danh sách trắng gồm:
   - Biến hệ thống cốt lõi: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ`, `NODE_ENV`, `XDG_*`, `SSH_AUTH_SOCK`, `SECURITYSESSIONID`, `__CF_USER_TEXT_ENCODING`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`.
+  - Biến mạng proxy tiêu chuẩn (hỗ trợ máy chạy qua proxy): `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, `http_proxy`, `https_proxy`, `no_proxy`, `all_proxy`.
   - Biến vận hành `AIBOSS_*` hợp lệ: `AIBOSS_DATA_DIR`, `AIBOSS_CONFIG_DIR`, `AIBOSS_OFFICE_CONFIG_PATH`, `AIBOSS_OFFICE_ROOT`, `AIBOSS_AGENT_BROKER_MCP_SCRIPT`, `AIBOSS_SEAT_TERMINAL_MODE`.
 - Các biến thử nghiệm nội bộ (`AIBOSS_DISABLE_HOOK_2_1`, `AIBOSS_TEST_MODE`) **tuyệt đối không** nằm trong danh sách trắng truyền xuống tiến trình ghế, và cờ tắt Hook 2.1 trong bộ đo kiểm thử chỉ hoạt động khi đồng thời có `AIBOSS_TEST_MODE=1` và `NODE_ENV != "production"`.
 
@@ -127,7 +132,7 @@ Mở tệp `config/office.json` để kiểm tra và điều chỉnh ngân sách
   }
 }
 ```
-- `language`: Ngôn ngữ trả lời của các ghế agent (`"auto"` mặc định trả lời theo ngôn ngữ câu hỏi của Owner, hoặc ghim cố định `"vi"` / `"en"`). Khi đổi trường `language`, thay đổi có hiệu lực ở lần chạy `pnpm start` kế tiếp (bước `prestart` tự động chạy `node operations/scripts/gen-seat-claude-md.mjs` một cách idempotent để cập nhật `CLAUDE.md` của các ghế khi nội dung đổi mà không chạm `SOUL.md`, `settings.json` hay `.mcp.json`). Nếu chạy qua LaunchAgent daemon (`pnpm exec next start`), chạy `node operations/scripts/gen-seat-claude-md.mjs` trước khi khởi động lại dịch vụ.
+- `language`: Ngôn ngữ trả lời của các ghế agent (`"auto"` mặc định trả lời theo ngôn ngữ câu hỏi của Owner, hoặc ghim cố định `"vi"` / `"en"`). Khi đổi trường `language`, thay đổi có hiệu lực ở lần chạy `pnpm start` kế tiếp (bước `prestart` tự động chạy `node operations/scripts/gen-seat-files.mjs && node operations/scripts/gen-seat-claude-md.mjs` một cách idempotent để cập nhật tệp ghế khi nội dung đổi mà không chạm `SOUL.md`). Nếu chạy trực tiếp qua `pnpm exec next start -p 4330 -H 127.0.0.1`, chạy `node operations/scripts/gen-seat-files.mjs && node operations/scripts/gen-seat-claude-md.mjs` trước khi khởi động lại dịch vụ.
 - `daily_limit_usd`: Trần chi tiêu tối đa mỗi ngày tính bằng USD (ví dụ 10.0 USD). Khi chi phí đạt trần cứng, hệ thống sẽ tự động chặn mọi lượt gọi tiếp theo để bảo vệ tài khoản của bạn.
 - `warning_threshold_ratio`: Mức cảnh báo (0.8 tương đương 80% ngân sách ngày).
 
