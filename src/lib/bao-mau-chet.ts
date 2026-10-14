@@ -32,14 +32,45 @@ const TEN_CUA: Record<string, string> = {
   'thieu-cua': '⛔ ĐO ĐƯỢC cửa nào — ⛔ đoán, để người đọc kêu',
 };
 
-/** 🔒 Chốt cứng theo khuôn. Biến môi trường CHỈ để phép thử ⛔ bẩn sổ thật. */
-const SO_DEM =
-  process.env.DUONG_DAN_SO_DEM ?? path.join(os.homedir(), 'Operations', 'dem-cua-mat-tin.jsonl');
+/**
+ * Lấy đường dẫn tệp sổ đếm mẩu chết.
+ * - Ưu tiên 1: Biến môi trường DUONG_DAN_SO_DEM nếu được đặt tường minh.
+ * - Ưu tiên 2: Nếu AIBOSS_DATA_DIR được đặt, ghi vào path.join(process.env.AIBOSS_DATA_DIR, 'dem-cua-mat-tin.jsonl').
+ * - Ưu tiên 3: Nếu là máy chủ app điều hành (PORT === '4319' hoặc AIBOSS_APP_CHAT === '1'): ghi vào homedir ~/Operations/dem-cua-mat-tin.jsonl.
+ * - Mặc định khác (khi chạy office, test, port khác 4319 mà không có AIBOSS_DATA_DIR): ghi vào path.join(process.cwd(), 'operations', 'data', 'dem-cua-mat-tin.jsonl').
+ */
+export function layDuongDanSoDem(): string | null {
+  if (process.env.DUONG_DAN_SO_DEM) {
+    return process.env.DUONG_DAN_SO_DEM;
+  }
+  if (process.env.AIBOSS_DATA_DIR) {
+    return path.join(process.env.AIBOSS_DATA_DIR, 'dem-cua-mat-tin.jsonl');
+  }
+  if (process.env.PORT === '4319' || process.env.AIBOSS_APP_CHAT === '1') {
+    return path.join(os.homedir(), 'Operations', 'dem-cua-mat-tin.jsonl');
+  }
+  return path.join(process.cwd(), 'operations', 'data', 'dem-cua-mat-tin.jsonl');
+}
 
-/** Kênh — để người ta THẤY ngay, khác với sổ đếm là để CỘNG. */
-const KENH =
-  process.env.DUONG_DAN_KENH ??
-  path.join(os.homedir(), 'idea', 'inbox', 'phong-ban-ai-boss', 'BOSS-CHANNEL.md');
+/**
+ * Lấy đường dẫn kênh báo mẩu chết.
+ * - Ưu tiên 1: Biến môi trường DUONG_DAN_KENH nếu được đặt tường minh.
+ * - Ưu tiên 2: Nếu AIBOSS_DATA_DIR được đặt, ghi vào path.join(process.env.AIBOSS_DATA_DIR, 'BOSS-CHANNEL.md').
+ * - Ưu tiên 3: Nếu là máy chủ app điều hành (PORT === '4319' hoặc AIBOSS_APP_CHAT === '1'): ghi vào homedir ~/idea/inbox/phong-ban-ai-boss/BOSS-CHANNEL.md.
+ * - Mặc định khác (khi chạy office, test, port khác 4319 mà không có AIBOSS_DATA_DIR): ghi vào path.join(process.cwd(), 'operations', 'data', 'BOSS-CHANNEL.md').
+ */
+export function layDuongDanKenh(): string | null {
+  if (process.env.DUONG_DAN_KENH) {
+    return process.env.DUONG_DAN_KENH;
+  }
+  if (process.env.AIBOSS_DATA_DIR) {
+    return path.join(process.env.AIBOSS_DATA_DIR, 'BOSS-CHANNEL.md');
+  }
+  if (process.env.PORT === '4319' || process.env.AIBOSS_APP_CHAT === '1') {
+    return path.join(os.homedir(), 'idea', 'inbox', 'phong-ban-ai-boss', 'BOSS-CHANNEL.md');
+  }
+  return path.join(process.cwd(), 'operations', 'data', 'BOSS-CHANNEL.md');
+}
 
 /** ⛔ kêu hai lần một mẩu. Nhớ trong bộ nhớ tiến trình — ⛔ thêm người ghi đĩa. */
 const daBao = new Set<string>();
@@ -117,32 +148,39 @@ export function baoMauChet(m: MauChet, td: ThamDo, bayGio = Date.now()): MaCua |
   const cua = doanCua(m, td);
 
   // ── sổ đếm (máy đọc) — đúng khuôn S1-KHUON-SO-DEM.md
-  try {
-    fs.mkdirSync(path.dirname(SO_DEM), { recursive: true });
-    fs.appendFileSync(
-      SO_DEM,
-      `${JSON.stringify({
-        luc: bayGio,
-        ma: m.ma,
-        cua,
-        ma_o: m.ma_o,
-        ma_nhan_su: m.ma_nhan_su,
-        tu_ai: m.tu_ai,
-        tuoi_giay: Math.round((bayGio - m.luc) / 1000),
-        so_lan_thu: m.da_xu ? 1 : 0,
-        ghi_chu: '',
-      })}\n`,
-      'utf8',
-    );
-  } catch {
-    /* sổ ⛔ ghi được thì thôi — ⛔ để lỗi lan ra lượt gọi */
+  const soDem = layDuongDanSoDem();
+  if (soDem) {
+    try {
+      fs.mkdirSync(path.dirname(soDem), { recursive: true });
+      fs.appendFileSync(
+        soDem,
+        `${JSON.stringify({
+          luc: bayGio,
+          ma: m.ma,
+          cua,
+          ma_o: m.ma_o,
+          ma_nhan_su: m.ma_nhan_su,
+          tu_ai: m.tu_ai,
+          tuoi_giay: Math.round((bayGio - m.luc) / 1000),
+          so_lan_thu: m.da_xu ? 1 : 0,
+          ghi_chu: '',
+        })}\n`,
+        'utf8',
+      );
+    } catch {
+      /* sổ ⛔ ghi được thì thôi — ⛔ để lỗi lan ra lượt gọi */
+    }
   }
 
   // ── kênh (người đọc)
-  try {
-    fs.appendFileSync(KENH, `${dongKenh(m, cua, bayGio)}\n`, 'utf8');
-  } catch {
-    /* kênh ⛔ ghi được thì thôi */
+  const kenh = layDuongDanKenh();
+  if (kenh) {
+    try {
+      fs.mkdirSync(path.dirname(kenh), { recursive: true });
+      fs.appendFileSync(kenh, `${dongKenh(m, cua, bayGio)}\n`, 'utf8');
+    } catch {
+      /* kênh ⛔ ghi được thì thôi */
+    }
   }
 
   return cua;

@@ -41,7 +41,11 @@ AIBOSS Office is a standalone workspace platform providing org charts, multi-sea
    ```bash
    ./operations/scripts/service-uninstall.sh
    ```
-   See [operations/README.md](file:///Users/erocathanh/Projects/aiboss-office-5a/operations/README.md) for detailed service and runner operations.
+   See [operations/README.md](operations/README.md) for detailed service and runner operations.
+
+6. **Fresh Machine Setup (Hướng dẫn cài máy mới):**
+   For a comprehensive step-by-step setup guide on a fresh Mac machine, refer to:
+   👉 **[operations/README-cai-may-moi.md](operations/README-cai-may-moi.md)** (Tiếng Việt chi tiết: cài đặt Node >=22 LTS, pnpm, Claude CLI OAuth, cấu hình ngân sách, đồng bộ Session History).
 
 ## Repository Structure
 

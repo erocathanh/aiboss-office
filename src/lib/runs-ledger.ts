@@ -216,7 +216,26 @@ export function foldRunRecord(record: RunRecord): RunRecord {
  * rawUsage is deleted from the merged record.
  */
 export function mergeRunRecordPair(older: RunRecord, newer: RunRecord): RunRecord {
-  const merged: RunRecord = { ...older, ...newer };
+  const isTerminal = (s?: string) => s === 'finished' || s === 'failed' || s === 'timeout' || s === 'killed';
+  const isFailure = (s?: string) => s === 'failed' || s === 'timeout' || s === 'killed';
+
+  let resolvedStatus = newer.status || older.status;
+  let resolvedExitCode = newer.exitCode !== undefined ? newer.exitCode : older.exitCode;
+
+  if (isTerminal(older.status) && newer.status === 'running') {
+    resolvedStatus = older.status;
+  }
+  if (isFailure(older.status) && newer.status === 'finished') {
+    resolvedStatus = older.status;
+    resolvedExitCode = older.exitCode;
+  }
+
+  const merged: RunRecord = {
+    ...older,
+    ...newer,
+    status: resolvedStatus,
+    exitCode: resolvedExitCode,
+  };
   if (
     newer.rawUsage === null ||
     newer.costStatus === 'recorded' ||
@@ -330,21 +349,34 @@ export function updateRun(runId: string, patch: Partial<RunRecord>): RunRecord |
   }
   const current = getRun(runId);
   if (!current) return null;
+
+  const isTerminal = (s?: string) => s === 'finished' || s === 'failed' || s === 'timeout' || s === 'killed';
+  const isFailure = (s?: string) => s === 'failed' || s === 'timeout' || s === 'killed';
+
+  const effectivePatch = { ...patch };
+  if (isTerminal(current.status) && effectivePatch.status === 'running') {
+    delete effectivePatch.status;
+  }
+  if (isFailure(current.status) && effectivePatch.status === 'finished') {
+    delete effectivePatch.status;
+    delete effectivePatch.exitCode;
+  }
+
   const updated: RunRecord = {
     ...current,
-    ...patch,
+    ...effectivePatch,
     type: 'run',
     runId,
     updatedAt: new Date().toISOString(),
   };
   if (
-    patch.rawUsage === null ||
-    patch.costStatus === 'recorded' ||
-    patch.costStatus === 'unpriced'
+    effectivePatch.rawUsage === null ||
+    effectivePatch.costStatus === 'recorded' ||
+    effectivePatch.costStatus === 'unpriced'
   ) {
     updated.rawUsage = null;
-  } else if (patch.rawUsage !== undefined) {
-    updated.rawUsage = sanitizeRawUsage(patch.rawUsage);
+  } else if (effectivePatch.rawUsage !== undefined) {
+    updated.rawUsage = sanitizeRawUsage(effectivePatch.rawUsage);
   } else if (current.rawUsage !== undefined && updated.rawUsage !== null) {
     updated.rawUsage = sanitizeRawUsage(current.rawUsage);
   }

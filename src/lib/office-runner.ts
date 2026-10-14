@@ -10,7 +10,7 @@ import path from 'node:path';
 import { chayMotLuot } from '@/lib/chay-mot-luot';
 import { nhanYeuCau, xacNhanDaGiao, xemSo, conDung, traVeHangDoi, boYeuCau } from '@/lib/kho-danh-thuc';
 import { layO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien } from '@/lib/doc-phien';
+import { coPhien, dangChay as dangChayNoiKhac, mocTepPhien, saoChepBanGhiPhien } from '@/lib/doc-phien';
 import { isSeatHeldByTerminal } from '@/lib/seat-active';
 import { dsViec } from '@/lib/kho-tien-trinh';
 import {
@@ -654,6 +654,7 @@ export async function tickRunner(): Promise<number> {
             const maP = result.maPhien;
             const ghiLai = () => {
               if (isFenced() && !isFenceGuardDisabledForTest()) return;
+              saoChepBanGhiPhien(y.ma_nhan_su, maP, y.cau_hoi, runId);
               const oNay = layO(y.ma_o);
               if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP) return;
               const m = mocTepPhien(y.ma_nhan_su, maP);

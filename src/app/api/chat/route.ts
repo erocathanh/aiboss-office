@@ -3,8 +3,9 @@ import { chayAgent } from '@/lib/chay-agent';
 import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT } from '@/lib/doc-phien';
+import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, luuMetadataPhien, isViewerGoneGuardDisabledForTest } from '@/lib/doc-phien';
 import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
+import { generateRunOrWakeId, recordRun, updateRun } from '@/lib/runs-ledger';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
@@ -251,20 +252,39 @@ export async function POST(req: NextRequest) {
   };
 
   let maPhienDaDung: string | null = maPhienCu;
+  const runId = generateRunOrWakeId('run');
+  let viewerGone = false;
 
   const luong = new ReadableStream<Uint8Array>({
     async start(dieu) {
+      let childSpawned = false;
+      let daThoat = false;
+      let daCoLoi = false;
+
+      const guiSSE = (chunk: Uint8Array) => {
+        if (viewerGone) return;
+        try {
+          dieu.enqueue(chunk);
+        } catch {
+          if (!isViewerGoneGuardDisabledForTest()) {
+            viewerGone = true;
+          } else {
+            throw new Error('SSE enqueue error after client disconnected');
+          }
+        }
+      };
+
       // Nhịp giữ sống mỗi 20 giây (Cloudflare cắt kết nối rảnh ở 125 giây → 524).
       // Dòng bắt đầu bằng ':' là CHÚ THÍCH trong chuẩn SSE — trình duyệt bỏ qua.
       const nhip = setInterval(() => {
-        try { dieu.enqueue(new TextEncoder().encode(': nhip\n\n')); } catch { /* đã đóng */ }
+        guiSSE(new TextEncoder().encode(': nhip\n\n'));
       }, 20_000);
 
       try {
-        dieu.enqueue(goi({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) }));
+        guiSSE(goi({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) }));
         // ⛔ Không im lặng: báo thẳng là đã mất bản ghi phiên cũ.
         if (matBanGhi) {
-          dieu.enqueue(goi({
+          guiSSE(goi({
             loai: 'mat-ban-ghi',
             thong_diep:
               'Không đọc được bản ghi phiên cũ (đã đo 2 lần) — lượt này mở PHIÊN MỚI. ' +
@@ -286,7 +306,7 @@ export async function POST(req: NextRequest) {
           const tra = traChuoi(maNhanSu, maPhienCu, cauHoi);
           if (tra) {
             cauGui = cauHoi + String.fromCharCode(10, 10) + tra.loi_dan;
-            dieu.enqueue(goi({
+            guiSSE(goi({
               loai: 'tra-chuoi', do_phu: tra.do_phu, so_tang: tra.so_tang,
               so_khop: tra.khop.length, tu_khoa: tra.tu_khoa,
             }));
@@ -294,6 +314,16 @@ export async function POST(req: NextRequest) {
         } catch {
           /* tra hỏng thì ⛔ ĐỪNG chặn lượt chat — cứ gửi câu gốc */
         }
+        const startedAt = new Date().toISOString();
+        try {
+          recordRun({
+            runId,
+            seatId: maNhanSu,
+            startedAt,
+            status: 'running',
+            sessionId: maPhienCu ?? undefined,
+          });
+        } catch { /* bỏ qua lỗi ghi sổ phụ */ }
         for await (const mau of chayAgent({
           cauHoi: cauGui,
           maPhienCu,
@@ -308,6 +338,10 @@ export async function POST(req: NextRequest) {
           // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT.
           chayNen: true,
           khiSinh: (tien) => {
+            childSpawned = true;
+            if (tien.pid) {
+              try { updateRun(runId, { pid: tien.pid }); } catch { /* bỏ qua */ }
+            }
             /**
              * 🔴 ĐỌC GIÁ TRỊ TRẢ VỀ — người soi ngoài nhà bắt đúng chỗ này 02/09:
              *    «chỉ còn PID trong console.warn / giá trị trả về, NHƯNG CALLER BỎ QUA».
@@ -321,31 +355,20 @@ export async function POST(req: NextRequest) {
             const ghi = dangKyViec(maO, tien, maNhanSu); // để nút DỪNG còn giết được
             traCho(maO);   // dòng sổ ĐÃ CÓ ⇒ cổng `xacMinhDong` tiếp quản ⇒ nhả khoá
             if (ghi.ket === 'tu_choi_dong_cu_con_song') {
-              /**
-               * 🔴 FAIL-CLOSED ĐÃ NỔ — và lời báo phải đổi HẲN nghĩa, KHÔNG chỉ đổi chữ.
-               *
-               * 🕳 Bản trước (mã `de_len_dong_song`) báo: «đã ghi đè, tiến trình CŨ nay mồ côi,
-               *    anh tự `kill` lấy». Tức app tự tạo ra một tiến trình KHÔNG ai dừng được rồi
-               *    bảo Owner đi dọn. `hermes-aiboss-app-reviewer` bác đúng: **kêu KHÔNG phải là chặn.**
-               * ✅ Nay ngược lại: lượt MỚI bị từ chối và đã bị dừng; lượt CŨ giữ nguyên dòng sổ,
-               *    giữ nguyên nút Dừng. Owner KHÔNG phải đi dọn gì cả.
-               * 🔑 Tới được đây nghĩa là CỔNG PHÍA TRÊN đã bị lọt — nên câu báo phải nói ra điều
-               *    đó, chứ đừng để nó trông như một va chạm bình thường.
-               */
-              dieu.enqueue(goi({
+              daCoLoi = true;
+              try {
+                updateRun(runId, {
+                  status: 'failed',
+                  errorKind: 'result_error',
+                  finishedAt: new Date().toISOString(),
+                  costStatus: 'unpriced',
+                });
+              } catch { /* bỏ qua */ }
+              guiSSE(goi({
                 loai: 'loi',
                 thong_diep:
                   `Ô này ĐANG CHẠY một lượt khác (${ghi.ma_nhan_su_cu}, pid ${ghi.pid_cu}, ` +
                   `đã chạy ${ghi.chay_duoc_giay} giây), nên tôi KHÔNG mở lượt mới đè lên nó.\n\n` +
-                  /**
-                   * 🔴 THÔI KHAI «đã được dừng lại» — người soi ngoài nhà bắt 02/09 (soi delta),
-                   *    và đây là ca NẶNG NHẤT trong ba việc, dù nó KHÔNG nằm ở mã.
-                   * 🕳 Tôi vá `gietViec` để nó thôi khai một điều nó chưa biết, rồi để lại một câu
-                   *    khai y hệt ở LỜI VĂN, cách đó vài chục dòng. Mã đã thành thật; chữ thì chưa.
-                   * 🔑 **Owner tin CHỮ, KHÔNG đọc mã.** Một lời khai dối trong câu thông báo có
-                   *    sức nặng ngang lời khai dối trong dòng lệnh — có khi hơn, vì nó tới thẳng
-                   *    người đọc mà KHÔNG qua một phép kiểm nào.
-                   */
                   `Lượt anh vừa gửi: tôi ĐÃ GỬI lệnh dừng cho nó và đang chờ nó đóng — nếu nó chưa ` +
                   `đóng trong ${giayTuEp()} giây thì tôi ép. Lượt ĐANG CHẠY thì **vẫn nguyên vẹn**, ` +
                   'nút Dừng của nó vẫn dùng được — anh KHÔNG mất gì cả.\n\n' +
@@ -353,8 +376,28 @@ export async function POST(req: NextRequest) {
               }));
             }
           },
-          // ⚰️ Rút khỏi sổ ĐÚNG LÚC CON CHẾT — xem chú thích dài ở `finally` bên dưới.
-          khiChet: (tien) => xoaViec(maO, tien),
+          // ⚰️ Rút khỏi sổ ĐÚNG LÚC CON CHẾT và ghi nhận trạng thái cuối cùng vào runs-ledger.
+          // DUY NHẤT handler khiChet quyết định trạng thái cuối của run khi tiến trình con kết thúc.
+          khiChet: (tien, ma, signal) => {
+            xoaViec(maO, tien);
+            daThoat = true;
+            const isClean = ma === 0 && !signal && !daCoLoi;
+            const finalStatus = isClean ? 'finished' : 'failed';
+            const errorKind = !isClean
+              ? (signal ? 'sigkill' : (ma !== 0 ? 'exit_nonzero' : 'result_error'))
+              : undefined;
+            try {
+              updateRun(runId, {
+                status: finalStatus,
+                exitCode: ma ?? (isClean ? 0 : 1),
+                finishedAt: new Date().toISOString(),
+                ...(errorKind ? { errorKind } : {}),
+                costStatus: 'unpriced',
+                ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
+              });
+            } catch { /* bỏ qua */ }
+            updateSeatActivePid(maNhanSu, null);
+          },
         })) {
           if (mau.loai === 'phien') {
             // Ghi XUỐNG ĐĨA ngay ⇒ tắt máy chủ/trình duyệt vẫn tìm lại được phiên.
@@ -366,58 +409,50 @@ export async function POST(req: NextRequest) {
               pid: process.pid,
               cwd: thuMucAgent(maNhanSu),
             });
-            dieu.enqueue(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
+            try { updateRun(runId, { sessionId: mau.ma_phien }); } catch { /* bỏ qua */ }
+            // ⭐ Lưu metadata bền NGAY LẬP TỨC khi nhận được session ID (Hermes v2 finding 6)
+            try { luuMetadataPhien(maNhanSu, mau.ma_phien, cauHoi, runId); } catch { /* bỏ qua */ }
+            guiSSE(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
           } else if (mau.loai === 'chu') {
-            dieu.enqueue(goi({ loai: 'chu', chu: mau.chu }));
+            guiSSE(goi({ loai: 'chu', chu: mau.chu }));
           } else if (mau.loai === 'loi') {
-            dieu.enqueue(goi({ loai: 'loi', thong_diep: mau.thong_diep }));
+            daCoLoi = true;
+            guiSSE(goi({ loai: 'loi', thong_diep: mau.thong_diep }));
           } else if (mau.loai === 'xong') {
             // ⛔ Không đẩy mã phiên ra trình duyệt. Chi phí thì cho xem để Owner canh tiền.
-            dieu.enqueue(goi({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token }));
+            try { updateRun(runId, { costStatus: 'unpriced' }); } catch { /* bỏ qua */ }
+            guiSSE(goi({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token }));
           }
         }
       } catch (e) {
-        dieu.enqueue(
-          goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
-        );
+        if (!viewerGone) {
+          daCoLoi = true;
+          if (daThoat || !childSpawned) {
+            try {
+              updateRun(runId, {
+                status: 'failed',
+                finishedAt: new Date().toISOString(),
+                errorKind: 'result_error',
+                costStatus: 'unpriced',
+                ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
+              });
+            } catch { /* bỏ qua */ }
+            updateSeatActivePid(maNhanSu, null);
+          }
+          guiSSE(
+            goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
+          );
+        }
       } finally {
         traCho(maO);   // phòng ca chết TRƯỚC khi kịp sinh ⇒ khoá vẫn được nhả
         clearInterval(nhip);
         /**
          * ⭐ Ghi mốc "lượt của TA vừa xong" để lượt SAU ⛔ không bị chính ta chặn nhầm.
-         *
-         * 🔴 Ca thật 14/08: lấy mốc ĐÚNG LÚC NÀY là **đo trước khi việc xong** —
-         *    `claude` nhận SIGTERM ⛔ không chết ngay, còn xả bản ghi thêm tới 51 giây
-         *    (đo được). Mốc lấy sớm ⇒ lượt sau bị bộ canh phán "đang chạy ở terminal
-         *    khác" trong khi ⛔ không có terminal nào ⇒ ghế câm giữa buổi quay.
-         * ⇒ Lấy ngay MỘT lần (để có mốc nếu máy chủ tắt đột ngột), rồi **lấy lại**
-         *    vài nhịp sau cho tới khi tệp thôi đổi. Luôn giữ mốc MỚI NHẤT.
-         */
-        /**
-         * 🔴 ĐÃ BỎ HẲN `xoaViec` VÔ ĐIỀU KIỆN Ở ĐÂY (02/09/2026) — nó là gốc của câu ⑥.
-         *
-         * 🕳 Khối `finally` này chạy CẢ KHI người xem chỉ rời đi:
-         *      `cancel()` (:262-268) CỐ Ý KHÔNG giết con — đúng ý Owner, việc phải chạy tiếp
-         *      mà mấy lệnh `enqueue` ở :159 :162 :184 :214 :216 KHÔNG bọc `try`
-         *      ⇒ luồng đóng ⇒ enqueue NÉM ⇒ vòng thoát ⇒ rơi vào `finally` này
-         *      ⇒ xoá sổ trong khi CON VẪN ĐANG LÀM VIỆC.
-         *
-         * 📏 ĐO ĐƯỢC 02/09, KHÔNG phải suy: sổ khai 0 ô đang chạy trong khi tiến trình chở
-         *    chính lượt đang gõ (37895) và tiến trình của ghế soi (37591) đều SỐNG —
-         *    năm lượt hỏi liên tiếp đều ra 0. Nhân chứng mạnh nhất có thể có: thứ đi hỏi
-         *    câu hỏi CHÍNH LÀ công việc KHÔNG được ghi sổ.
-         *
-         * 💸 Hậu quả nặng nhất KHÔNG phải cái đèn sai, mà là **NÚT DỪNG BIẾN MẤT** cho một
-         *    ghế đang chạy và đang tiêu tiền — đúng thứ sổ này được dựng ra ngày 31/08 để cứu.
-         *
-         * 🔑 «Đường xem SSE kết thúc» KHÔNG phải «tiến trình đã xong». Hai câu khác nhau,
-         *    và chỗ này đang dùng câu thứ nhất để trả lời câu thứ hai.
-         * ⇒ Nay sổ do `khiChet` quyết (bắn từ `close` của chính tiến trình con).
-         *   Lượt xong bình thường thì `close` cũng đã bắn rồi — nên KHÔNG mất đường dọn nào.
          */
         if (maPhienDaDung) {
           const maP = maPhienDaDung;
           const ghiLai = () => {
+            luuMetadataPhien(maNhanSu, maP, cauHoi, runId);
             const m = mocTepPhien(maNhanSu, maP);
             if (m !== null) ghiMocKetThuc(maO, m);
           };
@@ -426,7 +461,22 @@ export async function POST(req: NextRequest) {
             setTimeout(ghiLai, cho).unref?.();
           }
         }
-        updateSeatActivePid(maNhanSu, null);
+
+        // ⭐ DUY NHẤT handler khiChet quyết định trạng thái cuối của run khi tiến trình con kết thúc.
+        // Ở finally: TUYỆT ĐỐI KHÔNG ghi 'failed' hay xoá activePid khi tiến trình con CÒN SỐNG (!daThoat).
+        // Chỉ ghi failed ở finally nếu tiến trình con thậm chí chưa từng được spawn (!childSpawned && daCoLoi).
+        if (!childSpawned && daCoLoi) {
+          try {
+            updateRun(runId, {
+              status: 'failed',
+              finishedAt: new Date().toISOString(),
+              errorKind: 'result_error',
+              costStatus: 'unpriced',
+            });
+          } catch { /* bỏ qua */ }
+          updateSeatActivePid(maNhanSu, null);
+        }
+
         dongMotLan();
         try {
           dieu.close();
@@ -442,6 +492,9 @@ export async function POST(req: NextRequest) {
        * Chỉ ngừng ĐƯỜNG XEM; việc bên dưới chạy tiếp và tự ghi vào bản ghi phiên,
        * nên mở lại app là đọc được đầy đủ.
        */
+      if (!isViewerGoneGuardDisabledForTest()) {
+        viewerGone = true;
+      }
       dongMotLan();
     },
   });

@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { CAU_HINH } from './cau-hinh';
 import { timNhanSu } from './nhan-su';
+import { getRunsWithMetadata } from './runs-ledger';
 
 /**
  * ĐỌC KHO PHIÊN THẬT của Claude Code trên máy.
@@ -20,7 +21,17 @@ import { timNhanSu } from './nhan-su';
  *    nằm gọn kho của người đó, ⛔ không lẫn vào nhau.
  */
 
-const GOC_KHO = path.join(os.homedir(), '.claude', 'projects');
+export function gocKhoClaude(): string {
+  const cfg = process.env.CLAUDE_CONFIG_DIR;
+  if (cfg) {
+    return path.join(cfg, 'projects');
+  }
+  return path.join(os.homedir(), '.claude', 'projects');
+}
+
+export function layThuMucData(): string {
+  return process.env.AIBOSS_DATA_DIR || path.join(process.cwd(), 'operations', 'data');
+}
 
 /** Ngưỡng coi là "đang chạy nơi khác" — lấy đúng ngưỡng sổ phiên của Owner: 5 phút. */
 export const NGUONG_SONG_PHUT = 5;
@@ -39,11 +50,22 @@ export function thuMucAgent(maNhanSu: string): string {
   const rieng = timNhanSu(sach)?.thu_muc;
   if (rieng) {
     const chuan = path.normalize(rieng);
-    if (path.isAbsolute(chuan) && !chuan.split(path.sep).includes('..')) return chuan;
+    if (path.isAbsolute(chuan) && !chuan.split(path.sep).includes('..')) {
+      try {
+        return fs.realpathSync(chuan);
+      } catch {
+        return chuan;
+      }
+    }
     throw new Error('thu_muc của ghế phải là đường TUYỆT ĐỐI và ⛔ chứa "..".');
   }
 
-  return path.join(CAU_HINH.thuMucLamViec, sach);
+  const macDinh = path.join(CAU_HINH.thuMucLamViec, sach);
+  try {
+    return fs.realpathSync(macDinh);
+  } catch {
+    return macDinh;
+  }
 }
 
 /** Mã hoá đường dẫn thành tên thư mục kho — đúng luật đã đo. */
@@ -52,7 +74,242 @@ export function maHoaDuongDan(p: string): string {
 }
 
 export function khoPhienCua(maNhanSu: string): string {
-  return path.join(GOC_KHO, maHoaDuongDan(thuMucAgent(maNhanSu)));
+  return path.join(gocKhoClaude(), maHoaDuongDan(thuMucAgent(maNhanSu)));
+}
+
+interface CwdCacheEntry {
+  mtimeMs: number;
+  size: number;
+  cwd: string | null;
+}
+
+const transcriptCwdCache = new Map<string, CwdCacheEntry>();
+
+export function xoaCacheCwd(): void {
+  transcriptCwdCache.clear();
+}
+
+let _enableLegacyPrefixFilterForTest = false;
+export function setLegacyPrefixFilterForTest(enabled: boolean): void {
+  _enableLegacyPrefixFilterForTest = enabled;
+}
+
+let _disableViewerGoneGuardForTest = false;
+export function setDisableViewerGoneGuardForTest(disabled: boolean): void {
+  _disableViewerGoneGuardForTest = disabled;
+}
+export function isViewerGoneGuardDisabledForTest(): boolean {
+  return _disableViewerGoneGuardForTest;
+}
+
+/** Trích xuất trường cwd từ vài dòng đầu của tệp transcript (có cache theo mtime + size). */
+export function layCwdTep(filePath: string): string | null {
+  try {
+    const st = fs.statSync(filePath);
+    const cached = transcriptCwdCache.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+      return cached.cwd;
+    }
+
+    const fd = fs.openSync(filePath, 'r');
+    let foundCwd: string | null = null;
+    try {
+      const buffer = Buffer.alloc(128 * 1024);
+      const count = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      const text = buffer.subarray(0, count).toString('utf8');
+      const lines = text.split('\n');
+      if (count === buffer.length) lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('{') || !trimmed.includes('"cwd"')) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (typeof parsed?.cwd === 'string' && parsed.cwd.length > 0) {
+            foundCwd = parsed.cwd;
+            break;
+          }
+        } catch { /* bỏ qua dòng JSON lỗi */ }
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    transcriptCwdCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, cwd: foundCwd });
+    return foundCwd;
+  } catch {
+    return null;
+  }
+}
+
+/** Xác minh tệp transcript có đúng thuộc về ghế trong instance này không qua realpath(cwd). */
+export function thuocVeGhe(transcriptPath: string, maNhanSu: string): boolean {
+  const cwd = layCwdTep(transcriptPath);
+  if (!cwd) return false;
+  try {
+    const gheThuMuc = thuMucAgent(maNhanSu);
+    try {
+      const realCwd = fs.realpathSync(cwd);
+      const realGhe = fs.realpathSync(gheThuMuc);
+      return realCwd === realGhe;
+    } catch {
+      return path.resolve(cwd) === path.resolve(gheThuMuc);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Danh sách mọi thư mục kho ứng viên của nhân sự.
+ * Không quét hậu tố chung toàn máy; chỉ nhận kho local của instance và kho CLI xác minh.
+ */
+export function cacKhoPhienCua(maNhanSu: string): string[] {
+  const sach = maNhanSu.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!sach || sach !== maNhanSu) return [];
+
+  const ds = new Set<string>();
+  ds.add(path.join(layThuMucData(), 'sessions', sach));
+
+  const gocKho = gocKhoClaude();
+  if (fs.existsSync(gocKho)) {
+    try {
+      const tm = thuMucAgent(sach);
+      ds.add(path.join(gocKho, maHoaDuongDan(tm)));
+    } catch { /* bỏ qua */ }
+
+    const ns = timNhanSu(sach);
+    if (ns?.thu_muc) {
+      const raw = path.normalize(ns.thu_muc);
+      ds.add(path.join(gocKho, maHoaDuongDan(raw)));
+    }
+  }
+
+  return Array.from(ds);
+}
+
+/**
+ * Tìm tệp .jsonl của phiên theo mã phiên (UUID), quét trong ~/.claude/projects/
+ * và xác minh cwd thuộc về đúng ghế để chống rò chéo clone/khách.
+ */
+export function timTepPhien(maNhanSuHoacPhien: string, maPhienTuyChon?: string): string | null {
+  const maPhien = maPhienTuyChon ?? maNhanSuHoacPhien;
+  const maNhanSu = maPhienTuyChon ? maNhanSuHoacPhien : undefined;
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) return null;
+
+  const gocKho = gocKhoClaude();
+  if (!fs.existsSync(gocKho)) return null;
+
+  // 1. Thử đường trực tiếp nếu có mã nhân sự
+  if (maNhanSu) {
+    try {
+      const tm = thuMucAgent(maNhanSu);
+      const direct = path.join(gocKho, maHoaDuongDan(tm), `${maPhien}.jsonl`);
+      if (fs.existsSync(direct) && thuocVeGhe(direct, maNhanSu)) {
+        return direct;
+      }
+    } catch { /* bỏ qua */ }
+  }
+
+  // 2. Quét mọi thư mục con trong ~/.claude/projects/
+  try {
+    const entries = fs.readdirSync(gocKho, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(gocKho, entry.name, `${maPhien}.jsonl`);
+      if (fs.existsSync(candidate)) {
+        if (!maNhanSu || thuocVeGhe(candidate, maNhanSu)) {
+          return candidate;
+        }
+      }
+    }
+  } catch { /* bỏ qua lỗi đọc thư mục */ }
+
+  return null;
+}
+
+export interface MetadataPhien {
+  ma: string;
+  ma_nhan_su: string;
+  cwd: string;
+  run_id?: string;
+  started_at: number;
+  moc: number;
+  cau_hoi: string;
+  size_bytes: number;
+  cap_nhat: number;
+}
+
+/**
+ * Lưu tóm tắt metadata phiên vào kho bền vững AIBOSS_DATA_DIR.
+ * BỎ chép .jsonl (bảo vệ quyền riêng tư dữ liệu toàn văn khách; nguồn thật là kho CLI trên máy).
+ * Quyền thư mục 0700, quyền tệp 0600.
+ */
+export function luuMetadataPhien(
+  maNhanSu: string,
+  maPhien: string,
+  cauHoi?: string,
+  runId?: string,
+): void {
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) return;
+  try {
+    const thuMucDich = path.join(layThuMucData(), 'sessions', maNhanSu);
+    if (!fs.existsSync(thuMucDich)) {
+      fs.mkdirSync(thuMucDich, { recursive: true, mode: 0o700 });
+    } else {
+      try { fs.chmodSync(thuMucDich, 0o700); } catch { /* ignore */ }
+    }
+
+    const tepGoc = timTepPhien(maNhanSu, maPhien);
+    const st = tepGoc && fs.existsSync(tepGoc) ? fs.statSync(tepGoc) : null;
+    const metaPath = path.join(thuMucDich, `${maPhien}.json`);
+
+    let cu: Partial<MetadataPhien> = {};
+    if (fs.existsSync(metaPath)) {
+      try {
+        cu = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      } catch { /* ignore */ }
+    }
+
+    let cwd = cu.cwd;
+    if (!cwd) {
+      if (tepGoc) {
+        cwd = layCwdTep(tepGoc) || undefined;
+      }
+      if (!cwd) {
+        try { cwd = thuMucAgent(maNhanSu); } catch { /* ignore */ }
+      }
+    }
+
+    const now = Date.now();
+    const meta: MetadataPhien = {
+      ma: maPhien,
+      ma_nhan_su: maNhanSu,
+      cwd: cwd || '',
+      ...(runId || cu.run_id ? { run_id: runId || cu.run_id } : {}),
+      started_at: typeof cu.started_at === 'number' ? cu.started_at : now,
+      moc: st?.mtimeMs ?? (typeof cu.moc === 'number' ? cu.moc : now),
+      cau_hoi: cauHoi || cu.cau_hoi || '',
+      size_bytes: st?.size ?? cu.size_bytes ?? 0,
+      cap_nhat: now,
+    };
+
+    const tempFile = `${metaPath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(meta, null, 2), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tempFile, metaPath);
+    try { fs.chmodSync(metaPath, 0o600); } catch { /* ignore */ }
+  } catch {
+    /* không làm sập lượt vì thao tác sao lưu phụ trợ */
+  }
+}
+
+/** Tương thích ngược: chuyển tiếp cuộc gọi sang luuMetadataPhien (không chép .jsonl). */
+export function saoChepBanGhiPhien(
+  maNhanSu: string,
+  maPhien: string,
+  cauHoi?: string,
+  runId?: string,
+): void {
+  luuMetadataPhien(maNhanSu, maPhien, cauHoi, runId);
 }
 
 export interface TomTatPhien {
@@ -70,6 +327,8 @@ export interface TomTatPhien {
   so_luot: number;
   /** Đang chạy ở nơi khác → ⛔ KHÔNG cho nối vào. */
   dang_chay: boolean;
+  /** Trạng thái transcript thực tế: 'found' hoặc 'missing'. */
+  transcript?: 'missing' | 'found';
 }
 
 interface DongPhien {
@@ -148,43 +407,41 @@ function docDuoi(p: string, soByte = 256 * 1024): string {
   }
 }
 
-/**
- * Liệt kê mọi phiên của một nhân sự.
- *
- * `phienCuaTa` = { mã phiên ô đang giữ, mốc kết thúc lượt của ta } — để KHÔNG
- * gắn nhãn "đang chạy nơi khác" lên chính phiên mà ô này vừa chạy xong.
- * (Đã cắn thật lúc nghiệm thu: phiên đang mở bị tự gắn cờ rồi hoá ra bấm không được.)
- */
-export function dsPhien(
-  maNhanSu: string,
-  phienCuaTa?: { ma: string | null; mocKetThuc: number | null },
-): TomTatPhien[] {
-  let kho: string;
+/** Đọc ĐẦU tệp — lấy câu nhắc người dùng đầu tiên khi đuôi không có hoặc tệp quá dài. */
+function docDau(p: string, soByte = 256 * 1024): string {
+  const cd = fs.statSync(p).size;
+  const fd = fs.openSync(p, 'r');
   try {
-    kho = khoPhienCua(maNhanSu);
-  } catch {
-    return [];
+    const dem = Buffer.alloc(Math.min(cd, soByte));
+    const n = fs.readSync(fd, dem, 0, dem.length, 0);
+    return dem.subarray(0, n).toString('utf8');
+  } finally {
+    fs.closeSync(fd);
   }
-  if (!fs.existsSync(kho)) return [];
+}
 
-  const bayGio = Date.now();
-  const ra: TomTatPhien[] = [];
-
-  for (const t of fs.readdirSync(kho)) {
-    if (!t.endsWith('.jsonl')) continue;
-    const p = path.join(kho, t);
-    let st: fs.Stats;
-    try {
-      st = fs.statSync(p);
-    } catch {
-      continue;
+/** Trích xuất câu hỏi người dùng và số lượt trao đổi từ tệp transcript. */
+function trichXuatTinCuoiVaSoLuot(filePath: string): { tinCuoi: string; soLuot: number } {
+  let tinCuoi = '';
+  let soLuot = 0;
+  try {
+    for (const d of docDuoi(filePath).split('\n')) {
+      const s = d.trim();
+      if (!s.startsWith('{')) continue;
+      let j: DongPhien;
+      try {
+        j = JSON.parse(s) as DongPhien;
+      } catch {
+        continue;
+      }
+      if (j.type === 'user' && j.userType === 'external') {
+        soLuot += 1;
+        const c = bocChu(j.message?.content).trim();
+        if (c) tinCuoi = c;
+      }
     }
-    if (!st.isFile() || st.size === 0) continue;
-
-    let tinCuoi = '';
-    let soLuot = 0;
-    try {
-      for (const d of docDuoi(p).split('\n')) {
+    if (!tinCuoi) {
+      for (const d of docDau(filePath).split('\n')) {
         const s = d.trim();
         if (!s.startsWith('{')) continue;
         let j: DongPhien;
@@ -194,44 +451,265 @@ export function dsPhien(
           continue;
         }
         if (j.type === 'user' && j.userType === 'external') {
-          soLuot += 1;
+          if (soLuot === 0) soLuot = 1;
           const c = bocChu(j.message?.content).trim();
-          if (c) tinCuoi = c;
+          if (c) {
+            tinCuoi = c;
+            break;
+          }
         }
       }
-    } catch {
-      /* tệp hỏng thì bỏ qua, ⛔ đừng làm sập cả danh sách */
     }
+  } catch { /* bỏ qua lỗi */ }
+  return { tinCuoi, soLuot };
+}
 
-    const ma = t.replace(/\.jsonl$/, '');
-    const phutTuoi = (bayGio - st.mtimeMs) / 60000;
+/** Tìm các thư mục kho trong ~/.claude/projects/ đã được xác minh thuộc về đúng ghế này. */
+export function timCacKhoCuaGhe(maNhanSu: string): string[] {
+  const sach = maNhanSu.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!sach || sach !== maNhanSu) return [];
 
-    // ⛔ LUẬT CỨNG: phiên vừa đổi trong 5 phút coi như ĐANG SỐNG ở terminal khác.
-    //    Hai tiến trình cùng ghi một tệp phiên = hỏng bản ghi.
-    // ⚠️ Luật ở đây PHẢI khớp `dangChay()` bên dưới — hai chỗ lệch nhau thì danh sách
-    //    hiện một đằng, cổng chặn làm một nẻo (đã cắn: đo bằng danh sách tưởng cổng còn hỏng).
-    let dang_chay = phutTuoi < NGUONG_SONG_PHUT;
-    if (dang_chay && phienCoTienTrinhSong(ma)) {
-      dang_chay = true; // sờ tận tay có tiến trình cầm ⇒ bận thật
-    } else if (dang_chay && phienCuaTa?.ma === ma && phienCuaTa.mocKetThuc !== null) {
-      // Ta sở hữu phiên này ⇒ mốc-sửa-tệp ⛔ không còn quyền chặn (xem lý do ở `dangChay`).
-      dang_chay = false;
+  const gocKho = gocKhoClaude();
+  if (!fs.existsSync(gocKho)) return [];
+
+  const ketQua = new Set<string>();
+
+  try {
+    const entries = fs.readdirSync(gocKho, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (_enableLegacyPrefixFilterForTest) {
+        let tm = '';
+        try { tm = thuMucAgent(sach); } catch { /* ignore */ }
+        const encodedPrefix = maHoaDuongDan(tm).slice(0, Math.min(40, maHoaDuongDan(tm).length));
+        if (entries.length > 50 && !entry.name.startsWith(encodedPrefix)) {
+          continue;
+        }
+      }
+      const dirPath = path.join(gocKho, entry.name);
+      try {
+        const files = fs.readdirSync(dirPath).filter((f) => f.endsWith('.jsonl'));
+        for (const file of files) {
+          const filePath = path.join(dirPath, file);
+          if (thuocVeGhe(filePath, sach)) {
+            ketQua.add(dirPath);
+            break;
+          }
+        }
+      } catch { /* bỏ qua */ }
     }
+  } catch { /* bỏ qua */ }
 
-    ra.push({
-      ma,
-      started_at: (() => { try { return firstRecordedTimestamp(p, st.size); } catch { return null; } })(),
-      file_created_at: st.birthtimeMs > 0 ? st.birthtimeMs : null,
-      size_bytes: st.size,
-      moc: st.mtimeMs,
-      moc_doc: new Date(st.mtimeMs).toLocaleString('vi-VN', { hour12: false }),
-      tin_cuoi: tinCuoi.slice(0, 90),
-      so_luot: soLuot,
-      dang_chay,
-    });
+  return Array.from(ketQua);
+}
+
+/**
+ * Liệt kê mọi phiên của một nhân sự.
+ * Hợp của:
+ *  (a) metadata bền AIBOSS_DATA_DIR/sessions/[seat]/*.json
+ *  (b) phát hiện cũ: mọi transcript trong ~/.claude/projects/ có cwd khớp ghế
+ *  (c) các phiên từ runs-ledger
+ * Mỗi mục trả size_bytes thật nếu tìm thấy transcript; nếu thiếu transcript trả transcript: 'missing'.
+ */
+export function dsPhien(
+  maNhanSu: string,
+  phienCuaTa?: { ma: string | null; mocKetThuc: number | null },
+): TomTatPhien[] {
+  const bayGio = Date.now();
+  const banDo = new Map<string, TomTatPhien>();
+
+  // 1. Quét kho bền vững metadata cục bộ trong AIBOSS_DATA_DIR/sessions/<maNhanSu>
+  const thuMucData = path.join(layThuMucData(), 'sessions', maNhanSu);
+  if (fs.existsSync(thuMucData)) {
+    try {
+      for (const t of fs.readdirSync(thuMucData)) {
+        if (!t.endsWith('.json')) continue;
+        const ma = t.replace(/\.json$/, '');
+        const metaPath = path.join(thuMucData, t);
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          if (meta.cwd) {
+            try {
+              const realCwd = fs.realpathSync(meta.cwd);
+              const realGhe = fs.realpathSync(thuMucAgent(maNhanSu));
+              if (realCwd !== realGhe) continue;
+            } catch {
+              if (path.resolve(meta.cwd) !== path.resolve(thuMucAgent(maNhanSu))) continue;
+            }
+          }
+          const stMeta = fs.statSync(metaPath);
+          const startedAt = typeof meta.started_at === 'number' ? meta.started_at : stMeta.mtimeMs;
+          const moc = typeof meta.moc === 'number' ? meta.moc : stMeta.mtimeMs;
+
+          const transcriptFile = timTepPhien(maNhanSu, ma);
+          let sizeBytes = 0;
+          let transcriptStatus: 'missing' | 'found' = 'missing';
+          let tinCuoi = String(meta.cau_hoi || '').trim();
+          let soLuot = 1;
+
+          if (transcriptFile && fs.existsSync(transcriptFile)) {
+            try {
+              const stTr = fs.statSync(transcriptFile);
+              if (stTr.isFile() && stTr.size > 0) {
+                sizeBytes = stTr.size;
+                transcriptStatus = 'found';
+                const trData = trichXuatTinCuoiVaSoLuot(transcriptFile);
+                if (trData.tinCuoi) tinCuoi = trData.tinCuoi;
+                if (trData.soLuot > 0) soLuot = trData.soLuot;
+              }
+            } catch { /* ignore */ }
+          }
+
+          const phutTuoi = (bayGio - moc) / 60000;
+          let dang_chay = phutTuoi < NGUONG_SONG_PHUT;
+          if (dang_chay && phienCoTienTrinhSong(ma)) {
+            dang_chay = true;
+          } else if (dang_chay && phienCuaTa?.ma === ma && phienCuaTa.mocKetThuc !== null) {
+            dang_chay = false;
+          }
+
+          banDo.set(ma, {
+            ma,
+            started_at: startedAt,
+            file_created_at: stMeta.birthtimeMs > 0 ? stMeta.birthtimeMs : startedAt,
+            size_bytes: sizeBytes,
+            transcript: transcriptStatus,
+            moc,
+            moc_doc: new Date(moc).toLocaleString('vi-VN', { hour12: false }),
+            tin_cuoi: tinCuoi.slice(0, 90),
+            so_luot: Math.max(1, soLuot),
+            dang_chay,
+          });
+        } catch { /* ignore parse error */ }
+      }
+    } catch { /* ignore readdir error */ }
   }
 
-  return ra.sort((a, b) => b.moc - a.moc);
+  // 2. Phát hiện các transcript cũ trong ~/.claude/projects/*/*.jsonl có cwd khớp ghế
+  // Quét MỌI thư mục con trong gốc kho Claude, KHÔNG lọc theo tên thư mục ở bất kỳ bước nào.
+  const gocKho = gocKhoClaude();
+  if (fs.existsSync(gocKho)) {
+    try {
+      const projectDirs = fs.readdirSync(gocKho, { withFileTypes: true });
+      for (const entry of projectDirs) {
+        if (!entry.isDirectory()) continue;
+        if (_enableLegacyPrefixFilterForTest) {
+          let tm = '';
+          try { tm = thuMucAgent(maNhanSu); } catch { /* ignore */ }
+          const encodedPrefix = maHoaDuongDan(tm).slice(0, Math.min(40, maHoaDuongDan(tm).length));
+          if (projectDirs.length > 50 && !entry.name.startsWith(encodedPrefix)) {
+            continue;
+          }
+        }
+        const dirPath = path.join(gocKho, entry.name);
+        let entries: string[] = [];
+        try {
+          entries = fs.readdirSync(dirPath);
+        } catch {
+          continue;
+        }
+
+        for (const t of entries) {
+          if (!t.endsWith('.jsonl')) continue;
+          const p = path.join(dirPath, t);
+          let st: fs.Stats;
+          try {
+            st = fs.statSync(p);
+          } catch {
+            continue;
+          }
+          if (!st.isFile() || st.size === 0) continue;
+
+          const ma = t.replace(/\.jsonl$/, '');
+
+          // Xác minh transcript thuộc về ghế qua in-memory cache của layCwdTep
+          if (!thuocVeGhe(p, maNhanSu)) continue;
+
+          const tonTai = banDo.get(ma);
+          if (tonTai && tonTai.transcript === 'found' && tonTai.moc >= st.mtimeMs && tonTai.size_bytes >= st.size) {
+            continue;
+          }
+
+      const trData = trichXuatTinCuoiVaSoLuot(p);
+      const tinCuoi = trData.tinCuoi || tonTai?.tin_cuoi || '';
+      const soLuot = trData.soLuot || tonTai?.so_luot || 1;
+
+      const phutTuoi = (bayGio - st.mtimeMs) / 60000;
+      let dang_chay = phutTuoi < NGUONG_SONG_PHUT;
+      if (dang_chay && phienCoTienTrinhSong(ma)) {
+        dang_chay = true;
+      } else if (dang_chay && phienCuaTa?.ma === ma && phienCuaTa.mocKetThuc !== null) {
+        dang_chay = false;
+      }
+
+        banDo.set(ma, {
+          ma,
+          started_at: tonTai?.started_at ?? (() => { try { return firstRecordedTimestamp(p, st.size); } catch { return null; } })(),
+          file_created_at: st.birthtimeMs > 0 ? st.birthtimeMs : (tonTai?.file_created_at ?? null),
+          size_bytes: st.size,
+          transcript: 'found',
+          moc: st.mtimeMs,
+          moc_doc: new Date(st.mtimeMs).toLocaleString('vi-VN', { hour12: false }),
+          tin_cuoi: tinCuoi.slice(0, 90),
+          so_luot: Math.max(1, soLuot),
+          dang_chay,
+        });
+      }
+    }
+  } catch {
+    /* ignore readdir error */
+  }
+}
+
+  // 3. Quét thêm các phiên từ runs-ledger nếu có
+  try {
+    const ketQuaRuns = getRunsWithMetadata({ seat: maNhanSu, limit: 100 });
+    if (ketQuaRuns && Array.isArray(ketQuaRuns.runs)) {
+      for (const run of ketQuaRuns.runs) {
+        if (!run.sessionId || banDo.has(run.sessionId)) continue;
+        const startMs = new Date(run.startedAt).getTime();
+        const finishMs = run.finishedAt ? new Date(run.finishedAt).getTime() : startMs;
+
+        const transcriptFile = timTepPhien(maNhanSu, run.sessionId);
+        let sizeBytes = 0;
+        let transcriptStatus: 'missing' | 'found' = 'missing';
+        let tinCuoi = '';
+        let soLuot = 1;
+        let moc = Number.isFinite(finishMs) ? finishMs : bayGio;
+
+        if (transcriptFile && fs.existsSync(transcriptFile)) {
+          try {
+            const stTr = fs.statSync(transcriptFile);
+            if (stTr.isFile() && stTr.size > 0) {
+              sizeBytes = stTr.size;
+              transcriptStatus = 'found';
+              moc = stTr.mtimeMs;
+              const trData = trichXuatTinCuoiVaSoLuot(transcriptFile);
+              if (trData.tinCuoi) tinCuoi = trData.tinCuoi;
+              if (trData.soLuot > 0) soLuot = trData.soLuot;
+            }
+          } catch { /* ignore */ }
+        }
+
+        banDo.set(run.sessionId, {
+          ma: run.sessionId,
+          started_at: Number.isFinite(startMs) ? startMs : null,
+          file_created_at: Number.isFinite(startMs) ? startMs : null,
+          size_bytes: sizeBytes,
+          transcript: transcriptStatus,
+          moc,
+          moc_doc: new Date(moc).toLocaleString('vi-VN', { hour12: false }),
+          tin_cuoi: tinCuoi.slice(0, 90),
+          so_luot: Math.max(1, soLuot),
+          dang_chay: run.status === 'running',
+        });
+      }
+    }
+  } catch {
+    /* runs-ledger không sẵn sàng thì bỏ qua */
+  }
+
+  return Array.from(banDo.values()).sort((a, b) => b.moc - a.moc);
 }
 
 export interface TinLichSu {
@@ -311,9 +789,43 @@ export async function lichSuPhien(
   truocByte?: number,
 ): Promise<KetQuaLichSu> {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) throw new Error('Mã phiên không hợp lệ.');
-  const p = path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`);
-  if (!fs.existsSync(p))
+  const p = timTepPhien(maNhanSu, maPhien);
+  if (!p || !fs.existsSync(p)) {
+    // Thử đọc từ tệp metadata nếu có
+    const metaPath = path.join(layThuMucData(), 'sessions', maNhanSu, `${maPhien}.json`);
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        if (meta.cwd) {
+          try {
+            if (fs.realpathSync(meta.cwd) !== fs.realpathSync(thuMucAgent(maNhanSu))) {
+              return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
+            }
+          } catch {
+            if (path.resolve(meta.cwd) !== path.resolve(thuMucAgent(maNhanSu))) {
+              return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
+            }
+          }
+        }
+        if (meta && meta.cau_hoi) {
+          const startedAt = typeof meta.started_at === 'number' ? meta.started_at : Date.now();
+          return {
+            tin: [{
+              ai: 'toi',
+              chu: String(meta.cau_hoi),
+              gio: gioNgan(new Date(startedAt).toISOString()),
+              luc: startedAt,
+            }],
+            con_nua: false,
+            vi_tri: 0,
+            tong_byte: 0,
+            cat_dong_qua_dai: false,
+          };
+        }
+      } catch { /* bỏ qua lỗi */ }
+    }
     return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
+  }
 
   const tong = fs.statSync(p).size;
   /** Mép PHẢI của cửa sổ. ⛔ truyền gì ⇒ lấy cuối tệp (mở phiên = xem phần mới nhất). */
@@ -430,7 +942,24 @@ function gioNgan(ts?: string): string {
 export function coPhien(maNhanSu: string, maPhien: string): boolean {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) return false;
   try {
-    return fs.existsSync(path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`));
+    if (timTepPhien(maNhanSu, maPhien)) return true;
+    const metaPath = path.join(layThuMucData(), 'sessions', maNhanSu, `${maPhien}.json`);
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        if (meta.cwd) {
+          try {
+            return fs.realpathSync(meta.cwd) === fs.realpathSync(thuMucAgent(maNhanSu));
+          } catch {
+            return path.resolve(meta.cwd) === path.resolve(thuMucAgent(maNhanSu));
+          }
+        }
+        return true;
+      } catch {
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -439,7 +968,11 @@ export function coPhien(maNhanSu: string, maPhien: string): boolean {
 /** Mốc sửa của tệp phiên, hoặc null nếu chưa có tệp. */
 export function mocTepPhien(maNhanSu: string, maPhien: string): number | null {
   try {
-    return fs.statSync(path.join(khoPhienCua(maNhanSu), `${maPhien}.jsonl`)).mtimeMs;
+    const tep = timTepPhien(maNhanSu, maPhien);
+    if (tep) return fs.statSync(tep).mtimeMs;
+    const metaPath = path.join(layThuMucData(), 'sessions', maNhanSu, `${maPhien}.json`);
+    if (fs.existsSync(metaPath)) return fs.statSync(metaPath).mtimeMs;
+    return null;
   } catch {
     return null;
   }

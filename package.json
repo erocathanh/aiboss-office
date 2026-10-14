@@ -7,7 +7,7 @@
     "dev": "bash dev/chay-dev.sh",
     "build": "next build",
     "start": "next start -p 4330",
-    "test": "node --import ./tests/register.mjs tests/money.test.mjs && node --import ./tests/register.mjs tests/usage-receipt.test.mjs && node --import ./tests/register.mjs tests/runs-ledger.test.mjs && node --import ./tests/register.mjs tests/costs-ledger.test.mjs && node --import ./tests/register.mjs tests/danh-thuc-route.test.mjs && node --import ./tests/register.mjs tests/budget.test.mjs",
+    "test": "node --import ./tests/register.mjs tests/money.test.mjs && node --import ./tests/register.mjs tests/usage-receipt.test.mjs && node --import ./tests/register.mjs tests/runs-ledger.test.mjs && node --import ./tests/register.mjs tests/costs-ledger.test.mjs && node --import ./tests/register.mjs tests/danh-thuc-route.test.mjs && node --import ./tests/register.mjs tests/session-history.test.mjs && node --import ./tests/register.mjs tests/budget.test.mjs",
     "desktop": "pnpm --dir desktop start",
     "test:desktop": "pnpm --dir desktop test",
     "test:hooks": "bash tests/test_hooks.sh",
@@ -31,6 +31,6 @@
     "typescript": "5.7.2"
   },
   "engines": {
-    "node": ">=24.19.0"
+    "node": ">=22.0.0"
   }
 }
