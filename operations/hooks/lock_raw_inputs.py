@@ -43,6 +43,8 @@ def check_lock(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> 
         for sc in commands:
             targets = bash_parser.extract_write_targets(sc, symlinks)
             for target_path, reason in targets:
+                if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
+                    return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
                 rel = bash_parser.canonical_path(target_path, sc.cwd, project_dir, symlinks)
                 if bash_parser.is_in_project_dau_vao(rel):
                     return f"Lệnh có đích ghi nhắm vào thư mục DAU-VAO ({target_path}) bị chặn. Dữ liệu thô chỉ được đọc, không được ghi đè hay sửa đổi bằng lệnh shell."

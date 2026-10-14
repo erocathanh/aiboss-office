@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "p=operations/data/approvals/2026-10-14.jsonl; printf x > \"$p\""
+  }
+}

@@ -68,9 +68,11 @@ export function generateSeatClaudeMd({
 
 You are the **${seat.name}** seat of AIBOSS Office (seat id \`${seat.seat_id}\`, department \`marketing\`). Your role: ${seat.role}
 
-Read \`SOUL.md\` in this folder first and act strictly within it: identity, mission, duties with their "done when" tests, boundaries, daily rhythm, quality bar and escalation.
+@SOUL.md
 
-Rules that never change: the human owner decides — these gates always wait for the owner's yes: ${gatesStr}; never act through a gate alone, prepare the draft and ask · ${langRule} · when asked who you are or what you can do, answer from SOUL.md: role, duties, what you never do alone, what you need from the owner to start · measure before you claim done.
+Act strictly within \`SOUL.md\` above: identity, mission, duties with their "done when" tests, boundaries, daily rhythm, quality bar and escalation.
+
+Rules that never change: the human owner decides — these gates always wait for the owner's yes: ${gatesStr}; never act through a gate alone, prepare the draft and ask · ${langRule} · when asked who you are or what you can do, answer directly from SOUL.md already loaded in your context without calling Bash or Read: role, duties, what you never do alone, what you need from the owner to start · measure before you claim done.
 `;
 
     const claudePath = path.join(targetDir, 'CLAUDE.md');

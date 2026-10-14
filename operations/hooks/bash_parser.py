@@ -33,9 +33,10 @@ class BashParseError(Exception):
     pass
 
 class SimpleCommand:
-    def __init__(self, raw_str: str, cwd: str):
+    def __init__(self, raw_str: str, cwd: str, heredoc_bodies: Optional[List[str]] = None):
         self.raw_str = raw_str.strip()
         self.cwd = cwd
+        self.heredoc_bodies: List[str] = list(heredoc_bodies) if heredoc_bodies else []
         self.words: List[str] = []
         self.executable: str = ""
         self.raw_executable: str = ""
@@ -165,7 +166,7 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
                 i += 1
                 continue
 
-            # Kiểm tra redirection ngoài nháy: >, >>, <, 1>, 1>>, 2>, 2>>, 0<
+            # Kiểm tra redirection ngoài nháy: >, >>, <, <<, <<-, 1>, 1>>, 2>, 2>>, 0<
             # Xét xem ký tự này có phải là bắt đầu toán tử redirection không
             is_redir = False
             op = ""
@@ -174,6 +175,12 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
             if ch in ('>', '<'):
                 if i + 1 < length and chars[i:i+2] == ['>', '>']:
                     op = '>>'
+                    step = 2
+                elif i + 2 < length and chars[i:i+3] == ['<', '<', '-']:
+                    op = '<<-'
+                    step = 3
+                elif i + 1 < length and chars[i:i+2] == ['<', '<']:
+                    op = '<<'
                     step = 2
                 else:
                     op = ch
@@ -243,19 +250,20 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     flush_word()
     return tokens, redirections
 
-def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str]]]:
+def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str], List[str]]]:
     """
-    Tách chuỗi lệnh bash thành các đơn vị lệnh đơn + toán tử liên kết.
+    Tách chuỗi lệnh bash thành các đơn vị lệnh đơn + toán tử liên kết + danh sách thân heredoc.
     Hỗ trợ:
     - Quoting ', ", escape.
-    - Heredoc <<EOF / <<'EOF'.
+    - Heredoc <<EOF / <<'EOF' (lưu giữ toàn bộ nội dung thân heredoc gắn với lệnh mở nó).
     - Bỏ qua command substitution trong nháy đơn.
     - Báo lỗi nếu nháy chưa đóng.
     """
-    results: List[Tuple[str, Optional[str]]] = []
+    results: List[Tuple[str, Optional[str], List[str]]] = []
 
     lines = full_cmd.splitlines(keepends=True)
     current_cmd = []
+    current_heredocs: List[str] = []
 
     in_single = False
     in_double = False
@@ -264,19 +272,36 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str]]]:
     backtick = False
 
     heredoc_delim = None
+    heredoc_lines: List[str] = []
+    heredoc_owner_indices: List[int] = []
+
+    def attach_heredoc_body(body: str):
+        nonlocal heredoc_owner_indices
+        if heredoc_owner_indices:
+            for idx in heredoc_owner_indices:
+                if 0 <= idx < len(results):
+                    results[idx][2].append(body)
+            heredoc_owner_indices = []
+        else:
+            current_heredocs.append(body)
 
     for line in lines:
         # Nếu đang trong heredoc body
         if heredoc_delim is not None:
             stripped = line.strip()
             if stripped == heredoc_delim:
-                # Kết thúc heredoc
+                # Kết thúc heredoc -> gắn thân heredoc vào lệnh đã mở nó
+                attach_heredoc_body("".join(heredoc_lines))
+                heredoc_lines = []
                 heredoc_delim = None
+            else:
+                heredoc_lines.append(line)
             continue
 
         chars = list(line)
         length = len(chars)
         i = 0
+        line_opened_heredoc = False
 
         while i < length:
             ch = chars[i]
@@ -325,6 +350,8 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str]]]:
                     raw_delim = ''.join(delim_chars).strip("'\"")
                     if raw_delim:
                         heredoc_delim = raw_delim
+                        heredoc_lines = []
+                        line_opened_heredoc = True
                     current_cmd.extend(chars[i:hd_idx])
                     i = hd_idx
                     continue
@@ -367,8 +394,11 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str]]]:
                 if op is not None:
                     seg = ''.join(current_cmd).strip()
                     if seg:
-                        results.append((seg, op))
+                        results.append((seg, op, list(current_heredocs)))
+                        if line_opened_heredoc:
+                            heredoc_owner_indices.append(len(results) - 1)
                     current_cmd = []
+                    current_heredocs = []
                     i += step
                     continue
 
@@ -380,7 +410,12 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str]]]:
 
     remaining = ''.join(current_cmd).strip()
     if remaining:
-        results.append((remaining, None))
+        results.append((remaining, None, list(current_heredocs)))
+        if heredoc_delim is not None and not heredoc_owner_indices:
+            heredoc_owner_indices.append(len(results) - 1)
+
+    if heredoc_delim is not None and heredoc_lines:
+        attach_heredoc_body("".join(heredoc_lines))
 
     return results
 
@@ -496,16 +531,16 @@ def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleComma
     """
     Phân tích toàn diện một lệnh bash.
     Theo dõi cd và ln -s.
-    Phân tích substitution theo đúng cwd thời điểm thực thi.
+    Phân tích substitution và heredoc theo đúng cwd thời điểm thực thi.
     """
     commands: List[SimpleCommand] = []
     symlinks: Dict[str, str] = {}
     current_cwd = initial_cwd
 
-    # Tách các segments
+    # Tách các segments kèm thân heredoc
     segments = split_compound_commands(full_cmd)
 
-    for seg_text, op in segments:
+    for seg_text, op, hd_bodies in segments:
         clean_seg = seg_text.strip()
         if not clean_seg:
             continue
@@ -526,8 +561,15 @@ def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleComma
             symlinks.update(sub_links)
             continue
 
-        cmd = SimpleCommand(clean_seg, current_cwd)
+        cmd = SimpleCommand(clean_seg, current_cwd, heredoc_bodies=hd_bodies)
         commands.append(cmd)
+
+        # Nếu lệnh là shell (sh, bash, zsh, ksh, dash) nhận heredoc -> phân tích đệ quy thân heredoc như script shell
+        if cmd.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and cmd.heredoc_bodies:
+            for hd_body in cmd.heredoc_bodies:
+                nested_list, nested_links = parse_bash_script(hd_body, current_cwd)
+                commands.extend(nested_list)
+                symlinks.update(nested_links)
 
         # Xử lý `cd`: bỏ qua các cờ -P, -L, --
         if cmd.executable == 'cd' and cmd.words:
@@ -570,7 +612,7 @@ def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleComma
                 symlinks[link_name] = abs_src
 
         # Xử lý đệ quy cho sh -c, bash -c, zsh -c, eval (kể cả cờ gộp như -lc, -ec)
-        if cmd.executable in ('sh', 'bash', 'zsh', 'ksh') and len(cmd.words) > 1:
+        if cmd.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(cmd.words) > 1:
             for c_idx, w in enumerate(cmd.words[1:], start=1):
                 # Nhận cờ có chứa 'c' (ví dụ -c, -lc, -ec, -xc)
                 if w.startswith('-') and 'c' in w and c_idx + 1 < len(cmd.words):
@@ -668,9 +710,31 @@ def is_dau_ra_or_final(rel_path: str) -> bool:
         return True
     return False
 
+def is_dynamic_write_target(target_path: str) -> bool:
+    """F5 (S17b): Kiểm tra đích ghi có phải là biến ($p, ${p}), command substitution hoặc biểu thức động không giải tĩnh được."""
+    p = target_path.strip().strip("'\"")
+    if not p:
+        return True
+    if p.startswith("$DYNAMIC_WRITE"):
+        return True
+    if "$" in p or "`" in p:
+        return True
+    return False
+
+def is_cwd_inside_office(cwd: str, project_dir: str) -> bool:
+    """Kiểm tra cwd có nằm trong kho văn phòng project_dir không."""
+    if not project_dir:
+        return False
+    try:
+        real_cwd = os.path.realpath(os.path.expanduser(cwd))
+        real_proj = os.path.realpath(os.path.expanduser(project_dir))
+        return real_cwd == real_proj or real_cwd.startswith(real_proj + os.sep)
+    except Exception:
+        return True
+
 def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, str]] = None) -> List[Tuple[str, str]]:
     """
-    Trích xuất tất cả đích ghi từ một SimpleCommand.
+    Trích xuất tất cả đích ghi từ một SimpleCommand (bao gồm cả thân heredoc đi kèm).
     Trả về danh sách (raw_path, reason_type).
     """
     targets: List[Tuple[str, str]] = []
@@ -692,12 +756,15 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         if len(non_flags) >= 2:
             dest = non_flags[-1]
             sources = non_flags[:-1]
-            dest_abs = os.path.normpath(os.path.join(cmd.cwd, os.path.expanduser(dest)))
-            if dest.endswith('/') or os.path.isdir(dest_abs) or layout.is_outputs_dir(os.path.basename(dest_abs)):
-                for s in sources:
-                    targets.append((os.path.join(dest, os.path.basename(s)), f"{base} to directory"))
+            if is_dynamic_write_target(dest):
+                targets.append((dest, f"{base} dynamic destination"))
             else:
-                targets.append((dest, f"{base} destination"))
+                dest_abs = os.path.normpath(os.path.join(cmd.cwd, os.path.expanduser(dest)))
+                if dest.endswith('/') or os.path.isdir(dest_abs) or layout.is_outputs_dir(os.path.basename(dest_abs)):
+                    for s in sources:
+                        targets.append((os.path.join(dest, os.path.basename(s)), f"{base} to directory"))
+                else:
+                    targets.append((dest, f"{base} destination"))
 
     elif base == 'mv':
         non_flags = [w.strip("'\"") for w in words[1:] if not w.startswith('-')]
@@ -750,15 +817,35 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 dest = w[3:].strip("'\"")
                 targets.append((dest, "dd output file"))
 
-    # 3. Inline script writes (python/python3 -c open(...,'w'/'a'), Path(...).write_text, node fs.writeFileSync/appendFileSync)
-    if base in ('python', 'python3', 'py', 'node') or 'open(' in cmd.raw_str or 'write_' in cmd.raw_str or 'FileSync' in cmd.raw_str:
-        raw = cmd.raw_str
-        for m in re.finditer(r"""\bopen\s*\(\s*['"]([^'"]+)['"]\s*,\s*(?:mode\s*=\s*)?['"](?:[wax]|[rwax]\+)[^'"]*['"]""", raw):
+    # 3. Inline script & heredoc writes (python/python3 -c / <<EOF open(...,'w'/'a'), Path(...).write_text, node fs.writeFileSync/appendFileSync)
+    combined_raw = "\n".join([cmd.raw_str] + getattr(cmd, "heredoc_bodies", []))
+    if (
+        base in ('python', 'python3', 'py', 'node')
+        or 'open(' in combined_raw
+        or 'write_' in combined_raw
+        or 'FileSync' in combined_raw
+        or 'writeFile' in combined_raw
+        or 'appendFile' in combined_raw
+        or 'shutil.' in combined_raw
+    ):
+        for m in re.finditer(r"""\bopen\s*\(\s*['"]([^'"]+)['"]\s*,\s*(?:mode\s*=\s*)?['"](?:[wax]|[rwax]\+)[^'"]*['"]""", combined_raw):
             targets.append((m.group(1), "python open write"))
-        for m in re.finditer(r"""\bPath\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*write_(?:text|bytes)\b""", raw):
+        for m in re.finditer(r"""\bopen\s*\(\s*(?!['"])([^,)]+)\s*,\s*(?:mode\s*=\s*)?['"](?:[wax]|[rwax]\+)[^'"]*['"]""", combined_raw):
+            targets.append((f"$DYNAMIC_WRITE:open({m.group(1).strip()})", "python open dynamic write"))
+
+        for m in re.finditer(r"""\bPath\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*write_(?:text|bytes)\b""", combined_raw):
             targets.append((m.group(1), "python Path.write"))
-        for m in re.finditer(r"""\b(?:writeFileSync|appendFileSync|writeFile|appendFile|copyFileSync|cpSync)\s*\(\s*['"]([^'"]+)['"]""", raw):
+        for m in re.finditer(r"""\bPath\s*\(\s*(?!['"])([^)]+)\s*\)\s*\.\s*write_(?:text|bytes)\b""", combined_raw):
+            targets.append((f"$DYNAMIC_WRITE:Path({m.group(1).strip()}).write", "python Path dynamic write"))
+
+        for m in re.finditer(r"""\b(?:writeFileSync|appendFileSync|writeFile|appendFile|copyFileSync|cpSync)\s*\(\s*['"]([^'"]+)['"]""", combined_raw):
             targets.append((m.group(1), "node fs write"))
+        for m in re.finditer(r"""\b(?:writeFileSync|appendFileSync|writeFile|appendFile|copyFileSync|cpSync)\s*\(\s*(?!['"])([^,)]+)""", combined_raw):
+            targets.append((f"$DYNAMIC_WRITE:fs({m.group(1).strip()})", "node fs dynamic write"))
+
+        for m in re.finditer(r"""\bshutil\.(?:copy|copy2|copyfile|move)\s*\([^,]+,\s*['"]([^'"]+)['"]""", combined_raw):
+            targets.append((m.group(1), "python shutil write"))
 
     return targets
+
 

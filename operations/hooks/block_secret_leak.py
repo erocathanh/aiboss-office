@@ -63,11 +63,6 @@ def has_config_path(text: str) -> bool:
 def has_gemini_key_path(text: str) -> bool:
     return 'ai-agent/gemini/khoa' in text or '.gemini-api-key' in text
 
-def has_fb_token_path(text: str) -> bool:
-    if os.environ.get("AIBOSS_DISABLE_HOOK_2_1") == "1":
-        return False
-    return '.meta-token-fanpage' in text or '.fb-user-token' in text
-
 def extract_strings(obj):
     """Trích xuất tất cả chuỗi từ cấu trúc JSON đệ quy."""
     if isinstance(obj, str):
@@ -96,7 +91,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                 return "Accessing secret configuration directory .config/aiboss-office is blocked."
             if extract_env_paths(val):
                 return "Accessing .env file directly is blocked."
-            if 'meta-page-token' in val or 'hash-salt' in val or has_fb_token_path(val):
+            if 'meta-page-token' in val or 'hash-salt' in val:
                 return "Accessing Facebook/Meta token or hash-salt credential file is blocked."
             if has_gemini_key_path(val):
                 return "Accessing Gemini API key pool files directly is blocked."
@@ -136,7 +131,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                 return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
             if extract_env_paths(hd):
                 return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
-            if 'meta-page-token' in hd or 'hash-salt' in hd or has_fb_token_path(hd):
+            if 'meta-page-token' in hd or 'hash-salt' in hd:
                 return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
             if has_gemini_key_path(hd):
                 return "Accessing Gemini API key pool files in heredoc is blocked."
@@ -151,7 +146,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                     return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
                 if extract_env_paths(target):
                     return "Lệnh đọc tệp .env qua chuyển hướng đầu vào bị chặn."
-                if 'meta-page-token' in target or 'hash-salt' in target or has_fb_token_path(target):
+                if 'meta-page-token' in target or 'hash-salt' in target:
                     return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
                 if has_gemini_key_path(target):
                     return "Accessing Gemini API key pool files via redirection is blocked."
@@ -169,11 +164,11 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
             elif os.path.basename(sc.executable) == 'fetch_page_messages.py' or sc.raw_executable.endswith('fetch_page_messages.py'):
                 is_fetcher = True
 
-            # D. Kiểm tra tệp chìa meta-page-token, Facebook token, Gemini key hoặc hash-salt
+            # D. Kiểm tra tệp chìa meta-page-token, Gemini key hoặc hash-salt
             if not is_fetcher:
                 for w in words[1:]:
                     clean_w = w.strip("'\"")
-                    if 'meta-page-token' in clean_w or 'hash-salt' in clean_w or has_fb_token_path(clean_w):
+                    if 'meta-page-token' in clean_w or 'hash-salt' in clean_w:
                         return "Lệnh đọc/in tệp chìa meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
                     if has_gemini_key_path(clean_w):
                         return "Accessing Gemini API key pool files via command arguments is blocked."
@@ -187,7 +182,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                         return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
                     if extract_env_paths(val):
                         return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
-                    if has_fb_token_path(val) or has_gemini_key_path(val):
+                    if has_gemini_key_path(val):
                         return "Accessing credential file via flag assignment is blocked."
                     continue
                 elif w.startswith('-'):
@@ -203,14 +198,6 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                 return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
             if has_config_path(sc.raw_executable):
                 return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
-
-        try:
-            import block_public_publish
-            pub_violation = block_public_publish.check_public_publish(tool_name, tool_input, cwd)
-            if pub_violation:
-                return pub_violation
-        except Exception:
-            pass
 
     return ""
 

@@ -45,7 +45,7 @@ Dự án yêu cầu phiên bản Node.js hiện đại để hỗ trợ đầy �
 
 ---
 
-## 2. Tải Mã Nguồn (Clone Repository)
+## 2. Tải Mã Nguồn và Neo Sàn An Toàn Theo Thư Mục Kho (Clone & Seat Files)
 
 Clone kho mã nguồn chính thức từ GitHub về máy:
 
@@ -60,6 +60,13 @@ cd aiboss-office
   ```bash
   git checkout mvp/marketing
   ```
+
+*Neo lại quy tắc `deny` và tin cậy thư mục kho mới (S17b F4 & Mục 8)*:
+1. **Khi tải kho về đường dẫn mới hoặc dời kho sang thư mục khác** (ví dụ ngoài `/Users/<ten>/Projects/aiboss-office`), bắt buộc chạy lại bộ sinh tệp ghế để neo các quy tắc `Edit(//<REPO_ROOT>/projects/**/{references,templates,inputs}/**)` và `Edit(//<REPO_ROOT>/operations/data/**)` trong `.claude/settings.json` theo đúng đường dẫn thực của kho:
+   ```bash
+   node operations/scripts/gen-seat-files.mjs
+   ```
+2. **Chấp nhận hộp thoại tin cậy kho (Workspace Trust)**: Mở terminal tại thư mục gốc `aiboss-office` vừa clone và chạy lệnh `claude` tương tác một lần để bấm đồng ý tin cậy thư mục dự án (*Yes, I trust this folder*), sau đó gõ `/exit`. Bước này giúp Claude Code nạp đầy đủ các quy tắc `permissions.allow` và `hooks` trong `.claude/settings.json` của từng ghế.
 
 ---
 
@@ -77,7 +84,7 @@ Kiểm tra đảm bảo không có cảnh báo lỗi cài đặt gói thư việ
 
 ## 4. Cấu Hình Môi Trường (.env & config)
 
-### 4.1. Tệp biến môi trường `.env`
+### 4.1. Tệp biến môi trường `.env` và Danh Sách Trắng Môi Trường Tiến Trình Con
 Tạo tệp `.env` tại thư mục gốc của dự án nếu cần đặt tài khoản xác thực cho giao diện web:
 
 ```bash
@@ -90,11 +97,17 @@ PHONGBAN_PASS=mat_khau_quan_tri_cua_ban
 # AIBOSS_DATA_DIR=$HOME/Projects/aiboss-office/operations/data
 
 # Chế độ ngữ cảnh ghế (mặc định tắt để cô lập ngữ cảnh ghế với --setting-sources project
-# và --strict-mcp-config --mcp-config <tệp .mcp.json theo ghế>; đặt AIBOSS_SEAT_TERMINAL_MODE=1
+# và --strict-mcp-config --mcp-config <tệp .mcp.json theo ghế>; chỉ đặt AIBOSS_SEAT_TERMINAL_MODE=1
 # khi cần gỡ lỗi với toàn bộ CLAUDE.md và MCP cấp máy như terminal)
 # AIBOSS_SEAT_TERMINAL_MODE=1
 EOF
 ```
+
+*Danh sách trắng biến môi trường truyền xuống tiến trình con Claude (`CLAUDE_SEAT_ENV_WHITELIST` — S17b F3b)*:
+- Khi ứng dụng sinh tiến trình `claude` (ở cả runner, `/api/chat` và `/api/fork`), hệ thống **không** truyền nguyên `process.env` mà chỉ lọc qua danh sách trắng gồm:
+  - Biến hệ thống cốt lõi: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, `TZ`, `NODE_ENV`, `XDG_*`, `SSH_AUTH_SOCK`, `SECURITYSESSIONID`, `__CF_USER_TEXT_ENCODING`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`, `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`.
+  - Biến vận hành `AIBOSS_*` hợp lệ: `AIBOSS_DATA_DIR`, `AIBOSS_CONFIG_DIR`, `AIBOSS_OFFICE_CONFIG_PATH`, `AIBOSS_OFFICE_ROOT`, `AIBOSS_AGENT_BROKER_MCP_SCRIPT`, `AIBOSS_SEAT_TERMINAL_MODE`.
+- Các biến thử nghiệm nội bộ (`AIBOSS_DISABLE_HOOK_2_1`, `AIBOSS_TEST_MODE`) **tuyệt đối không** nằm trong danh sách trắng truyền xuống tiến trình ghế, và cờ tắt Hook 2.1 trong bộ đo kiểm thử chỉ hoạt động khi đồng thời có `AIBOSS_TEST_MODE=1` và `NODE_ENV != "production"`.
 
 *Lưu ý an toàn*: Không bao giờ commit tệp `.env` lên git repository.
 

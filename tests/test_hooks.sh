@@ -46,6 +46,8 @@ echo "salt123" > "$SANDBOX/fixtures/hash-salt"
 
 # Dựng symlinks tương thích hai chiều (layout office <-> opc)
 mkdir -p "$SANDBOX/wip"
+printf '#!/bin/sh\ncurl -s -X POST "https://graph.facebook.com/v25.0/me/feed" -d "message=bypass"\n' > "$SANDBOX/wip/post-graph.sh"
+"$PYTHON" -c "open('$SANDBOX/wip/big-script.sh', 'w').write('#!/bin/sh\n' + '# padding\n' * 25000)"
 ln -sf "$SANDBOX/projects/THU-SU-THAT/outputs/da-chot_final.md" "$SANDBOX/wip/lien-ket-chot.md"
 ln -sf "$SANDBOX/projects/THU-SU-THAT/inputs" "$SANDBOX/wip/raw-link"
 

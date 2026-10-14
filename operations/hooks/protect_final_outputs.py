@@ -122,6 +122,8 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
             # B. Kiểm tra tất cả write targets
             targets = bash_parser.extract_write_targets(sc, symlinks)
             for target_path, reason in targets:
+                if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
+                    return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
                 rel = bash_parser.canonical_path(target_path, sc.cwd, project_dir, symlinks)
 
                 # Rào 1: Ghi vào DU-AN-MAU-SU-THAT

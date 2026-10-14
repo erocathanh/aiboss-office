@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { CAU_HINH } from './cau-hinh';
 import { ghiSoHuu } from './so-so-huu';
@@ -42,7 +43,7 @@ import { ghiSoHuu } from './so-so-huu';
  * Chấp nhận được vì: chạy TẠI MÁY, một mình Owner dùng, Owner ngồi ngay đó.
  * 🔴 Điều kiện đó mất đi thì luật này phải đổi theo — xem `CHAN_TAY_CHAN_KHI_MO_RA_NGOAI`.
  */
-const CAM_KHI_HAN_CHE = [
+export const CAM_KHI_HAN_CHE = [
   'Task', 'Bash', 'Edit', 'Write', 'Read', 'Glob', 'Grep',
   'WebFetch', 'WebSearch', 'Skill', 'Monitor', 'NotebookEdit',
   'ToolSearch', 'SendMessage', 'ScheduleWakeup', 'PushNotification',
@@ -82,8 +83,7 @@ type HostDangNghe = { host: string | null; nguon: string };
  *   direction is safe: a standalone server.js has no -H, so the brake would over-restrict, not
  *   under-restrict.
  */
-export function hostDangNghe(): HostDangNghe {
-  const argv = process.argv;
+export function hostDangNghe(argv: string[] = process.argv): HostDangNghe {
   for (let i = 0; i < argv.length; i += 1) {
     const co = argv[i] ?? '';
     if ((co === '-H' || co === '--hostname') && typeof argv[i + 1] === 'string') {
@@ -106,41 +106,43 @@ const CHI_MAY_NAY = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
  *    case as local, which is backwards — it handed out full tools in exactly the
  *    configuration the brake existed to catch.
  */
-function ngheRaNgoai(): boolean {
-  const { host } = hostDangNghe();
+export function ngheRaNgoai(argv: string[] = process.argv): boolean {
+  const { host } = hostDangNghe(argv);
   if (host === null) return true;
   return !CHI_MAY_NAY.has(host.trim().toLowerCase());
 }
 
 /**
- * 🔒 KHOÁ DUY NHẤT CÒN LẠI — chế độ terminal CHỈ bật khi máy chủ nghe ở MÁY NÀY.
- *
- * Đây KHÔNG phải rào chắn Owner, mà là **phanh chống quên**: ngày nào đưa trang
- *    ra ngoài mạng, "ai vào được trang" lập tức đồng nghĩa "chạy được lệnh trên máy Owner".
- *    Người quên thường là người bận, KHÔNG phải người ẩu — nên để máy nhớ hộ.
- *    Muốn mở ra ngoài mà vẫn full quyền: tự đặt `GIONG_TERMINAL=1`, nhưng phải
- *    dựng lớp đăng nhập TRƯỚC.
- *
- * 🕳 Ca thật 11/09/2026 — cái phanh này CHƯA TỪNG NỔ một lần nào.
- *    Bản cũ chỉ đọc `process.env.HOST`, mà trên máy này KHÔNG ai đặt HOST: không
- *    `chay-lan.sh`, không plist. Vậy `ngheNgoai` luôn false, phanh luôn nhả — trong
- *    khi app THẬT SỰ bám ra mọi giao diện mạng.
- *    📌 Một cái phanh trông như đang canh mà chưa từng canh thì tệ hơn KHÔNG có phanh:
- *       ai đọc mã cũng tin là đã có người gác, nên KHÔNG ai đi gác nữa.
+ * 🔒 CHẾ ĐỘ TERMINAL — mặc định TẮT để mọi ghế chạy trong ngữ cảnh cô lập.
+ * Chỉ bật khi đặt tường minh `AIBOSS_SEAT_TERMINAL_MODE=1`.
+ * (S17b F1: đã loại bỏ hoàn toàn biến cũ `GIONG_TERMINAL`).
  */
-function chayNhuTerminal(): boolean {
-  if (process.env.AIBOSS_SEAT_TERMINAL_MODE === '1' || process.env.GIONG_TERMINAL === '1') return true;
-  if (process.env.AIBOSS_SEAT_TERMINAL_MODE === '0' || process.env.GIONG_TERMINAL === '0') return false;
-  return false;
+export function chayNhuTerminal(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AIBOSS_SEAT_TERMINAL_MODE === '1';
 }
 
 export const GIONG_TERMINAL = chayNhuTerminal();
 
-function isExplicitlyExternalBind(): boolean {
-  if (process.env.GIONG_TERMINAL === '0') return true;
-  const { host } = hostDangNghe();
-  if (host === null) return false;
-  return !CHI_MAY_NAY.has(host.trim().toLowerCase());
+/**
+ * Tìm gốc kho aiboss-office từ một thư mục bất kỳ (đi ngược lên tìm config/office.json hoặc data/seats.json).
+ */
+export function findOfficeRootFromDir(startDir?: string): string {
+  if (process.env.AIBOSS_OFFICE_ROOT && fs.existsSync(process.env.AIBOSS_OFFICE_ROOT)) {
+    return path.resolve(process.env.AIBOSS_OFFICE_ROOT);
+  }
+  let cur = path.resolve(startDir || process.cwd());
+  while (true) {
+    if (
+      fs.existsSync(path.join(cur, 'config', 'office.json')) ||
+      fs.existsSync(path.join(cur, 'data', 'seats.json'))
+    ) {
+      return cur;
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return path.resolve(process.cwd());
 }
 
 /**
@@ -148,10 +150,11 @@ function isExplicitlyExternalBind(): boolean {
  * If the seat is listed in data/seats.json and its generated .mcp.json exists, returns that file path.
  * If the seat is unlisted or missing, returns an empty MCP config '{"mcpServers":{}}'.
  */
-export function resolveSeatMcpConfig(maNhanSu?: string | null, thuMuc?: string): string {
+export function resolveSeatMcpConfig(maNhanSu?: string | null, thuMuc?: string, repoRoot?: string): string {
   const emptyMcp = '{"mcpServers":{}}';
   try {
-    const seatsFile = path.join(process.cwd(), 'data', 'seats.json');
+    const baseRoot = repoRoot ? path.resolve(repoRoot) : findOfficeRootFromDir(thuMuc);
+    const seatsFile = path.join(baseRoot, 'data', 'seats.json');
     if (!fs.existsSync(seatsFile)) return emptyMcp;
     const raw = fs.readFileSync(seatsFile, 'utf8');
     const seats = JSON.parse(raw) as Array<{ seat_id?: string; dir?: string; mcp?: string[] }>;
@@ -162,13 +165,13 @@ export function resolveSeatMcpConfig(maNhanSu?: string | null, thuMuc?: string):
       matchedSeat = seats.find((s) => s && s.seat_id === maNhanSu);
     } else if (thuMuc) {
       const resolvedThuMuc = path.resolve(thuMuc);
-      matchedSeat = seats.find((s) => s && s.dir && path.resolve(process.cwd(), s.dir) === resolvedThuMuc);
+      matchedSeat = seats.find((s) => s && s.dir && path.resolve(baseRoot, s.dir) === resolvedThuMuc);
     }
 
     if (!matchedSeat || !matchedSeat.dir) return emptyMcp;
     if (Array.isArray(matchedSeat.mcp) && matchedSeat.mcp.length === 0) return emptyMcp;
 
-    const mcpPath = path.resolve(process.cwd(), matchedSeat.dir, '.mcp.json');
+    const mcpPath = path.resolve(baseRoot, matchedSeat.dir, '.mcp.json');
     if (fs.existsSync(mcpPath)) {
       return mcpPath;
     }
@@ -178,21 +181,18 @@ export function resolveSeatMcpConfig(maNhanSu?: string | null, thuMuc?: string):
   }
 }
 
-/** Giống terminal ⇒ ⛔ KHÔNG cấm công cụ nào. Terminal có gì, app có nấy. */
-// Exported so a test can read the DECISION itself instead of scraping the log line below.
-// The reviewer called the old harness a blind ruler for exactly that reason: change the logic,
-// keep the string, and a string-reading test stays green.
-export const CONG_CU_CAM: string[] = (!GIONG_TERMINAL && isExplicitlyExternalBind()) ? CAM_KHI_HAN_CHE : [];
+/**
+ * Phanh mạng fail-closed (F6): khi không bật chế độ terminal và máy chủ nghe ra ngoài
+ * (hoặc chạy không có cờ `-H` / `--hostname` thuộc localhost/127.0.0.1/::1), cấm 26 công cụ.
+ */
+export const CONG_CU_CAM: string[] = (!GIONG_TERMINAL && ngheRaNgoai()) ? CAM_KHI_HAN_CHE : [];
 
-// The brake has to say out loud what it decided, once per server process. A silent
-// brake is how the old one stayed broken: nothing it decided was ever visible, so
-// nobody could notice it had decided nothing at all.
 {
   const { host, nguon } = hostDangNghe();
-  const ep = process.env.AIBOSS_SEAT_TERMINAL_MODE ?? process.env.GIONG_TERMINAL;
+  const ep = process.env.AIBOSS_SEAT_TERMINAL_MODE;
   const lyDo = ep === '1' || ep === '0'
-    ? `AIBOSS_SEAT_TERMINAL_MODE/GIONG_TERMINAL=${ep} (Owner override)`
-    : `isolated seat mode by default — host «${host ?? 'unset'}» from ${nguon}`;
+    ? `AIBOSS_SEAT_TERMINAL_MODE=${ep} (Owner override)`
+    : `${ngheRaNgoai() ? 'nghe ra ngoài' : 'chỉ máy này'} — host «${host ?? 'rỗng'}» từ ${nguon}`;
   console.log(
     `[chay-agent] giọng terminal: ${GIONG_TERMINAL ? 'BẬT' : 'TẮT'}`
     + ` · lý do: ${lyDo} · số công cụ bị cấm: ${CONG_CU_CAM.length}`,
@@ -305,99 +305,242 @@ function dichLoi(tho: string): string {
   return '⚠️ Lượt chạy thất bại:\n\n`' + t.slice(0, 300) + '`';
 }
 
-export const SEAT_ISOLATION_SETTINGS_JSON = JSON.stringify({
-  autoMemoryEnabled: false,
-  claudeMdExcludes: [
-    '/*/*/CLAUDE.md',
-    '/*/*/*/CLAUDE.md',
-    '/**/.claude/CLAUDE.md',
-    '/**/.claude/rules/**',
-  ],
-});
+/**
+ * F2 (S17b): Tính danh sách loại trừ CLAUDE.md theo tổ tiên thực của REPO_ROOT và HOME,
+ * thay vì mẫu glob theo độ sâu hoặc toàn cục.
+ * Đảm bảo `<REPO_ROOT>/CLAUDE.md` và `<REPO_ROOT>/.claude/...` KHÔNG BAO GIỜ nằm trong danh sách loại trừ.
+ */
+export function buildClaudeMdExcludes(options?: { repoRoot?: string; homeDir?: string }): string[] {
+  const rawRepoRoot = options?.repoRoot ?? process.cwd();
+  const rawHomeDir = options?.homeDir ?? (process.env.HOME || os.homedir());
 
-export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
-  const mcpConfigArg = resolveSeatMcpConfig(ts.maNhanSu, ts.thuMuc);
-  const hanCheMangNgoai = !GIONG_TERMINAL && isExplicitlyExternalBind();
+  const resolvedRepo = path.resolve(rawRepoRoot);
+  let realRepo = resolvedRepo;
+  try {
+    realRepo = fs.realpathSync(resolvedRepo);
+  } catch {}
+
+  const resolvedHome = path.resolve(rawHomeDir);
+  let realHome = resolvedHome;
+  try {
+    realHome = fs.realpathSync(resolvedHome);
+  } catch {}
+
+  const repoRoots = new Set([resolvedRepo, realRepo]);
+  const isRepoOrInsideRepo = (dirPath: string): boolean => {
+    const norm = path.resolve(dirPath);
+    for (const r of repoRoots) {
+      if (norm === r || norm.startsWith(r + path.sep)) return true;
+    }
+    return false;
+  };
+
+  const excludes = new Set<string>();
+  const addAncestorExcludes = (ancestor: string) => {
+    if (isRepoOrInsideRepo(ancestor)) return;
+    const prefix = ancestor === path.sep ? '' : ancestor.replace(/\/+$/, '');
+    excludes.add(`${prefix}/CLAUDE.md`);
+    excludes.add(`${prefix}/.claude/CLAUDE.md`);
+    excludes.add(`${prefix}/.claude/rules/**`);
+  };
+
+  // 1. Từ HOME (cả resolved và realpath nếu khác)
+  for (const h of new Set([resolvedHome, realHome])) {
+    if (!h) continue;
+    addAncestorExcludes(h);
+    const projectsDir = path.join(h, 'Projects');
+    if (!isRepoOrInsideRepo(projectsDir)) {
+      excludes.add(`${projectsDir}/CLAUDE.md`);
+    }
+  }
+
+  // 2. Đi ngược mọi thư mục cha nghiêm ngặt của REPO_ROOT tới `/` (không bao gồm chính REPO_ROOT)
+  for (const startRoot of repoRoots) {
+    let cur = path.dirname(startRoot);
+    while (cur && cur !== startRoot) {
+      addAncestorExcludes(cur);
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
+  }
+
+  // Chốt chặn cuối: lọc bỏ bất kỳ mẫu nào vô tình trỏ vào REPO_ROOT/CLAUDE.md hoặc REPO_ROOT/.claude/**
+  return Array.from(excludes).filter((pattern) => {
+    for (const r of repoRoots) {
+      if (pattern === `${r}/CLAUDE.md` || pattern.startsWith(`${r}/.claude/`)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+export function buildClaudeSeatSettingsJson(options?: { repoRoot?: string; homeDir?: string }): string {
+  return JSON.stringify({
+    autoMemoryEnabled: false,
+    claudeMdExcludes: buildClaudeMdExcludes(options),
+  });
+}
+
+export const SEAT_ISOLATION_SETTINGS_JSON = buildClaudeSeatSettingsJson();
+
+/**
+ * F3b (S17b): Danh sách trắng biến môi trường được phép truyền xuống tiến trình con Claude.
+ * Tuyệt đối KHÔNG truyền nguyên `process.env` và KHÔNG truyền `AIBOSS_DISABLE_HOOK_2_1` hay `AIBOSS_TEST_MODE`.
+ */
+export const CLAUDE_SEAT_ENV_WHITELIST = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TMPDIR',
+  'LANG',
+  'TERM',
+  'TZ',
+  'NODE_ENV',
+  'SSH_AUTH_SOCK',
+  'SECURITYSESSIONID',
+  '__CF_USER_TEXT_ENCODING',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'CLAUDE_CONFIG_DIR',
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'AIBOSS_DATA_DIR',
+  'AIBOSS_CONFIG_DIR',
+  'AIBOSS_OFFICE_CONFIG_PATH',
+  'AIBOSS_OFFICE_ROOT',
+  'AIBOSS_AGENT_BROKER_MCP_SCRIPT',
+  'AIBOSS_SEAT_TERMINAL_MODE',
+] as const;
+
+const TEST_ONLY_ENV_KEYS = [
+  'DUONG_DAN_CLAUDE',
+  'TEST_MOCK_CLAUDE_MODE',
+  'TEST_MOCK_SESSION_ID',
+  'TEST_MOCK_READY_FILE',
+  'TEST_MOCK_RELEASE_FILE',
+] as const;
+
+export function buildClaudeSeatEnv(sourceEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const cleanEnv: Record<string, string | undefined> = {};
+  const allowedSet = new Set<string>(CLAUDE_SEAT_ENV_WHITELIST);
+  if (sourceEnv.NODE_ENV !== 'production') {
+    for (const k of TEST_ONLY_ENV_KEYS) allowedSet.add(k);
+  }
+
+  for (const [key, val] of Object.entries(sourceEnv)) {
+    if (val === undefined) continue;
+    if (key === 'AIBOSS_DISABLE_HOOK_2_1' || key === 'AIBOSS_TEST_MODE') continue;
+    if (
+      allowedSet.has(key) ||
+      key.startsWith('LC_') ||
+      key.startsWith('XDG_') ||
+      (sourceEnv.NODE_ENV !== 'production' && key.startsWith('FAKE_CLAUDE_'))
+    ) {
+      cleanEnv[key] = val;
+    }
+  }
+  return cleanEnv as NodeJS.ProcessEnv;
+}
+
+export interface ThamSoDungDoiSoClaude {
+  thuMuc: string;
+  maNhanSu?: string | null;
+  outputFormat?: 'stream-json' | 'json';
+  maPhienCu?: string | null;
+  forkSession?: boolean;
+  loiDan?: string;
+  argv?: string[];
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * F1b (S17b): Hàm dựng đối số dùng chung cho MỌI điểm gọi `claude` (runner, chat, fork).
+ */
+export function buildClaudeSeatArgv(ts: ThamSoDungDoiSoClaude): string[] {
+  const env = ts.env ?? process.env;
+  const argv = ts.argv ?? process.argv;
+  const giongTerminal = chayNhuTerminal(env);
+  const hanCheMangNgoai = !giongTerminal && ngheRaNgoai(argv);
+  const congCuCam = hanCheMangNgoai ? CAM_KHI_HAN_CHE : [];
+  const repoRoot = findOfficeRootFromDir(ts.thuMuc);
+  const mcpConfigArg = resolveSeatMcpConfig(ts.maNhanSu, ts.thuMuc, repoRoot);
+  const settingsJson = buildClaudeSeatSettingsJson({ repoRoot, homeDir: env.HOME || os.homedir() });
+  const outputFormat = ts.outputFormat ?? 'stream-json';
+
   const doiSo: string[] = [
     '-p',
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    // 🔑 S17: Cô lập ngữ cảnh ghế mặc định (`!GIONG_TERMINAL`):
+    '--output-format', outputFormat,
+    ...(outputFormat === 'stream-json' ? ['--include-partial-messages', '--verbose'] : []),
+    // 🔑 S17 + S17b: Cô lập ngữ cảnh ghế mặc định (`!giongTerminal`):
     //    - `--setting-sources project`: không nạp ~/.claude/settings.json cấp máy
-    //    - `--settings`: chặn Claude Code đi ngược cây thư mục nạp ~/CLAUDE.md, ~/Projects/CLAUDE.md
+    //    - `--settings`: chặn Claude Code đi ngược cây thư mục nạp CLAUDE.md cấp cha ngoài repo
     //    - `--strict-mcp-config --mcp-config`: chỉ nạp MCP đã khai của ghế (agent-broker)
     //    - `--disable-slash-commands`: không nạp bộ lệnh gạch chéo cấp máy
-    ...(GIONG_TERMINAL
+    ...(giongTerminal
       ? []
       : [
           '--setting-sources', 'project',
-          '--settings', SEAT_ISOLATION_SETTINGS_JSON,
+          '--settings', settingsJson,
           '--strict-mcp-config', '--mcp-config', mcpConfigArg,
           '--disable-slash-commands',
         ]),
-    // Mở tay chân thì phải mở luôn cổng quyền, nếu không agent CÓ công cụ mà vẫn bị chặn
-    // giữa chừng — mà trang web ⛔ không có nút "Duyệt" nào để bấm.
     '--permission-mode', hanCheMangNgoai ? 'dontAsk' : 'bypassPermissions',
     '--model', CAU_HINH.moHinh,
-    // 🧠 Mức nỗ lực suy nghĩ — Owner chốt 14/08: CAO NHẤT ('max').
-    //    Cờ có thật ở bản 2.1.232 (`claude --help`: low · medium · high · xhigh · max).
     '--effort', CAU_HINH.mucNoLuc,
-    // Trần = 0 ⇒ BỎ HẲN cờ (Owner chốt 14/08: không giới hạn).
-    // ⚠️ Truyền `--max-budget-usd 0` là CẤM TIÊU, ⛔ không phải «vô hạn» — sai một chữ
-    //    thì mọi lượt chết ngay từ token đầu. Phải bỏ cờ, ⛔ đừng để số 0.
     ...(CAU_HINH.tranTienMoiLuot > 0
       ? ['--max-budget-usd', String(CAU_HINH.tranTienMoiLuot)]
       : []),
-    // ⚠️ Danh sách rỗng thì phải BỎ HẲN cờ — `--disallowedTools` đứng trơ sẽ nuốt
-    //    tham số đứng sau nó làm giá trị, hỏng âm thầm chứ ⛔ không báo lỗi.
-    ...(CONG_CU_CAM.length ? ['--disallowedTools', ...CONG_CU_CAM] : []),
   ];
 
-  /**
-   * 🪪 NỐI PHIÊN CŨ **VÀ** LỜI DẶN — hai việc ĐỘC LẬP, ⛔ phải hai lựa chọn loại trừ nhau.
-   *
-   * 🕳 CA THẬT 31/08/2026 (Owner bắt được, `claude-phong-ban-pm` truy ra gốc):
-   *    ghế mang nhãn `claude-phong-hanh-chinh` mà TỰ XƯNG `claude-tro-ly-dieu-hanh`.
-   *    Nó ⛔ nói dối — **nó chưa từng được báo.** Trước bản vá này, `else if` khiến
-   *    nhánh lời dặn ⛔ BAO GIỜ chạy khi có `maPhienCu`, mà 5 ghế «Quản Lý Trường»
-   *    đều chạy bằng `--resume`. Thứ duy nhất chúng có là trí nhớ cũ — và trong trí nhớ đó
-   *    chúng mang tên khác.
-   *
-   * 📏 SỐ ĐO 31/08 — vì sao đúng 5 ghế này dính:
-   *      225 ghế · 9 ghế CÓ `soul` · 5 ghế CÓ `thu_muc`
-   *      cả 5 ghế `thu_muc` đều **⛔ có `soul`** ⇒ `loiDan` là nguồn danh tính DUY NHẤT của chúng
-   *      (chúng đứng ở thư mục NHÀ, nên tệp CLAUDE.md nạp theo chỗ đứng là luật workspace,
-   *       ⛔ phải một bản khai vai)
-   *
-   * ✅ VÌ SAO GHÉP ĐƯỢC — đo thật, ⛔ suy từ `--help`:
-   *      `--help` ⛔ khai hai cờ này xung khắc, nhưng «⛔ cấm» chưa phải «chạy được».
-   *      Phép đo (`claude-aiboss-app-pm`, 31/08): mở phiên với lời dặn «tên bạn là ZORBAX»,
-   *      rồi `--resume <mã> --append-system-prompt «tên bạn là QUIXNAR»` + hỏi tên
-   *      ⇒ trả lời **QUIXNAR**. Hai cờ chạy cùng nhau VÀ lời dặn MỚI có tác dụng khi nối phiên.
-   *
-   * 🔒 GHẾ CÓ `soul` VẪN ⛔ BỊ NHÉT GÌ — `route.ts:199` đã cho `loiDan = undefined`,
-   *    nên chốt `if (ts.loiDan)` tự lo. Linh hồn của chúng nằm trong `CLAUDE.md` ở thư mục ghế
-   *    và Claude Code tự nạp theo chỗ đứng; nhét thêm một lời dặn là dựng ra HAI nguồn danh tính
-   *    cãi nhau. ⚠️ Đây là ca ĐỐI CHỨNG ÂM của bản vá: sửa xong, 9 ghế đó phải ⛔ đổi một ly.
-   *
-   * 📌 `else if` cũ ⛔ có một dòng chú thích nào, trong khi MỌI cờ quanh nó đều được giải thích
-   *    ⇒ bằng chứng nghiêng về SÓT, **chưa phải kết luận**. Ai sửa tiếp vẫn phải tự đọc.
-   */
   if (ts.maPhienCu) {
     doiSo.push('--resume', ts.maPhienCu);
+  }
+  if (ts.forkSession) {
+    doiSo.push('--fork-session');
   }
   if (ts.loiDan) {
     doiSo.push('--append-system-prompt', ts.loiDan);
   }
+  if (congCuCam.length) {
+    doiSo.push('--disallowedTools', ...congCuCam);
+  }
 
-  // spawn KHÔNG qua shell + câu hỏi đi bằng stdin
-  // ⇒ ⛔ không có đường chèn lệnh, ⛔ không đụng trần độ dài tham số.
+  return doiSo;
+}
+
+/**
+ * F1b & F3b (S17b): Điểm spawn `claude` DUY NHẤT trong toàn bộ mã nguồn `src/`.
+ * Luôn đi qua `buildClaudeSeatArgv` và `buildClaudeSeatEnv`.
+ */
+export function spawnClaudeSeatProcess(ts: ThamSoDungDoiSoClaude): {
+  tien: ChildProcessWithoutNullStreams;
+  doiSo: string[];
+  env: NodeJS.ProcessEnv;
+} {
   fs.mkdirSync(ts.thuMuc, { recursive: true });
+  const doiSo = buildClaudeSeatArgv(ts);
+  const env = buildClaudeSeatEnv(ts.env ?? process.env);
   const tien = spawn(CAU_HINH.lenhClaude, doiSo, {
     cwd: ts.thuMuc,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: process.env,
+    env,
+  });
+  return { tien, doiSo, env };
+}
+
+export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
+  // spawn KHÔNG qua shell + câu hỏi đi bằng stdin qua điểm gọi dùng chung
+  const { tien } = spawnClaudeSeatProcess({
+    thuMuc: ts.thuMuc,
+    maNhanSu: ts.maNhanSu,
+    outputFormat: 'stream-json',
+    maPhienCu: ts.maPhienCu,
+    loiDan: ts.loiDan,
   });
 
   /**
