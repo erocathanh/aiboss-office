@@ -9,11 +9,11 @@ Tài liệu này hướng dẫn chi tiết từng bước cho Owner (anh Thanh) 
 Trước khi tải mã nguồn, máy Mac mới cần cài đặt đầy đủ các công cụ nền tảng sau:
 
 ### 1.1. Node.js và pnpm
-Dự án yêu cầu phiên bản Node.js hiện đại để hỗ trợ đầy đủ các tính năng runtime và xử lý tiến trình:
-- **Node.js**: Phiên bản `>= 24.19.0` (khuyên dùng Node.js 24 LTS hoặc bản mới nhất qua `nvm` hoặc `fnm`).
+Dự án yêu cầu phiên bản Node.js hiện đại để hỗ trợ đầy đủ các tính năng runtime và xử lý tiến trình (Next.js 15 yêu cầu `>= 18.18.0`; dự án khuyến nghị Node.js 22 LTS trở lên):
+- **Node.js**: Phiên bản `>= 22.0.0` (khuyên dùng Node.js 22 LTS qua `nvm` hoặc `fnm`, cung cấp đầy đủ native WebSocket, fetch, crypto, test runner và khớp với `@types/node: 22.10.2`).
   ```bash
   node -v
-  # Kết quả phải trả về v24.19.0 trở lên
+  # Kết quả phải trả về v22.0.0 trở lên
   ```
 - **pnpm**: Phiên bản `>= 10.32.1`.
   ```bash
@@ -87,7 +87,7 @@ PHONGBAN_USER=erocathanh
 PHONGBAN_PASS=mat_khau_quan_tri_cua_ban
 
 # Đường dẫn thư mục dữ liệu (tuỳ chọn - mặc định lưu tại operations/data)
-# AIBOSS_DATA_DIR=/Users/erocathanh/Projects/aiboss-office/operations/data
+# AIBOSS_DATA_DIR=$HOME/Projects/aiboss-office/operations/data
 EOF
 ```
 
@@ -172,9 +172,9 @@ Sau khi ứng dụng khởi động, bạn có thể mở một cửa sổ termi
 
 ## 7. Kiểm Tra Session History & Nhật Ký Chạy
 
-Phiên bản mới nhất đã khắc phục triệt để lỗi không lưu nhật ký hoặc Session History trống rỗng khi clone sang máy mới nhờ cơ chế lưu trữ bền vững hai lớp:
-- Lớp 1: Bản ghi phiên Claude Code thực tế tại `~/.claude/projects/`.
-- Lớp 2: Bản sao lưu đồng bộ bền vững tại thư mục cục bộ `operations/data/sessions/<mã_ghế>/` và sổ nhật ký chạy `operations/data/runs/<YYYY-MM-DD>.jsonl`.
+Trên bản clone sạch, sau một lượt chat, Session History hiển thị phiên làm việc kèm toàn văn hội thoại (cả câu hỏi của người dùng và câu trả lời của trợ lý Claude Code) và kích thước bản ghi (`size_bytes > 0`). Cơ chế xử lý bao gồm:
+- Bản ghi phiên Claude Code thực tế tại `~/.claude/projects/` (được tìm kiếm chính xác theo mã phiên UUID và xác minh quyền sở hữu qua `cwd` để bảo đảm cách ly, không rò rỉ chéo giữa các bản clone hay khách trên cùng máy).
+- Metadata bền vững tại thư mục cục bộ `operations/data/sessions/<mã_ghế>/` (phân quyền hạn chế: thư mục 0700, tệp 0600) và sổ nhật ký chạy `operations/data/runs/<YYYY-MM-DD>.jsonl`. Khi tệp transcript chưa xuất hiện hoặc bị thiếu trên máy mới, metadata vẫn giữ mã phiên, câu hỏi mở đầu và đánh dấu `transcript: 'missing'`.
 
 ### Các bước kiểm tra thực tế:
 1. Mở trình duyệt truy cập `http://127.0.0.1:4330`.
@@ -183,9 +183,9 @@ Phiên bản mới nhất đã khắc phục triệt để lỗi không lưu nh�
 4. Quan sát câu trả lời hiển thị trực tiếp theo luồng.
 5. Sau khi lượt chạy hoàn tất, bấm vào nút **Session History** (hoặc biểu tượng lịch sử phiên) trên thanh công cụ của ghế:
    - Danh sách phiên hiển thị ngay phiên làm việc vừa thực hiện.
-   - Hiển thị đầy đủ câu hỏi mở đầu (`tin_cuoi`), mốc thời gian thực hiện, số lượt trao đổi (`so_luot >= 1`), kích thước bản ghi.
-   - Bấm vào phiên sẽ hiển thị toàn bộ nội dung lịch sử trò chuyện chi tiết, không bị thông báo "Session History của ghế là không có" như trước.
-6. Mọi lượt chạy đều được tự động ghi nhận vào sổ nhật ký tại `operations/data/runs/` phục vụ việc đối soát chi phí và kiểm toán minh bạch.
+   - Hiển thị đầy đủ câu hỏi mở đầu (`tin_cuoi`), mốc thời gian thực hiện, số lượt trao đổi (`so_luot >= 1`), kích thước bản ghi (`size_bytes > 0`).
+   - Bấm vào phiên sẽ hiển thị toàn bộ nội dung lịch sử trò chuyện chi tiết (cả câu hỏi và câu trả lời).
+6. Mọi lượt chạy đều được tự động ghi nhận vào sổ nhật ký tại `operations/data/runs/` với trạng thái chuẩn xác (`finished` chỉ khi exit 0, `failed` khi có lỗi/exception/exit khác 0).
 
 ---
 

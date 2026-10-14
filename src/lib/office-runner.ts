@@ -654,7 +654,7 @@ export async function tickRunner(): Promise<number> {
             const maP = result.maPhien;
             const ghiLai = () => {
               if (isFenced() && !isFenceGuardDisabledForTest()) return;
-              saoChepBanGhiPhien(y.ma_nhan_su, maP, y.cau_hoi);
+              saoChepBanGhiPhien(y.ma_nhan_su, maP, y.cau_hoi, runId);
               const oNay = layO(y.ma_o);
               if (!oNay || oNay.ma_nhan_su !== y.ma_nhan_su || oNay.ma_phien !== maP) return;
               const m = mocTepPhien(y.ma_nhan_su, maP);

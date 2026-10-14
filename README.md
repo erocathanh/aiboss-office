@@ -45,7 +45,7 @@ AIBOSS Office is a standalone workspace platform providing org charts, multi-sea
 
 6. **Fresh Machine Setup (Hướng dẫn cài máy mới):**
    For a comprehensive step-by-step setup guide on a fresh Mac machine, refer to:
-   👉 **[operations/README-cai-may-moi.md](operations/README-cai-may-moi.md)** (Tiếng Việt chi tiết: cài đặt Node, pnpm, Claude CLI OAuth, cấu hình ngân sách, khắc phục Session History).
+   👉 **[operations/README-cai-may-moi.md](operations/README-cai-may-moi.md)** (Tiếng Việt chi tiết: cài đặt Node >=22 LTS, pnpm, Claude CLI OAuth, cấu hình ngân sách, đồng bộ Session History).
 
 ## Repository Structure
 
