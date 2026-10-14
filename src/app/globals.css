@@ -445,7 +445,7 @@ body { padding-top: var(--cao-bang); }
 
 /* 🗣 Ô nhập CÂU DẶN ĐẦU sau khi fork — nằm dưới nút fork, chiếm trọn hàng.
    Cỡ chữ ≥16px: dưới mức đó iOS TỰ PHÓNG TO trang khi bấm vào ô, đẩy nút Gửi khỏi màn. */
-.o-cau-dau { width: 100%; margin-top: 6px; font-size: 16px; }
+.o-cau-dau { width: 100%; margin-top: 6px; font-size: max(16px, calc(16px * var(--text-scale, 1))); }
 
 /* ==========================================================================
    AIBOSS Office Phase 2 UI Styles - English & Marketing MVP
@@ -721,8 +721,13 @@ html[data-co-chu="lon"] {
 .gio {
   font-size: calc(10px * var(--text-scale, 1)) !important;
 }
-.soan textarea {
+.soan textarea,
+.o-dan,
+.o-cau-dau {
   font-size: max(16px, calc(16px * var(--text-scale, 1))) !important;
+}
+.lien-ket {
+  font-size: calc(12px * var(--text-scale, 1));
 }
 .ds-nhanh .mon b {
   font-size: calc(12.5px * var(--text-scale, 1)) !important;

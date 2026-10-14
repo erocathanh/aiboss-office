@@ -123,6 +123,22 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
     assert.equal(callbackValue, null);
     assert.equal(attrs.get('data-text-size'), 'medium');
 
+    // Exact TEXT_SIZE_STORAGE_KEY event syncs updated storage value
+    store.set(TEXT_SIZE_STORAGE_KEY, 'large');
+    assert.equal(shouldSyncTextSizeStorageKey(TEXT_SIZE_STORAGE_KEY), true);
+    const syncedOnKey = syncTextSizeOnStorageEvent({ key: TEXT_SIZE_STORAGE_KEY }, (val) => {
+      callbackValue = val;
+    });
+    assert.equal(syncedOnKey, 'large');
+    assert.equal(callbackValue, 'large');
+    assert.equal(attrs.get('data-text-size'), 'large');
+    assert.equal(attrs.get('data-co-chu'), 'lon');
+
+    // Reset back to medium before testing storage.clear() (key === null)
+    saveTextSize('medium');
+    applyTextSize('medium');
+    callbackValue = null;
+
     // Another tab calls localStorage.clear() -> fires storage event with key === null
     store.clear();
     assert.equal(shouldSyncTextSizeStorageKey(null), true);
@@ -137,7 +153,7 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
     delete globalThis.document;
     delete globalThis.localStorage;
   }
-  console.log('  [PASS] Test 3: applyTextSize syncs both attributes and syncTextSizeOnStorageEvent handles key === null');
+  console.log('  [PASS] Test 3: applyTextSize syncs both attributes and syncTextSizeOnStorageEvent handles TEXT_SIZE_STORAGE_KEY and key === null');
 }
 
 // Test 4: Language normalization handles valid strings, whitespace/case, unknown codes, and non-string types
@@ -221,7 +237,7 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
   console.log('  [PASS] Test 5: loiDanHeThong uniquely distinguishes vi, en, and auto branches and handles non-strings');
 }
 
-// Test 6: Seat CLAUDE.md generator (gen-seat-claude-md.mjs) idempotence, 0-diff on auto, and override on vi/en
+// Test 6: Seat CLAUDE.md generator (gen-seat-claude-md.mjs) idempotence, 0-diff on auto, and override on vi/en in isolated temp dir
 {
   assert.equal(
     resolveSeatLanguageRule('vi'),
@@ -233,22 +249,31 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
     'answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English'
   );
   assert.equal(
+    resolveSeatLanguageRule('vietnamese'),
+    'answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English',
+    'legacy vietnamese alias must fall back to auto rule'
+  );
+  assert.equal(
+    resolveSeatLanguageRule('english'),
+    'answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English',
+    'legacy english alias must fall back to auto rule'
+  );
+  assert.equal(
     resolveSeatLanguageRule(123),
     'answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English'
   );
 
-  // 6a: Running against repo root with "auto" produces 0 updates (matches committed CLAUDE.md files)
-  const autoRun = generateSeatClaudeMd({ repoRoot: process.cwd(), quiet: true });
-  assert.equal(autoRun.totalCount, 8, 'must check all 8 marketing seats');
-  assert.equal(autoRun.updatedCount, 0, 'with language="auto", committed CLAUDE.md files must have 0 diff');
-
-  // 6b: Running in an isolated temp workspace with "vi" and "en" updates CLAUDE.md without touching SOUL.md
+  // Copy fixture (seats.json, department.json, config/office.json, and committed seat CLAUDE.md files)
+  // to an isolated temp workspace so the working tree is NEVER written to during tests.
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ui1-seat-gen-'));
   try {
     fs.mkdirSync(path.join(tmpDir, 'data'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'departments', 'marketing'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'config'), { recursive: true });
 
+    const seatsData = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), 'data', 'seats.json'), 'utf-8')
+    );
     fs.copyFileSync(
       path.join(process.cwd(), 'data', 'seats.json'),
       path.join(tmpDir, 'data', 'seats.json')
@@ -257,6 +282,16 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
       path.join(process.cwd(), 'departments', 'marketing', 'department.json'),
       path.join(tmpDir, 'departments', 'marketing', 'department.json')
     );
+    const tmpCfgPath = path.join(tmpDir, 'config', 'office.json');
+    fs.copyFileSync(path.join(process.cwd(), 'config', 'office.json'), tmpCfgPath);
+
+    for (const seat of seatsData) {
+      if (seat.department !== 'marketing') continue;
+      const srcClaude = path.join(process.cwd(), seat.dir, 'CLAUDE.md');
+      const dstDir = path.join(tmpDir, seat.dir);
+      fs.mkdirSync(dstDir, { recursive: true });
+      fs.copyFileSync(srcClaude, path.join(dstDir, 'CLAUDE.md'));
+    }
 
     const soulSentinelPath = path.join(
       tmpDir,
@@ -266,11 +301,14 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
       'content-writer',
       'SOUL.md'
     );
-    fs.mkdirSync(path.dirname(soulSentinelPath), { recursive: true });
     fs.writeFileSync(soulSentinelPath, '# SOUL sentinel\n', 'utf-8');
 
-    // Write config with language: "vi"
-    const tmpCfgPath = path.join(tmpDir, 'config', 'office.json');
+    // 6a: Running against copied fixture in tmpDir with committed config ("auto") produces 0 updates
+    const autoRun = generateSeatClaudeMd({ repoRoot: tmpDir, configPath: tmpCfgPath, quiet: true });
+    assert.equal(autoRun.totalCount, 8, 'must check all 8 marketing seats');
+    assert.equal(autoRun.updatedCount, 0, 'with language="auto", copied CLAUDE.md fixture must have 0 diff');
+
+    // 6b: Write config with language: "vi" in temp workspace
     fs.writeFileSync(tmpCfgPath, JSON.stringify({ language: 'vi' }), 'utf-8');
 
     const viRun1 = generateSeatClaudeMd({ repoRoot: tmpDir, configPath: tmpCfgPath, quiet: true });
@@ -294,12 +332,74 @@ console.log('--- Testing UI-1: Default Large Font, Storage Sync & Language Confi
     const viRun2 = generateSeatClaudeMd({ repoRoot: tmpDir, configPath: tmpCfgPath, quiet: true });
     assert.equal(viRun2.updatedCount, 0, 'second run with unchanged language must be idempotent (0 writes)');
 
+    // 6c: Write config with language: "en" in temp workspace
+    fs.writeFileSync(tmpCfgPath, JSON.stringify({ language: 'en' }), 'utf-8');
+    const enRun1 = generateSeatClaudeMd({ repoRoot: tmpDir, configPath: tmpCfgPath, quiet: true });
+    assert.equal(enRun1.totalCount, 8);
+    assert.equal(enRun1.updatedCount, 8, 'switching from vi to en in temp dir must update 8 seat CLAUDE.md files');
+
+    const writerClaudeEn = fs.readFileSync(
+      path.join(tmpDir, 'departments', 'marketing', 'seats', 'content-writer', 'CLAUDE.md'),
+      'utf-8'
+    );
+    assert.ok(
+      writerClaudeEn.includes('answer in English'),
+      'generated CLAUDE.md for en must contain English rule'
+    );
+    assert.ok(
+      !writerClaudeEn.includes('answer in Vietnamese'),
+      'generated CLAUDE.md for en must NOT contain Vietnamese rule'
+    );
+    assert.ok(
+      !writerClaudeEn.includes('language the owner writes in'),
+      'generated CLAUDE.md for en must NOT contain auto rule'
+    );
+
     // SOUL.md sentinel is untouched
     assert.equal(fs.readFileSync(soulSentinelPath, 'utf-8'), '# SOUL sentinel\n');
+
+    // 6d: Verify gen-seat-files.mjs imports and reuses resolveSeatLanguageRule
+    const genSeatFilesSrc = fs.readFileSync(
+      path.join(process.cwd(), 'operations', 'scripts', 'gen-seat-files.mjs'),
+      'utf-8'
+    );
+    assert.ok(
+      genSeatFilesSrc.includes("import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs'"),
+      'gen-seat-files.mjs must import resolveSeatLanguageRule from gen-seat-claude-md.mjs'
+    );
+    assert.ok(
+      genSeatFilesSrc.includes('resolveSeatLanguageRule(rawLang)'),
+      'gen-seat-files.mjs must call resolveSeatLanguageRule(rawLang)'
+    );
+    assert.ok(
+      !genSeatFilesSrc.includes('vietnamese') && !genSeatFilesSrc.includes('english'),
+      'gen-seat-files.mjs must not diverge with legacy vietnamese/english branches'
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-  console.log('  [PASS] Test 6: generateSeatClaudeMd is idempotent, 0-diff on auto, and applies vi/en overrides to SOUL seats');
+  console.log('  [PASS] Test 6: generateSeatClaudeMd is idempotent, 0-diff on auto in temp dir, and applies vi/en overrides to SOUL seats');
+}
+
+// Test 7: Typography scale rules in globals.css cover .o-dan, .o-cau-dau (with 16px floor), and .lien-ket
+{
+  const globalsCss = fs.readFileSync(
+    path.join(process.cwd(), 'src', 'app', 'globals.css'),
+    'utf-8'
+  );
+  assert.ok(
+    /\.o-cau-dau\s*\{[^}]*font-size:\s*max\(16px,\s*calc\(16px\s*\*\s*var\(--text-scale,\s*1\)\)\)/.test(globalsCss),
+    '.o-cau-dau must scale with --text-scale while keeping 16px minimum floor'
+  );
+  assert.ok(
+    /\.soan textarea,\s*\.o-dan,\s*\.o-cau-dau\s*\{\s*font-size:\s*max\(16px,\s*calc\(16px\s*\*\s*var\(--text-scale,\s*1\)\)\)\s*!important;/.test(globalsCss),
+    '.o-dan and .o-cau-dau must share max(16px, calc(16px * var(--text-scale, 1))) !important scaling override'
+  );
+  assert.ok(
+    /\.lien-ket\s*\{\s*font-size:\s*calc\(12px\s*\*\s*var\(--text-scale,\s*1\)\);/.test(globalsCss),
+    '.lien-ket must scale with calc(12px * var(--text-scale, 1))'
+  );
+  console.log('  [PASS] Test 7: .o-dan, .o-cau-dau, and .lien-ket scale with --text-scale while preserving 16px input floor');
 }
 
 console.log('All UI-1 unit tests passed.');
