@@ -21,6 +21,59 @@ function formatRelativeAge(isoTs: string): string {
   return `${diffDays}d ago`;
 }
 
+const LEGACY_H1_REASON_MAP: Array<{ match: RegExp; code: string }> = [
+  {
+    match: /công cụ mcp|mcp.*gửi dữ liệu ra bên ngoài/i,
+    code: 'mcp_external_send',
+  },
+  {
+    match: /tệp cấu hình\s*\(-k\/--config\)|-k\/--config/i,
+    code: 'curl_config_flag',
+  },
+  {
+    match: /fetch_page_messages\.py|truy xuất tin nhắn hộp thư/i,
+    code: 'inbox_message_fetch',
+  },
+  {
+    match: /graph\.facebook\.com.*\/messages|gửi tin nhắn\s*\(\/messages\)/i,
+    code: 'facebook_graph_messages',
+  },
+  {
+    match: /batch request.*graph\.facebook\.com/i,
+    code: 'facebook_graph_batch',
+  },
+  {
+    match: /lệnh post gửi tin nhắn\/email|post gửi tin nhắn/i,
+    code: 'external_post_send',
+  },
+  {
+    match: /kết nối gửi tin\/email ra dịch vụ bên ngoài/i,
+    code: 'external_endpoint_send',
+  },
+];
+
+function formatApprovalReason(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return 'guarded_external_action';
+  for (const rule of LEGACY_H1_REASON_MAP) {
+    if (rule.match.test(trimmed)) {
+      return rule.code;
+    }
+  }
+  if (/[^\x00-\x7F]/.test(trimmed)) {
+    return 'guarded_external_action';
+  }
+  return trimmed.slice(0, 200);
+}
+
+function formatApprovalHead60(raw: string): string {
+  const trimmed = (raw || '').slice(0, 60);
+  if (/[^\x00-\x7F]/.test(trimmed)) {
+    return trimmed.replace(/[^\x20-\x7E]/g, '?');
+  }
+  return trimmed;
+}
+
 function getStatusBadgeStyle(status: ApprovalStatus): {
   bg: string;
   color: string;
@@ -297,7 +350,7 @@ export function ApprovalsSettingsCard({
                             borderRadius: '4px',
                           }}
                         >
-                          {item.reason}
+                          {formatApprovalReason(item.reason)}
                         </span>
                       </div>
 
@@ -328,7 +381,7 @@ export function ApprovalsSettingsCard({
                         wordBreak: 'break-all',
                       }}
                     >
-                      {item.head60}
+                      {formatApprovalHead60(item.head60)}
                     </div>
 
                     <div
@@ -497,7 +550,7 @@ export function ApprovalsSettingsCard({
                         {item.seat} · {item.tool} · {item.host}
                       </span>
                       <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                        ({item.reason})
+                        ({formatApprovalReason(item.reason)})
                       </span>
                     </div>
 
