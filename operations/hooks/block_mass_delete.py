@@ -104,6 +104,14 @@ def check_command(cmd: str, cwd: str) -> str:
                         return "Lệnh git push --force bị chặn để bảo vệ nhánh từ xa."
                     if a.startswith('-') and not a.startswith('--') and 'f' in a:
                         return "Lệnh git push --force bị chặn để bảo vệ nhánh từ xa."
+                    if a.startswith('+') and len(a) > 1:
+                        return "Command git push +refspec (force push) is blocked to protect remote branches."
+
+        # 3b. Check chmod 777
+        elif exe == 'chmod':
+            for a in words[1:]:
+                if a in ('777', '0777', 'a+rwx', 'ugo+rwx'):
+                    return "Command chmod 777 is blocked by the office safety floor."
 
         # 4. Kiểm tra ghi đè nhật ký bằng > hoặc 1> (cho phép nối thêm >> hoặc 1>>)
         for op, target in sc.redirections:

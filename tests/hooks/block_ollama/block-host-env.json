@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "OLLAMA_HOST=http://127.0.0.1:11434 python3 app.py"
+  }
+}

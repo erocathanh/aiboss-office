@@ -9,6 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs';
 
 const REPO_ROOT = process.cwd();
 const seatsPath = path.join(REPO_ROOT, 'data', 'seats.json');
@@ -40,25 +41,33 @@ const gatesList = dept.gates || [];
 const gatesStr = gatesList.map((g) => `\`${g}\``).join(', ');
 
 const officeConfigPath = path.join(REPO_ROOT, 'config', 'office.json');
-let officeLang = 'auto';
+let rawOfficeLang = 'auto';
 if (fs.existsSync(officeConfigPath)) {
   try {
     const officeCfg = JSON.parse(fs.readFileSync(officeConfigPath, 'utf-8'));
-    if (officeCfg.language) officeLang = officeCfg.language.toLowerCase().trim();
+    if (officeCfg && typeof officeCfg === 'object') rawOfficeLang = officeCfg.language;
   } catch {}
 }
 
-const langRule =
-  officeLang === 'vi' || officeLang === 'vietnamese'
-    ? 'answer in Vietnamese, keep code and identifiers in English'
-    : officeLang === 'en' || officeLang === 'english'
-    ? 'answer in English'
-    : 'answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English';
+const langRule = resolveSeatLanguageRule(rawOfficeLang);
 
 const DENY_RULES = [
+  'Bash(sudo:*)',
+  'Bash(git push --force:*)',
+  'Bash(git reset --hard:*)',
+  'Bash(chmod 777:*)',
   'Edit(projects/**/references/**)',
   'Edit(projects/**/templates/**)',
   'Edit(projects/**/inputs/**)',
+  'Edit(//Users/**/projects/**/references/**)',
+  'Edit(//Users/**/projects/**/templates/**)',
+  'Edit(//Users/**/projects/**/inputs/**)',
+  'Edit(//home/**/projects/**/references/**)',
+  'Edit(//home/**/projects/**/templates/**)',
+  'Edit(//home/**/projects/**/inputs/**)',
+  'Edit(operations/data/**)',
+  'Edit(//Users/**/operations/data/**)',
+  'Edit(//home/**/operations/data/**)',
   'Bash(rm:*)',
   'Read(./.env)',
   'Read(./.env.*)',
@@ -69,12 +78,45 @@ const DENY_RULES = [
   'Bash(/usr/bin/python3 tools/inbox-reader/fetch_page_messages.py *)',
 ];
 
-function buildSettingsJson(hooksBasePath) {
+const KNOWN_MCP_SERVERS = {
+  'agent-broker': {
+    type: 'stdio',
+    command: 'sh',
+    args: [
+      '-c',
+      'exec node "${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-$HOME/Development/agent-broker-mcp/index.js}"',
+    ],
+  },
+};
+
+function buildMcpJson(mcpList) {
+  const servers = {};
+  const names = Array.isArray(mcpList) ? mcpList : ['agent-broker'];
+  for (const name of names) {
+    if (KNOWN_MCP_SERVERS[name]) {
+      servers[name] = KNOWN_MCP_SERVERS[name];
+    }
+  }
+  return { mcpServers: servers };
+}
+
+function buildSettingsJson(hooksBasePath, seatPermissions = null) {
+  const extraDeny = Array.isArray(seatPermissions?.deny)
+    ? seatPermissions.deny
+    : Array.isArray(seatPermissions?.deny_extra)
+      ? seatPermissions.deny_extra
+      : [];
+  const mergedDeny = Array.from(new Set([...DENY_RULES, ...extraDeny]));
+  const allowList = Array.isArray(seatPermissions?.allow) ? seatPermissions.allow : [];
+
+  const permissions = {
+    ...(allowList.length > 0 ? { allow: allowList } : {}),
+    deny: mergedDeny,
+  };
+
   return {
     _comment_pcn_v3: 'PCN seat frame v3 hooks merge placeholder (reserved until 17/10)',
-    permissions: {
-      deny: DENY_RULES,
-    },
+    permissions,
     hooks: {
       PreToolUse: [
         {
@@ -87,7 +129,7 @@ function buildSettingsJson(hooksBasePath) {
           ],
         },
         {
-          matcher: 'Bash|Edit|Write|MultiEdit|NotebookEdit',
+          matcher: 'Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob',
           hooks: [
             {
               type: 'command',
@@ -140,6 +182,33 @@ function buildSettingsJson(hooksBasePath) {
             },
           ],
         },
+        {
+          matcher: 'Bash',
+          hooks: [
+            {
+              type: 'command',
+              command: `/usr/bin/python3 "${hooksBasePath}/block_ollama.py" || exit 2`,
+            },
+          ],
+        },
+        {
+          matcher: 'Bash|mcp__.*',
+          hooks: [
+            {
+              type: 'command',
+              command: `/usr/bin/python3 "${hooksBasePath}/block_ad_account_write.py" || exit 2`,
+            },
+          ],
+        },
+        {
+          matcher: 'Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob',
+          hooks: [
+            {
+              type: 'command',
+              command: `/usr/bin/python3 "${hooksBasePath}/block_public_publish.py" || exit 2`,
+            },
+          ],
+        },
       ],
       PostToolUse: [
         {
@@ -158,6 +227,7 @@ function buildSettingsJson(hooksBasePath) {
 
 let claudeCount = 0;
 let seatSettingsCount = 0;
+let seatMcpCount = 0;
 
 for (const seat of seats) {
   if (seat.department !== 'marketing') continue;
@@ -167,7 +237,7 @@ for (const seat of seats) {
     fs.mkdirSync(targetDir, { recursive: true });
   }
 
-  // 1. Sinh CLAUDE.md
+  // 1. Generate CLAUDE.md
   const claudeContent = `# ${seat.name} — seat \`${seat.seat_id}\` of the Marketing department, AIBOSS Office
 
 You are the **${seat.name}** seat of AIBOSS Office (seat id \`${seat.seat_id}\`, department \`marketing\`). Your role: ${seat.role}
@@ -180,28 +250,41 @@ Rules that never change: the human owner decides — these gates always wait for
   fs.writeFileSync(claudePath, claudeContent, 'utf-8');
   claudeCount++;
 
-  // 2. Sinh .claude/settings.json bốn cấp
+  // 2. Generate .claude/settings.json per seat (merging seat.permissions)
   const claudeDir = path.join(targetDir, '.claude');
   if (!fs.existsSync(claudeDir)) {
     fs.mkdirSync(claudeDir, { recursive: true });
   }
   const seatHooksPath = '$CLAUDE_PROJECT_DIR/../../../../operations/hooks';
-  const seatSettings = buildSettingsJson(seatHooksPath);
+  const seatSettings = buildSettingsJson(seatHooksPath, seat.permissions);
   const seatSettingsPath = path.join(claudeDir, 'settings.json');
   fs.writeFileSync(seatSettingsPath, JSON.stringify(seatSettings, null, 2) + '\n', 'utf-8');
   seatSettingsCount++;
+
+  // 3. Generate .mcp.json per seat
+  const mcpList = Array.isArray(seat.mcp)
+    ? seat.mcp
+    : Array.isArray(seat.permissions?.mcp_servers)
+      ? seat.permissions.mcp_servers
+      : ['agent-broker'];
+  const mcpConfig = buildMcpJson(mcpList);
+  const mcpPath = path.join(targetDir, '.mcp.json');
+  fs.writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2) + '\n', 'utf-8');
+  seatMcpCount++;
 }
 
-// 3. Sinh .claude/settings.json ở gốc kho
+// 4. Generate .claude/settings.json at repo root
 const rootClaudeDir = path.join(REPO_ROOT, '.claude');
 if (!fs.existsSync(rootClaudeDir)) {
   fs.mkdirSync(rootClaudeDir, { recursive: true });
 }
 const rootHooksPath = '$CLAUDE_PROJECT_DIR/operations/hooks';
-const rootSettings = buildSettingsJson(rootHooksPath);
+const rootSettings = buildSettingsJson(rootHooksPath, null);
 const rootSettingsPath = path.join(rootClaudeDir, 'settings.json');
 fs.writeFileSync(rootSettingsPath, JSON.stringify(rootSettings, null, 2) + '\n', 'utf-8');
 
-console.log(`[gen-seat-files] Đã sinh ${claudeCount} tệp CLAUDE.md`);
-console.log(`[gen-seat-files] Đã sinh ${seatSettingsCount} tệp settings.json bốn cấp cho ghế`);
-console.log(`[gen-seat-files] Đã sinh 1 tệp settings.json ở gốc kho: ${rootSettingsPath}`);
+console.log(`[gen-seat-files] Generated ${claudeCount} CLAUDE.md files`);
+console.log(`[gen-seat-files] Generated ${seatSettingsCount} seat .claude/settings.json files`);
+console.log(`[gen-seat-files] Generated ${seatMcpCount} seat .mcp.json files`);
+console.log(`[gen-seat-files] Generated 1 root .claude/settings.json file: ${rootSettingsPath}`);
+

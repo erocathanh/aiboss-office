@@ -29,6 +29,8 @@ def check_lock(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> 
             rel = bash_parser.canonical_path(file_path, cwd, project_dir)
             if bash_parser.is_in_project_dau_vao(rel):
                 return f"Thư mục DAU-VAO ({file_path}) là dữ liệu thô gốc, cấm máy can thiệp ghi/sửa. Người chủ tự chép dữ liệu vào bằng Finder."
+            if bash_parser.is_in_operations_data(rel):
+                return f"Thư mục sổ vận hành operations/data ({file_path}) chỉ do hệ thống và hook ghi, cấm ghế tự ý ghi/sửa."
 
     # 2. Lệnh Bash
     elif tool_name == "Bash":
@@ -44,6 +46,8 @@ def check_lock(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> 
                 rel = bash_parser.canonical_path(target_path, sc.cwd, project_dir, symlinks)
                 if bash_parser.is_in_project_dau_vao(rel):
                     return f"Lệnh có đích ghi nhắm vào thư mục DAU-VAO ({target_path}) bị chặn. Dữ liệu thô chỉ được đọc, không được ghi đè hay sửa đổi bằng lệnh shell."
+                if bash_parser.is_in_operations_data(rel):
+                    return f"Lệnh có đích ghi nhắm vào thư mục sổ vận hành operations/data ({target_path}) bị chặn. Ghế không được tự ghi hoặc sửa sổ duyệt."
 
     return ""
 

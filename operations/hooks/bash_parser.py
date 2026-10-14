@@ -638,6 +638,17 @@ def is_in_project_dau_vao(rel_path: str) -> bool:
         return True
     return False
 
+def is_in_operations_data(rel_path: str) -> bool:
+    """Kiểm tra rel_path có nằm trong operations/data/... không (S17-10)."""
+    norm = rel_path.replace('\\', '/')
+    parts = [p for p in norm.split('/') if p and p != '.']
+    if len(parts) >= 2 and parts[0] == 'operations' and parts[1] == 'data':
+        return True
+    for i in range(len(parts) - 1):
+        if parts[i] == 'operations' and parts[i + 1] == 'data':
+            return True
+    return False
+
 def is_in_du_an_mau(rel_path: str) -> bool:
     """Kiểm tra rel_path có thuộc projects/_sample-ground-truth/... hoặc CAC-DU-AN/DU-AN-MAU-SU-THAT/... không (không match ...-2)."""
     norm = rel_path.replace('\\', '/')
@@ -739,4 +750,15 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 dest = w[3:].strip("'\"")
                 targets.append((dest, "dd output file"))
 
+    # 3. Inline script writes (python/python3 -c open(...,'w'/'a'), Path(...).write_text, node fs.writeFileSync/appendFileSync)
+    if base in ('python', 'python3', 'py', 'node') or 'open(' in cmd.raw_str or 'write_' in cmd.raw_str or 'FileSync' in cmd.raw_str:
+        raw = cmd.raw_str
+        for m in re.finditer(r"""\bopen\s*\(\s*['"]([^'"]+)['"]\s*,\s*(?:mode\s*=\s*)?['"](?:[wax]|[rwax]\+)[^'"]*['"]""", raw):
+            targets.append((m.group(1), "python open write"))
+        for m in re.finditer(r"""\bPath\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*write_(?:text|bytes)\b""", raw):
+            targets.append((m.group(1), "python Path.write"))
+        for m in re.finditer(r"""\b(?:writeFileSync|appendFileSync|writeFile|appendFile|copyFileSync|cpSync)\s*\(\s*['"]([^'"]+)['"]""", raw):
+            targets.append((m.group(1), "node fs write"))
+
     return targets
+

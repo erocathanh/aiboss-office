@@ -1,10 +1,33 @@
 {
   "_comment_pcn_v3": "PCN seat frame v3 hooks merge placeholder (reserved until 17/10)",
   "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "Bash",
+      "mcp__agent-broker__*"
+    ],
     "deny": [
+      "Bash(sudo:*)",
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(chmod 777:*)",
       "Edit(projects/**/references/**)",
       "Edit(projects/**/templates/**)",
       "Edit(projects/**/inputs/**)",
+      "Edit(//Users/**/projects/**/references/**)",
+      "Edit(//Users/**/projects/**/templates/**)",
+      "Edit(//Users/**/projects/**/inputs/**)",
+      "Edit(//home/**/projects/**/references/**)",
+      "Edit(//home/**/projects/**/templates/**)",
+      "Edit(//home/**/projects/**/inputs/**)",
+      "Edit(operations/data/**)",
+      "Edit(//Users/**/operations/data/**)",
+      "Edit(//home/**/operations/data/**)",
       "Bash(rm:*)",
       "Read(./.env)",
       "Read(./.env.*)",
@@ -27,7 +50,7 @@
         ]
       },
       {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "matcher": "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob",
         "hooks": [
           {
             "type": "command",
@@ -77,6 +100,33 @@
           {
             "type": "command",
             "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/lock_raw_inputs.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/block_ollama.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/block_ad_account_write.py\" || exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/../../../../operations/hooks/block_public_publish.py\" || exit 2"
           }
         ]
       }

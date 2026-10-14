@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -X POST \"https://googleads.googleapis.com/v17/customers/1234567890/campaigns:mutate\" -H \"Content-Type: application/json\" -d '{\"operations\":[]}'"
+  }
+}

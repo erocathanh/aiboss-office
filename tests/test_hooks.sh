@@ -104,6 +104,19 @@ sys.stdout.write(s)
         chmod 000 "$SANDBOX/projects/THU-SU-THAT/CHANNEL.md" 2>/dev/null || true
     fi
 
+    # Xử lý ca đặc biệt S17-16: kiểm tra thư mục approvals chỉ đọc vs ghi được
+    local is_s17_16_ro=0
+    local is_s17_16_rw=0
+    local approvals_lines_before=0
+    if [[ "$filename" == *"s17-16-readonly-approvals"* ]]; then
+        is_s17_16_ro=1
+        chmod 0400 "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null || true
+        chmod 0500 "$SANDBOX/operations/data/approvals" 2>/dev/null || true
+    elif [[ "$filename" == *"s17-16-writable-approvals"* ]]; then
+        is_s17_16_rw=1
+        approvals_lines_before=$(cat "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
     local stdout_file stderr_file
     stdout_file="$(mktemp)"
     stderr_file="$(mktemp)"
@@ -123,6 +136,14 @@ sys.stdout.write(s)
 
     if [ "$is_h114" -eq 1 ]; then
         chmod 0644 "$SANDBOX/projects/THU-SU-THAT/CHANNEL.md" 2>/dev/null || true
+    fi
+    if [ "$is_s17_16_ro" -eq 1 ]; then
+        chmod 0755 "$SANDBOX/operations/data/approvals" 2>/dev/null || true
+        chmod 0644 "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null || true
+    fi
+    local approvals_lines_after=0
+    if [ "$is_s17_16_rw" -eq 1 ]; then
+        approvals_lines_after=$(cat "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
     fi
 
     local out_content err_content
@@ -148,7 +169,15 @@ sys.stdout.write(s)
     if [ "$expected_decision" == "block" ]; then
         if [ "$exit_code" -eq 2 ]; then
             if [[ "$err_content" == "[opc-harness:$hook_name]"* ]]; then
-                record_pass "$hook_name / $filename (chặn đúng mã 2 và đúng tiền tố stderr)"
+                if [ "$is_s17_16_ro" -eq 1 ] && [[ "$err_content" != *"approval request NOT recorded:"* ]]; then
+                    record_fail "$hook_name / $filename" "Mã 2 nhưng thiếu 'approval request NOT recorded:' trên stderr khi approvals chỉ đọc: $err_content"
+                elif [ "$is_s17_16_rw" -eq 1 ] && [[ "$err_content" == *"approval request NOT recorded:"* ]]; then
+                    record_fail "$hook_name / $filename" "Thư mục approvals ghi được nhưng stderr lại báo NOT recorded: $err_content"
+                elif [ "$is_s17_16_rw" -eq 1 ] && [ "$approvals_lines_after" -le "$approvals_lines_before" ]; then
+                    record_fail "$hook_name / $filename" "Thư mục approvals ghi được nhưng số dòng không tăng ($approvals_lines_before -> $approvals_lines_after)"
+                else
+                    record_pass "$hook_name / $filename (chặn đúng mã 2 và đúng tiền tố stderr)"
+                fi
             else
                 record_fail "$hook_name / $filename" "Mã 2 nhưng stderr không bắt đầu bằng [opc-harness:$hook_name]: $err_content"
             fi
@@ -188,7 +217,7 @@ sys.stdout.write(s)
     fi
 }
 
-echo "=== BẮT ĐẦU KIỂM TRA 8 HOOK AN TOÀN AIBOSS OFFICE ==="
+echo "=== BẮT ĐẦU KIỂM TRA 11 HOOK AN TOÀN AIBOSS OFFICE ==="
 
 HOOKS=(
     "block_mass_delete"
@@ -199,6 +228,9 @@ HOOKS=(
     "guard_bulk_send"
     "lock_raw_inputs"
     "remind_cross_check"
+    "block_ollama"
+    "block_ad_account_write"
+    "block_public_publish"
 )
 
 for hook in "${HOOKS[@]}"; do

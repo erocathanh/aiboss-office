@@ -88,6 +88,11 @@ PHONGBAN_PASS=mat_khau_quan_tri_cua_ban
 
 # Đường dẫn thư mục dữ liệu (tuỳ chọn - mặc định lưu tại operations/data)
 # AIBOSS_DATA_DIR=$HOME/Projects/aiboss-office/operations/data
+
+# Chế độ ngữ cảnh ghế (mặc định tắt để cô lập ngữ cảnh ghế với --setting-sources project
+# và --strict-mcp-config --mcp-config <tệp .mcp.json theo ghế>; đặt AIBOSS_SEAT_TERMINAL_MODE=1
+# khi cần gỡ lỗi với toàn bộ CLAUDE.md và MCP cấp máy như terminal)
+# AIBOSS_SEAT_TERMINAL_MODE=1
 EOF
 ```
 
@@ -225,3 +230,4 @@ Tất cả các bộ kiểm thử đều phải vượt qua 100%:
 - `tests/danh-thuc-route.test.mjs`: Luồng đánh thức và cách ly môi trường.
 - `tests/session-history.test.mjs`: Phát hiện phiên bền vững, dự phòng tệp lớn và đa kho lưu trữ.
 - `tests/budget.test.mjs`: 30 trường hợp kiểm thử nghiêm ngặt về trần ngân sách và khôi phục khi gặp sự cố.
+- `tests/s17-seat-isolation.test.mjs` & `pnpm test:hooks`: Kiểm thử cô lập ngữ cảnh ghế (`--setting-sources project`, `.mcp.json` theo ghế), sàn an toàn cấp ghế và Hook 2.1 chặn đăng công khai.

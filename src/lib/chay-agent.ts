@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { CAU_HINH } from './cau-hinh';
 import { ghiSoHuu } from './so-so-huu';
 
@@ -128,28 +129,70 @@ function ngheRaNgoai(): boolean {
  *       ai đọc mã cũng tin là đã có người gác, nên KHÔNG ai đi gác nữa.
  */
 function chayNhuTerminal(): boolean {
-  if (process.env.GIONG_TERMINAL === '1') return true;          // Owner ép bật
-  if (process.env.GIONG_TERMINAL === '0') return false;         // Owner ép tắt
-  return !ngheRaNgoai();
+  if (process.env.AIBOSS_SEAT_TERMINAL_MODE === '1' || process.env.GIONG_TERMINAL === '1') return true;
+  if (process.env.AIBOSS_SEAT_TERMINAL_MODE === '0' || process.env.GIONG_TERMINAL === '0') return false;
+  return false;
 }
 
-const GIONG_TERMINAL = chayNhuTerminal();
+export const GIONG_TERMINAL = chayNhuTerminal();
+
+function isExplicitlyExternalBind(): boolean {
+  if (process.env.GIONG_TERMINAL === '0') return true;
+  const { host } = hostDangNghe();
+  if (host === null) return false;
+  return !CHI_MAY_NAY.has(host.trim().toLowerCase());
+}
+
+/**
+ * Resolves the MCP config argument for a seat turn.
+ * If the seat is listed in data/seats.json and its generated .mcp.json exists, returns that file path.
+ * If the seat is unlisted or missing, returns an empty MCP config '{"mcpServers":{}}'.
+ */
+export function resolveSeatMcpConfig(maNhanSu?: string | null, thuMuc?: string): string {
+  const emptyMcp = '{"mcpServers":{}}';
+  try {
+    const seatsFile = path.join(process.cwd(), 'data', 'seats.json');
+    if (!fs.existsSync(seatsFile)) return emptyMcp;
+    const raw = fs.readFileSync(seatsFile, 'utf8');
+    const seats = JSON.parse(raw) as Array<{ seat_id?: string; dir?: string; mcp?: string[] }>;
+    if (!Array.isArray(seats)) return emptyMcp;
+
+    let matchedSeat: { seat_id?: string; dir?: string; mcp?: string[] } | undefined;
+    if (maNhanSu) {
+      matchedSeat = seats.find((s) => s && s.seat_id === maNhanSu);
+    } else if (thuMuc) {
+      const resolvedThuMuc = path.resolve(thuMuc);
+      matchedSeat = seats.find((s) => s && s.dir && path.resolve(process.cwd(), s.dir) === resolvedThuMuc);
+    }
+
+    if (!matchedSeat || !matchedSeat.dir) return emptyMcp;
+    if (Array.isArray(matchedSeat.mcp) && matchedSeat.mcp.length === 0) return emptyMcp;
+
+    const mcpPath = path.resolve(process.cwd(), matchedSeat.dir, '.mcp.json');
+    if (fs.existsSync(mcpPath)) {
+      return mcpPath;
+    }
+    return emptyMcp;
+  } catch {
+    return emptyMcp;
+  }
+}
 
 /** Giống terminal ⇒ ⛔ KHÔNG cấm công cụ nào. Terminal có gì, app có nấy. */
 // Exported so a test can read the DECISION itself instead of scraping the log line below.
 // The reviewer called the old harness a blind ruler for exactly that reason: change the logic,
 // keep the string, and a string-reading test stays green.
-export const CONG_CU_CAM: string[] = GIONG_TERMINAL ? [] : CAM_KHI_HAN_CHE;
+export const CONG_CU_CAM: string[] = (!GIONG_TERMINAL && isExplicitlyExternalBind()) ? CAM_KHI_HAN_CHE : [];
 
 // The brake has to say out loud what it decided, once per server process. A silent
 // brake is how the old one stayed broken: nothing it decided was ever visible, so
 // nobody could notice it had decided nothing at all.
 {
   const { host, nguon } = hostDangNghe();
-  const ep = process.env.GIONG_TERMINAL;
+  const ep = process.env.AIBOSS_SEAT_TERMINAL_MODE ?? process.env.GIONG_TERMINAL;
   const lyDo = ep === '1' || ep === '0'
-    ? `GIONG_TERMINAL=${ep} (Owner ép)`
-    : `tự đo — host «${host ?? 'không ai khai'}» từ ${nguon}`;
+    ? `AIBOSS_SEAT_TERMINAL_MODE/GIONG_TERMINAL=${ep} (Owner override)`
+    : `isolated seat mode by default — host «${host ?? 'unset'}» from ${nguon}`;
   console.log(
     `[chay-agent] giọng terminal: ${GIONG_TERMINAL ? 'BẬT' : 'TẮT'}`
     + ` · lý do: ${lyDo} · số công cụ bị cấm: ${CONG_CU_CAM.length}`,
@@ -262,24 +305,40 @@ function dichLoi(tho: string): string {
   return '⚠️ Lượt chạy thất bại:\n\n`' + t.slice(0, 300) + '`';
 }
 
+export const SEAT_ISOLATION_SETTINGS_JSON = JSON.stringify({
+  autoMemoryEnabled: false,
+  claudeMdExcludes: [
+    '/*/*/CLAUDE.md',
+    '/*/*/*/CLAUDE.md',
+    '/**/.claude/CLAUDE.md',
+    '/**/.claude/rules/**',
+  ],
+});
+
 export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
+  const mcpConfigArg = resolveSeatMcpConfig(ts.maNhanSu, ts.thuMuc);
+  const hanCheMangNgoai = !GIONG_TERMINAL && isExplicitlyExternalBind();
   const doiSo: string[] = [
     '-p',
     '--output-format', 'stream-json',
     '--include-partial-messages',
     '--verbose',
-    // 🔑 GIỐNG TERMINAL (Owner 14/08): nạp ĐỦ như khi Owner gõ `claude` ở nhà —
-    //    settings + hook + CLAUDE.md các tầng + toàn bộ máy chủ MCP đã cắm.
-    //    ⛔ Bản trước cắt sạch mấy thứ này cho rẻ; rẻ nhưng KHÔNG còn là terminal.
-    ...(GIONG_TERMINAL ? [] : ['--setting-sources', 'project',
-                              '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']),
+    // 🔑 S17: Cô lập ngữ cảnh ghế mặc định (`!GIONG_TERMINAL`):
+    //    - `--setting-sources project`: không nạp ~/.claude/settings.json cấp máy
+    //    - `--settings`: chặn Claude Code đi ngược cây thư mục nạp ~/CLAUDE.md, ~/Projects/CLAUDE.md
+    //    - `--strict-mcp-config --mcp-config`: chỉ nạp MCP đã khai của ghế (agent-broker)
+    //    - `--disable-slash-commands`: không nạp bộ lệnh gạch chéo cấp máy
+    ...(GIONG_TERMINAL
+      ? []
+      : [
+          '--setting-sources', 'project',
+          '--settings', SEAT_ISOLATION_SETTINGS_JSON,
+          '--strict-mcp-config', '--mcp-config', mcpConfigArg,
+          '--disable-slash-commands',
+        ]),
     // Mở tay chân thì phải mở luôn cổng quyền, nếu không agent CÓ công cụ mà vẫn bị chặn
     // giữa chừng — mà trang web ⛔ không có nút "Duyệt" nào để bấm.
-    '--permission-mode', GIONG_TERMINAL ? 'bypassPermissions' : 'dontAsk',
-    // 🔴 Owner 14/08: gõ `/mo-kenh-phoi-hop` vào ô chat mà ghế IM RE — chính cờ này chặn.
-    //    Terminal có lệnh gạch chéo thì app cũng phải có (luật «app = terminal»).
-    //    Đây là rào tôi SÓT khi gỡ 4 rào kia — gỡ nốt.
-    ...(GIONG_TERMINAL ? [] : ['--disable-slash-commands']),
+    '--permission-mode', hanCheMangNgoai ? 'dontAsk' : 'bypassPermissions',
     '--model', CAU_HINH.moHinh,
     // 🧠 Mức nỗ lực suy nghĩ — Owner chốt 14/08: CAO NHẤT ('max').
     //    Cờ có thật ở bản 2.1.232 (`claude --help`: low · medium · high · xhigh · max).
