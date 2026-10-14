@@ -80,27 +80,40 @@ Tài liệu kỹ thuật giải pháp A-3 (Budget Hold & Daily Caps) cho hệ th
   + Tệp rỗng hoặc chứa JSON hỏng có tuổi đời từ 10 giây trở lên sẽ được xác định là khoá mồ côi do crash khởi động.
   + *Cơ chế tái kiểm tra nguyên vẹn xác khoá hỏng bên trong Mutex:* Trước khi thực hiện `renameSync` ứng viên đè lên tệp khoá hỏng, tiến trình đọc lại đĩa bên trong mutex và so sánh `currentContent === initialContent && currentStat.mtimeMs === initialMtimeMs`. Nếu byte và mtime giống hệt (vẫn là xác khoá hỏng cũ chưa ai động vào), tiến trình an toàn thu hồi và thay thế nguyên tử. Nếu nội dung hoặc mtime đã đổi (có contender khác can thiệp), tiến trình lập tức từ chối thu hồi (`fail-closed`) để bảo vệ dữ liệu.
 - **Khe ③ — Bảo vệ an toàn cho máy chủ v07 dạng thư mục cũ:** Khi phát hiện `.instance.lock` là thư mục từ các phiên bản v06/v07 cũ, tiến trình không `rmSync` mù quáng. Hệ thống đọc `info.json` bên trong; nếu chủ cũ còn sống (`liveness === 'alive'` hoặc `unverified`), tiến trình mới từ chối khởi động và giữ nguyên thư mục cùng tệp `info.json` của phiên bản cũ. Chỉ khi chủ cũ đã chết thật sự (`liveness === 'dead'`), thư mục cũ mới được dọn dẹp để nâng cấp lên tệp đơn lẻ.
-- **Khe ④ — Cơ chế loại trừ thống nhất qua Mutex ngắn có chủ, thu hồi nguyên tử sang bia mộ, phục hồi crash & không giả lập danh tính:**
+- **Khe ④ — Cơ chế loại trừ thống nhất qua Mutex ngắn có chủ, giao thức Claim-File nguyên tử, chủ kiểm inode sau khi ghi metadata, không rename mutex sống, không rollback & không giả lập danh tính:**
   + **Mutex có chủ (`.instance.lock.mutex`):** Tất cả 4 thao tác chuyển đổi trạng thái khoá (`acquire`, `reclaim`, `renew`, `release`) đều bắt buộc chạy bên trong một khoá tệp loại trừ nguyên tử `O_EXCL` (`withInstanceMutex`). Ngay khi `openSync` thành công, metadata chủ `{ pid, processStartedAt, token, createdAt }` được ghi trực tiếp vào cùng fd bằng `writeSync`.
-  + **Khe ④A — Thu hồi bằng POSIX Atomic Rename sang Bia Mộ (Tombstone):**
-    * Thay vì dùng `unlinkSync` trực tiếp theo đường dẫn (dẫn tới nguy cơ đua TOCTOU khi hai reclaimer cùng đọc thấy chủ chết và một bên bị tạm dừng), reclaimer thực hiện `fs.renameSync(mutexPath, tombstonePath)` sang bia mộ cá nhân `.instance.lock.mutex.tombstone-<myToken>`.
-    * POSIX `rename` là nguyên tử ở tầng filesystem: chỉ duy nhất MỘT reclaimer thành công; reclaimer thua nhận `ENOENT` và rút lui.
-    * Reclaimer thắng đọc tệp bia mộ của mình để đối soát: nếu token trong bia mộ khớp đúng token chủ chết đã đọc, tiến trình xoá bia mộ và tạo mutex mới qua `open(O_EXCL)`. Nếu token bị thay thế bởi chủ mới trong tích tắc, tiến trình lập tức hoàn trả tệp (`fs.renameSync(tombstonePath, mutexPath)`) và từ chối thu hồi.
-    * Khối `finally` cũng áp dụng atomic rename sang bia mộ cá nhân trước khi unlink, tuyệt đối không bao giờ unlink trực tiếp đường dẫn mutex.
-  + **Khe ④B — Phục hồi Mutex hỏng/rỗng do crash giữa `open` và `write` (`>= 10s`):**
-    * Khi crash xảy ra giữa `open(O_EXCL)` và `writeSync`, tệp mutex bị bỏ lại rỗng (0 bytes) hoặc không parse được JSON.
-    * Ngưỡng `UNPARSEABLE_MUTEX_TIMEOUT_MS = 10000` (10 giây):
-      - Nếu tệp rỗng/hỏng có tuổi `< 10s`: coi là tiến trình chủ đang ghi (in-flight write), tiếp tục chờ và thử lại.
-      - Nếu tệp rỗng/hỏng có tuổi `>= 10s`: vì thao tác ghi metadata diễn ra ngay trong mili-giây sau khi mở tệp, sự tồn tại kéo dài $\ge 10\text{s}$ là bằng chứng đủ rằng tiến trình tạo đã chết. Hệ thống tự động thu hồi bằng atomic rename sang bia mộ theo đúng cơ chế ④A, giải phóng bế tắc khởi động máy chủ.
+  + **Bước 1 — Tạo mutex (chủ) & Kiểm tra sở hữu hậu ghi (Owner Post-Write Inode Check):**
+    * Chủ gọi `open(mutexPath, O_CREAT | O_EXCL | O_RDWR)` -> `writeSync(fd, metadata {pid, processStartedAt, token, createdAt})` -> `fsyncSync(fd)`.
+    * **Kiểm tra sở hữu hậu ghi bắt buộc:** Chủ thực hiện `fstat(fd).ino === stat(mutexPath).ino` VÀ đọc lại nội dung tệp tại `mutexPath` phải khớp đúng `token` và `pid` của mình.
+    * Nếu xảy ra lệch (do chủ bị tạm dừng giữa `open` và `write` quá 10 giây và tệp rỗng đã bị reclaimer thu hồi/thay thế), chủ lập tức đóng fd, **TUYỆT ĐỐI KHÔNG** vào `fn()`, và quay lại vòng lặp thử lại. Đây là chốt chặn đóng triệt để Khe ④B từ phía chủ: chủ tỉnh lại sau tạm dừng không bao giờ bước vào critical section bằng một fd mồ côi đã bị unlink.
+  + **Bước 2 — Thu hồi (reclaimer) — Không chạm mutex khi chưa thắng tệp Claim:**
+    * Reclaimer đọc `mutexPath`:
+      - *(a) Parse được JSON:* Gọi `checkProcessLiveness(pid, processStartedAt)`. Chỉ khi liveness là `dead` mới được phép đi tiếp; nếu `alive` hoặc `unverified` thì tiếp tục chờ. Danh tính xác = `token`.
+      - *(b) Tệp rỗng hoặc JSON hỏng:* Chỉ đi tiếp khi `mtime` đã quá ngưỡng `UNPARSEABLE_MUTEX_TIMEOUT_MS = 10000` (10 giây). Danh tính xác = `ino` (inode của tệp hỏng trên đĩa).
+    * Reclaimer tạo **tệp claim nguyên tử** `mutexPath + '.reclaim-' + <token|ino>` qua `open(O_CREAT | O_EXCL | O_RDWR)` ghi `{ pid, processStartedAt, createdAt }` của mình.
+    * **Chỉ duy nhất MỘT reclaimer thắng claim:** Reclaimer thua nhận `EEXIST` -> đọc tệp claim: nếu chủ claim đã `dead`, reclaimer an toàn dọn dẹp claim mồ côi bằng `unlinkSync` rồi thử lại; nếu chủ claim `alive` hoặc `unverified` thì chờ. Reclaimer không bao giờ rename hay unlink mutex khi chưa thắng claim.
+  + **Bước 3 — Xác minh lại sau khi thắng Claim rồi mới Unlink:**
+    * Sau khi thắng tệp claim, reclaimer đọc lại `mutexPath`:
+      - Nếu `targetMode === 'token'`: token trên đĩa VẪN khớp đúng `targetIdentity` đã claim.
+      - Nếu `targetMode === 'ino'`: inode trên đĩa VẪN khớp đúng `targetIdentity` và tệp vẫn rỗng/hỏng (nếu chủ tỉnh lại ghi xong metadata thì reclaimer phát hiện có pid hợp lệ và lập tức huỷ bỏ).
+    * Khi và chỉ khi xác minh thành công (`canUnlink === true`), reclaimer mới gọi `unlinkSync(mutexPath)`.
+    * Nếu không khớp, reclaimer huỷ bỏ, xoá tệp claim của mình và quay lại chờ.
+    * Sau khi unlink mutex cũ, reclaimer tạo mutex mới của mình theo Bước 1, rồi xoá tệp claim của mình.
+  + **Bước 4 — Giải phóng (finally) không Rename, không Rollback:**
+    * Khi rời khỏi `withInstanceMutex`, khối `finally` đọc lại `mutexPath`: nếu token trên đĩa khớp đúng `myToken` và `process.pid` của mình thì mới gọi `unlinkSync(mutexPath)`; nếu không khớp (đã bị người khác thay thế), tiến trình không làm gì. Fd mở ở Bước 1 luôn được đóng an toàn tại đây.
+    * Tuyệt đối không còn bia mộ (tombstone), 0 lệnh `renameSync(mutexPath`, và không có bất kỳ cơ chế rollback nào có thể ghi đè contender.
+  + **Bước 5 — Fail-Closed ở mọi bước:**
+    * Mọi lỗi đọc đĩa, parse JSON, hoặc kiểm tra quyền ở bất kỳ bước nào đều fail-closed (coi là chưa thắng, không unlink mutex), không bao giờ mặc định thắng.
   + **Khe ④C — Không giả lập danh tính thời gian khởi động (No Start Time Fabrication):**
     * Khi OS query `ps -p <pid> -o lstart=` thất bại, hệ thống ghi nhận trung thực `processStartedAt: null`, tuyệt đối không bao giờ dùng `new Date().toISOString()` làm fallback danh tính.
     * Hàm `checkProcessLiveness(pid, null)` khi nhận start time `null` luôn trả về `'unverified'`, không bao giờ trả về `'dead'`. Do đó, các contender cạnh tranh mutex không bao giờ nhìn thấy timestamp lệch để suy đoán sai thành `dead`, loại bỏ hoàn toàn nguy cơ chiếm đoạt mutex của chủ còn sống.
   + **Thời gian chờ Mutex 5000ms (5 giây):**
-    * Các thao tác trong mutex rất ngắn (vài ms đến vài chục ms để đọc/ghi tệp và gọi `ps` kiểm tra liveness). Thời hạn 5000ms là đủ rộng rãi để hai tiến trình cùng lúc khởi động hoặc cạnh tranh nhau có thể hoàn thành việc kiểm tra mà không bị timeout nhầm, ngay cả khi CPU đang tải cao; đồng thời đủ ngắn để khi gặp sự cố crash ngoài ý muốn, lần thử kế tiếp không bị treo lâu.
-  + **Tách bạch 4 công tắc thử nghiệm cô lập (đều vô hiệu hoá hoàn toàn khi `NODE_ENV === 'production'`):**
-    * `disableInstanceMutex` (`AIBOSS_TEST_DISABLE_INSTANCE_MUTEX=1`): Chỉ tắt việc acquire mutex trong `withInstanceMutex`.
-    * `disableMutexRecheck` (`AIBOSS_TEST_DISABLE_MUTEX_RECHECK=1`): Giữ mutex nhưng tắt nhánh re-read đối soát đĩa trước khi thay thế.
-    * `useUnlinkForMutex` (`AIBOSS_TEST_USE_UNLINK_FOR_MUTEX=1`): Dùng cho đối chứng dương Khe ④A: chuyển từ atomic rename sang `unlinkSync` trực tiếp để chứng minh tranh chấp TOCTOU giữa 2 reclaimer.
+    * Các thao tác trong mutex rất ngắn (vài ms đến vài chục ms). Thời hạn 5000ms là đủ rộng rãi để bảo đảm không timeout nhầm khi hệ thống chịu tải cao, đồng thời giải phóng nhanh chóng khi có crash.
+  + **Tách bạch 6 công tắc thử nghiệm cô lập (đều vô hiệu hoá hoàn toàn khi `NODE_ENV === 'production'`):**
+    * `disableInstanceMutex` (`AIBOSS_TEST_DISABLE_INSTANCE_MUTEX=1`): Tắt toàn bộ mutex trong `withInstanceMutex`.
+    * `disableMutexRecheck` (`AIBOSS_TEST_DISABLE_MUTEX_RECHECK=1`): Tắt kiểm tra đối soát token bên trong `.instance.lock`.
+    * `disableOwnerInodeCheck` (`AIBOSS_TEST_DISABLE_OWNER_INODE_CHECK=1`): Dùng cho đối chứng dương Khe ④B-1: tắt kiểm tra inode hậu ghi của chủ, chứng minh chủ dùng fd mồ côi gây va chạm đồng thời.
+    * `disableReclaimerRecheck` (`AIBOSS_TEST_DISABLE_RECLAIMER_RECHECK=1`): Dùng cho đối chứng dương Khe ④A-1 và ④B-2: tắt bước 3 xác minh lại trước khi unlink của reclaimer, chứng minh việc xoá nhầm mutex sống.
     * `disableCorruptMutexRecovery` (`AIBOSS_TEST_DISABLE_CORRUPT_MUTEX_RECOVERY=1`): Dùng cho đối chứng dương Khe ④B: tắt nhánh thu hồi mutex rỗng $\ge 10\text{s}$ để chứng minh timeout.
     * `fallbackStartTimeForTest` (`AIBOSS_TEST_FALLBACK_START_TIME=1`): Dùng cho đối chứng dương Khe ④C: khôi phục fallback `|| now` để chứng minh chủ sống bị chiếm đoạt mutex.
   + **Ràng buộc thời hạn Lease:** Thao tác reclaim chỉ được phép diễn ra khi đồng thời thoả mãn: tiến trình chủ cũ đã chết thật sự (`liveness === 'dead'`) VÀ thời hạn lease đã hết (`now >= leaseExpiresAt`).

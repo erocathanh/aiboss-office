@@ -99,7 +99,8 @@ import {
   isFenceGuardDisabledForTest,
   isInstanceMutexDisabledForTest,
   isMutexRecheckDisabledForTest,
-  isUseUnlinkForMutexEnabledForTest,
+  isOwnerInodeCheckDisabledForTest,
+  isReclaimerRecheckDisabledForTest,
   isCorruptMutexRecoveryDisabledForTest,
   isFallbackStartTimeEnabledForTest,
   withInstanceMutex,
@@ -2397,13 +2398,16 @@ try {
     resetFencingForTest();
 
     // -------------------------------------------------------------
-    // Khe ④A: Atomic rename to tombstone prevents TOCTOU unlink race between reclaimers
+    // Khe ④A-1: Atomic claim-file prevents TOCTOU races between reclaimers
+    // R1 and R2 race for dead mutex; R2 pauses at beforeCreateClaim.
+    // R1 wins claim, unlinks dead mutex, creates new mutex, enters fn().
+    // Contender C tries open(O_CREAT|O_EXCL) while R1 is inside -> gets EEXIST!
+    // R2 resumes: re-checks or encounters live owner, does NOT unlink R1's mutex.
+    // Counterproof: disable Step 3 reclaimer re-check (AIBOSS_TEST_DISABLE_RECLAIMER_RECHECK=1)
+    // with R2 paused at beforeMutexUnlinkAfterClaim -> R2 unlinks R1's live mutex -> collision detected!
     // -------------------------------------------------------------
-    // Subtest 4.9: Two real child processes racing to reclaim a dead mutex:
-    // With atomic rename to tombstone, exactly one winner enters critical section.
-    // Positive counterproof: With AIBOSS_TEST_USE_UNLINK_FOR_MUTEX=1, both enter concurrently!
-    async function runReclaimerRaceTest(useUnlink) {
-      const raceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-race-khe4a-'));
+    async function runCase4A1(disableRecheck) {
+      const raceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-race-khe4a1-'));
       const mutexFilePath = path.join(raceDir, '.instance.lock.mutex');
       const barrierDir = path.join(raceDir, 'barrier');
       fs.mkdirSync(barrierDir, { recursive: true });
@@ -2411,9 +2415,10 @@ try {
       const r2Paused = path.join(barrierDir, 'r2.paused');
       const r2Resume = path.join(barrierDir, 'r2.resume');
       const r1Inside = path.join(barrierDir, 'r1.inside');
+      const r1Finish = path.join(barrierDir, 'r1.finish');
       const concurrentFile = path.join(barrierDir, 'concurrent.log');
 
-      // 1. Write dead mutex
+      // 1. Initial dead mutex
       fs.writeFileSync(
         mutexFilePath,
         JSON.stringify({
@@ -2425,97 +2430,494 @@ try {
         'utf-8'
       );
 
-      // 2. Spawn R2: pauses in beforeMutexRename
-      const r2 = spawn(process.execPath, [
+      let r1;
+      let r2;
+      let contenderGotEexist = false;
+
+      if (!disableRecheck) {
+        // Normal mode: R2 pauses at beforeCreateClaim
+        r2 = spawn(process.execPath, [
+          '--import', './tests/register.mjs',
+          '-e',
+          `import { withInstanceMutex, __testHooks } from "./src/lib/budget-ledger.ts";
+           import fs from "node:fs";
+           __testHooks.beforeCreateClaim = () => {
+             if (!fs.existsSync(process.env.R2_PAUSED)) {
+               fs.writeFileSync(process.env.R2_PAUSED, "1");
+               while (!fs.existsSync(process.env.R2_RESUME)) {
+                 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+               }
+             }
+           };
+           try {
+             withInstanceMutex(process.env.MUTEX_DIR, () => {
+               if (fs.existsSync(process.env.R1_INSIDE)) {
+                 fs.writeFileSync(process.env.CONCURRENT_FILE, "COLLISION_R2_WHILE_R1_INSIDE");
+               }
+             }, 800);
+             process.exit(0);
+           } catch {
+             process.exit(2);
+           }`
+        ], {
+          env: {
+            ...process.env,
+            NODE_ENV: 'test',
+            MUTEX_DIR: raceDir,
+            R2_PAUSED: r2Paused,
+            R2_RESUME: r2Resume,
+            R1_INSIDE: r1Inside,
+            CONCURRENT_FILE: concurrentFile,
+          },
+        });
+
+        // Wait until R2 is paused before claim creation
+        while (!fs.existsSync(r2Paused)) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
+
+        // Spawn R1: wins claim, creates live mutex, enters fn()
+        r1 = spawn(process.execPath, [
+          '--import', './tests/register.mjs',
+          '-e',
+          `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
+           import fs from "node:fs";
+           withInstanceMutex(process.env.MUTEX_DIR, () => {
+             fs.writeFileSync(process.env.R1_INSIDE, "1");
+             while (!fs.existsSync(process.env.R1_FINISH)) {
+               Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+             }
+             try { fs.unlinkSync(process.env.R1_INSIDE); } catch {}
+           }, 1000);
+           process.exit(0);`
+        ], {
+          env: {
+            ...process.env,
+            NODE_ENV: 'test',
+            MUTEX_DIR: raceDir,
+            R1_INSIDE: r1Inside,
+            R1_FINISH: r1Finish,
+          },
+        });
+
+        // Wait until R1 is inside fn()
+        while (!fs.existsSync(r1Inside)) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
+
+        // Contender C tries open(O_CREAT|O_EXCL) on mutexFilePath while R1 is inside -> MUST throw EEXIST
+        try {
+          fs.openSync(mutexFilePath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR);
+        } catch (cErr) {
+          if (cErr.code === 'EEXIST') {
+            contenderGotEexist = true;
+          }
+        }
+
+        // Resume R2 while R1 is still inside!
+        fs.writeFileSync(r2Resume, '1');
+
+        // Let R2 run and inspect; wait 150ms
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+
+        // Tell R1 to finish
+        fs.writeFileSync(r1Finish, '1');
+      } else {
+        // Counterproof mode: R2 pauses at beforeMutexUnlinkAfterClaim after winning claim.
+        // While R2 is paused, R1 replaces mutex with live mutex.
+        // With recheck disabled, R2 blindly unlinks R1's live mutex, creates its own, and enters fn() -> collision!
+        r2 = spawn(process.execPath, [
+          '--import', './tests/register.mjs',
+          '-e',
+          `import { withInstanceMutex, __testHooks } from "./src/lib/budget-ledger.ts";
+           import fs from "node:fs";
+           __testHooks.beforeMutexUnlinkAfterClaim = () => {
+             if (!fs.existsSync(process.env.R2_PAUSED)) {
+               fs.writeFileSync(process.env.R2_PAUSED, "1");
+               while (!fs.existsSync(process.env.R2_RESUME)) {
+                 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+               }
+             }
+           };
+           try {
+             withInstanceMutex(process.env.MUTEX_DIR, () => {
+               if (fs.existsSync(process.env.R1_INSIDE)) {
+                 fs.writeFileSync(process.env.CONCURRENT_FILE, "COLLISION_COUNTERPROOF");
+               }
+             }, 1000);
+             process.exit(0);
+           } catch {
+             process.exit(2);
+           }`
+        ], {
+          env: {
+            ...process.env,
+            NODE_ENV: 'test',
+            MUTEX_DIR: raceDir,
+            R2_PAUSED: r2Paused,
+            R2_RESUME: r2Resume,
+            R1_INSIDE: r1Inside,
+            CONCURRENT_FILE: concurrentFile,
+            AIBOSS_TEST_DISABLE_RECLAIMER_RECHECK: '1',
+          },
+        });
+
+        // Wait until R2 is paused at beforeMutexUnlinkAfterClaim
+        while (!fs.existsSync(r2Paused)) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        }
+
+        // Live owner R1 writes live metadata and marks R1 inside
+        fs.writeFileSync(r1Inside, '1');
+        fs.writeFileSync(
+          mutexFilePath,
+          JSON.stringify({
+            pid: process.pid,
+            processStartedAt: new Date().toISOString(),
+            token: 'live-r1-token',
+            createdAt: Date.now(),
+          }),
+          'utf-8'
+        );
+
+        // Resume R2 with recheck disabled: R2 unlinks R1 live mutex, enters fn(), collides!
+        fs.writeFileSync(r2Resume, '1');
+      }
+
+      const [codeR1, codeR2] = await Promise.all([
+        r1 ? new Promise((resolve) => r1.on('close', resolve)) : Promise.resolve(0),
+        new Promise((resolve) => r2.on('close', resolve)),
+      ]);
+
+      const collided = fs.existsSync(concurrentFile);
+      fs.rmSync(raceDir, { recursive: true, force: true });
+      return { codeR1, codeR2, collided, contenderGotEexist };
+    }
+
+    // Normal mode: atomic claim-file prevents TOCTOU races between reclaimers
+    const race4A1Normal = await runCase4A1(false);
+    assert.equal(race4A1Normal.codeR1, 0, 'R1 must exit 0');
+    assert.equal(race4A1Normal.collided, false, 'Atomic claim-file protocol must prevent concurrent entry (Khe ④A-1)');
+    assert.equal(race4A1Normal.contenderGotEexist, true, 'Contender C must receive EEXIST while R1 holds mutex (Khe ④A-1)');
+
+    // Counterproof: disabling reclaimer Step 3 recheck allows unlinking live mutex and concurrent entry
+    const race4A1Counterproof = await runCase4A1(true);
+    assert.equal(race4A1Counterproof.collided, true, 'Disabling Step 3 recheck allows concurrent entry (Khe ④A-1 counterproof)');
+
+    // -------------------------------------------------------------
+    // Khe ④A-2: Orphaned claim file recovery after claimer crashes (SIGKILL)
+    // R2 crashes (SIGKILL) after winning claim before unlink -> claim file orphaned.
+    // Mutex file was never renamed, never unlinked, no missing mutex path window!
+    // R3 encounters EEXIST on claim, inspects claim owner (dead) -> unlinks orphaned claim, succeeds.
+    // Positive counterproof: if claim owner is ALIVE, R3 refuses to unlink claim -> times out.
+    // -------------------------------------------------------------
+    const a2Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-khe4a2-'));
+    const a2MutexFile = path.join(a2Dir, '.instance.lock.mutex');
+    const a2ClaimFile = `${a2MutexFile}.reclaim-dead-orig-token`;
+    const a2Barrier = path.join(a2Dir, 'a2.claimed');
+
+    fs.writeFileSync(
+      a2MutexFile,
+      JSON.stringify({
+        pid: 999999,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        token: 'dead-orig-token',
+        createdAt: 1000,
+      }),
+      'utf-8'
+    );
+
+    // Spawn R2: wins claim, signals via a2Barrier, then crashes immediately via process.kill(SIGKILL)
+    const r2A2 = spawn(process.execPath, [
+      '--import', './tests/register.mjs',
+      '-e',
+      `import { withInstanceMutex, __testHooks } from "./src/lib/budget-ledger.ts";
+       import fs from "node:fs";
+       __testHooks.beforeMutexUnlinkAfterClaim = () => {
+         fs.writeFileSync(process.env.A2_BARRIER, "1");
+         process.kill(process.pid, "SIGKILL");
+       };
+       try {
+         withInstanceMutex(process.env.MUTEX_DIR, () => {});
+       } catch {}`
+    ], {
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        MUTEX_DIR: a2Dir,
+        A2_BARRIER: a2Barrier,
+      },
+    });
+
+    await new Promise((resolve) => r2A2.on('close', resolve));
+
+    // Verify post-crash state:
+    // 1. Mutex file is still intact on disk (no empty path window!)
+    assert.equal(fs.existsSync(a2MutexFile), true, 'Mutex file must remain intact when reclaimer crashes before unlink');
+    const intactMutex = JSON.parse(fs.readFileSync(a2MutexFile, 'utf-8'));
+    assert.equal(intactMutex.token, 'dead-orig-token', 'Mutex content must be unchanged');
+    // 2. Claim file exists and is orphaned by dead PID
+    assert.equal(fs.existsSync(a2ClaimFile), true, 'Claim file exists orphaned by crashed R2');
+
+    // Positive counterproof: If claim owner was ALIVE, contender R3 must NOT steal or unlink claim!
+    // Write claim file with living PID (current process):
+    fs.writeFileSync(
+      a2ClaimFile,
+      JSON.stringify({
+        pid: process.pid,
+        processStartedAt: getProcessStartTime(process.pid) ?? new Date().toISOString(),
+        createdAt: Date.now(),
+      }),
+      'utf-8'
+    );
+    assert.throws(
+      () => withInstanceMutex(a2Dir, () => 'should_fail', 200),
+      /Timeout waiting for instance lock mutex/,
+      'When claim file owner is alive, contender must NOT unlink claim and must time out (Khe ④A-2 counterproof)'
+    );
+
+    // Now restore orphaned claim file with dead PID:
+    fs.writeFileSync(
+      a2ClaimFile,
+      JSON.stringify({
+        pid: 999998,
+        processStartedAt: '1970-01-01T00:00:00.000Z',
+        createdAt: Date.now(),
+      }),
+      'utf-8'
+    );
+
+    // R3 arrives: encounters EEXIST on claim, sees dead claim owner -> unlinks orphaned claim, reclaims mutex!
+    const r3Result = withInstanceMutex(a2Dir, () => 'r3_recovered_ok', 1000);
+    assert.equal(r3Result, 'r3_recovered_ok', 'R3 must clean up dead orphaned claim and recover dead mutex (Khe ④A-2)');
+    assert.equal(fs.existsSync(a2ClaimFile), false, 'Claim file cleaned up after successful recovery');
+    fs.rmSync(a2Dir, { recursive: true, force: true });
+
+    // -------------------------------------------------------------
+    // Khe ④B-1: Owner stalled between open() and writeSync()
+    // Owner A pauses in beforeMutexWrite (>10s simulated via utimes).
+    // Reclaimer R reclaims empty mutex by inode (targetMode ino), creates R mutex, enters fn().
+    // Owner A resumes -> writes metadata to orphaned fd -> post-write inode check mismatches!
+    // Owner A closes fd and does NOT enter fn()!
+    // Counterproof: disable owner inode check (AIBOSS_TEST_DISABLE_OWNER_INODE_CHECK=1) ->
+    // Owner A enters fn() using orphaned fd -> collision detected!
+    // -------------------------------------------------------------
+    async function runCase4B1(disableOwnerInodeCheck) {
+      const b1Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-khe4b1-'));
+      const mutexFilePath = path.join(b1Dir, '.instance.lock.mutex');
+      const barrierDir = path.join(b1Dir, 'barrier');
+      fs.mkdirSync(barrierDir, { recursive: true });
+
+      const aPaused = path.join(barrierDir, 'a.paused');
+      const aResume = path.join(barrierDir, 'a.resume');
+      const rInside = path.join(barrierDir, 'r.inside');
+      const rFinish = path.join(barrierDir, 'r.finish');
+      const concurrentFile = path.join(barrierDir, 'concurrent.log');
+
+      // Spawn Owner A: pauses in beforeMutexWrite
+      const ownerA = spawn(process.execPath, [
         '--import', './tests/register.mjs',
         '-e',
         `import { withInstanceMutex, __testHooks } from "./src/lib/budget-ledger.ts";
          import fs from "node:fs";
-         __testHooks.beforeMutexRename = () => {
-           fs.writeFileSync(process.env.R2_PAUSED, "1");
-           while (!fs.existsSync(process.env.R2_RESUME)) {
+         __testHooks.beforeMutexWrite = () => {
+           fs.writeFileSync(process.env.A_PAUSED, "1");
+           while (!fs.existsSync(process.env.A_RESUME)) {
              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
            }
          };
          try {
            withInstanceMutex(process.env.MUTEX_DIR, () => {
-             if (fs.existsSync(process.env.R1_INSIDE)) {
-               fs.writeFileSync(process.env.CONCURRENT_FILE, "CONCURRENT_COLLISION!");
+             if (fs.existsSync(process.env.R_INSIDE)) {
+               fs.writeFileSync(process.env.CONCURRENT_FILE, "COLLISION_OWNER_A_ENTERED_ORPHANED_FD");
              }
-             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-           }, 500);
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+           }, 400);
            process.exit(0);
-         } catch (err) {
+         } catch {
            process.exit(2);
          }`
       ], {
         env: {
           ...process.env,
           NODE_ENV: 'test',
-          MUTEX_DIR: raceDir,
-          R2_PAUSED: r2Paused,
-          R2_RESUME: r2Resume,
-          R1_INSIDE: r1Inside,
+          MUTEX_DIR: b1Dir,
+          A_PAUSED: aPaused,
+          A_RESUME: aResume,
+          R_INSIDE: rInside,
           CONCURRENT_FILE: concurrentFile,
-          ...(useUnlink ? { AIBOSS_TEST_USE_UNLINK_FOR_MUTEX: '1' } : {}),
-        }
+          ...(disableOwnerInodeCheck ? { AIBOSS_TEST_DISABLE_OWNER_INODE_CHECK: '1' } : {}),
+        },
       });
 
-      // Wait until R2 is paused in hook
-      while (!fs.existsSync(r2Paused)) {
+      // Wait until Owner A has created empty mutex and paused in beforeMutexWrite
+      while (!fs.existsSync(aPaused)) {
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       }
 
-      // 3. Spawn R1: does not pause, reclaims dead mutex
-      const r1 = spawn(process.execPath, [
+      // Mutex file is empty on disk. Simulate >10s elapsed time:
+      const sixtySecAgo = (Date.now() - 60000) / 1000;
+      fs.utimesSync(mutexFilePath, sixtySecAgo, sixtySecAgo);
+
+      // Spawn Reclaimer R: reclaims empty mutex by inode, creates R's mutex, enters fn()
+      const reclaimerR = spawn(process.execPath, [
         '--import', './tests/register.mjs',
         '-e',
         `import { withInstanceMutex } from "./src/lib/budget-ledger.ts";
          import fs from "node:fs";
          withInstanceMutex(process.env.MUTEX_DIR, () => {
-           fs.writeFileSync(process.env.R1_INSIDE, "1");
-           // Hold mutex for 500ms
-           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
-           try { fs.unlinkSync(process.env.R1_INSIDE); } catch {}
+           fs.writeFileSync(process.env.R_INSIDE, "1");
+           while (!fs.existsSync(process.env.R_FINISH)) {
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+           }
+           try { fs.unlinkSync(process.env.R_INSIDE); } catch {}
          }, 1000);
          process.exit(0);`
       ], {
         env: {
           ...process.env,
           NODE_ENV: 'test',
-          MUTEX_DIR: raceDir,
-          R1_INSIDE: r1Inside,
-          ...(useUnlink ? { AIBOSS_TEST_USE_UNLINK_FOR_MUTEX: '1' } : {}),
-        }
+          MUTEX_DIR: b1Dir,
+          R_INSIDE: rInside,
+          R_FINISH: rFinish,
+        },
       });
 
-      // Wait until R1 is inside critical section
-      while (!fs.existsSync(r1Inside)) {
+      // Wait until Reclaimer R is inside fn()
+      while (!fs.existsSync(rInside)) {
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       }
 
-      // 4. Resume R2 while R1 is inside critical section!
-      fs.writeFileSync(r2Resume, '1');
+      // Now resume Owner A while Reclaimer R is inside!
+      fs.writeFileSync(aResume, '1');
 
-      const [codeR1, codeR2] = await Promise.all([
-        new Promise((resolve) => r1.on('close', resolve)),
-        new Promise((resolve) => r2.on('close', resolve)),
-      ]);
+      // Wait for Owner A to finish or time out
+      const codeA = await new Promise((resolve) => ownerA.on('close', resolve));
+
+      // Tell Reclaimer R to finish
+      fs.writeFileSync(rFinish, '1');
+      const codeR = await new Promise((resolve) => reclaimerR.on('close', resolve));
 
       const collided = fs.existsSync(concurrentFile);
-      fs.rmSync(raceDir, { recursive: true, force: true });
-      return { codeR1, codeR2, collided };
+      fs.rmSync(b1Dir, { recursive: true, force: true });
+      return { codeA, codeR, collided };
     }
 
-    // Normal mode: atomic rename to tombstone prevents TOCTOU unlink race
-    const raceNormal = await runReclaimerRaceTest(false);
-    assert.equal(raceNormal.codeR1, 0, 'R1 must exit 0');
-    assert.equal(raceNormal.collided, false, 'Atomic rename to tombstone must prevent concurrent entry (Khe ④A)');
+    // Normal mode: Owner A verifies inode mismatch after writing metadata to orphaned fd, does NOT enter fn()
+    const case4B1Normal = await runCase4B1(false);
+    assert.equal(case4B1Normal.codeR, 0, 'Reclaimer R must execute critical section successfully');
+    assert.equal(case4B1Normal.collided, false, 'Owner A must not enter fn() on orphaned fd (Khe ④B-1)');
 
-    // Counterproof: raw path unlink causes collision
-    const raceCounterproof = await runReclaimerRaceTest(true);
-    assert.equal(raceCounterproof.codeR1, 0, 'R1 must exit 0 in counterproof');
-    assert.equal(raceCounterproof.collided, true, 'Raw path unlink allows concurrent entry (Khe ④A counterproof)');
+    // Counterproof: Disabling owner inode check allows Owner A to enter fn() concurrently
+    const case4B1Counterproof = await runCase4B1(true);
+    assert.equal(case4B1Counterproof.collided, true, 'Disabling owner inode check causes collision (Khe ④B-1 counterproof)');
+
+    // -------------------------------------------------------------
+    // Khe ④B-2: Owner completes metadata write right before reclaimer unlink
+    // Empty mutex (>10s) claimed by Reclaimer R (targetMode ino).
+    // R pauses in beforeMutexUnlinkAfterClaim.
+    // While R is paused, Owner A completes metadata write into mutexFilePath.
+    // R resumes -> re-checks mutex -> sees valid live metadata -> aborts unlink, unlinks claim!
+    // Owner A's live mutex remains intact and unharmed!
+    // Counterproof: disable Step 3 recheck (AIBOSS_TEST_DISABLE_RECLAIMER_RECHECK=1) ->
+    // R unlinks Owner A's live mutex -> Owner A's mutex destroyed!
+    // -------------------------------------------------------------
+    async function runCase4B2(disableRecheck) {
+      const b2Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-khe4b2-'));
+      const mutexFilePath = path.join(b2Dir, '.instance.lock.mutex');
+      const barrierDir = path.join(b2Dir, 'barrier');
+      fs.mkdirSync(barrierDir, { recursive: true });
+
+      const rPaused = path.join(barrierDir, 'r.paused');
+      const rResume = path.join(barrierDir, 'r.resume');
+      const rEntered = path.join(barrierDir, 'r.entered');
+
+      // Create empty mutex with mtime > 10s
+      fs.writeFileSync(mutexFilePath, '');
+      const sixtySecAgo = (Date.now() - 60000) / 1000;
+      fs.utimesSync(mutexFilePath, sixtySecAgo, sixtySecAgo);
+
+      // Reclaimer R pauses at beforeMutexUnlinkAfterClaim
+      const reclaimerR = spawn(process.execPath, [
+        '--import', './tests/register.mjs',
+        '-e',
+        `import { withInstanceMutex, __testHooks } from "./src/lib/budget-ledger.ts";
+         import fs from "node:fs";
+         __testHooks.beforeMutexUnlinkAfterClaim = () => {
+           fs.writeFileSync(process.env.R_PAUSED, "1");
+           while (!fs.existsSync(process.env.R_RESUME)) {
+             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+           }
+         };
+         try {
+           withInstanceMutex(process.env.MUTEX_DIR, () => {
+             fs.writeFileSync(process.env.R_ENTERED, "1");
+           }, 400);
+           process.exit(0);
+         } catch {
+           process.exit(2);
+         }`
+      ], {
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          MUTEX_DIR: b2Dir,
+          R_PAUSED: rPaused,
+          R_RESUME: rResume,
+          R_ENTERED: rEntered,
+          ...(disableRecheck ? { AIBOSS_TEST_DISABLE_RECLAIMER_RECHECK: '1' } : {}),
+        },
+      });
+
+      // Wait until R has claimed empty mutex and paused in beforeMutexUnlinkAfterClaim
+      while (!fs.existsSync(rPaused)) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+
+      // Owner A completes writing live metadata before R unlinks!
+      const ownerAToken = `owner-a-live-${Date.now()}`;
+      fs.writeFileSync(
+        mutexFilePath,
+        JSON.stringify({
+          pid: process.pid,
+          processStartedAt: getProcessStartTime(process.pid) ?? new Date().toISOString(),
+          token: ownerAToken,
+          createdAt: Date.now(),
+        }),
+        'utf-8'
+      );
+
+      // Resume R
+      fs.writeFileSync(rResume, '1');
+      const codeR = await new Promise((resolve) => reclaimerR.on('close', resolve));
+
+      let liveMutexDestroyed = false;
+      try {
+        if (!fs.existsSync(mutexFilePath)) {
+          liveMutexDestroyed = true;
+        } else {
+          const currentData = JSON.parse(fs.readFileSync(mutexFilePath, 'utf-8'));
+          if (currentData.token !== ownerAToken) {
+            liveMutexDestroyed = true;
+          }
+        }
+      } catch {
+        liveMutexDestroyed = true;
+      }
+
+      const rEnteredSection = fs.existsSync(rEntered);
+      fs.rmSync(b2Dir, { recursive: true, force: true });
+      return { codeR, liveMutexDestroyed, rEnteredSection };
+    }
+
+    // Normal mode: Reclaimer detects live metadata written during pause, aborts unlink
+    const case4B2Normal = await runCase4B2(false);
+    assert.equal(case4B2Normal.liveMutexDestroyed, false, 'Live mutex must not be unlinked by reclaimer (Khe ④B-2)');
+    assert.equal(case4B2Normal.rEnteredSection, false, 'Reclaimer must abort acquisition when live metadata exists');
+
+    // Counterproof: Disabling Step 3 recheck unlinks live metadata
+    const case4B2Counterproof = await runCase4B2(true);
+    assert.equal(case4B2Counterproof.liveMutexDestroyed, true, 'Disabling Step 3 recheck destroys live metadata (Khe ④B-2 counterproof)');
 
     // -------------------------------------------------------------
     // Khe ④B: Corrupt / unparseable mutex recovery
@@ -2605,7 +3007,7 @@ try {
 
     fs.rmSync(startTimeTestDir, { recursive: true, force: true });
 
-    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics, tombstone mutex rename, unparseable mutex recovery, no start time fabrication)');
+    console.log('  [PASS] Case 25: Condition (b) all 4 gaps verified (sticky fencing, startup crash recovery, legacy dir protection, unified lease mechanics, claim-file mutex protocol, owner post-write inode check, unparseable mutex recovery, no start time fabrication)');
   }
 
   // Case 26: Universal pending guard for all terminal statuses & worker liveness tri-state (Item 7 & Item 8)

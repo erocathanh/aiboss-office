@@ -217,8 +217,11 @@ export const UNINITIALIZED_LOCK_TIMEOUT_MS = 10000;
 
 export const __testHooks: {
   beforeReplace?: () => void;
-  beforeMutexRename?: () => void;
-  useUnlinkForMutex?: boolean;
+  beforeMutexWrite?: () => void;
+  beforeCreateClaim?: () => void;
+  beforeMutexUnlinkAfterClaim?: () => void;
+  disableOwnerInodeCheck?: boolean;
+  disableReclaimerRecheck?: boolean;
   mockProcessStartTime?: ((pid: number) => string | null) | null;
   fallbackStartTimeForTest?: boolean;
   disableCorruptMutexRecovery?: boolean;
@@ -251,11 +254,19 @@ export function isMutexRecheckDisabledForTest(): boolean {
   );
 }
 
-export function isUseUnlinkForMutexEnabledForTest(): boolean {
+export function isOwnerInodeCheckDisabledForTest(): boolean {
   if (process.env.NODE_ENV === 'production') return false;
   return (
-    __testHooks.useUnlinkForMutex === true ||
-    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_USE_UNLINK_FOR_MUTEX === '1')
+    __testHooks.disableOwnerInodeCheck === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_OWNER_INODE_CHECK === '1')
+  );
+}
+
+export function isReclaimerRecheckDisabledForTest(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return (
+    __testHooks.disableReclaimerRecheck === true ||
+    (process.env.NODE_ENV === 'test' && process.env.AIBOSS_TEST_DISABLE_RECLAIMER_RECHECK === '1')
   );
 }
 
@@ -316,11 +327,18 @@ export const UNPARSEABLE_MUTEX_TIMEOUT_MS = 10000;
 /**
  * Short mutex ensuring mutually exclusive state transitions for all instance lock operations:
  * acquire, reclaim, renew, and release.
- * - Writes owner metadata {pid, processStartedAt, token, createdAt} immediately on creation.
- * - Reclaims mutex ONLY when owner process is verified dead via checkProcessLiveness.
- * - Atomic rename to tombstone for reclaim and finally (never raw path unlinks susceptible to TOCTOU races).
- * - Orphaned unparseable/corrupt mutex recovery with >=10s threshold.
- * - Never fabricates process start time; null start time returns 'unverified', never 'dead'.
+ *
+ * Protocol v13:
+ * 1. Owner creates mutex via open(O_CREAT | O_EXCL) -> writeSync metadata -> fsync -> post-write
+ *    ownership verification: fstat(fd).ino === stat(mutexPath).ino && read token matches own token.
+ *    Mismatch (e.g. reclaimed during pause) -> closes fd and immediately retries without entering fn().
+ * 2. Reclaimer never touches live mutex: inspects dead PID or unparseable mtime >= 10s.
+ *    Decides winner via atomic claim file: open(mutexPath + '.reclaim-' + targetIdentity, O_CREAT | O_EXCL).
+ *    Loser of claim (EEXIST) inspects claim owner: if dead, unlinks orphaned claim; otherwise waits.
+ * 3. Winner of claim re-verifies mutex still matches targetIdentity before unlinking mutexPath.
+ *    Unlinks mutexPath, unlinks own claim file, then creates its own mutex via Step 1.
+ * 4. Finally block reads mutexPath: if token matches own token, unlinks mutexPath; otherwise no-op.
+ * 5. Zero tombstone files, zero renameSync on mutexPath, zero rollbacks.
  */
 export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, timeoutMs = 5000): T {
   if (isInstanceMutexDisabledForTest()) {
@@ -343,12 +361,19 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
 
   while (true) {
     try {
+      // 1. Owner creates mutex via open(O_CREAT | O_EXCL)
       fd = fs.openSync(
         mutexPath,
         fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR,
         0o644
       );
-      // Write owner metadata immediately into fd before entering critical section
+
+      // Test hook: pause between open and write metadata (test ④B-1)
+      if (process.env.NODE_ENV !== 'production' && __testHooks.beforeMutexWrite) {
+        __testHooks.beforeMutexWrite();
+      }
+
+      // Write owner metadata immediately into fd
       const info: InstanceMutexMetadata = {
         pid: process.pid,
         processStartedAt: myStartedAt,
@@ -356,17 +381,52 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
         createdAt: Date.now(),
       };
       fs.writeSync(fd, JSON.stringify(info), 0, 'utf-8');
+      fs.fsyncSync(fd);
+
+      // Post-write ownership verification: fstat(fd).ino === stat(mutexPath).ino && token matches
+      let ownershipVerified = true;
+      if (!isOwnerInodeCheckDisabledForTest()) {
+        try {
+          const fdStat = fs.fstatSync(fd);
+          const pathStat = fs.statSync(mutexPath);
+          if (fdStat.ino !== pathStat.ino) {
+            ownershipVerified = false;
+          }
+          const diskRaw = fs.readFileSync(mutexPath, 'utf-8');
+          const diskInfo = JSON.parse(diskRaw) as InstanceMutexMetadata;
+          if (!diskInfo || diskInfo.token !== myToken || diskInfo.pid !== process.pid) {
+            ownershipVerified = false;
+          }
+        } catch {
+          ownershipVerified = false;
+        }
+      }
+
+      if (!ownershipVerified) {
+        // Mutex was reclaimed/replaced while owner was delayed before/during write!
+        // Close orphaned fd, NEVER enter fn(), retry acquisition loop!
+        try { fs.closeSync(fd); } catch {}
+        fd = null;
+        if (Date.now() - start > timeoutMs) {
+          throw new Error(`[budget-ledger] Timeout waiting for instance lock mutex (${timeoutMs}ms, ownership verification failed)`);
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        continue;
+      }
+
       break;
     } catch (err: unknown) {
       if ((err as { code?: string }).code === 'EEXIST') {
-        // Mutex file exists on disk: inspect owner
+        // 2. Reclaimer inspects mutex
         let heldMutex: InstanceMutexMetadata | null = null;
         let isUnparseable = false;
         let fileAgeMs = 0;
+        let diskIno: number | null = null;
 
         try {
           if (fs.existsSync(mutexPath)) {
             const stat = fs.statSync(mutexPath);
+            diskIno = stat.ino;
             fileAgeMs = Date.now() - stat.mtimeMs;
             const raw = fs.readFileSync(mutexPath, 'utf-8');
             if (raw.trim()) {
@@ -382,75 +442,119 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
           isUnparseable = true;
         }
 
-        // Khe ④B: If mutex file is unparseable/empty (e.g. crashed between openSync and writeSync)
-        // If older than 10s (UNPARSEABLE_MUTEX_TIMEOUT_MS), safely reclaim via atomic rename to tombstone.
-        // If younger than 10s, treat as in-flight creation, wait and retry.
-        if (isUnparseable) {
+        let targetIdentity: string | null = null;
+        let targetMode: 'token' | 'ino' | null = null;
+
+        if (heldMutex && typeof heldMutex.pid === 'number') {
+          // (a) Parseable: check liveness; only dead can proceed
+          const liveness = checkProcessLiveness(heldMutex.pid, heldMutex.processStartedAt);
+          if (liveness === 'dead' && heldMutex.token) {
+            targetIdentity = heldMutex.token;
+            targetMode = 'token';
+          }
+        } else if (isUnparseable && diskIno !== null) {
+          // (b) Unparseable / empty: check age >= 10s
           if (fileAgeMs >= UNPARSEABLE_MUTEX_TIMEOUT_MS && !isCorruptMutexRecoveryDisabledForTest()) {
-            try {
-              if (isUseUnlinkForMutexEnabledForTest()) {
-                fs.unlinkSync(mutexPath);
-                continue;
-              } else {
-                const tombstonePath = `${mutexPath}.tombstone-${myToken}`;
-                fs.renameSync(mutexPath, tombstonePath);
-                try { fs.unlinkSync(tombstonePath); } catch {}
-                continue;
-              }
-            } catch {
-              /* ignore race */
-            }
+            targetIdentity = `${diskIno}`;
+            targetMode = 'ino';
           }
         }
 
-        if (heldMutex && typeof heldMutex.pid === 'number') {
-          // Reclaim mutex ONLY when owner process is verified dead via checkProcessLiveness
-          const liveness = checkProcessLiveness(heldMutex.pid, heldMutex.processStartedAt);
-          if (liveness === 'dead') {
-            let confirmed = false;
-            try {
-              const verifyRaw = fs.readFileSync(mutexPath, 'utf-8');
-              const verifyHeld = JSON.parse(verifyRaw);
-              if (verifyHeld && verifyHeld.token === heldMutex.token && verifyHeld.pid === heldMutex.pid) {
-                confirmed = true;
-              }
-            } catch {
-              /* ignore */
+        if (targetIdentity && targetMode) {
+          // 3. Reclaimer creates claim file via open(O_EXCL)
+          const claimPath = `${mutexPath}.reclaim-${targetIdentity}`;
+
+          if (process.env.NODE_ENV !== 'production' && __testHooks.beforeCreateClaim) {
+            __testHooks.beforeCreateClaim();
+          }
+
+          let claimFd: number | null = null;
+          let wonClaim = false;
+
+          try {
+            claimFd = fs.openSync(
+              claimPath,
+              fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR,
+              0o644
+            );
+            const claimInfo = {
+              pid: process.pid,
+              processStartedAt: myStartedAt,
+              createdAt: Date.now(),
+            };
+            fs.writeSync(claimFd, JSON.stringify(claimInfo), 0, 'utf-8');
+            fs.fsyncSync(claimFd);
+            wonClaim = true;
+          } catch (claimErr: unknown) {
+            if ((claimErr as { code?: string }).code === 'EEXIST') {
+              // Inspect claim owner: if dead, clean up orphaned claim
+              try {
+                if (fs.existsSync(claimPath)) {
+                  const claimRaw = fs.readFileSync(claimPath, 'utf-8');
+                  const claimOwner = JSON.parse(claimRaw);
+                  if (claimOwner && typeof claimOwner.pid === 'number') {
+                    const claimLiveness = checkProcessLiveness(claimOwner.pid, claimOwner.processStartedAt);
+                    if (claimLiveness === 'dead') {
+                      try { fs.unlinkSync(claimPath); } catch {}
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+
+          if (wonClaim && claimFd !== null) {
+            // Re-verify mutex before unlink
+            if (process.env.NODE_ENV !== 'production' && __testHooks.beforeMutexUnlinkAfterClaim) {
+              __testHooks.beforeMutexUnlinkAfterClaim();
             }
 
-            if (confirmed) {
-              if (process.env.NODE_ENV !== 'production' && __testHooks.beforeMutexRename) {
-                __testHooks.beforeMutexRename();
-              }
+            let canUnlink = true;
+            if (!isReclaimerRecheckDisabledForTest()) {
               try {
-                if (isUseUnlinkForMutexEnabledForTest()) {
-                  fs.unlinkSync(mutexPath);
-                  continue;
-                } else {
-                  const tombstonePath = `${mutexPath}.tombstone-${myToken}`;
-                  fs.renameSync(mutexPath, tombstonePath);
-                  let won = true;
-                  try {
-                    const tombRaw = fs.readFileSync(tombstonePath, 'utf-8');
-                    const tomb = JSON.parse(tombRaw);
-                    if (tomb && tomb.token !== heldMutex.token) {
-                      won = false;
-                      try { fs.renameSync(tombstonePath, mutexPath); } catch {}
-                    }
-                  } catch {
-                    /* ignore */
+                if (!fs.existsSync(mutexPath)) {
+                  canUnlink = false;
+                } else if (targetMode === 'token') {
+                  const reverifyRaw = fs.readFileSync(mutexPath, 'utf-8');
+                  const reverifyHeld = JSON.parse(reverifyRaw);
+                  if (!reverifyHeld || reverifyHeld.token !== targetIdentity) {
+                    canUnlink = false;
                   }
-                  if (won) {
-                    try { fs.unlinkSync(tombstonePath); } catch {}
-                    continue;
+                } else if (targetMode === 'ino') {
+                  const reverifyStat = fs.statSync(mutexPath);
+                  if (reverifyStat.ino !== Number(targetIdentity)) {
+                    canUnlink = false;
+                  }
+                  const reverifyRaw = fs.readFileSync(mutexPath, 'utf-8');
+                  if (reverifyRaw.trim()) {
+                    try {
+                      const reverifyParsed = JSON.parse(reverifyRaw);
+                      if (reverifyParsed && typeof reverifyParsed.pid === 'number') {
+                        // Owner finished writing metadata!
+                        canUnlink = false;
+                      }
+                    } catch {}
                   }
                 }
               } catch {
-                /* lost atomic rename race (e.g. ENOENT from another reclaimer) */
+                canUnlink = false;
               }
             }
+
+            if (canUnlink) {
+              try {
+                fs.unlinkSync(mutexPath);
+              } catch {}
+            }
+
+            // Always clean up own claim file
+            try { fs.closeSync(claimFd); } catch {}
+            try { fs.unlinkSync(claimPath); } catch {}
+
+            if (canUnlink) {
+              continue;
+            }
           }
-          // If alive or unverified: DO NOT UNLINK! Wait and retry.
         }
 
         if (Date.now() - start > timeoutMs) {
@@ -468,33 +572,13 @@ export function withInstanceMutex<T>(dataDir: string | undefined, fn: () => T, t
   } finally {
     if (fd !== null) {
       try { fs.closeSync(fd); } catch {}
-      // finally chỉ unlink khi re-read mutex còn đúng {pid, token} của mình, và dùng atomic rename sang tombstone!
+      // finally chỉ unlink khi re-read mutex còn đúng {pid, token} của mình!
       try {
         if (fs.existsSync(mutexPath)) {
           const currentRaw = fs.readFileSync(mutexPath, 'utf-8');
           const currentHeld = JSON.parse(currentRaw) as InstanceMutexMetadata;
           if (currentHeld && currentHeld.token === myToken && currentHeld.pid === process.pid) {
-            if (isUseUnlinkForMutexEnabledForTest()) {
-              fs.unlinkSync(mutexPath);
-            } else {
-              const myTombstone = `${mutexPath}.tombstone-${myToken}`;
-              fs.renameSync(mutexPath, myTombstone);
-              let validOwn = true;
-              try {
-                const tombRaw = fs.readFileSync(myTombstone, 'utf-8');
-                const tomb = JSON.parse(tombRaw) as InstanceMutexMetadata;
-                if (!tomb || tomb.token !== myToken || tomb.pid !== process.pid) {
-                  validOwn = false;
-                  try { fs.renameSync(myTombstone, mutexPath); } catch {}
-                }
-              } catch {
-                validOwn = false;
-                try { fs.renameSync(myTombstone, mutexPath); } catch {}
-              }
-              if (validOwn) {
-                try { fs.unlinkSync(myTombstone); } catch {}
-              }
-            }
+            fs.unlinkSync(mutexPath);
           }
         }
       } catch {
