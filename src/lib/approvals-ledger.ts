@@ -1,17 +1,19 @@
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { getOfficeConfig } from '@/lib/office-config';
 import { isFenced, isFenceGuardDisabledForTest } from '@/lib/budget-ledger';
 
 /**
- * Approval Ledger & State Machine (A-4 v03)
+ * Approval Ledger & State Machine (A-4 v04)
  *
  * All records live in `<approvalsDir>/<YYYY-MM-DD>.jsonl` (UTC date):
  * - `request`: written by `operations/hooks/guard_bulk_send.py` (no `type` field in legacy/current hook lines,
- *   normalized to `type: "request"` on read).
+ *   normalized to `type: "request"` on read; `"type": null` is rejected).
  * - `decision`: written by `POST /api/approvals/<requestId>/decision` (`decision: "approved" | "denied"`).
- * - `claim`: written atomically under lock by `approval_check.py --consume` (or `checkAndConsumeApproval`)
+ * - `claim`: written atomically under lock exclusively by `approval_check.py --consume` (hook H4)
  *   right before executing the guarded action (`type: "claim"`).
  * - `execution`: written by `operations/scripts/approval_mark.py` (or `recordApprovalExecution`)
  *   after the action runs (`result: "executed" | "failed"`).
@@ -137,8 +139,19 @@ export interface ApprovalItem {
   runId?: string;
 }
 
+/**
+ * Strip ONLY ASCII whitespace `[ \t\r\n]` from both ends (F2 — identical to Python `s.strip(" \t\r\n")`).
+ * Never strips U+FEFF (BOM) or non-ASCII whitespace characters.
+ */
+export function trimAscii(s: string): string {
+  return s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+}
+
 const ISO_ASCII_REGEX =
-  /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$/;
+  /^(19[7-9][0-9]|[2-9][0-9]{3})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$/;
+
+const MIN_VALID_UTC_MS = 0; // 1970-01-01T00:00:00.000Z
+const MAX_VALID_UTC_MS = 253_402_300_799_999; // 9999-12-31T23:59:59.999Z
 
 function daysInUtcMonth(year: number, month: number): number {
   if (month === 2) {
@@ -152,15 +165,16 @@ function daysInUtcMonth(year: number, month: number): number {
 }
 
 /**
- * Strictly parse an ISO-8601 timestamp with explicit UTC (`Z`) or numeric offset (`±HH:MM`).
- * - Uses ASCII-only digit matching `[0-9]` (rejects Unicode numerals).
+ * Strictly parse an ISO-8601 timestamp with explicit UTC (`Z`) or numeric offset (`±HH:MM`) (F2c, F5).
+ * - Uses ASCII-only digit matching `[0-9]` with valid year domain `1970–9999`.
  * - Validates calendar date/time ranges and round-trips components via `Date.UTC` / `toISOString()`.
- * - Truncates sub-millisecond fractional digits to integer milliseconds (matching Python `parse_strict_iso_utc`).
- * - Returns `null` on any invalid timestamp (F2c, F5 fail-closed).
+ * - Truncates sub-millisecond fractional digits to integer milliseconds (matching Python `parse_strict_iso_ms`).
+ * - Verifies resulting UTC instant also stays within `1970-01-01T00:00:00.000Z .. 9999-12-31T23:59:59.999Z`
+ *   so boundary offsets like `9999-12-31T23:59:59-00:01` are rejected identically to Python.
  */
 export function parseStrictIsoMs(iso: unknown): number | null {
   if (typeof iso !== 'string') return null;
-  const trimmed = iso.trim();
+  const trimmed = trimAscii(iso);
   if (!trimmed) return null;
   const m = ISO_ASCII_REGEX.exec(trimmed);
   if (!m) return null;
@@ -177,7 +191,7 @@ export function parseStrictIsoMs(iso: unknown): number | null {
   const tzHourStr = m[10];
   const tzMinStr = m[11];
 
-  if (year < 1 || year > 9999) return null;
+  if (year < 1970 || year > 9999) return null;
   if (month < 1 || month > 12) return null;
   const maxDay = daysInUtcMonth(year, month);
   if (day < 1 || day > maxDay) return null;
@@ -207,6 +221,9 @@ export function parseStrictIsoMs(iso: unknown): number | null {
   }
 
   const epochMs = localUtcMs - offsetMinutes * 60_000;
+  if (epochMs < MIN_VALID_UTC_MS || epochMs > MAX_VALID_UTC_MS) {
+    return null;
+  }
   if (new Date(epochMs + offsetMinutes * 60_000).toISOString() !== expectedLocalIso) {
     return null;
   }
@@ -260,7 +277,7 @@ const H1_VIETNAMESE_REASON_RULES: Array<{ pattern: RegExp; code: string }> = [
 ];
 
 export function normalizeApprovalReason(rawReason: unknown): string {
-  const s = typeof rawReason === 'string' ? rawReason.trim() : '';
+  const s = typeof rawReason === 'string' ? trimAscii(rawReason) : '';
   if (!s) return 'guarded_external_action';
 
   for (const rule of H1_VIETNAMESE_REASON_RULES) {
@@ -297,8 +314,8 @@ export function computeRequestId(
   tool: string,
   sha256: string
 ): string {
-  const normalizedSha = (sha256 || '').trim().toLowerCase();
-  const payload = `${(ts || '').trim()}|${(seat || '').trim()}|${(tool || '').trim()}|${normalizedSha}`;
+  const normalizedSha = trimAscii(sha256 || '').toLowerCase();
+  const payload = `${trimAscii(ts || '')}|${trimAscii(seat || '')}|${trimAscii(tool || '')}|${normalizedSha}`;
   return crypto.createHash('sha256').update(payload, 'utf8').digest('hex').slice(0, 16);
 }
 
@@ -323,7 +340,7 @@ export function isApprovalLockDisabledForTest(): boolean {
   return (
     process.env.NODE_ENV !== 'production' &&
     process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK === '1' &&
-    Boolean(process.env.AIBOSS_DATA_DIR && process.env.AIBOSS_DATA_DIR.trim())
+    Boolean(process.env.AIBOSS_DATA_DIR && trimAscii(process.env.AIBOSS_DATA_DIR))
   );
 }
 
@@ -337,7 +354,65 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+let cachedSystemBootId: string | null = null;
+
+/**
+ * Read OS boot identifier (`kern.boottime` sec on macOS, `/proc/stat` `btime` on Linux) (F16).
+ */
+export function getSystemBootId(): string {
+  if (cachedSystemBootId !== null) {
+    return cachedSystemBootId;
+  }
+  try {
+    if (process.platform === 'linux' && fs.existsSync('/proc/stat')) {
+      const statContent = fs.readFileSync('/proc/stat', 'utf-8');
+      const m = /^btime\s+([0-9]+)/m.exec(statContent);
+      if (m && m[1]) {
+        cachedSystemBootId = m[1];
+        return cachedSystemBootId;
+      }
+    }
+    const out = trimAscii(
+      execFileSync('sysctl', ['-n', 'kern.boottime'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 1000,
+      })
+    );
+    const secMatch = /sec\s*=\s*([0-9]+)/.exec(out);
+    if (secMatch && secMatch[1]) {
+      cachedSystemBootId = secMatch[1];
+      return cachedSystemBootId;
+    }
+    if (/^[0-9]+$/.test(out)) {
+      cachedSystemBootId = out;
+      return cachedSystemBootId;
+    }
+  } catch {
+    /* fallback below */
+  }
+  cachedSystemBootId = 'unknown';
+  return cachedSystemBootId;
+}
+
 const STALE_UNMEASURABLE_LOCK_MS = 30_000;
+const STALE_LOCK_ARTIFACT_SWEEP_MS = 10 * 60_000; // 10 minutes (F16)
+const SHARED_WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+
+function sleepSyncMs(ms: number): void {
+  if (ms <= 0) return;
+  Atomics.wait(SHARED_WAIT_BUFFER, 0, 0, ms);
+}
+
+export class ApprovalLockTimeoutError extends Error {
+  readonly code = 'lock_timeout';
+  readonly status = 'lock_timeout';
+
+  constructor(lockPath: string) {
+    super(`[approvals-ledger] Timed out acquiring approval lock at ${lockPath}`);
+    this.name = 'ApprovalLockTimeoutError';
+  }
+}
 
 interface LockInspection {
   isStale: boolean;
@@ -346,29 +421,51 @@ interface LockInspection {
 }
 
 /**
- * Unified stale lock inspection (F1b — shared with Python `inspect_lock_staleness`):
+ * Unified stale lock inspection (F1b, F16 — shared with Python `inspect_lock_staleness`):
+ * - If lock JSON contains `bootId` that differs from the current OS `bootId`: stale (`isStale: true`)
+ *   even if `pid` happens to exist after a machine reboot (F16).
  * - If lock JSON contains a valid positive integer `pid`: stale IFF `!isPidAlive(pid)`
- *   (a live PID is NEVER reclaimed, even if held > 30s).
+ *   (a live PID on the same boot is NEVER reclaimed, even if held > 30s).
  * - If `pid` cannot be measured (corrupted/unparseable lock file): stale IFF `mtime` age > 30s.
  */
 function inspectLockStaleness(lockPath: string, nowMs: number): LockInspection | null {
   try {
     const stat = fs.statSync(lockPath);
     const raw = fs.readFileSync(lockPath, 'utf-8');
-    const trimmed = raw.trim();
+    const trimmed = trimAscii(raw);
     if (trimmed) {
       try {
-        const parsed = JSON.parse(trimmed) as { pid?: unknown };
-        if (
-          typeof parsed.pid === 'number' &&
-          Number.isInteger(parsed.pid) &&
-          parsed.pid > 0
-        ) {
-          return {
-            isStale: !isPidAlive(parsed.pid),
-            ino: stat.ino,
-            raw,
-          };
+        const parsed = JSON.parse(trimmed) as {
+          pid?: unknown;
+          bootId?: unknown;
+        };
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const currentBootId = getSystemBootId();
+          const lockBootId =
+            typeof parsed.bootId === 'string' ? trimAscii(parsed.bootId) : '';
+          if (
+            lockBootId &&
+            lockBootId !== 'unknown' &&
+            currentBootId !== 'unknown' &&
+            lockBootId !== currentBootId
+          ) {
+            return {
+              isStale: true,
+              ino: stat.ino,
+              raw,
+            };
+          }
+          if (
+            typeof parsed.pid === 'number' &&
+            Number.isInteger(parsed.pid) &&
+            parsed.pid > 0
+          ) {
+            return {
+              isStale: !isPidAlive(parsed.pid),
+              ino: stat.ino,
+              raw,
+            };
+          }
         }
       } catch {
         /* fall through to unmeasurable PID age check */
@@ -390,86 +487,48 @@ export function isLockFileStale(lockPath: string, nowMs = Date.now()): boolean {
 }
 
 /**
- * Safely reclaim an orphan lock file using atomic `rename` under `.approvals.reclaim.lock`
- * so two concurrent reclaimers can never delete or steal a newly created lock (F1b).
+ * Best-effort sweep of leftover `.approvals.lock.tmp*` / `.approvals.lock.stale-*` / `.approvals.lock.rel-*`
+ * artifacts older than 10 minutes (F16). Never touches `.approvals.lock` itself.
  */
-function tryReclaimStaleLock(
-  approvalsDir: string,
-  lockPath: string,
-  observed: LockInspection
-): void {
-  const reclaimGuardPath = path.join(approvalsDir, '.approvals.reclaim.lock');
-  const guardTmp = path.join(
-    approvalsDir,
-    `.approvals.reclaim.tmp-${process.pid}-${process.hrtime.bigint().toString()}`
-  );
-  let guardAcquired = false;
-
+function sweepOldLockArtifacts(approvalsDir: string, nowMs: number): void {
   try {
-    fs.writeFileSync(
-      guardTmp,
-      JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
-      { encoding: 'utf-8', mode: 0o600 }
-    );
-    try {
-      fs.linkSync(guardTmp, reclaimGuardPath);
-      guardAcquired = true;
-    } catch {
-      const guardCheck = inspectLockStaleness(reclaimGuardPath, Date.now());
-      if (guardCheck && guardCheck.isStale) {
-        const staleGuard = `${reclaimGuardPath}.stale-${process.pid}-${process.hrtime.bigint().toString()}`;
-        try {
-          fs.renameSync(reclaimGuardPath, staleGuard);
-          fs.unlinkSync(staleGuard);
-        } catch {
-          /* ignore race */
+    const entries = fs.readdirSync(approvalsDir);
+    let inspected = 0;
+    for (const name of entries) {
+      if (
+        !name.startsWith('.approvals.lock.tmp') &&
+        !name.startsWith('.approvals.lock.stale-') &&
+        !name.startsWith('.approvals.lock.rel-')
+      ) {
+        continue;
+      }
+      inspected += 1;
+      if (inspected > 32) break;
+      const fullPath = path.join(approvalsDir, name);
+      try {
+        const st = fs.statSync(fullPath);
+        if (nowMs - st.mtimeMs > STALE_LOCK_ARTIFACT_SWEEP_MS) {
+          fs.unlinkSync(fullPath);
         }
-      }
-      return;
-    }
-
-    // Re-verify under reclaim guard that `.approvals.lock` is STILL the exact same orphan file
-    const recheck = inspectLockStaleness(lockPath, Date.now());
-    if (
-      !recheck ||
-      !recheck.isStale ||
-      recheck.ino !== observed.ino ||
-      recheck.raw !== observed.raw
-    ) {
-      return;
-    }
-
-    const staleTarget = `${lockPath}.stale-${process.pid}-${process.hrtime.bigint().toString()}`;
-    try {
-      fs.renameSync(lockPath, staleTarget);
-      try {
-        fs.unlinkSync(staleTarget);
       } catch {
-        /* ignore cleanup race */
-      }
-    } catch {
-      /* another process renamed first */
-    }
-  } finally {
-    try {
-      fs.unlinkSync(guardTmp);
-    } catch {
-      /* ignore */
-    }
-    if (guardAcquired) {
-      try {
-        fs.unlinkSync(reclaimGuardPath);
-      } catch {
-        /* ignore */
+        /* ignore concurrent unlink */
       }
     }
+  } catch {
+    /* ignore sweep errors */
   }
 }
 
 /**
- * Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b).
- * - Publishes a fully-written lock file atomically via `link(tmpPath, lockPath)` (`O_EXCL` semantics).
- * - Reclaims orphan locks via atomic `rename` to `.approvals.lock.stale-<pid>-<ns>` under `.approvals.reclaim.lock`.
+ * Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b, F14, F15, F16).
+ * - (a) Publishes a fully-written lock file `{ pid, token, createdAt, bootId, hostname }`
+ *       atomically via `link(tmpPath, lockPath)` (`O_EXCL` semantics).
+ * - (b) When `.approvals.lock` is stale, performs a single atomic `rename(lockPath, staleTarget)`.
+ *       Only the single process whose `rename` succeeds unlinks `staleTarget` and retries `link`.
+ *       Any process whose `rename` fails (`ENOENT` or any error) treats the lock as already reclaimed,
+ *       sleeps `25ms` via `Atomics.wait`, and retries. No `.approvals.reclaim.lock` guard is used.
+ * - (c) Every loop branch checks the timeout deadline (`timeoutMs`, default 5000ms) before `continue`
+ *       and throws `ApprovalLockTimeoutError` (`lock_timeout`) on expiry (fail-closed, never hangs).
  */
 export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
   if (isApprovalLockDisabledForTest()) {
@@ -478,14 +537,19 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
   ensureApprovalsDir();
   const approvalsDir = getApprovalsDir();
   const lockPath = getApprovalLockPath();
-  const token = `${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+  const nowStart = Date.now();
+  sweepOldLockArtifacts(approvalsDir, nowStart);
+
+  const token = `${process.pid}-${nowStart}-${crypto.randomBytes(6).toString('hex')}`;
   const tmpPath = `${lockPath}.tmp-${process.pid}-${token}`;
-  const start = Date.now();
+  const deadline = Date.now() + timeoutMs;
 
   const payload = JSON.stringify({
     pid: process.pid,
     token,
     createdAt: Date.now(),
+    bootId: getSystemBootId(),
+    hostname: os.hostname(),
   });
   const tmpFd = fs.openSync(
     tmpPath,
@@ -510,19 +574,52 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
         if ((err as { code?: string })?.code !== 'EEXIST') {
           throw err;
         }
-        const inspection = inspectLockStaleness(lockPath, Date.now());
+        const now = Date.now();
+        if (now >= deadline) {
+          throw new ApprovalLockTimeoutError(lockPath);
+        }
+
+        const inspection = inspectLockStaleness(lockPath, now);
         if (inspection && inspection.isStale) {
-          tryReclaimStaleLock(approvalsDir, lockPath, inspection);
+          const staleTarget = `${lockPath}.stale-${process.pid}-${process.hrtime.bigint().toString()}`;
+          let renamed = false;
+          try {
+            fs.renameSync(lockPath, staleTarget);
+            renamed = true;
+          } catch {
+            renamed = false;
+          }
+
+          if (renamed) {
+            try {
+              fs.unlinkSync(staleTarget);
+            } catch {
+              /* ignore cleanup error on our own stale file */
+            }
+            if (Date.now() >= deadline) {
+              throw new ApprovalLockTimeoutError(lockPath);
+            }
+            continue;
+          }
+
+          const afterRenameNow = Date.now();
+          if (afterRenameNow >= deadline) {
+            throw new ApprovalLockTimeoutError(lockPath);
+          }
+          sleepSyncMs(Math.min(30, Math.max(1, deadline - afterRenameNow)));
+          if (Date.now() >= deadline) {
+            throw new ApprovalLockTimeoutError(lockPath);
+          }
           continue;
         }
-        if (Date.now() - start >= timeoutMs) {
-          throw new Error(
-            `[approvals-ledger] Timed out acquiring approval lock at ${lockPath}`
-          );
+
+        const beforeWaitNow = Date.now();
+        if (beforeWaitNow >= deadline) {
+          throw new ApprovalLockTimeoutError(lockPath);
         }
-        const waitEnd = Date.now() + 10;
-        while (Date.now() < waitEnd) {
-          /* brief spin wait */
+        sleepSyncMs(Math.min(25, Math.max(1, deadline - beforeWaitNow)));
+        if (Date.now() >= deadline) {
+          throw new ApprovalLockTimeoutError(lockPath);
         }
       }
     }
@@ -539,7 +636,7 @@ export function withApprovalLock<T>(fn: () => T, timeoutMs = 5000): T {
   } finally {
     if (acquired) {
       try {
-        const currentRaw = fs.readFileSync(lockPath, 'utf-8').trim();
+        const currentRaw = trimAscii(fs.readFileSync(lockPath, 'utf-8'));
         if (currentRaw) {
           const currentParsed = JSON.parse(currentRaw) as { token?: string };
           if (currentParsed.token === token) {
@@ -565,14 +662,18 @@ function getUtcDateString(date: Date): string {
 
 /**
  * Strictly sanitize a raw request record (hook line without `type` or with `type: "request"`).
- * Requires valid ISO `ts` (F5) and normalizes legacy Vietnamese H1 `reason` strings (F9).
+ * - Rejects `"type": null` or any other `type` value (F2).
+ * - Uses `trimAscii` so non-ASCII characters like U+FEFF are never silently stripped (F2).
+ * - Requires valid ISO `ts` in `1970–9999` (F5) and normalizes legacy Vietnamese H1 `reason` strings (F9).
  */
 export function sanitizeApprovalRequestRecord(
   raw: unknown
 ): ApprovalRequestRecord | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
-  if (obj.type !== undefined && obj.type !== 'request') return null;
+  if ('type' in obj && obj.type !== undefined && obj.type !== 'request') {
+    return null;
+  }
 
   if (
     typeof obj.ts !== 'string' ||
@@ -583,15 +684,16 @@ export function sanitizeApprovalRequestRecord(
     return null;
   }
 
-  const ts = obj.ts.trim();
+  const ts = trimAscii(obj.ts);
   if (parseStrictIsoMs(ts) === null) return null;
 
-  const seat = obj.seat.trim();
-  const tool = obj.tool.trim();
-  const sha256 = obj.sha256.trim().toLowerCase();
+  const seat = trimAscii(obj.seat);
+  const tool = trimAscii(obj.tool);
+  const sha256 = trimAscii(obj.sha256).toLowerCase();
   if (!seat || !tool || !sha256 || !/^[0-9a-f]{16,128}$/.test(sha256)) return null;
 
-  const host = typeof obj.host === 'string' && obj.host.trim() ? obj.host.trim() : '-';
+  const host =
+    typeof obj.host === 'string' && trimAscii(obj.host) ? trimAscii(obj.host) : '-';
   const len =
     typeof obj.len === 'number' && Number.isFinite(obj.len) && obj.len >= 0
       ? Math.floor(obj.len)
@@ -617,13 +719,14 @@ export function sanitizeApprovalRequestRecord(
 
 /**
  * Strictly sanitize a decision record.
- * - Requires valid ISO `at` and `expiresAt` (F5 fail-closed).
+ * - Requires valid ISO `at` and `expiresAt` in `1970–9999` (F5 fail-closed).
  * - If `note` key is present (including `null`), it must be a string with <= 200 Unicode code points (F2b, F6).
+ * - Uses `trimAscii` on all string fields (F2).
  */
 export function sanitizeApprovalDecisionRecord(
   raw: unknown
 ): ApprovalDecisionRecord | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   if (obj.type !== 'decision') return null;
 
@@ -635,11 +738,11 @@ export function sanitizeApprovalDecisionRecord(
     return null;
   }
 
-  const requestId = obj.requestId.trim().toLowerCase();
+  const requestId = trimAscii(obj.requestId).toLowerCase();
   const decision = obj.decision;
   const by = obj.by;
-  const at = obj.at.trim();
-  const expiresAt = obj.expiresAt.trim();
+  const at = trimAscii(obj.at);
+  const expiresAt = trimAscii(obj.expiresAt);
 
   if (
     !/^[0-9a-f]{16}$/.test(requestId) ||
@@ -655,7 +758,7 @@ export function sanitizeApprovalDecisionRecord(
   if ('note' in obj && obj.note !== undefined) {
     if (typeof obj.note !== 'string') return null;
     if (countCodePoints(obj.note) > 200) return null;
-    const trimmed = obj.note.trim();
+    const trimmed = trimAscii(obj.note);
     if (trimmed.length > 0) {
       note = trimmed;
     }
@@ -673,12 +776,12 @@ export function sanitizeApprovalDecisionRecord(
 }
 
 /**
- * Strictly sanitize a claim record (F1, F2a).
+ * Strictly sanitize a claim record (F1, F2).
  */
 export function sanitizeApprovalClaimRecord(
   raw: unknown
 ): ApprovalClaimRecord | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   if (obj.type !== 'claim') return null;
 
@@ -699,12 +802,13 @@ export function sanitizeApprovalClaimRecord(
     return null;
   }
 
-  const requestId = obj.requestId.trim().toLowerCase();
-  const claimId = obj.claimId.trim();
-  const seatId = typeof obj.seatId === 'string' ? obj.seatId.trim() : '';
-  const tool = typeof obj.tool === 'string' ? obj.tool.trim() : '';
-  const digest = typeof obj.digest === 'string' ? obj.digest.trim().toLowerCase() : '';
-  const at = obj.at.trim();
+  const requestId = trimAscii(obj.requestId).toLowerCase();
+  const claimId = trimAscii(obj.claimId);
+  const seatId = typeof obj.seatId === 'string' ? trimAscii(obj.seatId) : '';
+  const tool = typeof obj.tool === 'string' ? trimAscii(obj.tool) : '';
+  const digest =
+    typeof obj.digest === 'string' ? trimAscii(obj.digest).toLowerCase() : '';
+  const at = trimAscii(obj.at);
 
   if (
     !/^[0-9a-f]{16}$/.test(requestId) ||
@@ -728,12 +832,12 @@ export function sanitizeApprovalClaimRecord(
 
 /**
  * Strictly sanitize an execution record.
- * Requires string `requestId`, `seatId`, `at`, `digest`, and `result: "executed" | "failed"` (F1a, F2a, F5).
+ * Requires string `requestId`, `seatId`, `at`, `digest`, and `result: "executed" | "failed"` (F1a, F2, F5).
  */
 export function sanitizeApprovalExecutionRecord(
   raw: unknown
 ): ApprovalExecutionRecord | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   if (obj.type !== 'execution') return null;
 
@@ -752,11 +856,11 @@ export function sanitizeApprovalExecutionRecord(
     return null;
   }
 
-  const requestId = obj.requestId.trim().toLowerCase();
-  const seatId = obj.seatId.trim();
-  const at = obj.at.trim();
+  const requestId = trimAscii(obj.requestId).toLowerCase();
+  const seatId = trimAscii(obj.seatId);
+  const at = trimAscii(obj.at);
   const result = obj.result;
-  const digest = obj.digest.trim().toLowerCase();
+  const digest = trimAscii(obj.digest).toLowerCase();
 
   if (
     !/^[0-9a-f]{16}$/.test(requestId) ||
@@ -769,12 +873,12 @@ export function sanitizeApprovalExecutionRecord(
   }
 
   const claimId =
-    typeof obj.claimId === 'string' && obj.claimId.trim().length > 0
-      ? obj.claimId.trim()
+    typeof obj.claimId === 'string' && trimAscii(obj.claimId).length > 0
+      ? trimAscii(obj.claimId)
       : undefined;
   const runId =
-    typeof obj.runId === 'string' && obj.runId.trim().length > 0
-      ? obj.runId.trim()
+    typeof obj.runId === 'string' && trimAscii(obj.runId).length > 0
+      ? trimAscii(obj.runId)
       : undefined;
 
   return {
@@ -795,7 +899,7 @@ export function sanitizeApprovalExecutionRecord(
 export function parseApprovalLedgerLine(
   line: string
 ): ApprovalLedgerRecord | null {
-  const trimmed = line.trim();
+  const trimmed = trimAscii(line);
   if (!trimmed) return null;
   try {
     const raw = JSON.parse(trimmed) as Record<string, unknown>;
@@ -809,7 +913,7 @@ export function parseApprovalLedgerLine(
     if (raw.type === 'execution') {
       return sanitizeApprovalExecutionRecord(raw);
     }
-    if (raw.type === undefined || raw.type === 'request') {
+    if (!('type' in raw) || raw.type === 'request') {
       return sanitizeApprovalRequestRecord(raw);
     }
     return null;
@@ -1256,16 +1360,14 @@ function buildApprovalItem(
  */
 export function deriveApprovalItems(nowMs = Date.now()): ApprovalItem[] {
   const map = foldApprovalLedger();
-  const items: ApprovalItem[] = [];
-  for (const folded of map.values()) {
-    items.push(buildApprovalItem(folded, nowMs));
-  }
-  items.sort((a, b) => {
-    const aMs = parseStrictIsoMs(a.ts) ?? 0;
-    const bMs = parseStrictIsoMs(b.ts) ?? 0;
-    return bMs - aMs;
+  const entries = Array.from(map.values());
+  entries.sort((a, b) => {
+    const aMs = parseStrictIsoMs(a.request.ts) ?? 0;
+    const bMs = parseStrictIsoMs(b.request.ts) ?? 0;
+    if (bMs !== aMs) return bMs - aMs;
+    return b.orderIndex - a.orderIndex;
   });
-  return items;
+  return entries.map((folded) => buildApprovalItem(folded, nowMs));
 }
 
 export interface GetApprovalsQuery {
@@ -1283,8 +1385,8 @@ export interface GetApprovalsResult {
 export function getApprovals(query: GetApprovalsQuery = {}): GetApprovalsResult {
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
   const all = deriveApprovalItems(query.nowMs);
-  const statusFilter = query.status?.trim().toLowerCase();
-  const seatFilter = query.seat?.trim();
+  const statusFilter = query.status ? trimAscii(query.status).toLowerCase() : undefined;
+  const seatFilter = query.seat ? trimAscii(query.seat) : undefined;
 
   const filtered = all.filter((item) => {
     if (seatFilter && item.seat !== seatFilter) {
@@ -1309,334 +1411,13 @@ export function getApprovalById(
   requestId: string,
   nowMs = Date.now()
 ): ApprovalItem | null {
-  const normId = (requestId || '').trim().toLowerCase();
+  const normId = trimAscii(requestId || '').toLowerCase();
   if (!normId) return null;
   const map = foldApprovalLedger();
   const folded = map.get(normId);
   if (!folded) return null;
   return buildApprovalItem(folded, nowMs);
 }
-
-export type ApprovalCheckFailureReason =
-  | 'not_found'
-  | 'pending'
-  | 'denied'
-  | 'expired'
-  | 'not_yet_valid'
-  | 'claimed'
-  | 'executed'
-  | 'failed'
-  | 'digest_mismatch'
-  | 'superseded';
-
-export type ApprovalCheckOutcome =
-  | {
-      ok: true;
-      allowed: true;
-      requestId: string;
-      status: 'approved';
-      expiresAt: string;
-      claimId?: string;
-      item: ApprovalItem;
-    }
-  | {
-      ok: false;
-      allowed: false;
-      status: ApprovalCheckFailureReason;
-      reason: ApprovalCheckFailureReason;
-      requestId?: string;
-      latestRequestId?: string;
-      expiresAt?: string;
-      claimId?: string;
-      item?: ApprovalItem;
-    };
-
-function makeCheckFailure(
-  reason: ApprovalCheckFailureReason,
-  extra: {
-    requestId?: string;
-    latestRequestId?: string;
-    expiresAt?: string;
-    claimId?: string;
-    item?: ApprovalItem;
-  } = {}
-): ApprovalCheckOutcome {
-  return {
-    ok: false,
-    allowed: false,
-    status: reason,
-    reason,
-    ...extra,
-  };
-}
-
-/**
- * Evaluate the NEWEST request for `(seat, tool, sha256)` ordered by UTC epoch timestamp (F4, F11).
- * If `requestId` is provided, it only confirms that the newest request matches `requestId`;
- * if a newer request exists, returns `reason: "superseded"` (never falls back to an older approval).
- */
-function evaluateApprovalForActionUnlocked(params: {
-  seat: string;
-  tool: string;
-  sha256: string;
-  requestId?: string;
-  nowMs: number;
-}):
-  | {
-      ok: true;
-      latest: FoldedRequestState;
-      item: ApprovalItem;
-      expiresAt: string;
-    }
-  | {
-      ok: false;
-      outcome: ApprovalCheckOutcome;
-    } {
-  const seat = (params.seat || '').trim();
-  const tool = (params.tool || '').trim();
-  const sha256 = (params.sha256 || '').trim().toLowerCase();
-  const reqIdFilter = params.requestId ? params.requestId.trim().toLowerCase() : undefined;
-  const nowMs = params.nowMs;
-
-  const map = foldApprovalLedger();
-  const candidates = Array.from(map.values()).filter(
-    (f) => f.request.seat === seat && f.request.tool === tool
-  );
-
-  if (candidates.length === 0) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('not_found', {
-        ...(reqIdFilter ? { requestId: reqIdFilter } : {}),
-      }),
-    };
-  }
-
-  // F4: Sort ascending by real UTC epoch timestamp, tie-breaking by ledger line order
-  candidates.sort((a, b) => {
-    if (a.requestTsMs !== b.requestTsMs) {
-      return a.requestTsMs - b.requestTsMs;
-    }
-    return a.orderIndex - b.orderIndex;
-  });
-
-  const exactDigestMatches = candidates.filter(
-    (c) => c.request.sha256 === sha256
-  );
-
-  if (exactDigestMatches.length === 0) {
-    const latestOther = candidates[candidates.length - 1];
-    return {
-      ok: false,
-      outcome: makeCheckFailure('digest_mismatch', {
-        requestId: latestOther.request.requestId,
-        item: buildApprovalItem(latestOther, nowMs),
-      }),
-    };
-  }
-
-  // F4: Always select the NEWEST request for (seat, tool, sha256) FIRST
-  const latest = exactDigestMatches[exactDigestMatches.length - 1];
-
-  // F4: If caller specified requestId, it must match the newest request; older requests are superseded
-  if (reqIdFilter && latest.request.requestId !== reqIdFilter) {
-    const matchedOld = candidates.some((c) => c.request.requestId === reqIdFilter);
-    return {
-      ok: false,
-      outcome: makeCheckFailure(matchedOld ? 'superseded' : 'not_found', {
-        requestId: reqIdFilter,
-        ...(matchedOld ? { latestRequestId: latest.request.requestId } : {}),
-      }),
-    };
-  }
-
-  const latestItem = buildApprovalItem(latest, nowMs);
-
-  if (!latest.decision) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('pending', {
-        requestId: latest.request.requestId,
-        item: latestItem,
-      }),
-    };
-  }
-
-  if (latest.decision.decision === 'denied') {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('denied', {
-        requestId: latest.request.requestId,
-        expiresAt: latest.decision.expiresAt,
-        item: latestItem,
-      }),
-    };
-  }
-
-  const expMs = parseStrictIsoMs(latest.decision.expiresAt);
-  const decAtMs = parseStrictIsoMs(latest.decision.at);
-  if (expMs === null || decAtMs === null) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('expired', {
-        requestId: latest.request.requestId,
-        expiresAt: latest.decision.expiresAt,
-        item: latestItem,
-      }),
-    };
-  }
-
-  if (latest.primaryExecution !== null) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure(
-        latest.primaryExecution.result === 'failed' ? 'failed' : 'executed',
-        {
-          requestId: latest.request.requestId,
-          expiresAt: latest.decision.expiresAt,
-          claimId: latest.primaryExecution.claimId,
-          item: latestItem,
-        }
-      ),
-    };
-  }
-
-  if (latest.claim !== null) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('claimed', {
-        requestId: latest.request.requestId,
-        expiresAt: latest.decision.expiresAt,
-        claimId: latest.claim.claimId,
-        item: latestItem,
-      }),
-    };
-  }
-
-  // F11: Decision `at` in the future is not yet valid
-  if (nowMs < decAtMs) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('not_yet_valid', {
-        requestId: latest.request.requestId,
-        expiresAt: latest.decision.expiresAt,
-        item: latestItem,
-      }),
-    };
-  }
-
-  if (nowMs >= expMs) {
-    return {
-      ok: false,
-      outcome: makeCheckFailure('expired', {
-        requestId: latest.request.requestId,
-        expiresAt: latest.decision.expiresAt,
-        item: latestItem,
-      }),
-    };
-  }
-
-  return {
-    ok: true,
-    latest,
-    item: latestItem,
-    expiresAt: latest.decision.expiresAt,
-  };
-}
-
-/**
- * Non-consuming check for an active approval for `(seat, tool, sha256)`.
- */
-export function findActiveApprovalForAction(params: {
-  seat: string;
-  tool: string;
-  sha256: string;
-  requestId?: string;
-  nowMs?: number;
-}): ApprovalCheckOutcome {
-  const nowMs = params.nowMs ?? Date.now();
-  const evaluated = evaluateApprovalForActionUnlocked({
-    ...params,
-    nowMs,
-  });
-  if (!evaluated.ok) {
-    return evaluated.outcome;
-  }
-  return {
-    ok: true,
-    allowed: true,
-    requestId: evaluated.latest.request.requestId,
-    status: 'approved',
-    expiresAt: evaluated.expiresAt,
-    item: evaluated.item,
-  };
-}
-
-/**
- * Atomic single-use claim/consume before action execution (F1, F4, F11, F12):
- * Under the cross-process lock, checks if the newest request for `(seat, tool, sha256)`
- * is `approved`, valid (`now >= decision.at` and `now < decision.expiresAt`), unclaimed,
- * and unexecuted; if so, writes a `claim` record and returns `{ ok: true, allowed: true, status: 'approved', requestId, claimId, expiresAt }`.
- */
-export function checkAndConsumeApproval(params: {
-  seat: string;
-  tool: string;
-  sha256: string;
-  requestId?: string;
-  nowMs?: number;
-}): ApprovalCheckOutcome {
-  if (isFenced() && !isFenceGuardDisabledForTest()) {
-    throw new Error('[approvals-ledger] Instance is fenced. Writes are barred.');
-  }
-
-  return withApprovalLock(() => {
-    const nowMs = params.nowMs ?? Date.now();
-    const evaluated = evaluateApprovalForActionUnlocked({
-      ...params,
-      nowMs,
-    });
-    if (!evaluated.ok) {
-      return evaluated.outcome;
-    }
-
-    const { latest, expiresAt } = evaluated;
-    const atIso = new Date(nowMs).toISOString();
-    const claimId = crypto
-      .createHash('sha256')
-      .update(
-        `${latest.request.requestId}|${process.pid}|${atIso}|${crypto.randomBytes(8).toString('hex')}`,
-        'utf8'
-      )
-      .digest('hex')
-      .slice(0, 16);
-
-    const claimRecord: ApprovalClaimRecord = {
-      type: 'claim',
-      requestId: latest.request.requestId,
-      claimId,
-      seatId: latest.request.seat,
-      tool: latest.request.tool,
-      digest: latest.request.sha256,
-      at: atIso,
-    };
-
-    const targetFile = resolveTargetFileForRequest(latest.sourceFile, atIso);
-    appendApprovalRecordUnlocked(claimRecord, targetFile);
-    latest.claim = claimRecord;
-
-    return {
-      ok: true,
-      allowed: true,
-      requestId: latest.request.requestId,
-      status: 'approved',
-      expiresAt,
-      claimId,
-      item: buildApprovalItem(latest, nowMs),
-    };
-  });
-}
-
-export const consumeApprovalForAction = checkAndConsumeApproval;
 
 export interface RecordDecisionSuccess {
   ok: true;
@@ -1674,7 +1455,7 @@ export function recordApprovalDecision(params: {
     throw new Error('[approvals-ledger] Instance is fenced. Writes are barred.');
   }
 
-  const normId = (params.requestId || '').trim().toLowerCase();
+  const normId = trimAscii(params.requestId || '').toLowerCase();
   if (!normId) {
     return {
       ok: false,
@@ -1718,7 +1499,7 @@ export function recordApprovalDecision(params: {
         message: 'Field `note` must not exceed 200 characters.',
       };
     }
-    const trimmed = params.note.trim();
+    const trimmed = trimAscii(params.note);
     if (trimmed.length > 0) {
       noteClean = trimmed;
     }
@@ -1832,7 +1613,7 @@ export function recordApprovalExecution(params: {
   }
 
   const outcome = withApprovalLock((): RecordExecutionOutcome => {
-    const normId = (params.requestId || '').trim().toLowerCase();
+    const normId = trimAscii(params.requestId || '').toLowerCase();
     const nowMs = params.nowMs ?? Date.now();
     const map = foldApprovalLedger();
     const existing = map.get(normId);
@@ -1856,9 +1637,9 @@ export function recordApprovalExecution(params: {
       };
     }
 
-    const providedDigest = (params.digest ?? existing.request.sha256)
-      .trim()
-      .toLowerCase();
+    const providedDigest = trimAscii(
+      params.digest ?? existing.request.sha256
+    ).toLowerCase();
 
     // F1a: Already executed — 0 lines written on repeat/conflict
     if (existing.primaryExecution !== null) {

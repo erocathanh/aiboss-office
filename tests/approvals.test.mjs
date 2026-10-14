@@ -15,18 +15,21 @@ const testDataDir = path.join(
 );
 process.env.AIBOSS_DATA_DIR = testDataDir;
 
+import * as approvalsLedgerModule from '../src/lib/approvals-ledger.ts';
 import {
-  checkAndConsumeApproval,
+  ApprovalLockTimeoutError,
   computeRequestId,
   getApprovalsDir,
   getApprovalLogPathForDate,
   getApprovals,
   getApprovalById,
+  getSystemBootId,
   isLockFileStale,
   parseIsoTimestampMs,
   recordApprovalDecision,
   recordApprovalExecution,
   readApprovalRecords,
+  trimAscii,
   withApprovalLock,
 } from '../src/lib/approvals-ledger.ts';
 import { GET as getApprovalsRoute } from '../src/app/api/approvals/route.ts';
@@ -99,7 +102,7 @@ function runMarkCli(requestId, result, runId, claimId) {
   return { status: res.status, body: parsed, rawStdout: stdout, rawStderr: res.stderr };
 }
 
-console.log('--- Testing A-4 v03 Approval Ledger & Hook Contract (tests/approvals.test.mjs) ---');
+console.log('--- Testing A-4 v04 Approval Ledger & Hook Contract (tests/approvals.test.mjs) ---');
 
 await (async () => {
   try {
@@ -992,6 +995,19 @@ await (async () => {
     );
     assert.equal(spoofedLocalhostRes.status, 503, 'F13: localhost.example.com must not match localhost');
 
+    const emptyHostRes = await postDecisionRoute(
+      new NextRequest(`http://localhost.example.com/api/approvals/${reqF7b}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved' }),
+      }),
+      { params: Promise.resolve({ requestId: reqF7b }) }
+    );
+    assert.equal(emptyHostRes.status, 503, 'F13 v04: empty Host header must not match localhost');
+
     const unconfRes = await postDecisionRoute(
       new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF7b}/decision`, {
         method: 'POST',
@@ -1007,7 +1023,7 @@ await (async () => {
     assert.equal(unconfRes.status, 200);
     const unconfJson = await unconfRes.json();
     assert.equal(unconfJson.decision.by, 'localhost', 'F7: unconfigured env must never attribute by="owner"');
-    console.log('  [PASS] Case 21 (F7 & F13): Basic Auth mandatory on localhost when configured; strict by="owner" vs by="localhost"');
+    console.log('  [PASS] Case 21 (F7 & F13 v04): Basic Auth timingSafeEqual on localhost when configured; empty/spoofed Host rejected with 503');
 
     // Case 22 (F8): Public decision API ignores client-supplied `expiresAt`
     const f8Ts = '2026-10-14T11:40:00Z';
@@ -1132,7 +1148,7 @@ await (async () => {
     console.log('  [PASS] Case 23 (F9): all 7 verbatim Vietnamese H1 reasons normalize to English codes in API and UI (0 Vietnamese chars)');
 
     // =========================================================================
-    // ADVERSARIAL TESTS FOR A-4 v03 (Cases 24 - 32: Closing Hermes Round 2)
+    // ADVERSARIAL TESTS FOR A-4 v03 + v04 (Cases 24 - 32: Closing Hermes Rounds 2 & 3)
     // =========================================================================
 
     // Case 24 (F1a v03): Marking an expired request throws Error in TS (when throwOnError=true),
@@ -1197,15 +1213,22 @@ await (async () => {
     );
     console.log('  [PASS] Case 24 (F1a v03): expired mark throws in TS, exits 2 in Python, and writes 0 bytes to ledger');
 
-    // Case 25 (F1b v03): Safe atomic stale lock recovery (`rename` under `.approvals.reclaim.lock`)
-    // + unified liveness rule (never steal lock held by a live PID even if age > 30s).
+    // Case 25 (F14, F15, F16 v04): Single atomic `rename` stale lock recovery (no `.approvals.reclaim.lock`),
+    // `bootId` liveness check (protects live PID with matching bootId, reclaims PID reuse across reboot),
+    // old `.approvals.lock.tmp*`/`.stale-*` artifact sweep, and strict deadline enforcement (`lock_timeout`).
     const lockPath = path.join(getApprovalsDir(), '.approvals.lock');
     const traceFile = path.join(testDataDir, 'lock-reclaim-trace.txt');
+    const currentBootId = getSystemBootId();
 
-    // 25a: Verify live PID lock > 30s old is NOT considered stale in either TS or Python
+    // 25a (F16): Verify live PID lock > 30s old with matching bootId is NOT stale in TS or Python,
+    // whereas live PID lock with MISMATCHED bootId (simulating reboot PID reuse) IS stale in both!
     fs.writeFileSync(
       lockPath,
-      JSON.stringify({ pid: process.pid, createdAt: Date.now() - 60_000 }),
+      JSON.stringify({
+        pid: process.pid,
+        bootId: currentBootId,
+        createdAt: Date.now() - 60_000,
+      }),
       'utf-8'
     );
     const pastTimeSec = (Date.now() - 60_000) / 1000;
@@ -1213,7 +1236,7 @@ await (async () => {
     assert.equal(
       isLockFileStale(lockPath),
       false,
-      'Case 25 (F1b): TS must NEVER treat a lock held by a live PID as stale even if age > 30s'
+      'Case 25a (F16): TS must NEVER treat a lock held by a live PID with matching bootId as stale even if age > 30s'
     );
     const pyLiveCheck = spawnSync(
       'python3',
@@ -1226,15 +1249,56 @@ await (async () => {
     assert.equal(
       pyLiveCheck.stdout.trim(),
       'False',
-      'Case 25 (F1b): Python must NEVER treat a lock held by a live PID as stale even if age > 30s'
+      'Case 25a (F16): Python must NEVER treat a lock held by a live PID with matching bootId as stale even if age > 30s'
+    );
+
+    // Mismatched bootId with live PID -> stale in both TS and Python!
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        bootId: 'boot-id-from-previous-reboot-000',
+        createdAt: Date.now() - 60_000,
+      }),
+      'utf-8'
+    );
+    assert.equal(
+      isLockFileStale(lockPath),
+      true,
+      'Case 25a (F16): TS must treat lock with mismatched bootId as stale even if PID is alive after reboot'
+    );
+    const pyRebootCheck = spawnSync(
+      'python3',
+      [
+        '-c',
+        `import sys; sys.path.insert(0, 'operations/scripts'); import approval_check; print(approval_check.is_lock_file_stale(${JSON.stringify(lockPath)}))`,
+      ],
+      { env: { ...process.env, AIBOSS_DATA_DIR: testDataDir }, encoding: 'utf-8' }
+    );
+    assert.equal(
+      pyRebootCheck.stdout.trim(),
+      'True',
+      'Case 25a (F16): Python must treat lock with mismatched bootId as stale even if PID is alive after reboot'
     );
     fs.unlinkSync(lockPath);
 
-    // 25b: Seed an orphan lock with a dead PID (99999999) and launch 2 concurrent child processes
-    // that both reclaim the stale lock, record `enter`, sleep 300ms inside the critical section, and record `exit`.
+    // Verify F16 sweep of old `.approvals.lock.tmp-*` / `.approvals.lock.stale-*` (> 10 minutes old)
+    const oldTmpArtifact = path.join(getApprovalsDir(), '.approvals.lock.tmp-old-crash');
+    const oldStaleArtifact = path.join(getApprovalsDir(), '.approvals.lock.stale-old-crash');
+    fs.writeFileSync(oldTmpArtifact, 'old', 'utf-8');
+    fs.writeFileSync(oldStaleArtifact, 'old', 'utf-8');
+    const fifteenMinAgoSec = (Date.now() - 15 * 60_000) / 1000;
+    fs.utimesSync(oldTmpArtifact, fifteenMinAgoSec, fifteenMinAgoSec);
+    fs.utimesSync(oldStaleArtifact, fifteenMinAgoSec, fifteenMinAgoSec);
+    withApprovalLock(() => {});
+    assert.equal(fs.existsSync(oldTmpArtifact), false, 'F16: old .tmp-* lock artifact must be swept');
+    assert.equal(fs.existsSync(oldStaleArtifact), false, 'F16: old .stale-* lock artifact must be swept');
+
+    // 25b (F14): Seed an orphan lock with a dead PID (99999999) and launch 2 concurrent child processes
+    // that both reclaim the stale lock via single atomic `rename`, record `enter`, sleep 300ms inside the critical section, and record `exit`.
     fs.writeFileSync(
       lockPath,
-      JSON.stringify({ pid: 99999999, createdAt: Date.now() - 60_000 }),
+      JSON.stringify({ pid: 99999999, bootId: currentBootId, createdAt: Date.now() - 60_000 }),
       'utf-8'
     );
     fs.writeFileSync(traceFile, '', 'utf-8');
@@ -1288,16 +1352,74 @@ await (async () => {
     assert.deepEqual(
       actions,
       ['enter', 'exit', 'enter', 'exit'],
-      `Case 25 (F1b): Critical sections overlapped during stale lock recovery! Trace: ${JSON.stringify(traceLines)}`
+      `Case 25b (F14): Critical sections overlapped during stale lock recovery! Trace: ${JSON.stringify(traceLines)}`
     );
     const leftoverLocks = fs
       .readdirSync(getApprovalsDir())
       .filter((f) => f.startsWith('.approvals.'));
-    assert.deepEqual(leftoverLocks, [], 'Case 25 (F1b): all lock/stale/reclaim files must be cleaned up');
-    console.log('  [PASS] Case 25 (F1b v03): atomic stale lock recovery serializes concurrent reclaimers (enter->exit->enter->exit) and protects live PIDs');
+    assert.deepEqual(leftoverLocks, [], 'Case 25b (F14): all lock/stale files must be cleaned up');
 
-    // Case 26 (F2a, F2b, F2c v03): Strict TS & Python parity on (a) non-string seatId,
-    // (b) 201-space note vs 150-emoji note, and (c) sub-millisecond timestamp truncation
+    // 25c (F15):
+    // (1) Positive control: orphan lock (dead PID 99999999) is reclaimed by approval_check.py in < 1s
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 99999999, bootId: currentBootId, createdAt: Date.now() - 10_000 }),
+      'utf-8'
+    );
+    const t0Reclaim = Date.now();
+    const pyOrphanReclaim = runCheckCli(f8Seat, f8Tool, f8Sha);
+    const elapsedReclaimMs = Date.now() - t0Reclaim;
+    assert.equal(pyOrphanReclaim.status, 0, 'Case 25c (F15): orphan lock must be reclaimed by approval_check.py');
+    assert.equal(pyOrphanReclaim.body.status, 'approved');
+    assert.ok(
+      elapsedReclaimMs < 1000,
+      `Case 25c (F15): orphan lock reclaim must finish in < 1000ms, took ${elapsedReclaimMs}ms`
+    );
+
+    // (2) Live PID holding `.approvals.lock` -> TS withApprovalLock throws ApprovalLockTimeoutError,
+    // POST /api/approvals/<id>/decision returns HTTP 503 (`error: 'lock_timeout'`), and
+    // Python approval_check.py (timeout 5s) exits 2 with `{"status": "lock_timeout"}` in <= 6s (never hangs!)
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: process.pid, bootId: currentBootId, createdAt: Date.now() }),
+      'utf-8'
+    );
+    try {
+      assert.throws(
+        () => withApprovalLock(() => {}, 150),
+        (err) => err instanceof ApprovalLockTimeoutError && err.code === 'lock_timeout',
+        'Case 25c (F15): TS withApprovalLock must throw ApprovalLockTimeoutError when deadline expires'
+      );
+
+      const t0PyTimeout = Date.now();
+      const pyLockTimeout = runCheckCli(f8Seat, f8Tool, f8Sha);
+      const elapsedPyTimeoutMs = Date.now() - t0PyTimeout;
+      assert.equal(
+        pyLockTimeout.status,
+        2,
+        'Case 25c (F15): approval_check.py must exit 2 on lock_timeout'
+      );
+      assert.equal(
+        pyLockTimeout.body.status,
+        'lock_timeout',
+        `Case 25c (F15): expected status="lock_timeout", got ${JSON.stringify(pyLockTimeout.body)}`
+      );
+      assert.ok(
+        elapsedPyTimeoutMs >= 4800 && elapsedPyTimeoutMs <= 6000,
+        `Case 25c (F15): approval_check.py timeout must complete in 4.8s..6.0s, took ${elapsedPyTimeoutMs}ms`
+      );
+    } finally {
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        /* ignore */
+      }
+    }
+    console.log('  [PASS] Case 25 (F14, F15, F16 v04): single-rename stale lock recovery, bootId liveness, and <=6s lock_timeout enforcement');
+
+    // Case 26 (F2a, F2b, F2c v03 + F2 v04): Strict TS & Python parity on (a) non-string seatId,
+    // (b) 201-space note vs 150-emoji note, (c) sub-millisecond timestamp truncation,
+    // (d) `"type": null` on request line rejected identically, and (e) U+FEFF (BOM) never stripped
     const c26TsA = '2026-10-14T12:10:00Z';
     const c26SeatA = '123';
     const c26ToolA = 'Bash';
@@ -1492,18 +1614,147 @@ await (async () => {
       'utf-8'
     );
     const pyTie = runCheckCli(c26SeatTie, c26ToolA, c26ShaTie);
-    const tsTie = checkAndConsumeApproval({
-      seat: c26SeatTie,
-      tool: c26ToolA,
-      sha256: c26ShaTie,
-    });
+    const tsTieList = getApprovals({ seat: c26SeatTie }).approvals;
     assert.equal(pyTie.status, 2);
     assert.equal(pyTie.body.requestId, reqTie2, 'F2c: Python must pick R_tie_2 on same-ms tie');
     assert.equal(pyTie.body.status, 'pending');
-    assert.equal(tsTie.ok, false);
-    assert.equal(tsTie.requestId, reqTie2, 'F2c: TS must pick R_tie_2 on same-ms tie');
-    assert.equal(tsTie.status, 'pending');
-    console.log('  [PASS] Case 26 (F2a, F2b, F2c v03): TS & Python fold identically on strict string types, Unicode code points, and ms truncation');
+    assert.equal(tsTieList[0]?.requestId, reqTie2, 'F2c: TS must sort R_tie_2 first on same-ms tie');
+    assert.equal(tsTieList[0]?.status, 'pending');
+
+    // Verify (d) F2 v04 Counterexample 1: R1 old `approved`, R2 newer with `"type": null`
+    // Both TS and Python must reject R2 (`"type": null`) and return R1 (`approved`).
+    const c26SeatTypeNull = 'seat-c26-typenull';
+    const c26ShaTypeNull = 'c26ec26ec26ec26ec26ec26ec26ec26ec26ec26ec26ec26ec26ec26ec26ec26e';
+    const tsTypeNull1 = '2026-10-14T12:11:00Z';
+    const tsTypeNull2 = '2026-10-14T12:12:00Z';
+    const reqTypeNull1 = computeRequestId(tsTypeNull1, c26SeatTypeNull, c26ToolA, c26ShaTypeNull);
+    const reqTypeNull2 = computeRequestId(tsTypeNull2, c26SeatTypeNull, c26ToolA, c26ShaTypeNull);
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: tsTypeNull1,
+          seat: c26SeatTypeNull,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaTypeNull,
+          head60: 'curl -X POST https://api.example.com/typenull1',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqTypeNull1,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+        }),
+        JSON.stringify({
+          type: null,
+          ts: tsTypeNull2,
+          seat: c26SeatTypeNull,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaTypeNull,
+          head60: 'curl -X POST https://api.example.com/typenull2',
+          reason: 'external_post_send',
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+    assert.equal(
+      getApprovalById(reqTypeNull2),
+      null,
+      'F2 v04: TS must reject request line with "type": null'
+    );
+    assert.equal(getApprovalById(reqTypeNull1)?.status, 'approved');
+    const pyTypeNull = runCheckCli(c26SeatTypeNull, c26ToolA, c26ShaTypeNull);
+    assert.equal(
+      pyTypeNull.status,
+      0,
+      'F2 v04: Python must reject R2 ("type": null) and return R1 (approved)'
+    );
+    assert.equal(pyTypeNull.body.requestId, reqTypeNull1);
+    assert.equal(pyTypeNull.body.status, 'approved');
+
+    // Verify (e) F2 v04 Counterexample 2: U+FEFF (BOM) in `execution.seatId` (`"\uFEFF" + seat`)
+    // and in `decision.note` (`"\uFEFF" + "a".repeat(200)` = 201 code points) -> neither TS nor Python strips U+FEFF!
+    assert.equal(trimAscii('\uFEFFseat-bom\uFEFF'), '\uFEFFseat-bom\uFEFF', 'F2 v04: trimAscii must preserve U+FEFF');
+    const c26SeatBom1 = 'seat-c26-bom-exec';
+    const c26ShaBom1 = 'c26fc26fc26fc26fc26fc26fc26fc26fc26fc26fc26fc26fc26fc26fc26fc26f';
+    const tsBom1 = '2026-10-14T12:13:00Z';
+    const reqBom1 = computeRequestId(tsBom1, c26SeatBom1, c26ToolA, c26ShaBom1);
+
+    const c26SeatBom2 = 'seat-c26-bom-note';
+    const c26ShaBom2 = 'c260c260c260c260c260c260c260c260c260c260c260c260c260c260c260c260';
+    const tsBom2 = '2026-10-14T12:13:01Z';
+    const reqBom2 = computeRequestId(tsBom2, c26SeatBom2, c26ToolA, c26ShaBom2);
+
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: tsBom1,
+          seat: c26SeatBom1,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaBom1,
+          head60: 'curl -X POST https://api.example.com/bom1',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqBom1,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+        }),
+        JSON.stringify({
+          type: 'execution',
+          requestId: reqBom1,
+          seatId: `\uFEFF${c26SeatBom1}`,
+          at: recentAtIso,
+          result: 'executed',
+          digest: c26ShaBom1,
+        }),
+        JSON.stringify({
+          ts: tsBom2,
+          seat: c26SeatBom2,
+          tool: c26ToolA,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c26ShaBom2,
+          head60: 'curl -X POST https://api.example.com/bom2',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          type: 'decision',
+          requestId: reqBom2,
+          decision: 'approved',
+          by: 'owner',
+          at: recentAtIso,
+          expiresAt: futureExpIso,
+          note: `\uFEFF${'a'.repeat(200)}`,
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+    // Both TS and Python must reject execution with seatId="\uFEFF"+seat -> reqBom1 stays approved
+    assert.equal(getApprovalById(reqBom1)?.status, 'approved', 'F2 v04: TS must not strip U+FEFF from execution.seatId');
+    const pyBom1 = runCheckCli(c26SeatBom1, c26ToolA, c26ShaBom1);
+    assert.equal(pyBom1.status, 0, 'F2 v04: Python must not strip U+FEFF from execution.seatId');
+    assert.equal(pyBom1.body.status, 'approved');
+
+    // Both TS and Python must reject decision with note="\uFEFF"+"a".repeat(200) (201 code points > 200) -> reqBom2 stays pending
+    assert.equal(getApprovalById(reqBom2)?.status, 'pending', 'F2 v04: TS must not strip U+FEFF from decision.note');
+    const pyBom2 = runCheckCli(c26SeatBom2, c26ToolA, c26ShaBom2);
+    assert.equal(pyBom2.status, 2);
+    assert.equal(pyBom2.body.status, 'pending', 'F2 v04: Python must not strip U+FEFF from decision.note');
+    console.log('  [PASS] Case 26 (F2 v03 + v04): TS & Python fold identically on "type": null, U+FEFF BOM, numeric seatId, Unicode code points, and ms truncation');
 
     // Case 27 (F4 v03): Select newest request for (seat, tool, sha256) BEFORE checking --request-id;
     // passing --request-id of an older approved request R1 when newer R2 is pending returns status="superseded" (exit 2, 0 bytes written)
@@ -1561,15 +1812,10 @@ await (async () => {
     assert.equal(pyC27.body.status, 'superseded');
     assert.equal(pyC27.body.requestId, reqC27R1);
 
-    const tsC27 = checkAndConsumeApproval({
-      seat: c27Seat,
-      tool: c27Tool,
-      sha256: c27Sha,
-      requestId: reqC27R1,
-    });
-    assert.equal(tsC27.ok, false);
-    assert.equal(tsC27.status, 'superseded');
-    assert.equal(tsC27.requestId, reqC27R1);
+    const pyC27Newest = runCheckCli(c27Seat, c27Tool, c27Sha);
+    assert.equal(pyC27Newest.status, 2);
+    assert.equal(pyC27Newest.body.status, 'pending');
+    assert.equal(pyC27Newest.body.requestId, reqC27R2);
     assert.equal(
       fs.statSync(todayPath).size,
       sizeBeforeC27,
@@ -1577,17 +1823,21 @@ await (async () => {
     );
     console.log('  [PASS] Case 27 (F4 v03): --request-id of older request returns status="superseded" (exit 2, 0 bytes written)');
 
-    // Case 28 (F5 v03): Identical ASCII-only ISO-8601 timestamp validation in TS and Python
+    // Case 28 (F5 v03 + v04): Identical ASCII-only ISO-8601 timestamp validation in TS and Python
+    // including year range [1970, 9999] and UTC epoch range [0, 253_402_300_799_999]
     const invalidTimestamps = [
       '2026-02-30T00:00:00Z',
       '2026-10-14T24:00:00Z',
       '٢٠٢٦-10-14T00:00:00Z',
+      '0099-01-01T00:00:00Z',
+      '9999-12-31T23:59:59-00:01',
+      '1970-01-01T00:00:00+00:01',
     ];
     for (const badTs of invalidTimestamps) {
       assert.equal(
         parseIsoTimestampMs(badTs),
         null,
-        `Case 28 (F5): TS must reject invalid timestamp ${badTs}`
+        `Case 28 (F5 v04): TS must reject invalid/out-of-bounds timestamp ${badTs}`
       );
       const pyBad = spawnSync(
         'python3',
@@ -1598,20 +1848,72 @@ await (async () => {
         { encoding: 'utf-8' }
       );
       assert.equal(
+        pyBad.status,
+        0,
+        `Case 28 (F5 v04): Python parse_iso_ts_ms must not raise OverflowError on ${badTs}: ${pyBad.stderr}`
+      );
+      assert.equal(
         pyBad.stdout.trim(),
         'None',
-        `Case 28 (F5): Python must reject invalid timestamp ${badTs}`
+        `Case 28 (F5 v04): Python must reject invalid/out-of-bounds timestamp ${badTs}`
       );
     }
+
+    // Also append lines with '0099-01-01T00:00:00Z' and '9999-12-31T23:59:59-00:01' into the ledger
+    // and verify neither TS getApprovals nor Python approval_check.py crashes!
+    fs.appendFileSync(
+      todayPath,
+      [
+        JSON.stringify({
+          ts: '0099-01-01T00:00:00Z',
+          seat: 'seat-f5-0099',
+          tool: 'Bash',
+          host: 'api.example.com',
+          len: 64,
+          sha256: 'f500f500f500f500f500f500f500f500f500f500f500f500f500f500f500f500',
+          head60: 'curl -X POST https://api.example.com/f5-0099',
+          reason: 'external_post_send',
+        }),
+        JSON.stringify({
+          ts: '9999-12-31T23:59:59-00:01',
+          seat: 'seat-f5-9999',
+          tool: 'Bash',
+          host: 'api.example.com',
+          len: 64,
+          sha256: 'f599f599f599f599f599f599f599f599f599f599f599f599f599f599f599f599',
+          head60: 'curl -X POST https://api.example.com/f5-9999',
+          reason: 'external_post_send',
+        }),
+      ].join('\n') + '\n',
+      'utf-8'
+    );
+    assert.equal(getApprovals({ seat: 'seat-f5-0099' }).approvals.length, 0);
+    assert.equal(getApprovals({ seat: 'seat-f5-9999' }).approvals.length, 0);
+    const pyF50099 = runCheckCli(
+      'seat-f5-0099',
+      'Bash',
+      'f500f500f500f500f500f500f500f500f500f500f500f500f500f500f500f500'
+    );
+    assert.equal(pyF50099.status, 2);
+    assert.equal(pyF50099.body.status, 'not_found');
+    const pyF59999 = runCheckCli(
+      'seat-f5-9999',
+      'Bash',
+      'f599f599f599f599f599f599f599f599f599f599f599f599f599f599f599f599'
+    );
+    assert.equal(pyF59999.status, 2);
+    assert.equal(pyF59999.body.status, 'not_found');
 
     const validTimestamps = [
       '2026-10-14T19:46:42.818Z',
       '2026-10-14T12:00:00+02:00',
       '2026-10-14T12:00:00.123456Z',
+      '1970-01-01T00:00:00Z',
+      '9999-12-31T23:59:59.999Z',
     ];
     for (const goodTs of validTimestamps) {
       const tsMs = parseIsoTimestampMs(goodTs);
-      assert.equal(typeof tsMs, 'number', `Case 28 (F5): TS must accept ${goodTs}`);
+      assert.equal(typeof tsMs, 'number', `Case 28 (F5 v04): TS must accept ${goodTs}`);
       const pyGoodDirect = spawnSync(
         'python3',
         [
@@ -1623,10 +1925,10 @@ await (async () => {
       assert.equal(
         Number(pyGoodDirect.stdout.trim()),
         tsMs,
-        `Case 28 (F5): TS and Python must produce identical ms epoch for ${goodTs}`
+        `Case 28 (F5 v04): TS and Python must produce identical ms epoch for ${goodTs}`
       );
     }
-    console.log('  [PASS] Case 28 (F5 v03): TS & Python reject 2026-02-30, 24:00:00, and Unicode digits, and match on valid ISO timestamps');
+    console.log('  [PASS] Case 28 (F5 v03 + v04): TS & Python reject 0099-01-01, 9999-12-31T23:59:59-00:01, 2026-02-30, 24:00:00, and Unicode digits, and match on valid ISO timestamps');
 
     // Case 29 (F10 v03): O_APPEND atomic write prevents TS/Python from overwriting a concurrent H1 append
     // that occurs right after fstatSync measures file size.
@@ -1785,13 +2087,12 @@ await (async () => {
     assert.equal(pyC30Mark.status, 2);
     assert.equal(pyC30Mark.body.status, 'not_yet_valid');
 
-    const tsC30 = checkAndConsumeApproval({
-      seat: c30Seat,
-      tool: c30Tool,
-      sha256: c30Sha,
+    const tsC30Exec = recordApprovalExecution({
+      requestId: reqC30,
+      result: 'executed',
     });
-    assert.equal(tsC30.ok, false);
-    assert.equal(tsC30.status, 'not_yet_valid');
+    assert.equal(tsC30Exec.ok, false);
+    assert.equal(tsC30Exec.status, 'not_yet_valid');
     assert.equal(
       fs.statSync(todayPath).size,
       sizeBeforeC30,
@@ -1831,9 +2132,21 @@ await (async () => {
     );
     console.log('  [PASS] Case 31 (F6 v03): note: null and 201-space note return HTTP 400 with 0 bytes written');
 
-    // Case 32 (F12 v03): Direct test of exported TypeScript checkAndConsumeApproval function
+    // Case 32 (Item 6 v04): Verify unused TS checkAndConsumeApproval & consumeApprovalForAction are removed
+    // and end-to-end consumption via approval_check.py --consume pairs cleanly with TS recordApprovalExecution
+    assert.equal(
+      'checkAndConsumeApproval' in approvalsLedgerModule,
+      false,
+      'Case 32 (v04): checkAndConsumeApproval dead code must be removed from src/lib/approvals-ledger.ts'
+    );
+    assert.equal(
+      'consumeApprovalForAction' in approvalsLedgerModule,
+      false,
+      'Case 32 (v04): consumeApprovalForAction dead code must be removed from src/lib/approvals-ledger.ts'
+    );
+
     const c32Ts = '2026-10-14T14:20:00Z';
-    const c32Seat = 'seat-c32-f12';
+    const c32Seat = 'seat-c32-v04';
     const c32Tool = 'Bash';
     const c32Sha = 'c320c320c320c320c320c320c320c320c320c320c320c320c320c320c320c320';
     const reqC32 = computeRequestId(c32Ts, c32Seat, c32Tool, c32Sha);
@@ -1852,13 +2165,9 @@ await (async () => {
       'utf-8'
     );
 
-    const c32Pending = checkAndConsumeApproval({
-      seat: c32Seat,
-      tool: c32Tool,
-      sha256: c32Sha,
-    });
-    assert.equal(c32Pending.ok, false);
-    assert.equal(c32Pending.status, 'pending');
+    const c32Pending = runCheckCli(c32Seat, c32Tool, c32Sha, ['--consume']);
+    assert.equal(c32Pending.status, 2);
+    assert.equal(c32Pending.body.status, 'pending');
 
     recordApprovalDecision({
       requestId: reqC32,
@@ -1866,45 +2175,40 @@ await (async () => {
       by: 'owner',
     });
 
-    const c32Consumed = checkAndConsumeApproval({
-      seat: c32Seat,
-      tool: c32Tool,
-      sha256: c32Sha,
-      requestId: reqC32,
-    });
-    assert.equal(c32Consumed.ok, true);
-    assert.equal(c32Consumed.status, 'approved');
-    assert.equal(c32Consumed.requestId, reqC32);
-    assert.ok(c32Consumed.claimId && c32Consumed.claimId.length === 16);
+    const c32Consumed = runCheckCli(c32Seat, c32Tool, c32Sha, [
+      '--request-id',
+      reqC32,
+      '--consume',
+    ]);
+    assert.equal(c32Consumed.status, 0);
+    assert.equal(c32Consumed.body.status, 'approved');
+    assert.equal(c32Consumed.body.requestId, reqC32);
+    assert.ok(c32Consumed.body.claimId && c32Consumed.body.claimId.length === 16);
 
     const sizeAfterFirstConsume = fs.statSync(todayPath).size;
-    const c32Second = checkAndConsumeApproval({
-      seat: c32Seat,
-      tool: c32Tool,
-      sha256: c32Sha,
-    });
-    assert.equal(c32Second.ok, false);
-    assert.equal(c32Second.status, 'claimed');
-    assert.equal(c32Second.claimId, c32Consumed.claimId);
+    const c32Second = runCheckCli(c32Seat, c32Tool, c32Sha, ['--consume']);
+    assert.equal(c32Second.status, 2);
+    assert.equal(c32Second.body.status, 'claimed');
+    assert.equal(c32Second.body.claimId, c32Consumed.body.claimId);
     assert.equal(
       fs.statSync(todayPath).size,
       sizeAfterFirstConsume,
-      'Case 32 (F12): second checkAndConsumeApproval must write 0 bytes'
+      'Case 32 (v04): second --consume must write 0 bytes'
     );
 
     const c32Exec = recordApprovalExecution({
       requestId: reqC32,
       result: 'executed',
-      claimId: c32Consumed.claimId,
+      claimId: c32Consumed.body.claimId,
       runId: 'run-c32',
       throwOnError: true,
     });
     assert.equal(c32Exec.ok, true);
     assert.equal(c32Exec.status, 'executed');
     assert.equal(getApprovalById(reqC32)?.status, 'executed');
-    console.log('  [PASS] Case 32 (F12 v03): exported TypeScript checkAndConsumeApproval atomically claims and pairs with recordApprovalExecution');
+    console.log('  [PASS] Case 32 (Item 6 v04): unused TS checkAndConsumeApproval removed; Python --consume pairs with TS recordApprovalExecution');
 
-    console.log('>>> ALL 32 A-4 v03 APPROVAL LEDGER TEST CASES PASSED <<<');
+    console.log('>>> ALL 32 A-4 v04 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

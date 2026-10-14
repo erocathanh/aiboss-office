@@ -13,16 +13,30 @@ import hashlib
 import json
 import os
 import re
+import socket
+import subprocess
 import sys
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+ASCII_WS = " \t\r\n"
+
 ISO_ASCII_RE = re.compile(
-    r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$"
+    r"^(19[7-9][0-9]|[2-9][0-9]{3})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$"
 )
 HEX16_RE = re.compile(r"^[0-9a-f]{16}$")
 HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{16,128}$")
 STALE_UNMEASURABLE_LOCK_MS = 30000
+STALE_LOCK_ARTIFACT_SWEEP_MS = 10 * 60000
+MIN_VALID_UTC_MS = 0
+MAX_VALID_UTC_MS = 253402300799999
+
+_CACHED_BOOT_ID: Optional[str] = None
+
+
+def strip_ascii(s: str) -> str:
+    """Strip ONLY ASCII whitespace `[ \\t\\r\\n]` matching TypeScript `trimAscii` (F2)."""
+    return s.strip(ASCII_WS)
 
 
 def find_office_root(start_dir: Optional[str] = None) -> str:
@@ -57,14 +71,18 @@ def find_office_root(start_dir: Optional[str] = None) -> str:
 
 def get_approvals_dir() -> str:
     env_data_dir = os.environ.get("AIBOSS_DATA_DIR")
-    if env_data_dir and env_data_dir.strip():
-        return os.path.join(os.path.abspath(env_data_dir.strip()), "approvals")
+    if env_data_dir and strip_ascii(env_data_dir):
+        return os.path.join(os.path.abspath(strip_ascii(env_data_dir)), "approvals")
     root = find_office_root()
     return os.path.join(root, "operations", "data", "approvals")
 
 
 def compute_request_id(ts: str, seat: str, tool: str, sha256_hex: str) -> str:
-    payload = f"{ts}|{seat}|{tool}|{sha256_hex}".encode("utf-8")
+    payload = (
+        f"{strip_ascii(ts)}|{strip_ascii(seat)}|{strip_ascii(tool)}|{strip_ascii(sha256_hex).lower()}".encode(
+            "utf-8"
+        )
+    )
     return hashlib.sha256(payload).hexdigest()[:16]
 
 
@@ -78,10 +96,10 @@ def days_in_utc_month(year: int, month: int) -> int:
 
 
 def parse_strict_iso_ms(iso_str: Any) -> Optional[int]:
-    """Strictly parse an ISO-8601 timestamp using ASCII digits and truncate to milliseconds (F2c, F5)."""
+    """Strictly parse an ISO-8601 timestamp in 1970-9999 using ASCII digits and truncate to milliseconds (F2c, F5)."""
     if not isinstance(iso_str, str):
         return None
-    s = iso_str.strip()
+    s = strip_ascii(iso_str)
     if not s:
         return None
     m = ISO_ASCII_RE.match(s)
@@ -100,7 +118,7 @@ def parse_strict_iso_ms(iso_str: Any) -> Optional[int]:
     tz_hour_str = m.group(10)
     tz_min_str = m.group(11)
 
-    if year < 1 or year > 9999:
+    if year < 1970 or year > 9999:
         return None
     if month < 1 or month > 12:
         return None
@@ -133,14 +151,19 @@ def parse_strict_iso_ms(iso_str: Any) -> Optional[int]:
         dt = datetime(
             year, month, day, hour, minute, second, ms * 1000, tzinfo=tz_obj
         ).astimezone(timezone.utc)
+        if dt.year < 1970 or dt.year > 9999:
+            return None
         epoch_sec = int(
             (
                 dt.replace(microsecond=0)
                 - datetime(1970, 1, 1, tzinfo=timezone.utc)
             ).total_seconds()
         )
-        return epoch_sec * 1000 + (dt.microsecond // 1000)
-    except ValueError:
+        epoch_ms = epoch_sec * 1000 + (dt.microsecond // 1000)
+        if epoch_ms < MIN_VALID_UTC_MS or epoch_ms > MAX_VALID_UTC_MS:
+            return None
+        return epoch_ms
+    except (ValueError, OverflowError):
         return None
 
 
@@ -174,25 +197,77 @@ def is_pid_alive(pid: int) -> bool:
         return False
 
 
+def get_system_boot_id() -> str:
+    """Read OS boot identifier (`kern.boottime` sec on macOS, `/proc/stat` `btime` on Linux) (F16)."""
+    global _CACHED_BOOT_ID
+    if _CACHED_BOOT_ID is not None:
+        return _CACHED_BOOT_ID
+    try:
+        if os.path.isfile("/proc/stat"):
+            with open("/proc/stat", "r", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("btime "):
+                        parts = strip_ascii(line).split()
+                        if len(parts) >= 2 and parts[1].isdigit():
+                            _CACHED_BOOT_ID = parts[1]
+                            return _CACHED_BOOT_ID
+        out = strip_ascii(
+            subprocess.check_output(
+                ["sysctl", "-n", "kern.boottime"],
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+            ).decode("utf-8", errors="replace")
+        )
+        m = re.search(r"sec\s*=\s*([0-9]+)", out)
+        if m:
+            _CACHED_BOOT_ID = m.group(1)
+            return _CACHED_BOOT_ID
+        if out.isdigit():
+            _CACHED_BOOT_ID = out
+            return _CACHED_BOOT_ID
+    except Exception:
+        pass
+    _CACHED_BOOT_ID = "unknown"
+    return _CACHED_BOOT_ID
+
+
 def is_lock_disabled_for_test() -> bool:
     return (
         os.environ.get("NODE_ENV") != "production"
         and os.environ.get("AIBOSS_TEST_DISABLE_APPROVAL_LOCK") == "1"
-        and bool((os.environ.get("AIBOSS_DATA_DIR") or "").strip())
+        and bool(strip_ascii(os.environ.get("AIBOSS_DATA_DIR") or ""))
     )
 
 
 def inspect_lock_staleness(lock_path: str, now_ms: int) -> Optional[Dict[str, Any]]:
-    """Unified stale lock inspection matching TypeScript `inspectLockStaleness` (F1b)."""
+    """Unified stale lock inspection matching TypeScript `inspectLockStaleness` (F1b, F16)."""
     try:
         st = os.stat(lock_path)
         with open(lock_path, "r", encoding="utf-8") as fh:
             raw = fh.read()
-        trimmed = raw.strip()
+        trimmed = strip_ascii(raw)
         if trimmed:
             try:
                 parsed = json.loads(trimmed)
                 if isinstance(parsed, dict):
+                    current_boot_id = get_system_boot_id()
+                    raw_boot_id = parsed.get("bootId")
+                    lock_boot_id = (
+                        strip_ascii(raw_boot_id)
+                        if isinstance(raw_boot_id, str)
+                        else ""
+                    )
+                    if (
+                        lock_boot_id
+                        and lock_boot_id != "unknown"
+                        and current_boot_id != "unknown"
+                        and lock_boot_id != current_boot_id
+                    ):
+                        return {
+                            "is_stale": True,
+                            "ino": st.st_ino,
+                            "raw": raw,
+                        }
                     holder_pid = parsed.get("pid")
                     if (
                         isinstance(holder_pid, int)
@@ -223,83 +298,65 @@ def is_lock_file_stale(lock_path: str, now_ms: Optional[int] = None) -> bool:
     return bool(info and info.get("is_stale"))
 
 
-def try_reclaim_stale_lock(
-    approvals_dir: str, lock_path: str, observed: Dict[str, Any]
-) -> None:
-    """Safely reclaim an orphan lock file using atomic `rename` under `.approvals.reclaim.lock` (F1b)."""
-    reclaim_guard_path = os.path.join(approvals_dir, ".approvals.reclaim.lock")
-    guard_tmp = os.path.join(
-        approvals_dir,
-        f".approvals.reclaim.tmp-{os.getpid()}-{time.time_ns()}",
-    )
-    guard_acquired = False
-
+def sweep_old_lock_artifacts(approvals_dir: str, now_ms: int) -> None:
+    """Best-effort sweep of leftover `.approvals.lock.tmp*`/`.stale-*`/`.rel-*` files > 10 minutes old (F16)."""
     try:
-        fd = os.open(guard_tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        try:
-            os.write(
-                fd,
-                json.dumps(
-                    {"pid": os.getpid(), "createdAt": current_utc_ms()}
-                ).encode("utf-8"),
-            )
-        finally:
-            os.close(fd)
-
-        try:
-            os.link(guard_tmp, reclaim_guard_path)
-            guard_acquired = True
-        except OSError:
-            guard_check = inspect_lock_staleness(reclaim_guard_path, current_utc_ms())
-            if guard_check and guard_check["is_stale"]:
-                stale_guard = f"{reclaim_guard_path}.stale-{os.getpid()}-{time.time_ns()}"
-                try:
-                    os.rename(reclaim_guard_path, stale_guard)
-                    os.unlink(stale_guard)
-                except OSError:
-                    pass
-            return
-
-        recheck = inspect_lock_staleness(lock_path, current_utc_ms())
-        if (
-            not recheck
-            or not recheck["is_stale"]
-            or recheck["ino"] != observed["ino"]
-            or recheck["raw"] != observed["raw"]
-        ):
-            return
-
-        stale_target = f"{lock_path}.stale-{os.getpid()}-{time.time_ns()}"
-        try:
-            os.rename(lock_path, stale_target)
+        inspected = 0
+        for name in os.listdir(approvals_dir):
+            if not (
+                name.startswith(".approvals.lock.tmp")
+                or name.startswith(".approvals.lock.stale-")
+                or name.startswith(".approvals.lock.rel-")
+            ):
+                continue
+            inspected += 1
+            if inspected > 32:
+                break
+            full_path = os.path.join(approvals_dir, name)
             try:
-                os.unlink(stale_target)
+                st = os.stat(full_path)
+                if now_ms - int(st.st_mtime * 1000) > STALE_LOCK_ARTIFACT_SWEEP_MS:
+                    os.unlink(full_path)
             except OSError:
                 pass
-        except OSError:
-            pass
-    finally:
-        try:
-            os.unlink(guard_tmp)
-        except OSError:
-            pass
-        if guard_acquired:
-            try:
-                os.unlink(reclaim_guard_path)
-            except OSError:
-                pass
+    except OSError:
+        pass
+
+
+def emit_lock_timeout_and_exit(
+    lock_path: str, request_id: Optional[str] = None
+) -> None:
+    out_to: Dict[str, Any] = {"status": "lock_timeout"}
+    if request_id:
+        out_to["requestId"] = request_id
+    print(json.dumps(out_to), flush=True)
+    sys.stderr.write(f"[approval_check] Timed out acquiring lock {lock_path}\n")
+    sys.exit(2)
 
 
 @contextmanager
-def with_approval_lock(approvals_dir: str, timeout_sec: float = 5.0) -> Iterator[None]:
-    """Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b)."""
+def with_approval_lock(
+    approvals_dir: str,
+    timeout_sec: float = 5.0,
+    request_id: Optional[str] = None,
+) -> Iterator[None]:
+    """Cross-process atomic lock on `<approvals_dir>/.approvals.lock` (F1b, F14, F15, F16).
+
+    - (a) Publishes `{ pid, token, createdAt, bootId, hostname }` via `os.link(tmp_path, lock_path)`.
+    - (b) Reclaims stale lock via single atomic `os.rename(lock_path, stale_target)` without `.approvals.reclaim.lock`.
+          Only the single winner unlinks `stale_target`; any loser whose `rename` raises `OSError` sleeps 20-50ms and retries.
+    - (c) Every loop branch checks `time.monotonic() >= deadline` before `continue` and exits 2 with `{"status": "lock_timeout"}`.
+    """
     if is_lock_disabled_for_test():
         yield
         return
 
     os.makedirs(approvals_dir, exist_ok=True)
+    now_start_ms = current_utc_ms()
+    sweep_old_lock_artifacts(approvals_dir, now_start_ms)
+
     lock_path = os.path.join(approvals_dir, ".approvals.lock")
-    token = f"{os.getpid()}-{current_utc_ms()}-{os.urandom(6).hex()}"
+    token = f"{os.getpid()}-{now_start_ms}-{os.urandom(6).hex()}"
     tmp_path = f"{lock_path}.tmp-{os.getpid()}-{token}"
     deadline = time.monotonic() + timeout_sec
 
@@ -308,6 +365,8 @@ def with_approval_lock(approvals_dir: str, timeout_sec: float = 5.0) -> Iterator
             "pid": os.getpid(),
             "token": token,
             "createdAt": current_utc_ms(),
+            "bootId": get_system_boot_id(),
+            "hostname": socket.gethostname(),
         }
     ).encode("utf-8")
     tmp_fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -327,16 +386,42 @@ def with_approval_lock(approvals_dir: str, timeout_sec: float = 5.0) -> Iterator
             except OSError as exc:
                 if exc.errno != errno.EEXIST:
                     raise
+                if time.monotonic() >= deadline:
+                    emit_lock_timeout_and_exit(lock_path, request_id)
+
                 inspection = inspect_lock_staleness(lock_path, current_utc_ms())
                 if inspection and inspection["is_stale"]:
-                    try_reclaim_stale_lock(approvals_dir, lock_path, inspection)
+                    stale_target = f"{lock_path}.stale-{os.getpid()}-{time.time_ns()}"
+                    renamed = False
+                    try:
+                        os.rename(lock_path, stale_target)
+                        renamed = True
+                    except OSError:
+                        renamed = False
+
+                    if renamed:
+                        try:
+                            os.unlink(stale_target)
+                        except OSError:
+                            pass
+                        if time.monotonic() >= deadline:
+                            emit_lock_timeout_and_exit(lock_path, request_id)
+                        continue
+
+                    rem = deadline - time.monotonic()
+                    if rem <= 0:
+                        emit_lock_timeout_and_exit(lock_path, request_id)
+                    time.sleep(min(0.03, max(0.001, rem)))
+                    if time.monotonic() >= deadline:
+                        emit_lock_timeout_and_exit(lock_path, request_id)
                     continue
+
+                rem = deadline - time.monotonic()
+                if rem <= 0:
+                    emit_lock_timeout_and_exit(lock_path, request_id)
+                time.sleep(min(0.025, max(0.001, rem)))
                 if time.monotonic() >= deadline:
-                    sys.stderr.write(
-                        f"[approval_check] Timed out acquiring lock {lock_path}\n"
-                    )
-                    sys.exit(2)
-                time.sleep(0.01)
+                    emit_lock_timeout_and_exit(lock_path, request_id)
     finally:
         try:
             os.unlink(tmp_path)
@@ -349,7 +434,7 @@ def with_approval_lock(approvals_dir: str, timeout_sec: float = 5.0) -> Iterator
         if acquired:
             try:
                 with open(lock_path, "r", encoding="utf-8") as fh:
-                    current_raw = fh.read().strip()
+                    current_raw = strip_ascii(fh.read())
                 if current_raw:
                     current_obj = json.loads(current_raw)
                     if isinstance(current_obj, dict) and current_obj.get("token") == token:
@@ -432,7 +517,7 @@ def load_folded_ledger(
         try:
             with open(file_path, "r", encoding="utf-8") as fh:
                 for raw_line in fh:
-                    line = raw_line.strip()
+                    line = strip_ascii(raw_line)
                     if not line:
                         continue
                     try:
@@ -442,8 +527,9 @@ def load_folded_ledger(
                     if not isinstance(obj, dict):
                         continue
 
+                    has_type_key = "type" in obj
                     rec_type = obj.get("type")
-                    if rec_type is None or rec_type == "request":
+                    if (not has_type_key) or rec_type == "request":
                         raw_ts = obj.get("ts")
                         raw_seat = obj.get("seat")
                         raw_tool = obj.get("tool")
@@ -455,10 +541,10 @@ def load_folded_ledger(
                             or not isinstance(raw_sha, str)
                         ):
                             continue
-                        ts = raw_ts.strip()
-                        seat = raw_seat.strip()
-                        tool = raw_tool.strip()
-                        sha256_val = raw_sha.strip().lower()
+                        ts = strip_ascii(raw_ts)
+                        seat = strip_ascii(raw_seat)
+                        tool = strip_ascii(raw_tool)
+                        sha256_val = strip_ascii(raw_sha).lower()
                         if (
                             not ts
                             or not seat
@@ -497,9 +583,9 @@ def load_folded_ledger(
                             or not isinstance(raw_exp, str)
                         ):
                             continue
-                        req_id = raw_req_id.strip().lower()
-                        at_val = raw_at.strip()
-                        exp_val = raw_exp.strip()
+                        req_id = strip_ascii(raw_req_id).lower()
+                        at_val = strip_ascii(raw_at)
+                        exp_val = strip_ascii(raw_exp)
                         if (
                             not HEX16_RE.match(req_id)
                             or dec_val not in ("approved", "denied")
@@ -541,24 +627,24 @@ def load_folded_ledger(
                             continue
                         if "digest" in obj and not isinstance(obj.get("digest"), str):
                             continue
-                        req_id = raw_req_id.strip().lower()
-                        claim_id = raw_claim_id.strip()
+                        req_id = strip_ascii(raw_req_id).lower()
+                        claim_id = strip_ascii(raw_claim_id)
                         seat_id = (
-                            obj["seatId"].strip()
+                            strip_ascii(obj["seatId"])
                             if isinstance(obj.get("seatId"), str)
                             else ""
                         )
                         tool_val = (
-                            obj["tool"].strip()
+                            strip_ascii(obj["tool"])
                             if isinstance(obj.get("tool"), str)
                             else ""
                         )
                         digest_val = (
-                            obj["digest"].strip().lower()
+                            strip_ascii(obj["digest"]).lower()
                             if isinstance(obj.get("digest"), str)
                             else ""
                         )
-                        at_val = raw_at.strip()
+                        at_val = strip_ascii(raw_at)
                         claim_ms = parse_strict_iso_ms(at_val)
                         if (
                             not HEX16_RE.match(req_id)
@@ -612,15 +698,15 @@ def load_folded_ledger(
                             continue
                         if "runId" in obj and not isinstance(obj.get("runId"), str):
                             continue
-                        req_id = raw_req_id.strip().lower()
-                        seat_id = raw_seat_id.strip()
-                        digest_val = raw_digest.strip().lower()
-                        at_val = raw_at.strip()
+                        req_id = strip_ascii(raw_req_id).lower()
+                        seat_id = strip_ascii(raw_seat_id)
+                        digest_val = strip_ascii(raw_digest).lower()
+                        at_val = strip_ascii(raw_at)
                         exec_ms = parse_strict_iso_ms(at_val)
                         claim_id_val = (
-                            obj["claimId"].strip()
+                            strip_ascii(obj["claimId"])
                             if isinstance(obj.get("claimId"), str)
-                            and obj["claimId"].strip()
+                            and strip_ascii(obj["claimId"])
                             else None
                         )
                         if (
@@ -729,18 +815,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    seat = args.seat.strip()
-    tool = args.tool.strip()
-    sha256_arg = args.sha256.strip().lower()
+    seat = strip_ascii(args.seat)
+    tool = strip_ascii(args.tool)
+    sha256_arg = strip_ascii(args.sha256).lower()
     req_id_filter = (
-        args.request_id.strip().lower()
-        if args.request_id and args.request_id.strip()
+        strip_ascii(args.request_id).lower()
+        if args.request_id and strip_ascii(args.request_id)
         else None
     )
 
     approvals_dir = get_approvals_dir()
 
-    with with_approval_lock(approvals_dir):
+    with with_approval_lock(approvals_dir, request_id=req_id_filter):
         now_ms = current_utc_ms()
         now_utc = datetime.fromtimestamp(now_ms / 1000.0, tz=timezone.utc)
         entries = load_folded_ledger(approvals_dir, now_utc)

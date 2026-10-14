@@ -169,7 +169,7 @@ Hàm `acquireInstanceLock(dataDir)` trả về kết quả cấu trúc kèm `rea
 
 ---
 
-## 5. Sổ Duyệt Hành Động Dạng Máy Trạng Thái (Approval Ledger State Machine) — A-4 (v03)
+## 5. Sổ Duyệt Hành Động Dạng Máy Trạng Thái (Approval Ledger State Machine) — A-4 (v04)
 
 Giải pháp A-4 biến sổ duyệt `operations/data/approvals/<YYYY-MM-DD>.jsonl` thành một máy trạng thái tất định nối trực tiếp từ yêu cầu của hook (`request`) → mã băm nội dung (`digest`) → quyết định của người duyệt (`decision`) → thực thi đơn lần (`execution`).
 
@@ -181,12 +181,12 @@ Toàn bộ dữ liệu nằm chung trong tệp nhật ký theo ngày UTC `operat
      ```json
      {"ts":"2026-10-14T10:00:00Z","seat":"email-crm","tool":"Bash","host":"api.sendgrid.com","len":248,"sha256":"a1b2...","head60":"curl -X POST ...","reason":"external_host"}
      ```
-   - Khi đọc sổ, mọi dòng không có `type` (hoặc có `type: "request"`) đều được chuẩn hoá thành bản ghi `type: "request"`.
+   - Khi đọc sổ, cả TypeScript và Python **chỉ** coi một dòng là `request` khi khoá `"type"` vắng mặt (`"type" not in obj`) **HOẶC** `obj["type"] == "request"`. Nếu `"type": null` có mặt trong JSON thì dòng đó bị từ chối ở cả hai bên (F2).
    - **Công thức tính `requestId` tất định (dùng chung giữa máy chủ TypeScript và hook H4 của PCN):**
      ```text
      requestId = sha256_hex(ts + "|" + seat + "|" + tool + "|" + sha256)[0..15]
      ```
-     Cụ thể: ghép chuỗi UTF-8 gồm 4 trường `ts`, `seat`, `tool`, `sha256` (chữ thường) phân cách bởi ký tự `|`, băm SHA-256 và lấy **16 ký tự hex chữ thường đầu tiên**.
+     Cụ thể: ghép chuỗi UTF-8 gồm 4 trường `ts`, `seat`, `tool`, `sha256` (chữ thường, đã cắt khoảng trắng ASCII `[ \t\r\n]`) phân cách bởi ký tự `|`, băm SHA-256 và lấy **16 ký tự hex chữ thường đầu tiên**.
      - Trong Python 3:
        ```python
        hashlib.sha256(f"{ts}|{seat}|{tool}|{sha256}".encode("utf-8")).hexdigest()[:16]
@@ -201,74 +201,77 @@ Toàn bộ dữ liệu nằm chung trong tệp nhật ký theo ngày UTC `operat
    {"type":"decision","requestId":"48b80909c1a4222b","decision":"approved","by":"owner","at":"2026-10-14T10:02:00.000Z","note":"Approved for newsletter","expiresAt":"2026-10-14T11:02:00.000Z"}
    ```
    - `decision`: `"approved"` hoặc `"denied"`.
-   - `by`: `"owner"` hoặc `"localhost"` (xem quy tắc xác thực F7/F13 tại mục 5.4: khi `PHONGBAN_USER` và `PHONGBAN_PASS` đã được cấu hình, Basic Auth bắt buộc cả trên `localhost` / `127.0.0.1` và chỉ khớp mới ghi `by: "owner"`; chỉ khi biến môi trường xác thực chưa cấu hình thì loopback mới được miễn với `by: "localhost"`).
-   - `note`: Tuỳ chọn; nếu có mặt trong payload (kể cả `note: null`), bắt buộc phải là kiểu `string` và có độ dài nguyên bản (trước khi `trim()`, đếm theo số điểm mã Unicode `Array.from(note).length` trong TS / `len(note)` trong Python) $\le 200$ ký tự. Nếu `note: null`, không phải chuỗi, hoặc vượt 200 điểm mã Unicode, API trả HTTP `400` ngay và ghi `0` byte vào sổ (F2b, F6).
+   - `by`: `"owner"` hoặc `"localhost"` (xem quy tắc xác thực F7/F13 tại mục 5.4).
+   - `note`: Tuỳ chọn; nếu có mặt trong payload (kể cả `note: null`), bắt buộc phải là kiểu `string` và có độ dài nguyên bản (trước khi cắt khoảng trắng ASCII, đếm theo số điểm mã Unicode `Array.from(note).length` trong TS / `len(note)` trong Python) $\le 200$ ký tự. Nếu `note: null`, không phải chuỗi, hoặc vượt 200 điểm mã Unicode, API trả HTTP `400` ngay và ghi `0` byte vào sổ (F2b, F6).
    - `expiresAt`: Do máy chủ tự tính bằng `at + approvals.ttlMinutes` (60 phút trong `config/office.json`); API công khai không nhận `expiresAt` từ phía client (F8).
    - Mỗi `requestId` chỉ được quyết định đúng một lần; gọi quyết định lần thứ hai cho cùng `requestId` trả về HTTP `409 Conflict`.
 
-3. **Dòng `claim` (do `approval_check.py --consume` hoặc hàm TypeScript `checkAndConsumeApproval` ghi nguyên tử dưới khoá trước khi thực thi hành động):**
+3. **Dòng `claim` (tiêu thụ chỉ qua `approval_check.py --consume` của hook H4, ghi nguyên tử dưới khoá trước khi thực thi hành động):**
    ```json
    {"type":"claim","requestId":"48b80909c1a4222b","claimId":"c9f1a2b3d4e5f601","seatId":"email-crm","tool":"Bash","digest":"a1b2...","at":"2026-10-14T10:02:30.000Z"}
    ```
-   - Giữ chỗ sử dụng duy nhất (single-use reservation) cho `requestId` ngay trước khi cho phép lệnh chạy. Khi đã có `claim`, mọi tiến trình `approval_check.py --consume` hoặc `checkAndConsumeApproval` chạy song song hoặc chạy sau đều nhận trạng thái `"claimed"` và thoát mã `2` (0 dòng ghi thêm).
+   - Giữ chỗ sử dụng duy nhất (single-use reservation) cho `requestId` ngay trước khi cho phép lệnh chạy. Tiêu thụ chỉ thực hiện qua `python3 operations/scripts/approval_check.py --consume` (hook H4). Khi đã có `claim`, mọi tiến trình `approval_check.py --consume` chạy song song hoặc chạy sau đều nhận trạng thái `"claimed"` và thoát mã `2` (0 dòng ghi thêm).
 
 4. **Dòng `execution` (do `approval_mark.py` hoặc `recordApprovalExecution` ghi sau khi thực thi):**
    ```json
    {"type":"execution","requestId":"48b80909c1a4222b","claimId":"c9f1a2b3d4e5f601","runId":"run-20261014-0001","seatId":"email-crm","at":"2026-10-14T10:03:00.000Z","result":"executed","digest":"a1b2..."}
    ```
-   - `result`: `"executed"` | `"failed"` | `"digest_mismatch"` | `"expired"`.
+   - `result`: `"executed"` | `"failed"`.
    - **Không bao giờ ghi bản ghi khi từ chối thực thi (F1a):** Khi yêu cầu chưa được duyệt (`pending`), đã từ chối (`denied`), chưa tới thời điểm hiệu lực (`not_yet_valid`), đã hết hạn (`expired`), sai `claimId` (`claim_mismatch`), hoặc đã thực thi trước đó (`already_executed` / `digest_mismatch`), cả `recordApprovalExecution` (TS) và `approval_mark.py` (Python) đều từ chối ngay và **ghi `0` dòng vào sổ** (kích thước tệp `.jsonl` không đổi từng byte).
    - Mọi bản ghi khi đọc/ghi và trả qua API đều đi qua bộ lọc whitelist trường nghiêm ngặt (`sanitizeApprovalRequestRecord`, `sanitizeApprovalDecisionRecord`, `sanitizeApprovalClaimRecord`, `sanitizeApprovalExecutionRecord`, `sanitizeApprovalItem`), đồng thời ánh xạ tự động cả 7 chuỗi `reason` tiếng Việt của hook H1 sang mã tiếng Anh chuẩn (`mcp_external_send`, `curl_config_flag`, `inbox_message_fetch`, `facebook_graph_messages`, `facebook_graph_batch`, `external_post_send`, `external_endpoint_send`).
 
 ### 5.2. Máy Trạng Thái Suy Ra Từ Sổ, Quy Tắc Đồng Nhất TS/Python & Khoá Nguyên Tử (Derived State Machine)
 Trạng thái của mỗi yêu cầu được suy ra trực tiếp khi gấp (fold) các dòng trong sổ theo quy tắc đồng nhất tuyệt đối giữa TypeScript (`src/lib/approvals-ledger.ts`) và Python (`operations/scripts/approval_check.py`, `operations/scripts/approval_mark.py`):
 - `requested` (hiển thị là `pending` trên bộ lọc API) → `approved` | `denied` → (`claim` nguyên tử) → `executed` | `failed` | `expired`.
-- **Luật chuyển trạng thái & đồng nhất bộ gấp sổ (F2, F4, F5, F10, F11):**
-  1. **Kiểm tra kiểu chuỗi nghiêm ngặt (`typeof === 'string'` / `isinstance(..., str)`) (F2a):** Toàn bộ các trường định danh và thời gian (`ts`, `seat`, `tool`, `sha256`, `requestId`, `seatId`, `digest`, `at`, `expiresAt`, `claimId`, `runId`, `note`) đều bắt buộc kiểm tra đúng kiểu chuỗi trước khi xử lý; tuyệt đối không ép kiểu ngầm (`str(...)`) từ số hay boolean.
-  2. **Chuẩn thời gian ISO-8601 chỉ nhận chữ số ASCII & cắt phần nguyên mili-giây (F2c, F5):**
-     - Cả TS và Python cùng dùng biểu thức chính quy chỉ nhận chữ số ASCII `[0-9]`:
-       `^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$`
-     - Từ chối hoàn toàn chữ số Unicode (ví dụ `٢٠٢٦`), giờ `24:00:00`, hoặc ngày không tồn tại trên lịch (`2026-02-30`).
-     - Mọi mốc thời gian hợp lệ đều được cắt phần lẻ dưới mili-giây về **số nguyên mili-giây UTC** (`(us // 1000) * 1000`) trước mọi phép so sánh hay sắp xếp, và dùng bộ đếm thứ tự dòng hợp lệ (`order_counter`) đồng nhất giữa TS và Python.
+- **Luật chuyển trạng thái & đồng nhất bộ gấp sổ (F2, F4, F5, F10, F11, F14, F15, F16):**
+  1. **Kiểm tra kiểu chuỗi nghiêm ngặt, từ chối `"type": null` & chỉ cắt khoảng trắng ASCII `[ \t\r\n]` (F2):**
+     - Một dòng chỉ là `request` khi khoá `"type"` vắng mặt hoặc `type === "request"`; `"type": null` bị loại bỏ ở cả hai bên.
+     - Toàn bộ các trường định danh và thời gian (`ts`, `seat`, `tool`, `sha256`, `requestId`, `seatId`, `digest`, `at`, `expiresAt`, `claimId`, `runId`, `note`) đều bắt buộc kiểm tra đúng kiểu chuỗi trước khi xử lý; tuyệt đối không ép kiểu ngầm (`str(...)`) từ số hay boolean.
+     - Cả TS (`trimAscii`) và Python (`strip_ascii`) chỉ cắt 4 ký tự khoảng trắng ASCII `[ \t\r\n]` ở hai đầu chuỗi; các ký tự như `U+FEFF` (BOM) hoặc khoảng trắng Unicode được giữ nguyên đồng nhất ở cả hai bên.
+  2. **Chuẩn thời gian ISO-8601 miền năm `1970–9999`, chỉ nhận chữ số ASCII & chống tràn biên múi giờ (F2c, F5):**
+     - Cả TS và Python cùng dùng biểu thức chính quy giới hạn miền năm `1970–9999` và chỉ nhận chữ số ASCII `[0-9]`:
+       `^(19[7-9][0-9]|[2-9][0-9]{3})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?(Z|([+-])([0-9]{2}):([0-9]{2}))$`
+     - Từ chối hoàn toàn năm trước `1970` (ví dụ `0099-01-01T00:00:00Z`), chữ số Unicode (`٢٠٢٦`), giờ `24:00:00`, hoặc ngày không tồn tại trên lịch (`2026-02-30`).
+     - Sau khi quy đổi lệch múi giờ về UTC, cả hai bên đều kiểm tra thời điểm UTC vẫn nằm trong miền `[1970-01-01T00:00:00.000Z, 9999-12-31T23:59:59.999Z]` (`0 <= epochMs <= 253402300799999`) và bọc bắt `(ValueError, OverflowError)` trong Python để các mốc tràn biên như `9999-12-31T23:59:59-00:01` đều bị loại bỏ an toàn (không bao giờ gây crash).
+     - Mọi mốc thời gian hợp lệ đều được cắt phần lẻ dưới mili-giây về **số nguyên mili-giây UTC** trước mọi phép so sánh hay sắp xếp, và dùng bộ đếm thứ tự dòng hợp lệ (`order_counter`) đồng nhất giữa TS và Python.
   3. **Từ chối quyết định có `decision.at` ở tương lai (`not_yet_valid`, dung sai 0) (F11):**
-     - Khi `nowMs < decision.atMs` (dung sai `0`), quyết định `approved` chưa có hiệu lực: `approval_check.py` (cả có và không có `--consume`), `approval_mark.py`, và các hàm TS (`checkAndConsumeApproval`, `findActiveApprovalForAction`, `recordApprovalExecution`) đều trả về `status: "not_yet_valid"`, thoát mã `2` và ghi `0` dòng vào sổ.
+     - Khi `nowMs < decision.atMs` (dung sai `0`), quyết định `approved` chưa có hiệu lực: `approval_check.py` (cả có và không có `--consume`), `approval_mark.py`, và `recordApprovalExecution` đều trả về `status: "not_yet_valid"`, thoát mã `2` và ghi `0` dòng vào sổ.
   4. **Chọn yêu cầu mới nhất của `(seat, tool, sha256)` TRƯỚC KHI đối chiếu `--request-id` (F4):**
-     - Khi kiểm tra quyền cho hành động `(seat, tool, sha256)`, cả TS và Python đều tìm yêu cầu mới nhất của bộ ba `(seat, tool, sha256)` trước tiên.
-     - Nếu người gọi truyền `--request-id <id>` (hoặc `requestId` trong `checkAndConsumeApproval`):
+     - Khi kiểm tra quyền cho hành động `(seat, tool, sha256)`, `approval_check.py` tìm yêu cầu mới nhất của bộ ba `(seat, tool, sha256)` trước tiên.
+     - Nếu người gọi truyền `--request-id <id>`:
        + Nếu `<id>` trùng với yêu cầu mới nhất: tiếp tục kiểm tra trạng thái của yêu cầu đó.
        + Nếu `<id>` thuộc về một yêu cầu cũ hơn của cùng `(seat, tool)` (đã có yêu cầu mới hơn trên sổ): từ chối với `status: "superseded"`, thoát mã `2` và ghi `0` dòng.
        + Nếu `<id>` thuộc về yêu cầu mới nhất của `(seat, tool)` nhưng có `sha256` khác: từ chối với `status: "digest_mismatch"`, thoát mã `2`.
-  5. **Khoá xuyên tiến trình và thu hồi khoá mồ côi nguyên tử qua `rename` (F1b):**
-     - Khi tạo khoá `<approvals_dir>/.approvals.lock`, tiến trình ghi đầy đủ JSON `{ pid, createdAt }` vào tệp tạm `.approvals.lock.tmp-<pid>-<ns>` rồi xuất bản nguyên tử qua `link(tmpPath, lockPath)` (`O_EXCL`), bảo đảm `.approvals.lock` trên đĩa không bao giờ rỗng.
-     - **Quy tắc xác định khoá mồ côi đồng nhất giữa TS và Python:**
-       + Nếu đọc được `pid` nguyên dương trong `.approvals.lock`: khoá chỉ bị coi là mồ côi khi `!isPidAlive(pid)`. **Tuyệt đối không bao giờ thu hồi khoá của một PID đang sống (`isPidAlive(pid) === true`), kể cả khi đã giữ khoá quá 30 giây.**
-       + Chỉ khi không đọc được `pid` hợp lệ (tệp hỏng): khoá mới được coi là mồ côi khi tuổi `mtime` vượt quá `30_000` ms (30 giây).
-     - **Giao thức thu hồi nguyên tử:** Tiến trình thu hồi phải giữ khoá phụ `.approvals.reclaim.lock`, kiểm tra lại `.approvals.lock` (cùng `ino`, cùng nội dung, vẫn mồ côi), rồi thực hiện `rename(.approvals.lock -> .approvals.lock.stale-<pid>-<ns>)` trước khi xoá tệp stale. Nhờ đó hai tiến trình thu hồi cạnh tranh không bao giờ xoá nhầm khoá mới của tiến trình vừa thắng.
+  5. **Khoá xuyên tiến trình và thu hồi khoá mồ côi qua một lệnh `rename` nguyên tử duy nhất, không dùng guard phụ (F1b, F14, F15, F16):**
+     - **(a) Tạo khoá:** Tiến trình ghi đầy đủ JSON `{ pid, token, createdAt, bootId, hostname }` (`bootId` lấy từ `sysctl -n kern.boottime` trên macOS hoặc `/proc/stat` `btime` trên Linux) vào tệp tạm `.approvals.lock.tmp-<pid>-<token>` rồi xuất bản nguyên tử qua `link(tmpPath, lockPath)` (`O_EXCL`). Khi vào `withApprovalLock` / `with_approval_lock`, tiến trình quét dọn các tệp `.approvals.lock.tmp*`/`.stale-*`/`.rel-*` có `mtime` quá 10 phút (F16).
+     - **(b) Xác định & thu hồi khoá mồ côi bằng một lệnh `rename` duy nhất (F14, F16):**
+       + Nếu `.approvals.lock` có `bootId` khác lần khởi động hiện tại của hệ điều hành $\rightarrow$ coi là mồ côi ngay cả khi `pid` trùng (F16).
+       + Nếu `bootId` khớp và đọc được `pid` nguyên dương $\rightarrow$ khoá chỉ mồ côi khi `!isPidAlive(pid)`. **Tuyệt đối không bao giờ thu hồi khoá của một PID đang sống cùng lần khởi động, kể cả khi giữ khoá quá 30 giây.**
+       + Chỉ khi không đọc được `pid` hợp lệ (tệp hỏng) $\rightarrow$ khoá mồ côi khi tuổi `mtime` vượt quá `30_000` ms (30 giây).
+       + Khi khoá mồ côi, tiến trình gọi thẳng `rename(.approvals.lock, .approvals.lock.stale-<pid>-<ns>)` (hoàn toàn không dùng `.approvals.reclaim.lock`). Vì `rename` nguyên tử, **CHỈ MỘT** tiến trình thành công; tiến trình đó `unlink` tệp `stale` của chính mình rồi quay lại (a). Mọi tiến trình mà `rename` trả `ENOENT`/`OSError` coi như người khác đã thu hồi, ngủ ngắn (`25–30ms`, dùng `Atomics.wait` trong TS / `time.sleep` trong Python, không busy-wait) rồi quay lại (a). Không bao giờ xoá tệp nào theo tên trừ khi chính mình vừa `rename` ra tên riêng.
+     - **(c) Kiểm tra deadline ở MỌI nhánh vòng lặp (`lock_timeout`) (F15):**
+       + Mọi nhánh trong vòng lặp chờ khoá đều kiểm tra hạn chờ (mặc định `5s`) trước khi `continue`. Khi quá hạn, CLI (`approval_check.py`, `approval_mark.py`) in `{"status": "lock_timeout"}` và thoát mã `2`; các route API trả về HTTP `503` (`error: "lock_timeout"`). Luôn fail-closed, không bao giờ treo vô hạn.
   6. **Ghi nối nguyên tử `O_APPEND` bảo vệ dòng của hook H1 (F3, F10):**
-     - Cả `appendJsonlLineSafely` (TS) và `append_jsonl_safely` (Python) đều mở tệp `.jsonl` với cờ `O_CREAT | O_RDWR | O_APPEND`.
-     - Nếu byte cuối hiện tại của tệp khác `\n` (`0x0a`), bộ ghi ghép `"\n"` vào đầu chuỗi JSON mới và thực hiện **đúng một lệnh `write` duy nhất không truyền offset** kèm `fsync`. Nhờ cờ `O_APPEND` ở tầng nhân hệ điều hành, ngay cả khi hook H1 (`guard_bulk_send.py`) nối thêm dòng `request` đồng thời mà không giữ `.approvals.lock`, dòng của TS/Python luôn được nối vào cuối tệp thật sự và không bao giờ ghi đè lên dòng của H1.
+     - Cả `appendJsonlLineSafely` (TS) và `append_jsonl_safely` (Python) đều mở tệp `.jsonl` với cờ `O_CREAT | O_RDWR | O_APPEND`, kiểm tra byte cuối để thêm `"\n"` nếu dòng trước bị cụt, và ghi bằng một lệnh `write` duy nhất kèm `fsync`.
 
-### 5.3. Hợp Đồng CLI Python & Hàm TypeScript Cho Hook H4/H5
-Hai script CLI Python 3 chuẩn (`operations/scripts/`) và hàm TypeScript xuất khẩu từ `src/lib/approvals-ledger.ts` dùng chung khoá `.approvals.lock` và quy tắc gấp sổ:
+### 5.3. Hợp Đồng CLI Python Cho Hook H4/H5
+Tiêu thụ duyệt một lần (`claim`) chỉ thực hiện qua `approval_check.py --consume` (hook H4):
 
-1. **Kiểm tra và giữ chỗ nguyên tử trước khi thực thi (`operations/scripts/approval_check.py` & `checkAndConsumeApproval`):**
+1. **Kiểm tra và giữ chỗ nguyên tử trước khi thực thi (`operations/scripts/approval_check.py`):**
    ```bash
-   # Giữ chỗ nguyên tử trước khi chạy lệnh (khuyến nghị cho H4):
+   # Giữ chỗ nguyên tử trước khi chạy lệnh (bắt buộc cho H4):
    python3 operations/scripts/approval_check.py --seat <slug> --tool <tool> --sha256 <hex> [--request-id <id>] --consume
 
    # Hoặc kiểm tra trạng thái không tiêu thụ:
    python3 operations/scripts/approval_check.py --seat <slug> --tool <tool> --sha256 <hex> [--request-id <id>]
    ```
-   - Trong TypeScript (`src/lib/approvals-ledger.ts`):
-     ```ts
-     const res = checkAndConsumeApproval({ seat: 'email-crm', tool: 'Bash', sha256: '...', requestId: '...' });
-     ```
    - Khi yêu cầu mới nhất của `(seat, tool, sha256)` đang `approved`, đã tới giờ hiệu lực (`now >= decision.at`), còn hạn (`now < decision.expiresAt`), chưa có `claim` và chưa có `execution`:
-     - Nếu có `--consume` (hoặc gọi `checkAndConsumeApproval`): ghi nguyên tử dòng `claim` dưới khoá `.approvals.lock`, trả về `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>", "claimId": "<claimId>"}` và thoát mã `0`. Khi hai tiến trình chạy song song, **chỉ đúng một tiến trình thoát `0`**, tiến trình còn lại nhận `status: "claimed"` và thoát mã `2`.
+     - Nếu có `--consume`: ghi nguyên tử dòng `claim` dưới khoá `.approvals.lock`, trả về `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>", "claimId": "<claimId>"}` và thoát mã `0`. Khi hai tiến trình chạy song song, **chỉ đúng một tiến trình thoát `0`**, tiến trình còn lại nhận `status: "claimed"` và thoát mã `2`.
      - Nếu không có `--consume`: in ra `{"requestId": "<id>", "status": "approved", "expiresAt": "<ISO>"}` và thoát mã `0`.
    - Nếu `--request-id` trỏ tới yêu cầu cũ hơn của cùng `(seat, tool)`: trả `{"requestId": "<id>", "status": "superseded"}` và thoát mã `2` (0 dòng ghi).
    - Nếu `now < decision.at`: trả `{"requestId": "<id>", "status": "not_yet_valid"}` và thoát mã `2` (0 dòng ghi).
    - Nếu mã băm `--sha256` không khớp với yêu cầu: trả `{"requestId": "<id>", "status": "digest_mismatch"}` và thoát mã `2` (0 dòng ghi).
+   - Nếu quá hạn chờ khoá `.approvals.lock` (5s): trả `{"status": "lock_timeout"}` và thoát mã `2`.
    - Mọi trường hợp khác (`pending`, `denied`, `expired`, `claimed`, `executed`, `failed`, `not_found`): in ra JSON `{"status": "<lý do>", ...}` và thoát mã `2`.
 
 2. **Đánh dấu kết quả sau khi thực thi (`operations/scripts/approval_mark.py` & `recordApprovalExecution`):**
@@ -283,16 +286,13 @@ Hai script CLI Python 3 chuẩn (`operations/scripts/`) và hàm TypeScript xu�
 - `GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50`: trả danh sách yêu cầu đã qua whitelist kèm tổng số bản ghi khớp.
 - `POST /api/approvals/<requestId>/decision`:
   - **Quy tắc xác thực (F7, F13):**
-    + Khi `PHONGBAN_USER` và `PHONGBAN_PASS` đã được cấu hình trên máy chủ: **bắt buộc xác thực HTTP Basic Auth trên mọi yêu cầu, kể cả khi `Host` là `localhost` hoặc `127.0.0.1`**. Thiếu header `Authorization` hoặc sai thông tin đăng nhập đều trả về HTTP `401 Unauthorized`; khi khớp thông tin đăng nhập thì ghi nhận `by: "owner"`.
-    + Chỉ khi `PHONGBAN_USER` / `PHONGBAN_PASS` **chưa được cấu hình** (môi trường phát triển nội bộ): yêu cầu từ loopback thực sự (`localhost`, `127.0.0.1`, `[::1]`) mới được chấp nhận với `by: "localhost"` (không bao giờ là `"owner"`), còn yêu cầu từ tên miền khác (kể cả `localhost.example.com`) bị từ chối với HTTP `503`.
-  - Chỉ nhận `{"decision": "approved" | "denied", "note"?: string}`; trả `400` (0 dòng ghi sổ) nếu `decision` sai, `note: null`, `note` không phải chuỗi, hoặc `note` vượt quá 200 điểm mã Unicode; trả `404` nếu `requestId` không tồn tại; trả `409` nếu `requestId` đã được quyết định trước đó.
+    + Khi `PHONGBAN_USER` và `PHONGBAN_PASS` đã được cấu hình trên máy chủ: **bắt buộc xác thực HTTP Basic Auth trên mọi yêu cầu, kể cả khi `Host` là `localhost` hoặc `127.0.0.1`**. Tên đăng nhập và mật khẩu được đối chiếu thời gian hằng (`crypto.timingSafeEqual` trên SHA-256 digest). Thiếu header `Authorization` hoặc sai thông tin đăng nhập đều trả về HTTP `401 Unauthorized`; khi khớp thông tin đăng nhập thì ghi nhận `by: "owner"`.
+    + Chỉ khi `PHONGBAN_USER` / `PHONGBAN_PASS` **chưa được cấu hình** (môi trường phát triển nội bộ): yêu cầu có header `Host` khớp loopback thực sự (`localhost`, `127.0.0.1`, `[::1]`; header `Host` rỗng bị từ chối `false`) mới được chấp nhận với `by: "localhost"` (không bao giờ là `"owner"`), còn yêu cầu từ tên miền khác hoặc thiếu `Host` bị từ chối với HTTP `503`.
+    + > **CẢNH BÁO VẬN HÀNH:** Nếu chưa cấu hình `PHONGBAN_USER`/`PHONGBAN_PASS` mà máy chủ bám `0.0.0.0` hoặc đứng sau reverse proxy không lọc `Host`, bất kỳ client nào gửi header `Host: localhost` cũng có thể duyệt yêu cầu — bắt buộc luôn cấu hình `PHONGBAN_USER`/`PHONGBAN_PASS` trên mọi máy có kết nối mạng.
+  - Chỉ nhận `{"decision": "approved" | "denied", "note"?: string}`; trả `400` (0 dòng ghi sổ) nếu `decision` sai, `note: null`, `note` không phải chuỗi, hoặc `note` vượt quá 200 điểm mã Unicode; trả `404` nếu `requestId` không tồn tại; trả `409` nếu `requestId` đã được quyết định trước đó; trả `503` (`lock_timeout`) nếu khoá sổ đang bận quá hạn.
 - Giao diện `/settings` hiển thị thẻ **Approvals** hoàn toàn bằng tiếng Anh gồm hai khu vực: **Pending Requests** (hiển thị `seat`, `tool`, `host`, `head60`, `reason` đã ánh xạ sang tiếng Anh, tuổi, nút `Approve` / `Deny`) và **Decided Ledger** (hiển thị trạng thái thật suy từ sổ kèm `requestId`).
 
 ### 5.5. Công Tắc Đối Chứng Dương, Giới Hạn Đã Biết & Cách Dọn Sổ Thử Nghiệm
 - **Công tắc đối chứng dương (`AIBOSS_TEST_DISABLE_APPROVAL_LOCK=1`):** Dùng để chứng minh hiệu lực của khoá `.approvals.lock` trong Ca 15 (khi bật biến này ở môi trường test, hai tiến trình `approval_check.py --consume` chạy song song sẽ cùng thoát `0` và làm Ca 15 ĐỎ; khi để mặc định thì đúng 1 tiến trình thoát `0`, 1 tiến trình thoát `2` và Ca 15 XANH). Công tắc này luôn bị vô hiệu hoá hoàn toàn khi `NODE_ENV === 'production'`.
 - **Giới hạn cách ly người dùng hệ điều hành:** Các ghế hiện chạy dưới cùng tài khoản người dùng hệ điều hành với máy chủ, nên tệp JSONL trên đĩa chưa tách quyền ghi ở tầng OS kernel; việc chặn ghế tự ghi trực tiếp vào thư mục sổ thuộc phạm vi các hook bảo vệ của PCN (H4/H5). Ở tầng ứng dụng, sổ tuân thủ nghiêm ngặt cơ chế khoá `.approvals.lock`, ghi nối nguyên tử `O_APPEND`, kiểm tra ranh giới dòng JSONL và whitelist trường.
 - **Cách xoá sổ thử nghiệm:** Các ca kiểm thử luôn đặt biến môi trường `AIBOSS_DATA_DIR` trỏ vào thư mục tạm trong `/tmp/aiboss-test-approvals-*` và tự dọn sạch bằng `fs.rmSync(testDataDir, { recursive: true, force: true })` trong khối `finally`. Không bao giờ xoá hoặc ghi thử vào `operations/data/approvals/` của máy chủ đang vận hành.
-
-
-
-

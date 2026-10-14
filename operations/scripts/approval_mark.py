@@ -29,6 +29,7 @@ from approval_check import (
     is_lock_disabled_for_test,
     load_folded_ledger,
     resolve_target_file,
+    strip_ascii,
     with_approval_lock,
 )
 
@@ -52,16 +53,20 @@ def main() -> None:
     parser.add_argument("--run-id", required=False, help="Optional runId")
     args = parser.parse_args()
 
-    req_id_target = args.request_id.strip().lower()
-    result_arg = args.result.strip()
+    req_id_target = strip_ascii(args.request_id).lower()
+    result_arg = strip_ascii(args.result)
     claim_id_arg = (
-        args.claim_id.strip() if args.claim_id and args.claim_id.strip() else None
+        strip_ascii(args.claim_id)
+        if args.claim_id and strip_ascii(args.claim_id)
+        else None
     )
-    run_id_arg = args.run_id.strip() if args.run_id and args.run_id.strip() else None
+    run_id_arg = (
+        strip_ascii(args.run_id) if args.run_id and strip_ascii(args.run_id) else None
+    )
 
     approvals_dir = get_approvals_dir()
 
-    with with_approval_lock(approvals_dir):
+    with with_approval_lock(approvals_dir, request_id=req_id_target):
         now_utc = datetime.now(timezone.utc)
         now_ms = current_utc_ms(now_utc)
         entries = load_folded_ledger(approvals_dir, now_utc)

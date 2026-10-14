@@ -1,8 +1,11 @@
+import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getIsRunnerStarting } from '@/lib/office-runner';
 import {
+  ApprovalLockTimeoutError,
   recordApprovalDecision,
   sanitizeApprovalItem,
+  trimAscii,
   type ApprovalDecisionActor,
   type ApprovalDecisionValue,
 } from '@/lib/approvals-ledger';
@@ -10,10 +13,16 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const digestA = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const digestB = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(digestA, digestB);
+}
+
 function isStrictLocalhostHost(rawHost: string): boolean {
-  const trimmed = rawHost.trim().toLowerCase();
+  const trimmed = trimAscii(rawHost).toLowerCase();
   if (!trimmed) {
-    return true;
+    return false;
   }
   let hostname = trimmed;
   if (trimmed.startsWith('[')) {
@@ -37,10 +46,11 @@ function isStrictLocalhostHost(rawHost: string): boolean {
 /**
  * Resolve decision actor (F7, F13):
  * - When `PHONGBAN_USER` and `PHONGBAN_PASS` are configured:
- *   Basic Auth is mandatory EVEN from `localhost` / `127.0.0.1` (F13).
+ *   Basic Auth is mandatory EVEN from `localhost` / `127.0.0.1` (F13),
+ *   compared in constant time via `crypto.timingSafeEqual` on SHA-256 digests.
  *   Missing or wrong credentials return HTTP 401; valid credentials return `by: 'owner'`.
  * - Only when `PHONGBAN_USER` / `PHONGBAN_PASS` are NOT configured:
- *   strict loopback (`localhost`, `127.0.0.1`, `[::1]`) is exempted as `by: 'localhost'`,
+ *   strict loopback (`localhost`, `127.0.0.1`, `[::1]`; empty `Host` is rejected) is exempted as `by: 'localhost'`,
  *   while non-localhost requests return HTTP 503.
  */
 function resolveDecisionActor(req: NextRequest): {
@@ -57,7 +67,7 @@ function resolveDecisionActor(req: NextRequest): {
   const envPass = process.env.PHONGBAN_PASS;
   const hasConfiguredAuth = Boolean(envUser && envPass);
 
-  if (hasConfiguredAuth) {
+  if (hasConfiguredAuth && envUser && envPass) {
     if (!authHeader.startsWith('Basic ')) {
       return {
         allowed: false,
@@ -66,12 +76,14 @@ function resolveDecisionActor(req: NextRequest): {
       };
     }
     try {
-      const decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8');
+      const decoded = Buffer.from(trimAscii(authHeader.slice(6)), 'base64').toString('utf8');
       const idx = decoded.indexOf(':');
       if (idx >= 0) {
         const u = decoded.slice(0, idx);
         const p = decoded.slice(idx + 1);
-        if (u === envUser && p === envPass) {
+        const userOk = timingSafeStringEqual(u, envUser);
+        const passOk = timingSafeStringEqual(p, envPass);
+        if (userOk && passOk) {
           return { allowed: true, by: 'owner' };
         }
       }
@@ -107,6 +119,7 @@ interface DecisionRequestBody {
  * - Unknown requestId -> 404
  * - Already decided requestId -> 409
  * - Invalid decision or invalid/overlong note (> 200 Unicode code points, or note: null) -> 400 (0 ledger writes)
+ * - Lock timeout -> 503 (lock_timeout)
  * - Server always computes expiresAt from configured TTL (F8: client expiresAt is ignored)
  */
 export async function POST(
@@ -132,7 +145,7 @@ export async function POST(
   }
 
   const resolvedParams = await Promise.resolve(context.params);
-  const requestId = (resolvedParams?.requestId || '').trim().toLowerCase();
+  const requestId = trimAscii(resolvedParams?.requestId || '').toLowerCase();
   if (!requestId) {
     return NextResponse.json(
       { error: 'invalid_request_id', message: 'Missing requestId parameter.' },
@@ -218,6 +231,19 @@ export async function POST(
       decision: result.decisionRecord,
     });
   } catch (err: unknown) {
+    if (
+      err instanceof ApprovalLockTimeoutError ||
+      (err as { code?: string })?.code === 'lock_timeout'
+    ) {
+      return NextResponse.json(
+        {
+          error: 'lock_timeout',
+          status: 'lock_timeout',
+          message: 'Timed out waiting for approval ledger lock.',
+        },
+        { status: 503 }
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       { error: 'internal_error', message },

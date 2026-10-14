@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getIsRunnerStarting } from '@/lib/office-runner';
-import { getApprovals, sanitizeApprovalItem } from '@/lib/approvals-ledger';
+import {
+  ApprovalLockTimeoutError,
+  getApprovals,
+  sanitizeApprovalItem,
+  trimAscii,
+} from '@/lib/approvals-ledger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,8 +42,8 @@ export async function GET(req: NextRequest) {
     const limitRaw = searchParams.get('limit');
 
     let status: string | undefined;
-    if (statusRaw !== null && statusRaw.trim() !== '') {
-      const normalized = statusRaw.trim().toLowerCase();
+    if (statusRaw !== null && trimAscii(statusRaw) !== '') {
+      const normalized = trimAscii(statusRaw).toLowerCase();
       if (!VALID_STATUS_FILTERS.has(normalized)) {
         return NextResponse.json(
           {
@@ -75,7 +80,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const seat = seatRaw && seatRaw.trim() ? seatRaw.trim() : undefined;
+    const seat = seatRaw && trimAscii(seatRaw) ? trimAscii(seatRaw) : undefined;
     const result = getApprovals({ status, seat, limit });
 
     return NextResponse.json({
@@ -83,6 +88,19 @@ export async function GET(req: NextRequest) {
       total: result.total,
     });
   } catch (err: unknown) {
+    if (
+      err instanceof ApprovalLockTimeoutError ||
+      (err as { code?: string })?.code === 'lock_timeout'
+    ) {
+      return NextResponse.json(
+        {
+          error: 'lock_timeout',
+          status: 'lock_timeout',
+          message: 'Timed out waiting for approval ledger lock.',
+        },
+        { status: 503 }
+      );
+    }
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       { error: 'internal_error', message },
