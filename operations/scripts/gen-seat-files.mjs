@@ -12,7 +12,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs';
 import { generateSeatClaudeMd } from './gen-seat-claude-md.mjs';
-import { escapeSeatSettingsGlobPath } from '../../src/lib/seat-settings-anchor.ts';
+import { escapeSeatSettingsGlobPath } from './seat-settings-anchor.mjs';
 
 export const escapeGlobPath = escapeSeatSettingsGlobPath;
 export { escapeSeatSettingsGlobPath };

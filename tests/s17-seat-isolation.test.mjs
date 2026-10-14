@@ -18,6 +18,7 @@ import {
   buildClaudeSeatEnv,
   buildClaudeSeatArgv,
   escapeSeatSettingsGlobPath,
+  truncateUtf8Bytes,
   verifySeatSettingsRootAnchor,
   ensureSeatSettingsAnchored,
   spawnClaudeSeatProcess,
@@ -588,6 +589,10 @@ test('F14, F17 & F18: shared glob escape handles {demo}/[x]/spaces/symlink alias
       path.join(specialRepo, 'operations', 'scripts', 'gen-seat-claude-md.mjs')
     );
     fs.copyFileSync(
+      path.join(REPO_ROOT, 'operations', 'scripts', 'seat-settings-anchor.mjs'),
+      path.join(specialRepo, 'operations', 'scripts', 'seat-settings-anchor.mjs')
+    );
+    fs.copyFileSync(
       path.join(REPO_ROOT, 'src', 'lib', 'seat-settings-anchor.ts'),
       path.join(specialRepo, 'src', 'lib', 'seat-settings-anchor.ts')
     );
@@ -786,7 +791,8 @@ test('F15 & Item 5: Hook 2.1 blocks xargs/wrapped HTTP writes & symlinked skill 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
-  // 4. Item 5: Threat Model & Residual Risk Register file exists and contains all 4 required sections
+  // 4. Item 5 & F24/F25: Threat Model & Residual Risk Register file exists, contains all 4 required sections,
+  // preserves PM §3.2 replay metrics, and defines concrete P1 vs P2 conditions per RR without blanket non-blocking wording
   const sanAnToanPath = path.join(REPO_ROOT, 'operations', 'SAN-AN-TOAN-GHE.md');
   assert.ok(fs.existsSync(sanAnToanPath), 'Item 5: operations/SAN-AN-TOAN-GHE.md must exist');
   const sanAnToanContent = fs.readFileSync(sanAnToanPath, 'utf8');
@@ -798,14 +804,207 @@ test('F15 & Item 5: Hook 2.1 blocks xargs/wrapped HTTP writes & symlinked skill 
     'permissions.deny',
     'Sổ Rủi Ro Tồn Dư',
     'RR-01',
+    'RR-02',
+    'RR-03',
+    'RR-04',
     'RR-05',
+    '47 lệnh/2 ngày',
+    'MỚI CHẶN 7',
+    'NỚI 0',
+    '0 hỏi oan',
+    'caffeinate',
+    'script',
+    'io.FileIO',
+    'shutil.move',
+    'MAX_SCRIPT_DEPTH = 4',
     'Tiêu Chí Phân Loại Lỗi và Gộp Nhánh',
+    'phân loại từng phản ví dụ theo §4.1',
   ]) {
     assert.ok(
       sanAnToanContent.includes(requiredPhrase),
-      `Item 5: operations/SAN-AN-TOAN-GHE.md must include "${requiredPhrase}"`
+      `Item 5 / F24: operations/SAN-AN-TOAN-GHE.md must include "${requiredPhrase}"`
     );
   }
+  assert.equal(
+    sanAnToanContent.includes('không dùng làm lý do chặn gộp'),
+    false,
+    'F24: operations/SAN-AN-TOAN-GHE.md must not contain blanket "không dùng làm lý do chặn gộp" clause'
+  );
 });
+
+test('F19 & F20 (S17e): Hook 2.1 unwraps caffeinate/script and balanced-paren fetch(new URL(...), {method:"POST"}), and Hook 7 blocks pathlib /, Path via variable, shutil.move/os.rename/fs.rename source+dest, and POSIX Node path.join', () => {
+  const hook21Path = path.join(REPO_ROOT, 'operations', 'hooks', 'block_public_publish.py');
+  const hook7Path = path.join(REPO_ROOT, 'operations', 'hooks', 'lock_raw_inputs.py');
+
+  // 1. F19: 4 block cases + 2 allow cases on Hook 2.1
+  for (const cmd of [
+    'caffeinate -i curl -X POST https://example.net/ingest -d x',
+    'script -q /dev/null curl -X POST https://example.net/ingest -d x',
+    "node -e \"fetch(new URL('/ingest','https://example.net'), {method:'POST',body:'x'})\"",
+    "python3 -c \"import urllib.request; urllib.request.urlopen(urllib.request.Request('https://example.net/ingest', data=b'x', method='POST'))\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F19 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:block_public_publish]'), `F19 block stderr must have hook prefix for "${cmd}"`);
+  }
+
+  for (const cmd of [
+    'caffeinate -i curl -X POST http://127.0.0.1:4330/api/health -d x',
+    "node -e \"fetch(new URL('/status','https://example.net'))\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, `F19 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  }
+
+  // 2. F20: 7 block cases + 3 allow cases on Hook 7
+  for (const cmd of [
+    "python3 -c \"from pathlib import Path; (Path('projects') / 'demo' / 'inputs' / 'x.txt').write_text('x')\"",
+    "python3 -c \"from pathlib import Path; p = Path('projects') / 'demo' / 'inputs' / 'x.txt'; p.write_text('x')\"",
+    "python3 -c \"from pathlib import Path; (Path('projects/demo/inputs/x.txt')).open('w').write('x')\"",
+    "python3 -c \"import shutil; shutil.move('projects/demo/inputs/a.txt', '/tmp/x.txt')\"",
+    "python3 -c \"import os; os.remove('projects/demo/inputs/a.txt')\"",
+    "node -e \"require('fs').renameSync('projects/demo/inputs/a.txt', '/tmp/x.txt')\"",
+    "node -e \"const fs=require('fs'),p=require('path'); fs.writeFileSync(p.join('projects/demo/inputs','/x.txt'),'x')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook7Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F20 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:lock_raw_inputs]'), `F20 block stderr must have hook prefix for "${cmd}"`);
+  }
+
+  for (const cmd of [
+    "python3 -c \"from pathlib import Path; (Path('projects') / 'demo' / 'drafts' / 'x.txt').write_text('x')\"",
+    "python3 -c \"import shutil; shutil.move('projects/demo/drafts/a.txt', 'projects/demo/wip/b.txt')\"",
+    "node -e \"const fs=require('fs'),p=require('path'); fs.writeFileSync(p.join('projects/demo/drafts','/x.txt'),'x')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook7Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, `F20 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  }
+});
+
+test('F21, F22 & F23 (S17e): gen-seat-files.mjs runs under --no-experimental-strip-types, verifySeatSettingsRootAnchor fails closed on unregistered seat dir, and truncateUtf8Bytes caps at 2048 UTF-8 bytes without splitting multi-byte chars', () => {
+  // 1. F21: node --no-experimental-strip-types operations/scripts/gen-seat-files.mjs --check must exit 0
+  const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 's17e-f21-'));
+  try {
+    fs.mkdirSync(path.join(tmpRepo, 'data'), { recursive: true });
+    fs.mkdirSync(path.join(tmpRepo, 'departments', 'marketing'), { recursive: true });
+    fs.mkdirSync(path.join(tmpRepo, 'config'), { recursive: true });
+    fs.mkdirSync(path.join(tmpRepo, 'operations', 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(tmpRepo, 'packs', 'core'), { recursive: true });
+    fs.copyFileSync(path.join(REPO_ROOT, 'data', 'seats.json'), path.join(tmpRepo, 'data', 'seats.json'));
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'departments', 'marketing', 'department.json'),
+      path.join(tmpRepo, 'departments', 'marketing', 'department.json')
+    );
+    fs.copyFileSync(path.join(REPO_ROOT, 'config', 'office.json'), path.join(tmpRepo, 'config', 'office.json'));
+    for (const rel of [
+      'operations/scripts/gen-seat-files.mjs',
+      'operations/scripts/gen-seat-claude-md.mjs',
+      'operations/scripts/seat-settings-anchor.mjs',
+    ]) {
+      fs.copyFileSync(path.join(REPO_ROOT, rel), path.join(tmpRepo, rel));
+    }
+    const workingRulesSrc = path.join(REPO_ROOT, 'packs', 'core', 'WORKING-RULES.md');
+    if (fs.existsSync(workingRulesSrc)) {
+      fs.copyFileSync(workingRulesSrc, path.join(tmpRepo, 'packs', 'core', 'WORKING-RULES.md'));
+    }
+    const realTmpRepo = fs.realpathSync(tmpRepo);
+    const genRes = spawnSync(
+      process.execPath,
+      ['--no-experimental-strip-types', path.join(realTmpRepo, 'operations', 'scripts', 'gen-seat-files.mjs')],
+      { cwd: realTmpRepo, encoding: 'utf8' }
+    );
+    assert.equal(
+      genRes.status,
+      0,
+      `F21: node --no-experimental-strip-types gen-seat-files.mjs must exit 0 (stderr: ${genRes.stderr})`
+    );
+
+    const stripRes = spawnSync(
+      process.execPath,
+      ['--no-experimental-strip-types', path.join(realTmpRepo, 'operations', 'scripts', 'gen-seat-files.mjs'), '--check'],
+      { cwd: realTmpRepo, encoding: 'utf8' }
+    );
+    assert.equal(
+      stripRes.status,
+      0,
+      `F21: node --no-experimental-strip-types gen-seat-files.mjs --check must exit 0 (stderr: ${stripRes.stderr})`
+    );
+
+    // 2. F22: verifySeatSettingsRootAnchor fails closed when seatDir is neither registered nor has .claude/settings.json
+    const unregDir = path.join(tmpRepo, 'departments', 'marketing', 'seats', 'unregistered-ghost-seat');
+    fs.mkdirSync(unregDir, { recursive: true });
+    const unregCheck = verifySeatSettingsRootAnchor(unregDir, tmpRepo);
+    assert.equal(unregCheck.valid, false, 'F22: unregistered seat dir without .claude/settings.json must fail closed');
+    assert.ok(
+      unregCheck.reason?.includes('seat_unregistered_or_missing_settings'),
+      `F22: reason must include seat_unregistered_or_missing_settings, got: ${unregCheck.reason}`
+    );
+    assert.ok(
+      unregCheck.checkedFiles.includes(path.join(tmpRepo, '.claude', 'settings.json')),
+      'F22: root .claude/settings.json must always be included in checkedFiles'
+    );
+
+    // Explicit opt-in allowNonOfficeDir: true permits non-seat directory if root settings are anchored
+    const optInCheck = verifySeatSettingsRootAnchor(unregDir, tmpRepo, { allowNonOfficeDir: true });
+    assert.equal(optInCheck.valid, true, 'F22: allowNonOfficeDir: true must pass when root settings are anchored');
+
+    // 3. F23: truncateUtf8Bytes caps at <= 2048 UTF-8 bytes and never splits a multi-byte UTF-8 sequence (no U+FFFD)
+    const vietChunk = 'Lỗi quyền truy cập tệp cấu hình ghế nhân sự — kiểm tra neo đường dẫn! '; // multi-byte UTF-8
+    const longUnicode = vietChunk.repeat(60); // > 4000 bytes
+    assert.ok(Buffer.byteLength(longUnicode, 'utf8') > 4000);
+    const truncated = truncateUtf8Bytes(longUnicode, 2048);
+    const truncatedByteLen = Buffer.byteLength(truncated, 'utf8');
+    assert.ok(
+      truncatedByteLen <= 2048,
+      `F23: truncated UTF-8 byte length must be <= 2048, got ${truncatedByteLen}`
+    );
+    assert.ok(
+      truncatedByteLen >= 2044,
+      `F23: truncated UTF-8 byte length should be near 2048 boundary, got ${truncatedByteLen}`
+    );
+    assert.equal(
+      truncated.includes('\uFFFD'),
+      false,
+      'F23: truncateUtf8Bytes must never split a multi-byte UTF-8 character into U+FFFD'
+    );
+
+    // Also verify ensureSeatSettingsAnchored surfaces <= 2048 bytes of generator stderr when generator outputs 5 KB of Unicode
+    generateSeatFiles({ repoRoot: tmpRepo, anchorRoot: '/opt/mismatch-root', quiet: true });
+    fs.writeFileSync(
+      path.join(tmpRepo, 'operations', 'scripts', 'gen-seat-files.mjs'),
+      `process.stderr.write(${JSON.stringify(longUnicode)}); process.exit(1);\n`,
+      'utf8'
+    );
+    const validSeatDir = path.join(tmpRepo, 'departments', 'marketing', 'seats', 'content-writer');
+    assert.throws(
+      () => ensureSeatSettingsAnchored(validSeatDir, tmpRepo, { autoRegenerate: true }),
+      (err) => {
+        const msg = String(err?.message || err);
+        const m = msg.match(/\| gen-seat-files stderr: ([\s\S]*?) — Kiểm quyền ghi tại/);
+        assert.ok(m, `F23: error message must contain gen-seat-files stderr snippet, got: ${msg}`);
+        const stderrSnippet = m[1];
+        const byteLen = Buffer.byteLength(stderrSnippet, 'utf8');
+        assert.ok(byteLen <= 2048, `F23: surfaced stderr snippet must be <= 2048 UTF-8 bytes, got ${byteLen}`);
+        assert.equal(stderrSnippet.includes('\uFFFD'), false, 'F23: surfaced stderr snippet must not contain U+FFFD');
+        return true;
+      }
+    );
+  } finally {
+    fs.rmSync(tmpRepo, { recursive: true, force: true });
+  }
+});
+
 
 

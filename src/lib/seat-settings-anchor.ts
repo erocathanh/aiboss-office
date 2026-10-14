@@ -1,21 +1,9 @@
 /**
- * Shared glob-escaping helper and constants for seat & repo-root `.claude/settings.json`
- * anchored deny rules (S17d F14).
- *
- * Imported by both the generator (`operations/scripts/gen-seat-files.mjs`) and the
- * spawn-time verifier (`src/lib/chay-agent.ts`) so that paths containing glob
- * metacharacters (`*`, `?`, `[`, `]`, `{`, `}`) are escaped identically.
+ * Re-exports the shared pure-JS glob-escaping helper and constants from
+ * `operations/scripts/seat-settings-anchor.mjs` (S17d F14 / S17e F21).
  */
 
-export function escapeSeatSettingsGlobPath(rawPath: string): string {
-  return String(rawPath)
-    .replace(/([*?[\]{}])/g, '\\$1')
-    .replace(/^\/+/, '');
-}
-
-export const REQUIRED_ANCHORED_DENY_SUFFIXES = [
-  'projects/**/references/**',
-  'projects/**/templates/**',
-  'projects/**/inputs/**',
-  'operations/data/**',
-] as const;
+export {
+  escapeSeatSettingsGlobPath,
+  REQUIRED_ANCHORED_DENY_SUFFIXES,
+} from '../../operations/scripts/seat-settings-anchor.mjs';

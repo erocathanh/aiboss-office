@@ -258,28 +258,52 @@ for hook in "${HOOKS[@]}"; do
     done
 done
 
-# Kiểm tra đối chứng dương: khi TẮT hook (thay bằng no-op true), ca block-* qua runner PHẢI báo FAIL.
-# Nếu runner báo FAIL khi hook bị câm/tắt, thì đối chứng dương ĐẠT (bộ kiểm thử không mù).
-echo "--- Kiểm tra đối chứng dương (Positive Control) ---"
-pos_script="$REPO_ROOT/operations/hooks/block_mass_delete.py"
-pos_file="$REPO_ROOT/tests/hooks/block_mass_delete/positive-control-rm-rf.json"
+# Kiểm tra đối chứng dương: khi TẮT hook (thay bằng no-op true), các ca block-* (gồm cả F15/F16/F19/F20)
+# trả mã thoát 0 nên qua runner PHẢI báo FAIL. Nếu runner báo FAIL khi hook bị câm/tắt, thì đối chứng dương ĐẠT.
+echo "--- Kiểm tra đối chứng dương (Positive Control: HOOKS_DISABLED=1) ---"
+POS_CONTROL_CASES=(
+    "block_mass_delete:positive-control-rm-rf.json"
+    "block_public_publish:block-f15-xargs-curl-post.json"
+    "block_public_publish:block-f19a-caffeinate-curl-post.json"
+    "block_public_publish:block-f19a-script-curl-post.json"
+    "block_public_publish:block-f19b-node-fetch-new-url-post.json"
+    "block_public_publish:block-f19b-python-urllib-request-post.json"
+    "lock_raw_inputs:block-f16-node-cpSync-dst-approvals.json"
+    "lock_raw_inputs:block-f16-python-open-hex-escape.json"
+    "lock_raw_inputs:block-f16-python-path-join-write-text.json"
+    "lock_raw_inputs:block-f20a-python-path-div-write-text.json"
+    "lock_raw_inputs:block-f20a-python-path-var-write-text.json"
+    "lock_raw_inputs:block-f20b-python-shutil-move-from-inputs.json"
+    "lock_raw_inputs:block-f20c-node-path-join-leading-slash-inputs.json"
+)
 
 saved_total=$TOTAL
 saved_passed=$PASSED
 saved_failed=$FAILED
 
-control_out=$(HOOKS_DISABLED=1 run_hook_test "$pos_script" "block_mass_delete" "$pos_file" 2>&1)
+pos_control_ok=1
+for entry in "${POS_CONTROL_CASES[@]}"; do
+    pc_hook="${entry%%:*}"
+    pc_file="${entry#*:}"
+    pc_script="$REPO_ROOT/operations/hooks/${pc_hook}.py"
+    pc_path="$REPO_ROOT/tests/hooks/${pc_hook}/${pc_file}"
+    control_out=$(HOOKS_DISABLED=1 run_hook_test "$pc_script" "$pc_hook" "$pc_path" 2>&1)
+    if [[ "$control_out" != *"[FAIL]"* || "$control_out" != *"nhận mã 0"* ]]; then
+        echo "  [FAIL] Ca đối chứng dương ($pc_hook/$pc_file): khi HOOKS_DISABLED=1, không phát hiện nhận mã 0: $control_out"
+        pos_control_ok=0
+    fi
+done
 
 TOTAL=$saved_total
 PASSED=$saved_passed
 FAILED=$saved_failed
 
-if [[ "$control_out" == *"[FAIL]"* ]]; then
-    echo "  [PASS] Ca đối chứng dương: khi tắt hook (thay bằng no-op true), runner phát hiện và báo FAIL. Bộ test không mù, thước biết nói KHÔNG!"
+if [ "$pos_control_ok" -eq 1 ]; then
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
-    echo "  [FAIL] Ca đối chứng dương: khi tắt hook, runner không báo FAIL: $control_out"
     FAILED=$((FAILED + 1))
 fi
+
 
 echo ""
 echo "=== KẾT QUẢ KIỂM THỬ ==="

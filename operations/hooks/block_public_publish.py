@@ -137,14 +137,156 @@ def is_curl_write(cmd: str) -> bool:
     return False
 
 
+def _is_non_readonly_method_spec(options_text: str) -> bool:
+    """Return True if options_text specifies an HTTP method that is POST/PUT/DELETE/PATCH or non-readonly."""
+    for m in re.finditer(r"\bmethod\s*[:=]\s*(['\"]?[A-Za-z0-9_$.]+['\"]?)", options_text, re.I):
+        val = m.group(1).strip().strip("'\"").upper()
+        if val not in ("GET", "HEAD", "OPTIONS"):
+            return True
+    return False
+
+
+def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
+    """
+    F19b (S17e): Detect HTTP write calls in Python/JS using balanced parenthesis argument lists
+    so nested parentheses in arguments (e.g. `fetch(new URL('/ingest','https://example.net'), {method:'POST',body:'x'})`)
+    never truncate detection.
+    Returns a list of raw URL argument expressions (or None when an HTTP write call has no extractable URL arg).
+    """
+    url_exprs: list[str | None] = []
+
+    # 1. Explicit write verbs: requests/httpx/axios/got/client/session . (post|put|delete|patch)(...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text, r"\b(?:requests|httpx|axios|got|client|session)\s*\.\s*(?:post|put|delete|patch)\s*\("
+    ):
+        if not call_args:
+            url_exprs.append(None)
+            continue
+        url_expr = None
+        for extra in call_args:
+            s_extra = extra.strip()
+            if s_extra.startswith("url") and "=" in s_extra:
+                url_expr = s_extra.split("=", 1)[1].strip()
+                break
+        if url_expr is None:
+            url_expr = call_args[0].strip()
+        url_exprs.append(url_expr or None)
+
+    # 2. (requests|httpx|client|session).request(method, url, ...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text, r"\b(?:requests|httpx|client|session)\s*\.\s*request\s*\("
+    ):
+        if not call_args:
+            continue
+        method_arg = call_args[0].strip().strip("'\"").upper()
+        rest_text = " , ".join(call_args[1:])
+        is_write = method_arg not in ("GET", "HEAD", "OPTIONS") or bool(
+            re.search(r"\b(?:data|json|files|content)\s*=", rest_text)
+        )
+        if not is_write:
+            continue
+        url_expr = None
+        for extra in call_args:
+            s_extra = extra.strip()
+            if s_extra.startswith("url") and "=" in s_extra:
+                url_expr = s_extra.split("=", 1)[1].strip()
+                break
+        if url_expr is None and len(call_args) >= 2:
+            url_expr = call_args[1].strip()
+        url_exprs.append(url_expr or None)
+
+    # 3. fetch(resource, options?) — inspect balanced args so new URL(...) in arg 0 never breaks parsing
+    for call_args in bash_parser._extract_call_arg_lists(text, r"\bfetch\s*\("):
+        if not call_args:
+            continue
+        first_arg = call_args[0].strip()
+        opts_text = " , ".join(call_args[1:])
+        combined_opts = f"{first_arg} , {opts_text}" if first_arg.startswith("new Request") else opts_text
+        has_write_method = _is_non_readonly_method_spec(combined_opts)
+        has_body = bool(
+            re.search(r"\bbody\s*:", combined_opts)
+            or re.search(r"\{\s*(?:[A-Za-z0-9_]+\s*,\s*)*body\s*(?:,|\})", combined_opts)
+        )
+        if has_write_method or has_body:
+            url_exprs.append(first_arg or None)
+
+    # 4. axios(config_or_url, config?) / axios.request(config)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text, r"\baxios(?:\s*\.\s*request)?\s*\("
+    ):
+        if not call_args:
+            continue
+        joined_args = " , ".join(call_args)
+        has_write = _is_non_readonly_method_spec(joined_args) or bool(
+            re.search(r"\b(?:data|body)\s*:", joined_args)
+        )
+        if not has_write:
+            continue
+        first_arg = call_args[0].strip()
+        if first_arg.startswith("{"):
+            m_url = re.search(r"\burl\s*:\s*([^,}]+)", first_arg)
+            url_exprs.append(m_url.group(1).strip() if m_url else None)
+        else:
+            url_exprs.append(first_arg or None)
+
+    # 5. Node http.request(...) / https.request(...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text, r"\bhttps?\s*\.\s*request\s*\("
+    ):
+        if not call_args:
+            url_exprs.append(None)
+            continue
+        joined_args = " , ".join(call_args)
+        explicit_readonly = bool(
+            re.search(r"\bmethod\s*:\s*['\"](?:GET|HEAD|OPTIONS)['\"]", joined_args, re.I)
+        ) and not bool(re.search(r"\.write\s*\(", text))
+        if explicit_readonly:
+            continue
+        first_arg = call_args[0].strip()
+        url_exprs.append(first_arg or None)
+
+    # 6. Python urllib.request.Request(...) / urlopen(...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text, r"\b(?:urllib\.request\.)?(?:Request|urlopen)\s*\("
+    ):
+        if not call_args:
+            continue
+        joined_args = " , ".join(call_args)
+        has_kw_write = _is_non_readonly_method_spec(joined_args) or bool(
+            re.search(r"\bdata\s*=", joined_args)
+        )
+        has_pos_data = False
+        if len(call_args) >= 2:
+            second = call_args[1].strip()
+            if second != "None" and not re.match(r"^(?:timeout|cafile|capath|cadefault|context|headers|origin_req_host|unverifiable)\s*=", second):
+                has_pos_data = True
+        if has_kw_write or has_pos_data:
+            url_expr = None
+            for extra in call_args:
+                s_extra = extra.strip()
+                if s_extra.startswith("url") and "=" in s_extra:
+                    url_expr = s_extra.split("=", 1)[1].strip()
+                    break
+            if url_expr is None:
+                url_expr = call_args[0].strip()
+            url_exprs.append(url_expr or None)
+
+    return url_exprs
+
+
+def has_code_http_write(cmd: str) -> bool:
+    if any(p.search(cmd) for p in CODE_HTTP_WRITE_PATTERNS):
+        return True
+    return len(_find_code_http_write_url_exprs(cmd)) > 0
+
+
 def is_http_write_command(cmd: str) -> bool:
     if re.search(r"\bcurl\b", cmd) and is_curl_write(cmd):
         return True
     if re.search(r"\bwget\b", cmd) and any(p.search(cmd) for p in WGET_WRITE_PATTERNS):
         return True
-    for pat in CODE_HTTP_WRITE_PATTERNS:
-        if pat.search(cmd):
-            return True
+    if has_code_http_write(cmd):
+        return True
     return False
 
 
@@ -249,56 +391,26 @@ def _extract_wget_target_urls(words: list[str]) -> tuple[list[str], str]:
 
 def _extract_code_http_write_target_urls(text: str) -> tuple[list[str], str]:
     urls: list[str] = []
-
-    # 1. requests.request(method, url, ...) / httpx.request(method, url, ...)
-    for call_args in bash_parser._extract_call_arg_lists(
-        text, r"\b(?:requests|httpx|client|session)\.request\s*\("
-    ):
-        url_expr = None
-        for extra in call_args:
-            s_extra = extra.strip()
-            if s_extra.startswith("url") and "=" in s_extra:
-                url_expr = s_extra.split("=", 1)[1].strip()
-                break
-        if url_expr is None and len(call_args) >= 2:
-            url_expr = call_args[1].strip()
+    raw_exprs = _find_code_http_write_url_exprs(text)
+    if not raw_exprs:
+        return ([], "Outbound HTTP write without resolvable target URL argument is blocked fail-closed by Hook 2.1.")
+    for url_expr in raw_exprs:
         if not url_expr:
-            return ([], "Outbound HTTP write without resolvable target URL argument is blocked fail-closed by Hook 2.1.")
-        m = _STRICT_STATIC_URL_LITERAL_RE.match(url_expr)
-        if not m:
-            return ([], f"Outbound HTTP write with dynamic or concatenated target URL ({url_expr}) is blocked fail-closed by Hook 2.1.")
-        urls.append(m.group(2))
-
-    # 2. requests/httpx/axios/urllib/fetch where 1st positional arg (or url=...) is the target URL
-    for call_args in bash_parser._extract_call_arg_lists(
-        text,
-        r"(?:\b(?:requests|httpx|axios|client|session)\.(?:post|put|delete|patch)|\burllib\.request\.(?:Request|urlopen)|\bfetch)\s*\(",
-    ):
-        if not call_args:
             return ([], "Outbound HTTP write without target URL argument is blocked fail-closed by Hook 2.1.")
-        url_expr = None
-        for extra in call_args:
-            s_extra = extra.strip()
-            if s_extra.startswith("url") and "=" in s_extra:
-                url_expr = s_extra.split("=", 1)[1].strip()
-                break
-        if url_expr is None:
-            url_expr = call_args[0].strip()
         m = _STRICT_STATIC_URL_LITERAL_RE.match(url_expr)
         if not m:
             return ([], f"Outbound HTTP write with dynamic or concatenated target URL ({url_expr}) is blocked fail-closed by Hook 2.1.")
         urls.append(m.group(2))
-
     return (urls, "")
 
 
 def check_outbound_http_write_text(cmd: str, allowed_hosts: set[str]) -> str:
-    """F3a & F9a: Fail-closed outbound HTTP write verification on command/script text."""
+    """F3a, F9a & F19b: Fail-closed outbound HTTP write verification on command/script text."""
     low = cmd.lower()
 
     # Check specific Meta Graph mutations even if disguised
     if any(d in low for d in GRAPH_DOMAINS):
-        if is_curl_write(cmd) or any(p.search(cmd) for p in CODE_HTTP_WRITE_PATTERNS) or any(p.search(cmd) for p in GRAPH_SPECIFIC_MUTATION_PATTERNS):
+        if is_curl_write(cmd) or has_code_http_write(cmd) or any(p.search(cmd) for p in GRAPH_SPECIFIC_MUTATION_PATTERNS):
             return "Writing or posting to Meta Graph API (POST/DELETE/PUT or data/form payload) is blocked by Hook 2.1."
 
     # Block string concatenation of URLs in write requests
@@ -307,7 +419,7 @@ def check_outbound_http_write_text(cmd: str, allowed_hosts: set[str]) -> str:
             if pat.search(cmd):
                 return "Outbound HTTP write with dynamically concatenated URL is blocked fail-closed by Hook 2.1."
 
-    if any(p.search(cmd) for p in CODE_HTTP_WRITE_PATTERNS):
+    if has_code_http_write(cmd):
         urls, err = _extract_code_http_write_target_urls(cmd)
         if err:
             return err

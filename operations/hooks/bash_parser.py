@@ -16,7 +16,9 @@ Tuân thủ tiêu chuẩn POSIX / Bash cơ bản, hỗ trợ:
 - Báo lỗi cú pháp khi nháy chưa khép (fail-closed).
 """
 
+import fnmatch
 import os
+import posixpath
 import sys
 import re
 import shlex
@@ -43,6 +45,7 @@ class SimpleCommand:
         self.redirections: List[Tuple[str, str]] = [] # list of (op, target) e.g. ('>', 'file.txt')
         self.env_vars: Dict[str, str] = {}
         self.via_xargs: bool = False
+        self.script_transcript_files: List[str] = []
         self.parse()
 
     def parse(self):
@@ -69,7 +72,7 @@ class SimpleCommand:
         if not remaining_tokens:
             return
 
-        # Bóc tách wrapper (command, env, sudo, exec, builtin, nohup, nice, timeout, xargs, \)
+        # Bóc tách wrapper (command, env, sudo, exec, builtin, nohup, nice, timeout, xargs, caffeinate, script, \)
         w_idx = 0
         while w_idx < len(remaining_tokens):
             w = remaining_tokens[w_idx]
@@ -152,6 +155,46 @@ class SimpleCommand:
                 if t_idx + 1 < len(remaining_tokens):
                     w_idx = t_idx + 1
                     continue
+                break
+            elif base_w == 'caffeinate':
+                c_idx = w_idx + 1
+                while c_idx < len(remaining_tokens):
+                    cw = remaining_tokens[c_idx]
+                    if cw == '--':
+                        c_idx += 1
+                        break
+                    if cw in ('-t', '-w'):
+                        c_idx += 2
+                        continue
+                    if cw.startswith('-'):
+                        c_idx += 1
+                        continue
+                    break
+                if c_idx < len(remaining_tokens):
+                    w_idx = c_idx
+                    continue
+                break
+            elif base_w == 'script':
+                s_idx = w_idx + 1
+                while s_idx < len(remaining_tokens):
+                    sw = remaining_tokens[s_idx]
+                    if sw == '--':
+                        s_idx += 1
+                        break
+                    if sw == '-t':
+                        s_idx += 2
+                        continue
+                    if sw.startswith('-'):
+                        s_idx += 1
+                        continue
+                    break
+                if s_idx < len(remaining_tokens):
+                    transcript_tok = remaining_tokens[s_idx].strip("'\"")
+                    if transcript_tok and transcript_tok != '/dev/null':
+                        self.script_transcript_files.append(transcript_tok)
+                    if s_idx + 1 < len(remaining_tokens):
+                        w_idx = s_idx + 1
+                        continue
                 break
             elif base_w == 'xargs':
                 self.via_xargs = True
@@ -751,11 +794,25 @@ def canonical_path(raw_path: str, cwd: str, project_dir: str, symlinks_map: Opti
 
     return rel.replace('\\', '/')
 
+def _seg_matches_protected(seg: str, protected_names: Tuple[str, ...]) -> bool:
+    if not seg:
+        return False
+    if seg in protected_names:
+        return True
+    if any(ch in seg for ch in ('*', '?', '[')):
+        return any(fnmatch.fnmatchcase(name, seg) for name in protected_names)
+    return False
+
+
 def is_in_project_dau_vao(rel_path: str) -> bool:
     """Kiểm tra rel_path có nằm trong projects/<project>/inputs/... hoặc CAC-DU-AN/<project>/DAU-VAO/... không."""
     norm = rel_path.replace('\\', '/')
     parts = [p for p in norm.split('/') if p and p != '.']
-    if len(parts) >= 3 and layout.is_projects_root(parts[0]) and layout.is_inputs_dir(parts[2]):
+    if (
+        len(parts) >= 3
+        and (layout.is_projects_root(parts[0]) or _seg_matches_protected(parts[0], layout.PROJECTS_ROOT_ALL))
+        and (layout.is_inputs_dir(parts[2]) or _seg_matches_protected(parts[2], layout.INPUTS_DIR_ALL))
+    ):
         return True
     return False
 
@@ -763,10 +820,8 @@ def is_in_operations_data(rel_path: str) -> bool:
     """Kiểm tra rel_path có nằm trong operations/data/... không (S17-10)."""
     norm = rel_path.replace('\\', '/')
     parts = [p for p in norm.split('/') if p and p != '.']
-    if len(parts) >= 2 and parts[0] == 'operations' and parts[1] == 'data':
-        return True
     for i in range(len(parts) - 1):
-        if parts[i] == 'operations' and parts[i + 1] == 'data':
+        if _seg_matches_protected(parts[i], ('operations',)) and _seg_matches_protected(parts[i + 1], ('data',)):
             return True
     return False
 
@@ -774,7 +829,11 @@ def is_in_du_an_mau(rel_path: str) -> bool:
     """Kiểm tra rel_path có thuộc projects/_sample-ground-truth/... hoặc CAC-DU-AN/DU-AN-MAU-SU-THAT/... không (không match ...-2)."""
     norm = rel_path.replace('\\', '/')
     parts = [p for p in norm.split('/') if p and p != '.']
-    if len(parts) >= 2 and layout.is_projects_root(parts[0]) and layout.is_sample_ground_truth(parts[1]):
+    if (
+        len(parts) >= 2
+        and (layout.is_projects_root(parts[0]) or _seg_matches_protected(parts[0], layout.PROJECTS_ROOT_ALL))
+        and (layout.is_sample_ground_truth(parts[1]) or _seg_matches_protected(parts[1], layout.SAMPLE_GROUND_TRUTH_ALL))
+    ):
         return True
     return False
 
@@ -783,7 +842,11 @@ def is_dau_ra_or_final(rel_path: str) -> bool:
     norm = rel_path.replace('\\', '/')
     parts = [p for p in norm.split('/') if p and p != '.']
     filename = os.path.basename(norm)
-    if len(parts) >= 3 and layout.is_projects_root(parts[0]) and layout.is_outputs_dir(parts[2]):
+    if (
+        len(parts) >= 3
+        and (layout.is_projects_root(parts[0]) or _seg_matches_protected(parts[0], layout.PROJECTS_ROOT_ALL))
+        and (layout.is_outputs_dir(parts[2]) or _seg_matches_protected(parts[2], layout.OUTPUTS_DIR_ALL))
+    ):
         return True
     if layout.FINAL_SUFFIX in filename:
         return True
@@ -826,6 +889,10 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         if op in ('>', '>>', '1>', '1>>', '2>', '2>>'):
             targets.append((clean_target, f"redirection {op}"))
 
+    for tf in getattr(cmd, "script_transcript_files", []):
+        if tf and tf != '/dev/null':
+            targets.append((tf, "script transcript file"))
+
     # 2. Lệnh ghi file: cp, mv, ln, install, rsync, touch, truncate, tee, sed, perl, dd
     base = cmd.executable
     words = cmd.words
@@ -844,7 +911,13 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 targets.append((dest, f"{base} dynamic destination"))
             else:
                 dest_abs = os.path.normpath(os.path.join(cmd.cwd, os.path.expanduser(dest)))
-                if dest.endswith('/') or os.path.isdir(dest_abs) or layout.is_outputs_dir(os.path.basename(dest_abs)):
+                dest_base = os.path.basename(dest_abs)
+                if (
+                    dest.endswith('/')
+                    or os.path.isdir(dest_abs)
+                    or layout.is_outputs_dir(dest_base)
+                    or _seg_matches_protected(dest_base, layout.OUTPUTS_DIR_ALL + layout.INPUTS_DIR_ALL)
+                ):
                     for s in sources:
                         targets.append((os.path.join(dest, os.path.basename(s)), f"{base} to directory"))
                 else:
@@ -901,7 +974,7 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 dest = w[3:].strip("'\"")
                 targets.append((dest, "dd output file"))
 
-    # 3. Inline script & heredoc writes (F5, F10, F12, F16: python open, Path.write_*, shutil.copy*, node fs.*FileSync, copyFileSync/cpSync)
+    # 3. Inline script & heredoc writes (F5, F10, F12, F16, F20: python open, Path.write_*, shutil.copy/move, os.rename/replace, node fs.*FileSync, copyFileSync/cpSync/renameSync)
     combined_raw = "\n".join([cmd.raw_str] + getattr(cmd, "heredoc_bodies", []))
     if (
         base in ('python', 'python3', 'py', 'node')
@@ -914,99 +987,167 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         or 'appendFile' in combined_raw
         or 'copyFile' in combined_raw
         or 'rename' in combined_raw
+        or 'unlink' in combined_raw
+        or 'rmSync' in combined_raw
         or 'shutil.' in combined_raw
         or 'os.replace' in combined_raw
+        or 'os.rename' in combined_raw
+        or 'os.remove' in combined_raw
+        or 'os.unlink' in combined_raw
     ):
+        default_join = 'node' if base == 'node' else 'auto'
+        var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join)
+
         for call_args in _extract_call_arg_lists(combined_raw, r'(?<!\.)\bopen\s*\('):
             if not call_args:
                 continue
             path_expr = call_args[0]
-            mode_expr = None
-            for extra in call_args[1:]:
-                s_extra = extra.strip()
-                if s_extra.startswith('mode') and '=' in s_extra:
-                    mode_expr = s_extra.split('=', 1)[1].strip()
-                    break
-            if mode_expr is None and len(call_args) >= 2:
-                first_extra = call_args[1].strip()
-                if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=', first_extra):
-                    mode_expr = first_extra
+            mode_expr = _extract_open_mode_expr(call_args[1:])
             if mode_expr is not None:
-                resolved_mode = resolve_script_path_expr(mode_expr)
+                resolved_mode = resolve_script_path_expr(mode_expr, var_env=var_env, default_join_style=default_join)
                 if resolved_mode.startswith('$DYNAMIC_WRITE:') or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode):
-                    resolved_target = resolve_script_path_expr(path_expr)
+                    resolved_target = resolve_script_path_expr(path_expr, var_env=var_env, default_join_style=default_join)
                     label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
                     targets.append((resolved_target, label))
 
-        for ctor_args, method_name, method_args in _extract_chained_call_arg_lists(
-            combined_raw,
-            r'\b(?:pathlib\.)?Path\s*\(',
-            r'^\s*\.\s*(write_text|write_bytes|open)\s*\(',
+        # F20a: Receiver-based detection for .write_text(...), .write_bytes(...), .open(...)
+        # Handles Path(...).write_text(...), (Path('a')/'b').write_text(...), and p = ...; p.write_text(...)
+        for recv_expr, method_name, method_args in _extract_method_calls_with_receiver(
+            combined_raw, ('write_text', 'write_bytes', 'open', 'unlink')
         ):
-            if not ctor_args:
+            if not recv_expr:
                 continue
-            resolved_ctor_parts = [resolve_script_path_expr(a) for a in ctor_args]
-            if any(p.startswith('$DYNAMIC_WRITE:') for p in resolved_ctor_parts):
-                resolved_target = f"$DYNAMIC_WRITE:Path({','.join(ctor_args)})"
-            else:
-                resolved_target = os.path.normpath(os.path.join(*resolved_ctor_parts)).replace('\\', '/')
             if method_name == 'open':
-                mode_expr = None
-                for extra in method_args:
-                    s_extra = extra.strip()
-                    if s_extra.startswith('mode') and '=' in s_extra:
-                        mode_expr = s_extra.split('=', 1)[1].strip()
-                        break
-                if mode_expr is None and len(method_args) >= 1:
-                    first_extra = method_args[0].strip()
-                    if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=', first_extra):
-                        mode_expr = first_extra
+                mode_expr = _extract_open_mode_expr(method_args)
                 if mode_expr is None:
                     continue
-                resolved_mode = resolve_script_path_expr(mode_expr)
+                resolved_mode = resolve_script_path_expr(mode_expr, var_env=var_env, default_join_style=default_join)
                 if not (
                     resolved_mode.startswith('$DYNAMIC_WRITE:')
                     or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode)
                 ):
                     continue
+            resolved_target = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style=default_join)
             label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.write"
             targets.append((resolved_target, label))
 
+        # Node fs single-target writes & deletes
         for call_args in _extract_call_arg_lists(
             combined_raw,
-            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream)\s*\(',
+            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|unlinkSync|unlink|rmSync)\s*\(',
         ):
             if not call_args:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[0])
+            resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
             label = "node fs dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs write"
             targets.append((resolved_target, label))
 
+        # Node fs copy (destination is arg[1])
         for call_args in _extract_call_arg_lists(
             combined_raw,
-            r'\b(?:copyFileSync|cpSync|copyFile|renameSync|rename)\s*\(',
+            r'\b(?:copyFileSync|cpSync|copyFile)\s*\(',
         ):
             if len(call_args) < 2:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[1])
-            label = "node fs dynamic copy/rename" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs copy/rename"
+            resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='node')
+            label = "node fs dynamic copy" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs copy"
             targets.append((resolved_target, label))
 
+        # F20b: Node fs rename / renameSync — check BOTH source (arg[0]) and destination (arg[1])
         for call_args in _extract_call_arg_lists(
             combined_raw,
-            r'\b(?:shutil\.(?:copy|copy2|copyfile|move)|os\.(?:replace|rename))\s*\(',
+            r'\b(?:renameSync|rename)\s*\(',
         ):
             if len(call_args) < 2:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[1])
-            label = "python shutil/os dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python shutil write"
+            for idx_arg, role in ((0, "source"), (1, "destination")):
+                resolved_target = resolve_script_path_expr(call_args[idx_arg], var_env=var_env, default_join_style='node')
+                label = f"node fs dynamic rename {role}" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"node fs rename {role}"
+                targets.append((resolved_target, label))
+
+        # Python shutil.copy / copy2 / copyfile (destination is arg[1])
+        for call_args in _extract_call_arg_lists(
+            combined_raw,
+            r'\bshutil\.(?:copy|copy2|copyfile)\s*\(',
+        ):
+            if len(call_args) < 2:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='python')
+            label = "python shutil dynamic copy" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python shutil copy"
+            targets.append((resolved_target, label))
+
+        # F20b: Python shutil.move, os.rename, os.replace — check BOTH source (arg[0]) and destination (arg[1])
+        for call_args in _extract_call_arg_lists(
+            combined_raw,
+            r'\b(?:shutil\.move|os\.(?:replace|rename))\s*\(',
+        ):
+            if len(call_args) < 2:
+                continue
+            for idx_arg, role in ((0, "source"), (1, "destination")):
+                resolved_target = resolve_script_path_expr(call_args[idx_arg], var_env=var_env, default_join_style='python')
+                label = f"python move/rename dynamic {role}" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python move/rename {role}"
+                targets.append((resolved_target, label))
+
+        # Python os.remove, os.unlink, shutil.rmtree (single target arg[0])
+        for call_args in _extract_call_arg_lists(
+            combined_raw,
+            r'\b(?:os\.(?:remove|unlink)|shutil\.rmtree)\s*\(',
+        ):
+            if not call_args:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='python')
+            label = "python delete dynamic target" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python delete target"
             targets.append((resolved_target, label))
 
     return targets
 
 
+def _extract_open_mode_expr(extra_args: List[str]) -> Optional[str]:
+    mode_expr: Optional[str] = None
+    for extra in extra_args:
+        s_extra = extra.strip()
+        if s_extra.startswith('mode') and '=' in s_extra:
+            mode_expr = s_extra.split('=', 1)[1].strip()
+            break
+    if mode_expr is None and len(extra_args) >= 1:
+        first_extra = extra_args[0].strip()
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*\s*=', first_extra):
+            mode_expr = first_extra
+    return mode_expr
+
+
 _SINGLE_STRING_LITERAL_RE = re.compile(r"""^(?:'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")$""", re.DOTALL)
-_JOIN_CALL_PREFIX_RE = re.compile(r'^(?:os\.path|posixpath|path)\.join\s*\(', re.DOTALL)
+_PYTHON_JOIN_CALL_PREFIX_RE = re.compile(r'^(?:os\.path|posixpath)\.join\s*\(', re.DOTALL)
+_NODE_JOIN_CALL_PREFIX_RE = re.compile(
+    r'^(?:require\s*\(\s*[\'"](?:node:)?path(?:/posix)?[\'"]\s*\)|[A-Za-z_][A-Za-z0-9_]*)(?:\.posix)?\.join\s*\(',
+    re.DOTALL,
+)
+_PATHLIB_CTOR_PREFIX_RE = re.compile(r'^(?:pathlib\.)?(?:Pure(?:Posix|Windows)?|Posix|Windows)?Path\s*\(', re.DOTALL)
+_SIMPLE_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _node_path_join(parts: List[str]) -> str:
+    """
+    F20c (S17e): POSIX implementation of Node.js path.join(...parts).
+    Unlike Python os.path.join (which discards earlier segments when a segment begins with '/'),
+    Node path.join concatenates all non-empty segments with '/' and normalizes the result.
+    """
+    non_empty = [p for p in parts if p]
+    if not non_empty:
+        return "."
+    joined = "/".join(non_empty)
+    return posixpath.normpath(joined)
+
+
+def _strip_outer_parens(expr: str) -> str:
+    s = (expr or "").strip()
+    while len(s) >= 2 and s[0] == '(' and s[-1] == ')':
+        _, close_idx = _scan_balanced_paren_args(s, 1)
+        if close_idx == len(s) - 1:
+            s = s[1:-1].strip()
+        else:
+            break
+    return s
 
 
 def _decode_single_pass_escapes(raw_val: str) -> Optional[str]:
@@ -1096,15 +1237,20 @@ def _decode_string_literal_escapes(raw_val: str) -> Optional[str]:
     return cur
 
 
-def resolve_script_path_expr(expr: str) -> str:
+def resolve_script_path_expr(
+    expr: str,
+    var_env: Optional[Dict[str, str]] = None,
+    default_join_style: str = "auto",
+) -> str:
     """
-    F10 & F12 (S17c) & F16 (S17d): Resolve a Python/JS path argument expression into either:
-    - a static string path (supporting surrounding whitespace, '+' concatenation of string literals,
-      static os.path.join/path.join calls, and decoded string literal escapes), OR
-    - '$DYNAMIC_WRITE:<expr>' when the expression contains variables, template substitutions,
+    F10 & F12 (S17c), F16 (S17d) & F20 (S17e): Resolve a Python/JS path argument expression into either:
+    - a static string path (supporting surrounding whitespace, outer parens, '+' concatenation,
+      pathlib.Path(...) and '/' operator chains, static os.path.join vs Node path.join calls,
+      and decoded string literal escapes), OR
+    - '$DYNAMIC_WRITE:<expr>' when the expression contains unresolvable variables, template substitutions,
       unresolvable escapes, or dynamic calls.
     """
-    s = (expr or "").strip()
+    s = _strip_outer_parens(expr)
     if not s:
         return "$DYNAMIC_WRITE:empty"
 
@@ -1116,39 +1262,98 @@ def resolve_script_path_expr(expr: str) -> str:
             return f"$DYNAMIC_WRITE:{s}"
         return decoded
 
-    # Check if s is a static os.path.join(...) / path.join(...) call
-    m_join = _JOIN_CALL_PREFIX_RE.match(s)
-    if m_join and s.endswith(')'):
-        join_arg_lists = _extract_call_arg_lists(s, r'^(?:os\.path|posixpath|path)\.join\s*\(')
+    if _SIMPLE_IDENT_RE.match(s):
+        if var_env and s in var_env:
+            return var_env[s]
+        return f"$DYNAMIC_WRITE:{s}"
+
+    # F20a: Check top-level '/' operator (pathlib Path('a') / 'b' / 'c')
+    slash_parts = _split_top_level_op(s, '/')
+    if len(slash_parts) > 1:
+        resolved_slash = [
+            resolve_script_path_expr(p, var_env=var_env, default_join_style=default_join_style)
+            for p in slash_parts
+        ]
+        if any(rp.startswith('$DYNAMIC_WRITE:') for rp in resolved_slash):
+            return f"$DYNAMIC_WRITE:{s}"
+        return os.path.normpath(os.path.join(*resolved_slash)).replace('\\', '/')
+
+    # F20a: Check pathlib.Path(...) constructor (with optional .joinpath(...) chain)
+    m_path = _PATHLIB_CTOR_PREFIX_RE.match(s)
+    if m_path:
+        ctor_args, close_idx = _scan_balanced_paren_args(s, m_path.end())
+        if ctor_args is not None:
+            tail = s[close_idx + 1 :].strip()
+            all_path_arg_exprs = list(ctor_args)
+            valid_chain = True
+            while tail:
+                m_jp = re.match(r'^\.\s*joinpath\s*\(', tail)
+                if not m_jp:
+                    valid_chain = False
+                    break
+                jp_args, jp_close = _scan_balanced_paren_args(tail, m_jp.end())
+                if jp_args is None:
+                    valid_chain = False
+                    break
+                all_path_arg_exprs.extend(jp_args)
+                tail = tail[jp_close + 1 :].strip()
+            if valid_chain:
+                if not all_path_arg_exprs:
+                    return "."
+                resolved_ctor = [
+                    resolve_script_path_expr(a, var_env=var_env, default_join_style='python')
+                    for a in all_path_arg_exprs
+                ]
+                if any(rp.startswith('$DYNAMIC_WRITE:') for rp in resolved_ctor):
+                    return f"$DYNAMIC_WRITE:{s}"
+                return os.path.normpath(os.path.join(*resolved_ctor)).replace('\\', '/')
+
+    # F20c: Check Python os.path.join(...) / posixpath.join(...) vs Node path.join(...) / path.posix.join(...)
+    m_py_join = _PYTHON_JOIN_CALL_PREFIX_RE.match(s)
+    if m_py_join and s.endswith(')'):
+        join_arg_lists = _extract_call_arg_lists(s, r'^(?:os\.path|posixpath)\.join\s*\(')
         if len(join_arg_lists) == 1 and join_arg_lists[0]:
-            resolved_parts = [resolve_script_path_expr(p) for p in join_arg_lists[0]]
+            resolved_parts = [
+                resolve_script_path_expr(p, var_env=var_env, default_join_style='python')
+                for p in join_arg_lists[0]
+            ]
             if all(not rp.startswith('$DYNAMIC_WRITE:') for rp in resolved_parts):
                 return os.path.normpath(os.path.join(*resolved_parts)).replace('\\', '/')
 
+    m_node_join = _NODE_JOIN_CALL_PREFIX_RE.match(s)
+    if m_node_join and s.endswith(')'):
+        join_arg_lists = _extract_call_arg_lists(
+            s,
+            r'^(?:require\s*\(\s*[\'"](?:node:)?path(?:/posix)?[\'"]\s*\)|[A-Za-z_][A-Za-z0-9_]*)(?:\.posix)?\.join\s*\(',
+        )
+        if len(join_arg_lists) == 1 and join_arg_lists[0]:
+            is_explicit_path_recv = bool(re.match(r'^(?:path|require\b)', s))
+            if is_explicit_path_recv or default_join_style == 'node' or len(join_arg_lists[0]) >= 2:
+                resolved_parts = [
+                    resolve_script_path_expr(p, var_env=var_env, default_join_style='node')
+                    for p in join_arg_lists[0]
+                ]
+                if all(not rp.startswith('$DYNAMIC_WRITE:') for rp in resolved_parts):
+                    return _node_path_join(resolved_parts)
+
     # Check if s is a '+' concatenation of string literals: 'operations/' + 'data/...'
-    parts = _split_top_level_plus(s)
+    parts = _split_top_level_op(s, '+')
     if len(parts) > 1:
         concat_pieces: List[str] = []
         all_literals = True
         for part in parts:
-            p_strip = part.strip()
-            mp = _SINGLE_STRING_LITERAL_RE.match(p_strip)
-            if not mp:
+            rp = resolve_script_path_expr(part, var_env=var_env, default_join_style=default_join_style)
+            if rp.startswith('$DYNAMIC_WRITE:'):
                 all_literals = False
                 break
-            piece = mp.group(1) if mp.group(1) is not None else mp.group(2)
-            decoded_piece = _decode_string_literal_escapes(piece)
-            if decoded_piece is None:
-                all_literals = False
-                break
-            concat_pieces.append(decoded_piece)
+            concat_pieces.append(rp)
         if all_literals:
             return "".join(concat_pieces)
 
     return f"$DYNAMIC_WRITE:{s}"
 
 
-def _split_top_level_plus(expr: str) -> List[str]:
+def _split_top_level_op(expr: str, op_char: str) -> List[str]:
     parts: List[str] = []
     cur: List[str] = []
     quote: Optional[str] = None
@@ -1180,13 +1385,132 @@ def _split_top_level_plus(expr: str) -> List[str]:
             depth = max(0, depth - 1)
             cur.append(ch)
             continue
-        if ch == '+' and depth == 0:
+        if ch == op_char and depth == 0:
             parts.append("".join(cur))
             cur = []
             continue
         cur.append(ch)
     parts.append("".join(cur))
     return parts
+
+
+def _split_top_level_plus(expr: str) -> List[str]:
+    return _split_top_level_op(expr, '+')
+
+
+def _extract_simple_var_env(text: str, default_join_style: str = "auto") -> Dict[str, str]:
+    """
+    Extract simple variable assignments (e.g. `p = Path(root) / 'projects' / ...` or `p = Path('wip') / 'a.md'`)
+    across `;` and newline-separated statements. Reassigned variables become $DYNAMIC_WRITE.
+    """
+    env: Dict[str, str] = {}
+    counts: Dict[str, int] = {}
+    for stmt in re.split(r'[;\n]+', text):
+        s = stmt.strip()
+        if not s:
+            continue
+        m = re.match(r'^(?:(?:const|let|var)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(?![=~>])(.+)$', s)
+        if not m:
+            continue
+        var_name = m.group(1)
+        rhs = m.group(2).strip()
+        if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
+            continue
+        counts[var_name] = counts.get(var_name, 0) + 1
+        if counts[var_name] > 1:
+            env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
+        else:
+            env[var_name] = resolve_script_path_expr(rhs, var_env=env, default_join_style=default_join_style)
+    return env
+
+
+def _extract_receiver_before_dot(text: str, dot_idx: int) -> str:
+    """
+    Walk backwards from dot_idx (the index of '.' in '.write_text(' / '.write_bytes(' / '.open(')
+    to extract the receiver expression (supporting balanced parens/brackets, string literals,
+    identifiers/attributes, and top-level '/' pathlib expressions).
+    """
+    i = dot_idx - 1
+    while i >= 0 and text[i] in (' ', '\t'):
+        i -= 1
+    end_pos = i + 1
+    if end_pos <= 0:
+        return ""
+
+    while i >= 0:
+        ch = text[i]
+        if ch in (')', ']'):
+            open_ch = '(' if ch == ')' else '['
+            depth = 1
+            i -= 1
+            in_q: Optional[str] = None
+            while i >= 0 and depth > 0:
+                c = text[i]
+                if in_q is not None:
+                    if c == in_q and (i == 0 or text[i - 1] != '\\'):
+                        in_q = None
+                else:
+                    if c in ("'", '"', '`') and (i == 0 or text[i - 1] != '\\'):
+                        in_q = c
+                    elif c == ch:
+                        depth += 1
+                    elif c == open_ch:
+                        depth -= 1
+                i -= 1
+            continue
+        if ch in ("'", '"') and (i == 0 or text[i - 1] != '\\'):
+            q = ch
+            i -= 1
+            while i >= 0:
+                if text[i] == q and (i == 0 or text[i - 1] != '\\'):
+                    i -= 1
+                    break
+                i -= 1
+            continue
+        if ch.isalnum() or ch in ('_', '.'):
+            i -= 1
+            continue
+        if ch == '/':
+            i -= 1
+            while i >= 0 and text[i] in (' ', '\t'):
+                i -= 1
+            continue
+        if ch in (' ', '\t'):
+            j = i - 1
+            while j >= 0 and text[j] in (' ', '\t'):
+                j -= 1
+            if j >= 0 and text[j] == '/':
+                i = j - 1
+                while i >= 0 and text[i] in (' ', '\t'):
+                    i -= 1
+                continue
+            break
+        break
+
+    start_pos = i + 1
+    return text[start_pos:end_pos].strip()
+
+
+def _extract_method_calls_with_receiver(
+    text: str,
+    method_names: Tuple[str, ...],
+) -> List[Tuple[str, str, List[str]]]:
+    """
+    F20a (S17e): Find all `.method_name(...)` calls in `text` and return
+    `(receiver_expr, method_name, method_args)` for each call.
+    """
+    results: List[Tuple[str, str, List[str]]] = []
+    alt = "|".join(re.escape(m) for m in method_names)
+    pat = re.compile(rf'\.\s*({alt})\s*\(')
+    for m in pat.finditer(text):
+        dot_idx = m.start()
+        method_name = m.group(1)
+        receiver_expr = _extract_receiver_before_dot(text, dot_idx)
+        method_args, _ = _scan_balanced_paren_args(text, m.end())
+        if method_args is None:
+            method_args = []
+        results.append((receiver_expr, method_name, method_args))
+    return results
 
 
 def _scan_balanced_paren_args(text: str, start_idx: int) -> Tuple[Optional[List[str]], int]:
@@ -1280,6 +1604,7 @@ def _extract_chained_call_arg_lists(
             method_args = []
         results.append((ctor_args, method_name, method_args))
     return results
+
 
 
 
