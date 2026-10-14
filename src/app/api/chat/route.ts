@@ -3,8 +3,9 @@ import { chayAgent } from '@/lib/chay-agent';
 import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT } from '@/lib/doc-phien';
+import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, saoChepBanGhiPhien } from '@/lib/doc-phien';
 import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
+import { generateRunOrWakeId, recordRun, updateRun } from '@/lib/runs-ledger';
 import { ghiVetMatLienKet } from '@/lib/vet-mat-lien-ket';
 import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
@@ -251,6 +252,7 @@ export async function POST(req: NextRequest) {
   };
 
   let maPhienDaDung: string | null = maPhienCu;
+  const runId = generateRunOrWakeId('run');
 
   const luong = new ReadableStream<Uint8Array>({
     async start(dieu) {
@@ -294,6 +296,16 @@ export async function POST(req: NextRequest) {
         } catch {
           /* tra hỏng thì ⛔ ĐỪNG chặn lượt chat — cứ gửi câu gốc */
         }
+        const startedAt = new Date().toISOString();
+        try {
+          recordRun({
+            runId,
+            seatId: maNhanSu,
+            startedAt,
+            status: 'running',
+            sessionId: maPhienCu ?? undefined,
+          });
+        } catch { /* bỏ qua lỗi ghi sổ phụ */ }
         for await (const mau of chayAgent({
           cauHoi: cauGui,
           maPhienCu,
@@ -308,6 +320,9 @@ export async function POST(req: NextRequest) {
           // 🔌 Người xem rời đi thì việc VẪN CHẠY TỚI HẾT.
           chayNen: true,
           khiSinh: (tien) => {
+            if (tien.pid) {
+              try { updateRun(runId, { pid: tien.pid }); } catch { /* bỏ qua */ }
+            }
             /**
              * 🔴 ĐỌC GIÁ TRỊ TRẢ VỀ — người soi ngoài nhà bắt đúng chỗ này 02/09:
              *    «chỉ còn PID trong console.warn / giá trị trả về, NHƯNG CALLER BỎ QUA».
@@ -366,6 +381,7 @@ export async function POST(req: NextRequest) {
               pid: process.pid,
               cwd: thuMucAgent(maNhanSu),
             });
+            try { updateRun(runId, { sessionId: mau.ma_phien }); } catch { /* bỏ qua */ }
             dieu.enqueue(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
           } else if (mau.loai === 'chu') {
             dieu.enqueue(goi({ loai: 'chu', chu: mau.chu }));
@@ -373,10 +389,18 @@ export async function POST(req: NextRequest) {
             dieu.enqueue(goi({ loai: 'loi', thong_diep: mau.thong_diep }));
           } else if (mau.loai === 'xong') {
             // ⛔ Không đẩy mã phiên ra trình duyệt. Chi phí thì cho xem để Owner canh tiền.
+            try { updateRun(runId, { costStatus: 'unpriced' }); } catch { /* bỏ qua */ }
             dieu.enqueue(goi({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token }));
           }
         }
       } catch (e) {
+        try {
+          updateRun(runId, {
+            status: 'failed',
+            finishedAt: new Date().toISOString(),
+            errorKind: 'result_error',
+          });
+        } catch { /* bỏ qua */ }
         dieu.enqueue(
           goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
         );
@@ -418,6 +442,7 @@ export async function POST(req: NextRequest) {
         if (maPhienDaDung) {
           const maP = maPhienDaDung;
           const ghiLai = () => {
+            saoChepBanGhiPhien(maNhanSu, maP, cauHoi);
             const m = mocTepPhien(maNhanSu, maP);
             if (m !== null) ghiMocKetThuc(maO, m);
           };
@@ -426,6 +451,15 @@ export async function POST(req: NextRequest) {
             setTimeout(ghiLai, cho).unref?.();
           }
         }
+        try {
+          updateRun(runId, {
+            status: 'finished',
+            finishedAt: new Date().toISOString(),
+            exitCode: 0,
+            costStatus: 'unpriced',
+            ...(maPhienDaDung ? { sessionId: maPhienDaDung } : {}),
+          });
+        } catch { /* bỏ qua */ }
         updateSeatActivePid(maNhanSu, null);
         dongMotLan();
         try {
