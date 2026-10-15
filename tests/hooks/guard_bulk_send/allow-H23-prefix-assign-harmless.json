@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "CODE='x=1'; CODE='print(1)' python3 -c \"$CODE\""
+  }
+}

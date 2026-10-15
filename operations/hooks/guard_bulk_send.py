@@ -165,41 +165,51 @@ def extract_subcommand_executable(sub_cmd: str) -> tuple[str, str]:
     return "", ""
 
 
-def extract_inline_code_args(sc: bash_parser.SimpleCommand) -> list[str]:
-    """H16a (v04): Với runner (`python*`, `node`, `deno`, `bun`, `perl`, `ruby`, `php`, `osascript`, `bash`/`sh`/`zsh`),
-    lấy toàn bộ chuỗi mã của `-c` / `-e` / `-E` / `--eval` / `-p` / `--print` / `-r` từ `sc.words` đã tách nháy
-    (một đối số nguyên vẹn, không tách bên trong bằng regex).
+def extract_inline_code_raw_args(sc: bash_parser.SimpleCommand) -> list[tuple[str, str]]:
+    """H16a (v04) & H24 (v06): Với runner (`python*`, `node`, `deno`, `bun`, `perl`, `ruby`, `php`, `osascript`, `bash`/`sh`/`zsh`),
+    lấy các cặp `(unquoted_code, raw_code)` của `-c` / `-e` / `-E` / `--eval` / `-p` / `--print` / `-r` từ `sc.words` và `sc.raw_words`.
     """
     exe = sc.executable
     if not (exe in INLINE_CODE_RUNNERS or exe.startswith(('python2.', 'python3.'))):
         return []
-    codes: list[str] = []
+    pairs: list[tuple[str, str]] = []
     words = sc.words
+    raw_words = getattr(sc, "raw_words", None) or words
     i = 1
     while i < len(words):
         w = words[i]
+        raw_w = raw_words[i] if i < len(raw_words) else w
         if w in ('-c', '-e', '-E', '--eval', '-p', '--print', '-r') and i + 1 < len(words):
-            codes.append(words[i + 1])
+            nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
+            pairs.append((words[i + 1], nxt_raw))
             i += 2
             continue
         if exe.startswith(('python', 'py')) and w.startswith('-') and not w.startswith('--') and w.endswith('c') and len(w) > 2 and i + 1 < len(words):
-            codes.append(words[i + 1])
+            nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
+            pairs.append((words[i + 1], nxt_raw))
             i += 2
             continue
         if exe in ('sh', 'bash', 'zsh', 'ksh', 'dash') and w.startswith('-') and not w.startswith('--') and 'c' in w and i + 1 < len(words):
-            codes.append(words[i + 1])
+            nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
+            pairs.append((words[i + 1], nxt_raw))
             i += 2
             continue
         if w.startswith(('-c', '-e', '-r')) and not w.startswith('--') and len(w) > 2:
-            codes.append(w[2:])
+            raw_attached = raw_w[2:] if raw_w.startswith(('-c', '-e', '-r')) else w[2:]
+            pairs.append((w[2:], raw_attached))
             i += 1
             continue
         if w.startswith(('--eval=', '--print=')):
-            codes.append(w.split('=', 1)[1])
+            raw_attached = raw_w.split('=', 1)[1] if '=' in raw_w else w.split('=', 1)[1]
+            pairs.append((w.split('=', 1)[1], raw_attached))
             i += 1
             continue
         i += 1
-    return codes
+    return pairs
+
+
+def extract_inline_code_args(sc: bash_parser.SimpleCommand) -> list[str]:
+    return [code for code, _ in extract_inline_code_raw_args(sc)]
 
 
 def is_code_or_smtp_runner(sub_cmd: str) -> bool:
@@ -262,6 +272,26 @@ def has_curl_delete_flags(cmd: str) -> bool:
     return False
 
 
+def has_curl_write_flags(cmd: str) -> bool:
+    """PCN ĐK 1 (v06): Kiểm tra lệnh curl có thực hiện GHI mạng (POST/PUT/PATCH/DELETE hoặc gửi dữ liệu/tệp) không."""
+    if has_curl_post_flags(cmd) or has_curl_delete_flags(cmd):
+        return True
+    if re.search(r'(?:-X\s*[\'"]?|--request[\s=]+[\'"]?)(?:POST|PUT|PATCH|DELETE)\b', cmd, re.IGNORECASE):
+        return True
+    return False
+
+
+def has_wget_write_flags(cmd: str) -> bool:
+    """PCN ĐK 1 (v06): Kiểm tra lệnh wget có thực hiện GHI mạng (--post-data, --post-file, --body-*, --method=POST|PUT|PATCH|DELETE) không."""
+    return bool(
+        re.search(
+            r'(?:--post-data\b|--post-file\b|--body-data\b|--body-file\b|--method[\s=]+[\'"]?(?:POST|PUT|PATCH|DELETE)\b)',
+            cmd,
+            re.IGNORECASE,
+        )
+    )
+
+
 def is_curl_command(sub_cmd: str) -> bool:
     """Kiểm tra lệnh con có bắt đầu bằng curl không."""
     sc = parse_simple_command_safe(sub_cmd)
@@ -274,37 +304,44 @@ def is_curl_command(sub_cmd: str) -> bool:
     return first == "curl" or first.endswith("/curl")
 
 
-def has_curl_variable_url(sub_cmd: str) -> bool:
-    """Kiểm tra lệnh curl có địa chỉ đích mở đầu bằng biến ($X, ${X}/...) không."""
-    sc = parse_simple_command_safe(sub_cmd)
-    tokens = sc.words if (sc and sc.words) else split_tokens(sub_cmd)
+def extract_curl_url_candidates(sub_cmd: str, sc: bash_parser.SimpleCommand | None = None) -> list[tuple[str, str]]:
+    """Trích xuất danh sách các cặp `(unquoted_url_token, raw_url_token)` đóng vai trò địa chỉ đích trong lệnh curl."""
+    if sc is None:
+        sc = parse_simple_command_safe(sub_cmd)
+    if sc and sc.words:
+        tokens = sc.words
+        raw_tokens = getattr(sc, "raw_words", None) or tokens
+    else:
+        tokens = split_tokens(sub_cmd)
+        raw_tokens = list(tokens)
     if not tokens:
-        return False
+        return []
 
     idx = 0
     while idx < len(tokens) and '=' in tokens[idx] and not tokens[idx].startswith('-'):
         idx += 1
     if idx >= len(tokens):
-        return False
+        return []
 
     first = tokens[idx].strip('\'"')
     if not (first == "curl" or first.endswith("/curl")):
-        return False
+        return []
 
+    candidates: list[tuple[str, str]] = []
     i = idx + 1
     while i < len(tokens):
         tok = tokens[i]
+        raw_tok = raw_tokens[i] if i < len(raw_tokens) else tok
         clean = tok.strip('\'"')
         if clean == '--url' and i + 1 < len(tokens):
-            url_val = tokens[i + 1].strip('\'"')
-            if SHELL_VAR_START_PATTERN.match(url_val):
-                return True
+            nxt_raw = raw_tokens[i + 1] if (i + 1) < len(raw_tokens) else tokens[i + 1]
+            candidates.append((tokens[i + 1].strip('\'"'), nxt_raw))
             i += 2
             continue
         if clean.startswith('--url='):
-            url_val = clean.split('=', 1)[1].strip('\'"')
-            if SHELL_VAR_START_PATTERN.match(url_val):
-                return True
+            u_val = clean.split('=', 1)[1].strip('\'"')
+            u_raw = raw_tok.split('=', 1)[1] if '=' in raw_tok else u_val
+            candidates.append((u_val, u_raw))
             i += 1
             continue
         if clean in CURL_VALUE_FLAGS:
@@ -313,9 +350,16 @@ def has_curl_variable_url(sub_cmd: str) -> bool:
         if clean.startswith('-'):
             i += 1
             continue
-        if SHELL_VAR_START_PATTERN.match(clean):
-            return True
+        candidates.append((clean, raw_tok))
         i += 1
+    return candidates
+
+
+def has_curl_variable_url(sub_cmd: str) -> bool:
+    """Kiểm tra lệnh curl có địa chỉ đích mở đầu bằng biến ($X, ${X}/...) không."""
+    for clean_url, _ in extract_curl_url_candidates(sub_cmd):
+        if SHELL_VAR_START_PATTERN.match(clean_url):
+            return True
     return False
 
 
@@ -477,6 +521,10 @@ def extract_target_host(tool_name: str, tool_input: dict) -> str:
 
 
 SHELL_VAR_REF_RE = re.compile(r'\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^}]*)\})')
+HEX_OR_OCTAL_ESCAPE_RE = re.compile(r'\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|0[0-7]{2})')
+PLAIN_LITERAL_HTTP_URL_RE = re.compile(r'^([\'"])https?://[A-Za-z0-9._-]+(?::\d+)?(?:/[^\'"\\]*)?\1$')
+RESOLVED_STATIC_HOST_RE = re.compile(r'^https?://([A-Za-z0-9._-]+)(?::\d+)?(?:/|$)', re.IGNORECASE)
+WATCHED_BULK_HOSTS = ('graph.facebook.com', 'openapi.zalo.me', 'api.resend.com', 'api.sendgrid.com')
 
 
 def has_bulk_send_signal(text: str) -> bool:
@@ -525,46 +573,158 @@ def expand_shell_vars_in_text(
     return expanded, has_unresolved
 
 
+def expand_shell_vars_in_raw_token(
+    raw_token: str,
+    static_vars: dict[str, str],
+    unresolved_vars: set[str],
+) -> tuple[str, bool]:
+    """H24 (v06): Mở rộng `$NAME` và `${NAME}` có tôn trọng ngữ cảnh vùng nháy của token:
+    - Trong vùng nháy đơn `'...'`: `$NAME` là nguyên văn — KHÔNG mở rộng biến.
+    - Trong vùng nháy kép `"..."` hoặc không nháy: mở rộng `$NAME` / `${NAME}` (trừ khi có `\\$` thoát trước).
+    Đồng thời thực hiện bóc nháy bao ngoài (quote removal) giống shell.
+    """
+    if not raw_token:
+        return "", False
+
+    out: list[str] = []
+    has_unresolved = False
+    i = 0
+    n = len(raw_token)
+    in_single = False
+    in_double = False
+
+    while i < n:
+        ch = raw_token[i]
+        if in_single:
+            if ch == "'":
+                in_single = False
+            else:
+                out.append(ch)
+            i += 1
+            continue
+
+        if ch == '\\':
+            if i + 1 < n:
+                nxt = raw_token[i + 1]
+                if in_double and nxt not in ('$', '`', '"', '\\', '\n'):
+                    out.append('\\')
+                out.append(nxt)
+                i += 2
+            else:
+                out.append('\\')
+                i += 1
+            continue
+
+        if ch == "'" and not in_double:
+            in_single = True
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = not in_double
+            i += 1
+            continue
+
+        if ch == '`':
+            has_unresolved = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == '$':
+            if i + 1 < n and raw_token[i + 1] == '(':
+                has_unresolved = True
+                out.append('$(')
+                i += 2
+                continue
+            m = SHELL_VAR_REF_RE.match(raw_token, i)
+            if m:
+                var_name = m.group(1) or m.group(2) or ""
+                modifier = m.group(3) or ""
+                if not var_name:
+                    out.append(m.group(0))
+                elif var_name in unresolved_vars or var_name not in static_vars:
+                    has_unresolved = True
+                    out.append(m.group(0))
+                else:
+                    val = static_vars[var_name]
+                    if modifier:
+                        has_unresolved = True
+                        out.append(f"{val} {modifier}")
+                    else:
+                        out.append(val)
+                i = m.end()
+                continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out), has_unresolved
+
+
 def update_shell_var_bindings(
     sub_cmd: str,
     sc: bash_parser.SimpleCommand | None,
     static_vars: dict[str, str],
     unresolved_vars: set[str],
 ) -> bool:
-    """H19 (v05): Cập nhật bảng gán biến tĩnh `static_vars` và tập biến động `unresolved_vars`
-    từ subcommand `sub_cmd` (gồm gán thuần `NAME=...`, gán đầu lệnh `NAME=... cmd`, và
-    `export`/`local`/`declare`/`typeset`/`readonly`/`read`).
-    Trả về True nếu vế phải gán biến chứa mẫu gửi/SMTP.
+    """H19 (v05) & H23 (v06): Cập nhật bảng gán biến shell `static_vars` / `unresolved_vars`
+    và kiểm tra tín hiệu gửi trong vế phải phép gán.
+    - H23 (v06): Tách «biến môi trường tạm đầu lệnh» (`VAR=val cmd ...`, khi `sc.executable` là lệnh thực thi)
+      khỏi «bảng binding dài hạn của shell» (gán thuần `VAR=val` không có lệnh, hoặc builtin khai báo
+      `export`/`local`/`declare`/`typeset`/`readonly`/`read`).
+      Trong POSIX/Bash, khi chạy `CODE='print(1)' python3 -c "$CODE"`, bước mở rộng `"$CODE"` trên argv
+      dùng giá trị `CODE` CÓ TRƯỚC lệnh; phép gán đầu lệnh `CODE='print(1)'` chỉ cấp biến môi trường tạm
+      cho tiến trình con và KHÔNG ghi đè `static_vars` dùng để mở rộng argv hay trạng thái dài hạn.
+    - Lưu ý bảo thủ (Hermes / H23): trường hợp chỉ có `CODE='…smtplib…' python3 -c "$CODE"` (chưa gán `CODE`
+      trước đó) thực tế shell truyền chuỗi rỗng cho `-c` nhưng biến `CODE` đã vào `os.environ` của tiến trình con;
+      hook trả `found_signal = True` (bật `chain_has_bulk_send_signal`) và chặn qua nhánh biến chưa giải tĩnh
+      là chặn bảo thủ có chủ đích (over-approximation), không phải coi `$CODE` đã mở rộng thành chuỗi đó.
     """
     found_signal = False
     sub_has_cmd_subst = bool(bash_parser.extract_substitutions_safe(sub_cmd))
 
+    is_declaration_builtin = (
+        sc is not None and sc.executable in ('export', 'local', 'declare', 'typeset', 'readonly')
+    )
+    is_pure_assignment = (sc is None or not sc.executable)
+    persist_bindings = is_pure_assignment or is_declaration_builtin
+
     raw_assignments: list[tuple[str, bool, str]] = []
-    try:
-        tokens, _ = bash_parser.tokenize_command(sub_cmd)
-    except Exception:
-        tokens = []
+    if sc is not None and getattr(sc, "raw_env_assignments", None):
+        raw_assignments.extend(sc.raw_env_assignments)
+    else:
+        try:
+            tokens, raw_tokens, _ = bash_parser.tokenize_command_with_raw(sub_cmd)
+        except Exception:
+            tokens, raw_tokens = [], []
 
-    while tokens and tokens[0].lower() in ('then', 'do', 'else', 'elif', 'fi', 'done', 'time'):
-        tokens = tokens[1:]
+        while tokens and tokens[0].lower() in ('then', 'do', 'else', 'elif', 'fi', 'done', 'time'):
+            tokens = tokens[1:]
+            raw_tokens = raw_tokens[1:]
 
-    idx = 0
-    while idx < len(tokens):
-        tok = tokens[idx]
-        m_assign = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)$', tok, re.DOTALL)
-        if m_assign:
-            raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', m_assign.group(3)))
-            idx += 1
-        else:
-            break
+        idx = 0
+        while idx < len(tokens):
+            tok = tokens[idx]
+            raw_tok = raw_tokens[idx] if idx < len(raw_tokens) else tok
+            m_assign = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)$', tok, re.DOTALL)
+            if m_assign:
+                raw_rhs = raw_tok.split('=', 1)[1] if '=' in raw_tok else m_assign.group(3)
+                raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', raw_rhs))
+                idx += 1
+            else:
+                break
 
-    if sc is not None and sc.executable in ('export', 'local', 'declare', 'typeset', 'readonly'):
-        for w in sc.words[1:]:
+    if is_declaration_builtin and sc is not None:
+        raw_words = getattr(sc, "raw_words", None) or sc.words
+        for w_idx, w in enumerate(sc.words[1:], start=1):
             if w.startswith(('-', '+')):
                 continue
+            raw_w = raw_words[w_idx] if w_idx < len(raw_words) else w
             m_assign = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)$', w, re.DOTALL)
             if m_assign:
-                raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', m_assign.group(3)))
+                raw_rhs = raw_w.split('=', 1)[1] if '=' in raw_w else m_assign.group(3)
+                raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', raw_rhs))
     elif sc is not None and sc.executable == 'read':
         for w in sc.words[1:]:
             if w.startswith('-'):
@@ -574,13 +734,16 @@ def update_shell_var_bindings(
                 unresolved_vars.add(clean_w)
                 static_vars.pop(clean_w, None)
 
-    for var_name, is_append, rhs in raw_assignments:
-        if has_bulk_send_signal(rhs):
+    for var_name, is_append, raw_rhs in raw_assignments:
+        if has_bulk_send_signal(raw_rhs):
             found_signal = True
-        expanded_rhs, rhs_unresolved = expand_shell_vars_in_text(rhs, static_vars, unresolved_vars)
+        expanded_rhs, rhs_unresolved = expand_shell_vars_in_raw_token(raw_rhs, static_vars, unresolved_vars)
         if has_bulk_send_signal(expanded_rhs):
             found_signal = True
-        is_dynamic = rhs_unresolved or (sub_has_cmd_subst and ('$ (' in rhs or '$(' in rhs or '`' in rhs))
+        if not persist_bindings:
+            # H23: Gán đầu lệnh (env tạm của tiến trình con) KHÔNG ghi vào static_vars dùng để mở rộng argv.
+            continue
+        is_dynamic = rhs_unresolved or (sub_has_cmd_subst and ('$ (' in raw_rhs or '$(' in raw_rhs or '`' in raw_rhs))
         if is_dynamic:
             unresolved_vars.add(var_name)
             static_vars.pop(var_name, None)
@@ -595,6 +758,128 @@ def update_shell_var_bindings(
                 static_vars[var_name] = expanded_rhs
 
     return found_signal
+
+
+def check_inline_code_uncertain_network_write(code_text: str) -> str:
+    """PCN ĐK 1 (§7 & §8 v06): Phát hiện mã nội tuyến Python/Node thực hiện GHI mạng
+    (`requests.post/put/patch/delete/request`, `urllib.request`, `httpx`, `axios`, `fetch` POST/PUT/PATCH/DELETE)
+    nhưng địa chỉ đích không phải hằng chuỗi URL tĩnh tường minh (ví dụ ghép chuỗi `'https://'+h+...`,
+    f-string, biến động, hoặc chứa mã hoá hex `\\x2f`).
+    """
+    if not code_text:
+        return ""
+
+    write_call_patterns = [
+        (
+            "chuỗi ghép Python / biến động trong requests/httpx/axios",
+            re.compile(r'\b(?:requests|httpx|axios)\s*\.\s*(?:post|put|patch|delete)\s*\(\s*([^,)]+)', re.DOTALL),
+        ),
+        (
+            "chuỗi ghép Python / biến động trong requests/httpx/axios.request",
+            re.compile(
+                r'\b(?:requests|httpx|axios)\s*\.\s*request\s*\(\s*[\'"](?:POST|PUT|PATCH|DELETE)[\'"]\s*,\s*([^,)]+)',
+                re.IGNORECASE | re.DOTALL,
+            ),
+        ),
+    ]
+    for label, pat in write_call_patterns:
+        for m in pat.finditer(code_text):
+            url_expr = m.group(1).strip()
+            if url_expr.startswith("url="):
+                url_expr = url_expr[4:].strip()
+            if not PLAIN_LITERAL_HTTP_URL_RE.match(url_expr) or HEX_OR_OCTAL_ESCAPE_RE.search(url_expr):
+                return f"Không chắc đích ghi mạng: phát hiện lệnh ghi HTTP ({label}: {url_expr[:40]}) không giải tĩnh được đích. Lệnh bị chặn và ghi sổ duyệt."
+
+    # urllib.request.Request / urlopen có data= hoặc method=POST/PUT/PATCH/DELETE
+    if re.search(r'\burllib\.request\.(?:Request|urlopen)\b', code_text):
+        has_urllib_write = bool(
+            re.search(r'\bdata\s*=', code_text)
+            or re.search(r'\bmethod\s*=\s*[\'"](?:POST|PUT|PATCH|DELETE)[\'"]', code_text, re.IGNORECASE)
+        )
+        if has_urllib_write:
+            for m in re.finditer(r'\burllib\.request\.(?:Request|urlopen)\s*\(\s*([^,)]+)', code_text, re.DOTALL):
+                url_expr = m.group(1).strip()
+                if not PLAIN_LITERAL_HTTP_URL_RE.match(url_expr) or HEX_OR_OCTAL_ESCAPE_RE.search(url_expr):
+                    return f"Không chắc đích ghi mạng: phát hiện urllib.request ghi dữ liệu tới đích động/chuỗi ghép ({url_expr[:40]}). Lệnh bị chặn và ghi sổ duyệt."
+
+    # fetch(...) có method POST/PUT/PATCH/DELETE
+    if re.search(r'\bfetch\s*\(', code_text) and re.search(
+        r'\bmethod\s*:\s*[\'"](?:POST|PUT|PATCH|DELETE)[\'"]', code_text, re.IGNORECASE
+    ):
+        for m in re.finditer(r'\bfetch\s*\(\s*([^,)]+)', code_text, re.DOTALL):
+            url_expr = m.group(1).strip()
+            if not PLAIN_LITERAL_HTTP_URL_RE.match(url_expr) or HEX_OR_OCTAL_ESCAPE_RE.search(url_expr):
+                return f"Không chắc đích ghi mạng: phát hiện fetch ghi mạng tới đích động/chuỗi ghép ({url_expr[:40]}). Lệnh bị chặn và ghi sổ duyệt."
+
+    return ""
+
+
+def check_curl_or_wget_uncertain_write(
+    sub_cmd: str,
+    sc: bash_parser.SimpleCommand | None,
+    static_vars: dict[str, str],
+    unresolved_vars: set[str],
+) -> str:
+    """PCN ĐK 1 (§7 & §8 v06): Với lệnh mạng CÓ GHI (`curl` POST/PUT/PATCH/DELETE/data/form/upload,
+    `wget --post*`/`--method=POST|...`, `nc`/`ncat`/`netcat`) mà bộ phân tích không chắc đích
+    (`xargs`, mã hoá hex `\\x2f`, command substitution `$(...)`, biến không giải được `$URL`),
+    trả về lý do mở đầu bằng «Không chắc đích ghi mạng: ...».
+    Không bao giờ chặn lệnh ĐỌC (`curl` GET, `wget` GET).
+    """
+    exe = sc.executable if sc else ""
+    via_xargs = bool(sc and sc.via_xargs)
+
+    if exe in ('nc', 'ncat', 'netcat'):
+        return f"Không chắc đích ghi mạng: lệnh kết nối socket ({exe}) có thể gửi dữ liệu tới đích không xác định. Lệnh bị chặn và ghi sổ duyệt."
+
+    if exe == "wget" or sub_cmd.strip().startswith("wget "):
+        if not has_wget_write_flags(sub_cmd):
+            return ""
+        if via_xargs:
+            return "Không chắc đích ghi mạng: lệnh wget ghi mạng chạy qua xargs nhận đích động từ stdin. Lệnh bị chặn và ghi sổ duyệt."
+        if HEX_OR_OCTAL_ESCAPE_RE.search(sub_cmd) or '$(' in sub_cmd or '`' in sub_cmd:
+            return "Không chắc đích ghi mạng: lệnh wget ghi mạng chứa mã hoá hex (\\x2f) hoặc command substitution trong URL. Lệnh bị chặn và ghi sổ duyệt."
+        if SHELL_VAR_REF_RE.search(sub_cmd):
+            return "Không chắc đích ghi mạng: lệnh wget ghi mạng chứa biến không giải được trong đích. Lệnh bị chặn và ghi sổ duyệt."
+        return ""
+
+    if not is_curl_command(sub_cmd):
+        return ""
+
+    # Chỉ xét lệnh curl CÓ GHI; lệnh curl GET/đọc cho qua ngay
+    if not has_curl_write_flags(sub_cmd):
+        return ""
+
+    if via_xargs:
+        return "Không chắc đích ghi mạng: lệnh curl ghi mạng (POST/PUT/PATCH/DELETE) chạy qua xargs nhận đích từ stdin. Lệnh bị chặn và ghi sổ duyệt."
+
+    url_candidates = extract_curl_url_candidates(sub_cmd, sc)
+    if not url_candidates:
+        return "Không chắc đích ghi mạng: lệnh curl ghi mạng nhưng không giải tĩnh được URL đích. Lệnh bị chặn và ghi sổ duyệt."
+
+    for clean_url, raw_url in url_candidates:
+        if clean_url in ('{}', '__'):
+            return "Không chắc đích ghi mạng: lệnh curl ghi mạng tới placeholder động (xargs {}). Lệnh bị chặn và ghi sổ duyệt."
+        if HEX_OR_OCTAL_ESCAPE_RE.search(raw_url) or HEX_OR_OCTAL_ESCAPE_RE.search(clean_url):
+            return "Không chắc đích ghi mạng: lệnh curl ghi mạng tới URL chứa mã hoá hex (\\x2f). Lệnh bị chặn và ghi sổ duyệt."
+        if '$(' in raw_url or '`' in raw_url or '$(' in clean_url or '`' in clean_url:
+            return "Không chắc đích ghi mạng: lệnh curl ghi mạng tới URL ghép bằng command substitution (ví dụ printf \\x2f). Lệnh bị chặn và ghi sổ duyệt."
+
+        expanded_url, url_unresolved = expand_shell_vars_in_raw_token(raw_url, static_vars, unresolved_vars)
+        clean_expanded = expanded_url.strip('\'"')
+        if SHELL_VAR_START_PATTERN.match(clean_expanded) or SHELL_VAR_START_PATTERN.match(clean_url):
+            return "Không chắc đích ghi mạng: lệnh curl ghi mạng tới địa chỉ mở đầu bằng biến không giải được ($URL). Lệnh bị chặn và ghi sổ duyệt."
+
+        m_host = RESOLVED_STATIC_HOST_RE.match(clean_expanded)
+        if not m_host:
+            if url_unresolved or '$' in clean_expanded:
+                return "Không chắc đích ghi mạng: lệnh curl ghi mạng tới host chứa biến không giải được. Lệnh bị chặn và ghi sổ duyệt."
+        else:
+            host_low = m_host.group(1).lower()
+            if any(host_low == wh or host_low.endswith("." + wh) for wh in WATCHED_BULK_HOSTS) and url_unresolved:
+                return f"Không chắc đích ghi mạng: lệnh curl ghi mạng tới {host_low} nhưng đường dẫn chứa biến không giải được. Lệnh bị chặn và ghi sổ duyệt."
+
+    return ""
 
 
 def should_block_bulk_send(
@@ -632,12 +917,12 @@ def should_block_bulk_send(
         if "fetch_page_messages" in cmd_joined:
             return "Phát hiện lệnh truy xuất tin nhắn hộp thư (fetch_page_messages.py). Lệnh bị chặn và được ghi nhận vào sổ duyệt."
 
-        # 2c. Kiểm tra lệnh có cả graph.facebook.com và endpoint gửi/đăng hoặc xoá
+        # 2c. Kiểm tra lệnh có cả graph.facebook.com và endpoint gửi/đăng hoặc xoá (trừ khi đi qua ống xargs để nhánh PCN xử lý đúng reason)
         tokens = cmd_joined.strip().split()
         first_tok = tokens[0].strip('\'"') if tokens else ""
         is_top_curl = (first_tok == "curl" or first_tok.endswith("/curl"))
 
-        if "graph.facebook.com" in cmd_joined:
+        if "graph.facebook.com" in cmd_joined and not re.search(r'\bxargs\b', cmd_joined):
             if not is_top_curl:
                 if any(ep in cmd_joined for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
                     return "Phát hiện mã/lệnh kết nối tới graph.facebook.com gửi tin nhắn hoặc đăng bài/bình luận/ảnh. Lệnh bị chặn và cần chủ trực tiếp duyệt."
@@ -648,15 +933,18 @@ def should_block_bulk_send(
             if ("batch=" in cmd_joined or "relative_url" in cmd_joined) and any(ep in cmd_joined for ep in ('messages', 'feed', 'comments', 'photos')):
                 return "Phát hiện batch request gửi dữ liệu qua graph.facebook.com. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-        # 2e. Kiểm tra thân heredoc thực thi (chảy vào python/node/sh hoặc ghi-rồi-chạy — H15)
+        # 2e. Kiểm tra thân heredoc thực thi (chảy vào python/node/sh hoặc ghi-rồi-chạy — H15 & PCN ĐK 1)
         for hd_body in bash_parser.extract_executed_heredocs(raw_cmd):
             if SMTP_PATTERN.search(hd_body):
                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
             for endpoint in BULK_SEND_ENDPOINTS:
                 if endpoint.search(hd_body):
                     return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+            uncertain_hd_reason = check_inline_code_uncertain_network_write(hd_body)
+            if uncertain_hd_reason:
+                return uncertain_hd_reason
 
-        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a & H19)
+        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a, H19, H23, H24)
         pipelines = split_clauses_and_pipelines_safe(cmd_joined)
         cur_cwd = base_cwd
         static_vars: dict[str, str] = dict(_inherited_static_vars) if _inherited_static_vars else {}
@@ -664,6 +952,11 @@ def should_block_bulk_send(
         chain_has_bulk_send_signal: bool = bool(_inherited_bulk_signal) or has_bulk_send_signal(cmd_joined)
 
         for pipe_subs in pipelines:
+            for ps in pipe_subs:
+                ps_sc = parse_simple_command_safe(ps, cur_cwd)
+                if ps_sc and ps_sc.via_xargs and (has_curl_write_flags(ps) or has_wget_write_flags(ps)):
+                    return check_curl_or_wget_uncertain_write(ps, ps_sc, static_vars, unresolved_vars)
+
             pipeline_has_runner = any(is_code_or_smtp_runner(ps) for ps in pipe_subs)
 
             for sub in pipe_subs:
@@ -702,18 +995,20 @@ def should_block_bulk_send(
 
                 sc = parse_simple_command_safe(sub, cur_cwd)
 
-                # H19 (v05): Cập nhật bảng gán biến shell tĩnh/động trước khi xét runner
+                # H19 (v05) & H23 (v06): Cập nhật bảng gán biến shell (chỉ ghi static_vars khi là gán thuần/declaration builtin;
+                # gán đầu lệnh chỉ kiểm tra tín hiệu gửi chứ không ghi đè static_vars dùng để mở rộng argv).
                 if update_shell_var_bindings(sub, sc, static_vars, unresolved_vars):
                     chain_has_bulk_send_signal = True
 
-                # Bóc wrapper shell (bash -c, sh -c, zsh -c, eval) tới lệnh bên trong (H16a & H19)
+                # Bóc wrapper shell (bash -c, sh -c, zsh -c, eval) tới lệnh bên trong (H16a, H19 & H24)
                 if sc and sc.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(sc.words) > 1:
                     handled_shell_c = False
+                    raw_words = getattr(sc, "raw_words", None) or sc.words
                     for c_idx, w in enumerate(sc.words[1:], start=1):
                         if w.startswith('-') and not w.startswith('--') and 'c' in w and c_idx + 1 < len(sc.words):
-                            nested_script = sc.words[c_idx + 1]
-                            expanded_nested, nested_unresolved = expand_shell_vars_in_text(
-                                nested_script, static_vars, unresolved_vars
+                            raw_nested = raw_words[c_idx + 1] if (c_idx + 1) < len(raw_words) else sc.words[c_idx + 1]
+                            expanded_nested, nested_unresolved = expand_shell_vars_in_raw_token(
+                                raw_nested, static_vars, unresolved_vars
                             )
                             if nested_unresolved and chain_has_bulk_send_signal:
                                 return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
@@ -735,11 +1030,16 @@ def should_block_bulk_send(
                     if handled_shell_c:
                         continue
                 elif sc and sc.executable == 'eval' and len(sc.words) > 1:
-                    nested_script = " ".join(sc.words[1:])
-                    expanded_nested, nested_unresolved = expand_shell_vars_in_text(
-                        nested_script, static_vars, unresolved_vars
-                    )
-                    if nested_unresolved and chain_has_bulk_send_signal:
+                    raw_words = getattr(sc, "raw_words", None) or sc.words
+                    eval_parts: list[str] = []
+                    eval_unresolved = False
+                    for rw in raw_words[1:]:
+                        exp_part, part_unres = expand_shell_vars_in_raw_token(rw, static_vars, unresolved_vars)
+                        eval_parts.append(exp_part)
+                        if part_unres:
+                            eval_unresolved = True
+                    expanded_nested = " ".join(eval_parts)
+                    if eval_unresolved and chain_has_bulk_send_signal:
                         return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
                     try:
                         inner_reason = should_block_bulk_send(
@@ -760,11 +1060,12 @@ def should_block_bulk_send(
                 if check_script_dong_y(sub):
                     return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-                # (b1) Với runner có cờ mã nội tuyến (-c/-e/--eval/-p/--print/-r), mở rộng biến shell tĩnh (H19) và quét mẫu SMTP/nodemailer + endpoint trên TOÀN BỘ chuỗi đối số mã (H16a)
+                # (b1) Với runner có cờ mã nội tuyến (-c/-e/--eval/-p/--print/-r), mở rộng biến có tôn trọng vùng nháy (H24)
+                # và quét mẫu SMTP/nodemailer + endpoint + ghi mạng không chắc đích (PCN ĐK 1)
                 if sc is not None:
-                    for code_arg in extract_inline_code_args(sc):
-                        expanded_code, code_unresolved = expand_shell_vars_in_text(
-                            code_arg, static_vars, unresolved_vars
+                    for code_arg, raw_code_arg in extract_inline_code_raw_args(sc):
+                        expanded_code, code_unresolved = expand_shell_vars_in_raw_token(
+                            raw_code_arg, static_vars, unresolved_vars
                         )
                         for candidate_code in (code_arg, expanded_code):
                             if SMTP_PATTERN.search(candidate_code):
@@ -772,14 +1073,23 @@ def should_block_bulk_send(
                             for endpoint in BULK_SEND_ENDPOINTS:
                                 if endpoint.search(candidate_code):
                                     return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                            uncertain_code_reason = check_inline_code_uncertain_network_write(candidate_code)
+                            if uncertain_code_reason:
+                                return uncertain_code_reason
                         if code_unresolved and chain_has_bulk_send_signal:
                             return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-                # (b2) Kiểm tra SMTP trên argv / subcommand (H13, H16a & H19: chỉ chặn khi thực thi mã/script/heredoc chạy hoặc gọi client thật; miễn lệnh chỉ in/đọc/tìm tài liệu)
+                # (b2) Kiểm tra SMTP trên argv / subcommand (H13, H16a, H19 & H24: chỉ mở rộng biến ngoài nháy đơn)
                 sc_joined_words = " ".join(sc.words) if (sc and sc.words) else sub
-                expanded_words, words_unresolved = expand_shell_vars_in_text(
-                    sc_joined_words, static_vars, unresolved_vars
-                )
+                if sc and getattr(sc, "raw_words", None):
+                    expanded_word_list = [
+                        expand_shell_vars_in_raw_token(rw, static_vars, unresolved_vars)[0]
+                        for rw in sc.raw_words
+                    ]
+                    expanded_words = " ".join(expanded_word_list)
+                else:
+                    expanded_words = sc_joined_words
+
                 if SMTP_PATTERN.search(sc_joined_words) or SMTP_PATTERN.search(sub) or SMTP_PATTERN.search(expanded_words):
                     _, sub_base = extract_subcommand_executable(sub)
                     if sub_base in EXEMPT_PRINT_COMMANDS and not pipeline_has_runner:
@@ -790,20 +1100,20 @@ def should_block_bulk_send(
                 sub_is_curl = is_curl_command(sub)
 
                 if sub_is_curl:
+                    # Nếu curl chạy qua xargs và có cờ ghi mạng -> hỏi duyệt không chắc đích (PCN A1)
+                    if sc and sc.via_xargs and has_curl_write_flags(sub):
+                        return check_curl_or_wget_uncertain_write(sub, sc, static_vars, unresolved_vars)
+
                     # Kiểm tra curl DELETE tới graph.facebook.com
                     if "graph.facebook.com" in sub and has_curl_delete_flags(sub):
                         return "Phát hiện lệnh curl DELETE tới graph.facebook.com xoá dữ liệu. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-                    # Kiểm tra curl có cờ gửi dữ liệu mà địa chỉ đích mở đầu bằng biến ($X, ${X}/...)
-                    if has_curl_post_flags(sub) and has_curl_variable_url(sub):
-                        return "Phát hiện lệnh curl gửi dữ liệu tới địa chỉ mở đầu bằng biến môi trường/shell. Lệnh bị chặn và cần chủ trực tiếp duyệt."
-
-                    # Miễn trừ /conversations: CHỈ áp khi lệnh con là curl, không có cờ POST hay data, và không có endpoint gửi/đăng
+                    # Miễn trừ /conversations: CHỈ áp khi lệnh con là curl, không có cờ POST/write hay data, và không có endpoint gửi/đăng
                     if "graph.facebook.com" in sub and "conversations" in sub:
-                        if not has_curl_post_flags(sub) and not any(ep in sub for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
+                        if not has_curl_write_flags(sub) and not any(ep in sub for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
                             continue
 
-                # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin không
+                # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin đã biết không (B1 giữ nguyên reason chắc chắn)
                 for endpoint in BULK_SEND_ENDPOINTS:
                     if endpoint.search(sc_joined_words) or endpoint.search(sub) or endpoint.search(expanded_words):
                         if sub_is_curl:
@@ -813,6 +1123,11 @@ def should_block_bulk_send(
                         elif not (sc and sc.executable in EXEMPT_PRINT_COMMANDS and not pipeline_has_runner):
                             # Với công cụ khác (wget, http, python, node, v.v.), có endpoint gửi là chặn
                             return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                # PCN ĐK 1 (§7 & §8 v06): Kiểm tra lệnh mạng CÓ GHI nhưng không chắc đích (A1, A2, A4, wget POST, nc)
+                uncertain_net_reason = check_curl_or_wget_uncertain_write(sub, sc, static_vars, unresolved_vars)
+                if uncertain_net_reason:
+                    return uncertain_net_reason
 
                 # (c) Kiểm tra chạy tệp kịch bản trong dự án (< 1 MB hoặc vừa ghi từ heredoc)
                 script_reason = check_script_file_bulk_send(sub, cur_cwd, heredoc_written_files)

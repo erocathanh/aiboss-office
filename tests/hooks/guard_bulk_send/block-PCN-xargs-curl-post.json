@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo https://graph.facebook.com/v21.0/me/feed | xargs -I{} curl -s -X POST -d 'message=hi' {}"
+  }
+}

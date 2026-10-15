@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"import requests; h='graph.facebook'+'.com'; requests.post('https://'+h+'/v21.0/me/feed', data={'message':'hi'})\""
+  }
+}

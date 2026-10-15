@@ -40,35 +40,44 @@ class SimpleCommand:
         self.cwd = cwd
         self.heredoc_bodies: List[str] = list(heredoc_bodies) if heredoc_bodies else []
         self.words: List[str] = []
+        self.raw_words: List[str] = []
         self.executable: str = ""
         self.raw_executable: str = ""
         self.redirections: List[Tuple[str, str]] = [] # list of (op, target) e.g. ('>', 'file.txt')
         self.env_vars: Dict[str, str] = {}
+        self.raw_env_assignments: List[Tuple[str, bool, str]] = []
         self.via_xargs: bool = False
         self.script_transcript_files: List[str] = []
         self.parse()
 
     def parse(self):
-        tokens, redirs = tokenize_command(self.raw_str)
+        tokens, raw_tokens, redirs = tokenize_command_with_raw(self.raw_str)
         self.redirections = redirs
 
         # Bỏ qua các từ khoá điều khiển shell nếu đứng đầu (then, do, else, elif, if, fi)
         while tokens and tokens[0].lower() in ('then', 'do', 'else', 'elif', 'fi', 'done', 'time'):
             tokens = tokens[1:]
+            raw_tokens = raw_tokens[1:]
 
         # Lọc biến môi trường đầu lệnh: FOO=BAR cmd ...
         idx = 0
         while idx < len(tokens):
             tok = tokens[idx]
+            raw_tok = raw_tokens[idx] if idx < len(raw_tokens) else tok
             if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\+?=.*$', tok, re.DOTALL) and not self.executable:
                 if '=' in tok:
                     k, v = tok.split('=', 1)
-                    self.env_vars[k.rstrip('+')] = v
+                    is_append = k.endswith('+')
+                    clean_k = k.rstrip('+')
+                    self.env_vars[clean_k] = v
+                    raw_rhs = raw_tok.split('=', 1)[1] if '=' in raw_tok else v
+                    self.raw_env_assignments.append((clean_k, is_append, raw_rhs))
                 idx += 1
             else:
                 break
 
         remaining_tokens = tokens[idx:]
+        remaining_raw_tokens = raw_tokens[idx:]
         if not remaining_tokens:
             return
 
@@ -109,30 +118,37 @@ class SimpleCommand:
                 env_flags_with_val = {'-u', '-C', '--unset', '--chdir'}
                 while w_idx < len(remaining_tokens):
                     cur = remaining_tokens[w_idx]
+                    raw_cur = remaining_raw_tokens[w_idx] if w_idx < len(remaining_raw_tokens) else cur
                     if cur == '--':
                         w_idx += 1
                         break
                     if cur in ('-S', '--split-string') and w_idx + 1 < len(remaining_tokens):
                         try:
-                            split_toks = shlex.split(remaining_tokens[w_idx + 1])
+                            split_toks, split_raw_toks, _ = tokenize_command_with_raw(remaining_tokens[w_idx + 1])
                         except Exception:
                             split_toks = remaining_tokens[w_idx + 1].strip().split()
+                            split_raw_toks = list(split_toks)
                         remaining_tokens = remaining_tokens[:w_idx] + split_toks + remaining_tokens[w_idx + 2:]
+                        remaining_raw_tokens = remaining_raw_tokens[:w_idx] + split_raw_toks + remaining_raw_tokens[w_idx + 2:]
                         continue
                     if cur.startswith('-S') and len(cur) > 2:
                         try:
-                            split_toks = shlex.split(cur[2:])
+                            split_toks, split_raw_toks, _ = tokenize_command_with_raw(cur[2:])
                         except Exception:
                             split_toks = cur[2:].strip().split()
+                            split_raw_toks = list(split_toks)
                         remaining_tokens = remaining_tokens[:w_idx] + split_toks + remaining_tokens[w_idx + 1:]
+                        remaining_raw_tokens = remaining_raw_tokens[:w_idx] + split_raw_toks + remaining_raw_tokens[w_idx + 1:]
                         continue
                     if cur.startswith('--split-string='):
                         val_s = cur.split('=', 1)[1]
                         try:
-                            split_toks = shlex.split(val_s)
+                            split_toks, split_raw_toks, _ = tokenize_command_with_raw(val_s)
                         except Exception:
                             split_toks = val_s.strip().split()
+                            split_raw_toks = list(split_toks)
                         remaining_tokens = remaining_tokens[:w_idx] + split_toks + remaining_tokens[w_idx + 1:]
+                        remaining_raw_tokens = remaining_raw_tokens[:w_idx] + split_raw_toks + remaining_raw_tokens[w_idx + 1:]
                         continue
                     if cur in env_flags_with_val:
                         w_idx += 2
@@ -141,7 +157,11 @@ class SimpleCommand:
                         if '=' in cur and not cur.startswith('-'):
                             ek, ev = cur.split('=', 1)
                             if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\+?$', ek):
-                                self.env_vars[ek.rstrip('+')] = ev
+                                is_append = ek.endswith('+')
+                                clean_ek = ek.rstrip('+')
+                                self.env_vars[clean_ek] = ev
+                                raw_ev = raw_cur.split('=', 1)[1] if '=' in raw_cur else ev
+                                self.raw_env_assignments.append((clean_ek, is_append, raw_ev))
                         w_idx += 1
                     else:
                         break
@@ -250,6 +270,7 @@ class SimpleCommand:
                 break
 
         self.words = remaining_tokens[w_idx:]
+        self.raw_words = remaining_raw_tokens[w_idx:]
         if self.words:
             first = self.words[0].lstrip('\\')
             # Nếu bắt đầu bằng subshell ( ví dụ (rm -rf ...)
@@ -259,14 +280,20 @@ class SimpleCommand:
             self.executable = os.path.basename(first).lower()
 
 def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
+    tokens, _, redirections = tokenize_command_with_raw(cmd_str)
+    return tokens, redirections
+
+def tokenize_command_with_raw(cmd_str: str) -> Tuple[List[str], List[str], List[Tuple[str, str]]]:
     """
-    Tách các word tokens và toán tử chuyển hướng ngoài nháy.
+    Tách các word tokens (đã bóc nháy), raw_tokens (giữ nguyên nháy/escape để H24 xét ngữ cảnh nháy),
+    và toán tử chuyển hướng ngoài nháy.
     Đảm bảo:
     - '>' trong nháy đơn/kép là word token, không phải redirection.
     - > hoặc >> hoặc 1> ngoài nháy là redirection.
     - Nháy không khép sẽ raise BashParseError.
     """
     tokens: List[str] = []
+    raw_tokens: List[str] = []
     redirections: List[Tuple[str, str]] = []
 
     chars = list(cmd_str)
@@ -274,21 +301,26 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
     i = 0
 
     current_word = []
+    current_raw_word = []
     in_single = False
     in_double = False
     escaped = False
 
     def flush_word():
-        nonlocal current_word
+        nonlocal current_word, current_raw_word
         if current_word:
             tokens.append(''.join(current_word))
-            current_word = []
+            raw_tokens.append(''.join(current_raw_word))
+        current_word = []
+        current_raw_word = []
 
     while i < length:
         ch = chars[i]
 
         if escaped:
             current_word.append(ch)
+            current_raw_word.append('\\')
+            current_raw_word.append(ch)
             escaped = False
             i += 1
             continue
@@ -300,11 +332,13 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
 
         if ch == "'" and not in_double:
             in_single = not in_single
+            current_raw_word.append(ch)
             i += 1
             continue
 
         if ch == '"' and not in_single:
             in_double = not in_double
+            current_raw_word.append(ch)
             i += 1
             continue
 
@@ -384,7 +418,7 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
                         i += 1
                         continue
                     if tch == '"' and not t_in_single:
-                        t_in_double = not t_in_double
+                        t_in_double = not t_in_single and not t_in_double
                         i += 1
                         continue
                     if not t_in_single and not t_in_double:
@@ -399,13 +433,14 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
                 continue
 
         current_word.append(ch)
+        current_raw_word.append(ch)
         i += 1
 
     if in_single or in_double or escaped:
         raise BashParseError("Unclosed quote or trailing escape in command")
 
     flush_word()
-    return tokens, redirections
+    return tokens, raw_tokens, redirections
 
 def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str], List[str]]]:
     """
@@ -583,6 +618,25 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str], Lis
 
     return results
 
+def _unescape_backtick_body(raw_body: str, in_double: bool = False) -> str:
+    """H25 (v06): Trong thân command substitution dạng backtick `` `...` ``,
+    POSIX/Bash bóc đúng MỘT lớp escape cho `` \\` `` -> `` ` ``, ``\\\\`` -> ``\\``, ``\\$`` -> ``$``
+    (và ``\\"`` -> ``"`` khi backtick nằm trong nháy kép).
+    """
+    out: List[str] = []
+    i = 0
+    n = len(raw_body)
+    escapable = ('`', '\\', '$', '"') if in_double else ('`', '\\', '$')
+    while i < n:
+        if raw_body[i] == '\\' and i + 1 < n and raw_body[i + 1] in escapable:
+            out.append(raw_body[i + 1])
+            i += 2
+        else:
+            out.append(raw_body[i])
+            i += 1
+    return ''.join(out)
+
+
 def extract_substitutions_safe(cmd_str: str) -> List[str]:
     """
     Trích xuất command substitutions $(...) hoặc `...`
@@ -683,7 +737,7 @@ def extract_substitutions_safe(cmd_str: str) -> List[str]:
                         break
                     sub_chars.append(c)
                     j += 1
-                subs.append(''.join(sub_chars))
+                subs.append(_unescape_backtick_body(''.join(sub_chars), in_double=in_double))
                 i = j
                 continue
 
@@ -692,9 +746,22 @@ def extract_substitutions_safe(cmd_str: str) -> List[str]:
     return subs
 
 
+def _collect_nested_substitutions_recursive(cmd_str: str, out: List[str], max_depth: int = 8) -> None:
+    """H25 (v06): Đệ quy trích các command substitution lồng bên trong `cmd_str` (`$(...)` trong `` `...` ``,
+    `` `...` `` trong `` `...` `` hoặc `$(...)`).
+    """
+    if max_depth <= 0 or not cmd_str:
+        return
+    for inner in extract_substitutions_safe(cmd_str):
+        inner_clean = inner.strip()
+        if inner_clean:
+            out.append(inner_clean)
+            _collect_nested_substitutions_recursive(inner_clean, out, max_depth - 1)
+
+
 def extract_heredoc_substitutions(body_text: str) -> List[str]:
-    """H20 (v05): Trích xuất các command substitutions `$(...)` và `` `...` `` bên trong
-    thân heredoc có nhãn KHÔNG bọc nháy (`<<EOF`, `<<-EOF`).
+    """H20 (v05) & H25 (v06): Trích xuất các command substitutions `$(...)` và `` `...` `` bên trong
+    thân heredoc có nhãn KHÔNG bọc nháy (`<<EOF`, `<<-EOF`), gồm cả backtick/subshell lồng nhiều tầng.
     Trong thân heredoc không nháy của bash, dấu nháy đơn `'...'` và nháy kép `"..."` ở mức ngoài
     không chặn mở rộng `$(...)` hay `` `...` ``; chỉ có `\\$` và `` \\` `` mới thoát ký tự mở rộng.
     """
@@ -757,6 +824,7 @@ def extract_heredoc_substitutions(body_text: str) -> List[str]:
             sub_cmd = ''.join(sub_chars).strip()
             if sub_cmd:
                 subs.append(sub_cmd)
+                _collect_nested_substitutions_recursive(sub_cmd, subs)
             i = j
             continue
 
@@ -781,9 +849,10 @@ def extract_heredoc_substitutions(body_text: str) -> List[str]:
                     break
                 sub_chars.append(c)
                 j += 1
-            sub_cmd = ''.join(sub_chars).strip()
+            sub_cmd = _unescape_backtick_body(''.join(sub_chars)).strip()
             if sub_cmd:
                 subs.append(sub_cmd)
+                _collect_nested_substitutions_recursive(sub_cmd, subs)
             i = j
             continue
 

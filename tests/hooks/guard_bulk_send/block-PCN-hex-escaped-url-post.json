@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s -X POST -d 'message=hi' \"$(printf 'https:\\x2f\\x2fgraph.facebook.com\\x2fv21.0\\x2fme\\x2ffeed')\""
+  }
+}

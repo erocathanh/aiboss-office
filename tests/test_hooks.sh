@@ -442,6 +442,12 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-H19-node-e-var-nodemailer.json"
     "guard_bulk_send:block-H19-unresolved-var-with-smtp-assign-in-chain.json"
     "guard_bulk_send:block-H20-cat-unquoted-heredoc-subst-smtp.json"
+    "guard_bulk_send:block-H23-prefix-assign-after-smtp-binding.json"
+    "guard_bulk_send:block-H24-double-quoted-var-smtp.json"
+    "guard_bulk_send:block-H25-nested-backtick-heredoc-smtp.json"
+    "guard_bulk_send:block-PCN-hex-escaped-url-post.json"
+    "guard_bulk_send:block-PCN-python-joined-url-post.json"
+    "guard_bulk_send:block-PCN-xargs-curl-post.json"
 )
 
 saved_total=$TOTAL

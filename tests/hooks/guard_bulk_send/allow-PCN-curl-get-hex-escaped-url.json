@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s \"$(printf 'https:\\x2f\\x2fexample.com\\x2fapi\\x2fstatus')\""
+  }
+}
