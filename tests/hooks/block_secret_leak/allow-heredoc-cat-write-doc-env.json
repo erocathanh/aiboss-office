@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat > wip/note.md <<'EOF'\nBáo cáo: không đẩy .env hay .envrc lên git.\nEOF"
+  }
+}

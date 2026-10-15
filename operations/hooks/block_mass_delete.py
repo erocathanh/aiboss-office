@@ -100,18 +100,36 @@ def check_command(cmd: str, cwd: str) -> str:
                         return "Lệnh git clean -f/--force bị chặn để tránh mất tệp chưa commit. Hãy xoá tệp cụ thể bằng tay."
             elif subcmd == 'push':
                 for a in subcmd_args:
-                    if a in ('--force', '--force-with-lease') or a.startswith('--force-with-lease'):
-                        return "Lệnh git push --force bị chặn để bảo vệ nhánh từ xa."
-                    if a.startswith('-') and not a.startswith('--') and 'f' in a:
-                        return "Lệnh git push --force bị chặn để bảo vệ nhánh từ xa."
-                    if a.startswith('+') and len(a) > 1:
-                        return "Command git push +refspec (force push) is blocked to protect remote branches."
+                    if a in ('--force', '--force-with-lease', '--delete', '-d') or a.startswith('--force-with-lease'):
+                        return "Lệnh git push --force / --delete bị chặn để bảo vệ nhánh từ xa."
+                    if a.startswith('-') and not a.startswith('--') and ('f' in a or 'd' in a):
+                        return "Lệnh git push --force / -d bị chặn để bảo vệ nhánh từ xa."
+                    if (a.startswith('+') or a.startswith(':')) and len(a) > 1:
+                        return "Lệnh git push +refspec hoặc :branch (ép đẩy/xoá nhánh từ xa) bị chặn."
+            elif subcmd == 'branch':
+                has_d = False
+                has_f = False
+                for a in subcmd_args:
+                    if a == '--delete':
+                        has_d = True
+                    elif a in ('--force', '-f'):
+                        has_f = True
+                    elif a.startswith('-') and not a.startswith('--'):
+                        if 'D' in a:
+                            return "Lệnh git branch -D (ép xoá nhánh) bị chặn để bảo vệ lịch sử làm việc."
+                        if 'd' in a:
+                            has_d = True
+                        if 'f' in a:
+                            has_f = True
+                if has_d and has_f:
+                    return "Lệnh git branch -d -f (ép xoá nhánh) bị chặn để bảo vệ lịch sử làm việc."
 
         # 3b. Check chmod 777
         elif exe == 'chmod':
             for a in words[1:]:
                 if a in ('777', '0777', 'a+rwx', 'ugo+rwx'):
                     return "Command chmod 777 is blocked by the office safety floor."
+
 
         # 4. Kiểm tra ghi đè nhật ký bằng > hoặc 1> (cho phép nối thêm >> hoặc 1>>)
         for op, target in sc.redirections:

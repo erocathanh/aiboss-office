@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "/usr/bin/python3 /Users/hocvien/.claude/skills/tra-loi-inbox-fanpage/scripts/page_inbox.py --dong-y --thread t1"
+  }
+}

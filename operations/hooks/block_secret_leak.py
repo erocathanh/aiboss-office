@@ -31,42 +31,87 @@ SECRET_PATTERNS = [
     (re.compile(r'EAA[A-Za-z0-9]{40,}'), "Meta Graph API Access Token (EAA...)"),
 ]
 
-ENV_PATH_REGEX = re.compile(
-    r'(?:^|[\s\'"`\(\)\[\]\{\}<>;|&=:,])'  # Boundary
-    r'('
-    r'[\w~$\./-]*'                          # Optional directory path prefix (allows /, ., ~, $, alphanumeric, -, _)
-    r'\.env(?:\.[A-Za-z0-9_-]+)?'          # .env or .env.<suffix>
-    r')'
-    r'(?=$|[\s\'"`\(\)\[\]\{\}<>;|&=:,])'  # Boundary lookahead
-)
+TOKEN_BOUNDARY_SPLIT_REGEX = re.compile(r'[\s\'"`\(\)\[\]\{\}<>;|&=:,]+')
+
 
 def is_exempt_env_path(p: str) -> bool:
-    clean = p.strip().strip("'\"`")
-    base = os.path.basename(clean)
+    clean = p.strip().strip("'\"`").replace('\\', '/')
+    base = os.path.basename(clean).lower()
     if base in ('.env.example', '.env.sample'):
         return True
     if base.startswith('.env.example.') or base.startswith('.env.sample.'):
         return True
     return False
 
+
+def is_node_or_vite_env_var(token: str) -> bool:
+    """Kiểm tra token có phải là biến môi trường của Node (process.env) hoặc Vite (import.meta.env) không."""
+    clean = token.strip().strip("'\"`").replace('\\', '/').lower()
+    if not clean or '/' in clean:
+        return False
+    if clean in ('process.env', 'import.meta.env'):
+        return True
+    if clean.startswith('process.env.') or clean.startswith('import.meta.env.'):
+        return True
+    if '.process.env' in clean or 'import.meta.env' in clean:
+        return True
+    return False
+
+
+def is_env_filename(token: str) -> bool:
+    """Luật tên tệp env dùng chung cho mọi chỗ trong hook 2:
+    Phần tên cuối sau dấu '/' cuối, so không phân biệt hoa thường, thoả một điều:
+    - là .env hoặc .envrc;
+    - bắt đầu bằng .env., .env- hoặc .env_;
+    - kết thúc bằng .env (ví dụ prod.env).
+    Miễn .env.example, .env.sample (và .env.example.*, .env.sample.*), cùng process.env / import.meta.env.
+    """
+    clean = token.strip().strip("'\"`").replace('\\', '/')
+    if not clean:
+        return False
+    if is_node_or_vite_env_var(clean):
+        return False
+    if is_exempt_env_path(clean):
+        return False
+
+    base = os.path.basename(clean).lower()
+    if not base:
+        return False
+    if base in ('.env', '.envrc'):
+        return True
+    if base.startswith(('.env.', '.env-', '.env_')):
+        return True
+    if base.endswith('.env'):
+        return True
+    return False
+
+
 def extract_env_paths(text: str) -> list[str]:
+    """Cắt chữ ở các ranh giới chuẩn và trả về các từ khớp luật tên tệp env."""
+    if not text:
+        return []
     paths = []
-    for m in ENV_PATH_REGEX.findall(text):
-        clean = m.strip().strip("'\"`")
-        if clean and not is_exempt_env_path(clean):
+    for tok in TOKEN_BOUNDARY_SPLIT_REGEX.split(text):
+        clean = tok.strip().strip("'\"`")
+        if clean and is_env_filename(clean):
             paths.append(clean)
     return paths
 
+
 def has_config_path(text: str) -> bool:
-    return '.config/aiboss-office' in text
+    lower = text.lower()
+    return '.config/opc-business-harness' in lower or '.config/aiboss-office' in lower
+
 
 def has_gemini_key_path(text: str) -> bool:
     return 'ai-agent/gemini/khoa' in text or '.gemini-api-key' in text
+
 
 FB_TOKEN_PATH_REGEX = re.compile(
     r'(?:^|[/\\\s\'"`=])(?:\.meta-token-fanpage|\.fb-user-token[A-Za-z0-9_.-]*|\.config/aiboss-office/meta-[A-Za-z0-9_.-]*|\.config/opc-business-harness/meta-page-token|meta-page-token|hash-salt)(?=$|[/\\\s\'"`.])',
     re.IGNORECASE,
 )
+
 
 def has_fb_token_path(text: str) -> bool:
     """F8 (S17c): Independent Facebook/Meta token & hash-salt path detection (never depends on Hook 2.1 switch)."""
@@ -81,6 +126,7 @@ def has_fb_token_path(text: str) -> bool:
         or 'hash-salt' in text
     )
 
+
 def extract_strings(obj):
     """Trích xuất tất cả chuỗi từ cấu trúc JSON đệ quy."""
     if isinstance(obj, str):
@@ -91,6 +137,7 @@ def extract_strings(obj):
     elif isinstance(obj, list):
         for item in obj:
             yield from extract_strings(item)
+
 
 def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
     # 1. Kiểm tra sự xuất hiện của các secret patterns trong mọi chuỗi dữ liệu
@@ -105,14 +152,34 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
             val = tool_input.get(key, "") if isinstance(tool_input, dict) else ""
             if not isinstance(val, str) or not val:
                 continue
-            if has_fb_token_path(val):
+            clean_val = val.strip().strip("'\"`")
+            norm_val = clean_val.replace('\\', '/')
+            if has_fb_token_path(norm_val):
                 return "Accessing Facebook/Meta token or hash-salt credential file is blocked."
-            if has_config_path(val):
+            if has_config_path(norm_val):
                 return "Accessing secret configuration directory .config/aiboss-office is blocked."
-            if extract_env_paths(val):
+            if is_env_filename(norm_val) or extract_env_paths(norm_val):
                 return "Accessing .env file directly is blocked."
-            if has_gemini_key_path(val):
+            if has_gemini_key_path(norm_val):
                 return "Accessing Gemini API key pool files directly is blocked."
+
+        for gkey in ("glob", "pattern"):
+            if gkey == "pattern" and tool_name != "Glob":
+                continue
+            glob_val = tool_input.get(gkey, "") if isinstance(tool_input, dict) else ""
+            if not isinstance(glob_val, str) or not glob_val:
+                continue
+            clean_g = glob_val.strip().strip("'\"`")
+            norm_g = clean_g.replace('\\', '/')
+            if has_fb_token_path(norm_g):
+                return "Lệnh Grep/Glob với glob nhắm vào meta-page-token hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
+            if has_config_path(norm_g):
+                return "Lệnh Grep/Glob với glob truy cập thư mục cấu hình bí mật .config/ bị chặn để bảo vệ bí mật vận hành."
+            if has_gemini_key_path(norm_g):
+                return "Accessing Gemini API key pool files via glob is blocked."
+            stripped_wild = norm_g.rstrip('*?')
+            if (is_env_filename(norm_g) or is_env_filename(stripped_wild) or extract_env_paths(norm_g) or re.search(r'(?:^|[/\*])\.env', norm_g, re.IGNORECASE)) and not is_exempt_env_path(norm_g):
+                return "Lệnh Grep với glob khớp .env* bị chặn để bảo vệ bí mật vận hành."
 
     # 2. Nếu là lệnh Bash, kiểm tra các lệnh đọc .env, .config/aiboss-office hoặc tệp chìa meta
     if tool_name == "Bash":
@@ -122,28 +189,10 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
 
         commands, _ = bash_parser.parse_bash_script(cmd, cwd)
 
-        # Trích xuất heredoc contents nếu có
-        heredocs = []
-        lines = cmd.splitlines()
-        in_hd = False
-        delim = None
-        hd_lines = []
-        for line in lines:
-            if in_hd:
-                if line.strip() == delim:
-                    in_hd = False
-                    heredocs.append("\n".join(hd_lines))
-                    hd_lines = []
-                    delim = None
-                else:
-                    hd_lines.append(line)
-            else:
-                m = re.search(r'<<-?\s*[\'"]?([A-Za-z0-9_-]+)[\'"]?', line)
-                if m:
-                    in_hd = True
-                    delim = m.group(1)
+        # Chỉ xét các heredoc chảy vào shell/trình thông dịch hoặc tệp vừa ghi được chạy ngay ở lệnh con sau
+        heredocs = bash_parser.extract_executed_heredocs(cmd)
 
-        # Kiểm tra heredocs
+        # Kiểm tra heredocs thực thi
         for hd in heredocs:
             if has_fb_token_path(hd):
                 return "Lệnh đọc/in tệp chìa Facebook/Meta hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
@@ -164,7 +213,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                     return "Lệnh đọc/in tệp chìa Facebook/Meta hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
                 if has_config_path(target):
                     return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
-                if extract_env_paths(target):
+                if is_env_filename(target) or extract_env_paths(target):
                     return "Lệnh đọc tệp .env qua chuyển hướng đầu vào bị chặn."
                 if has_gemini_key_path(target):
                     return "Accessing Gemini API key pool files via redirection is blocked."
@@ -190,7 +239,7 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
                         return "Lệnh đọc/in tệp chìa Facebook/Meta hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
                     if has_config_path(val):
                         return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
-                    if extract_env_paths(val):
+                    if is_env_filename(val) or extract_env_paths(val):
                         return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
                     if has_gemini_key_path(val):
                         return "Accessing credential file via flag assignment is blocked."
@@ -200,13 +249,13 @@ def check_secret_leak(tool_name: str, tool_input: dict, cwd: str) -> str:
 
                 if has_config_path(w):
                     return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."
-                if extract_env_paths(w):
+                if is_env_filename(w) or extract_env_paths(w):
                     return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
 
             # E. Kiểm tra executable chính nó (ví dụ: .env hoặc tệp chìa làm script thực thi)
             if has_fb_token_path(sc.raw_executable):
                 return "Lệnh đọc/in tệp chìa Facebook/Meta hoặc hash-salt bị chặn để bảo vệ bí mật vận hành."
-            if extract_env_paths(sc.raw_executable):
+            if is_env_filename(sc.raw_executable) or extract_env_paths(sc.raw_executable):
                 return "Lệnh đọc tệp .env bị chặn. Hãy cấu hình biến môi trường qua môi trường hệ thống an toàn."
             if has_config_path(sc.raw_executable):
                 return "Lệnh truy cập thư mục cấu hình bí mật .config/aiboss-office bị chặn để bảo vệ bí mật vận hành."

@@ -41,7 +41,56 @@ def find_office_root(start_dir: Optional[str] = None) -> str:
     sys.exit(2)
 
 
+def find_root(start_dir: Optional[str] = None) -> str:
+    """Tìm thư mục gốc kho theo 4 bậc ưu tiên (tương đương find_root.py của OPC harness v11):
+    1. Đi ngược tối đa 8 tầng tìm config/office.json.
+    2. Kiểm tra AIBOSS_OFFICE_ROOT (nếu có config/office.json).
+    3. Đi ngược tối đa 8 tầng tìm CLAUDE-MASTER/CLAUDE.md hoặc operations/hooks/bash_parser.py / .claude/hooks/bash_parser.py.
+    4. Fallback: CLAUDE_PROJECT_DIR hoặc start_dir.
+    """
+    start = start_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    start_abs = os.path.abspath(os.path.expanduser(start))
+
+    # Bậc 1: Tìm config/office.json
+    current = start_abs
+    for _ in range(9):
+        if os.path.isfile(os.path.join(current, "config", "office.json")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+    # Bậc 2: Kiểm tra AIBOSS_OFFICE_ROOT
+    env_root = os.environ.get("AIBOSS_OFFICE_ROOT", "").strip()
+    if env_root:
+        env_abs = os.path.abspath(os.path.expanduser(env_root))
+        if os.path.isfile(os.path.join(env_abs, "config", "office.json")):
+            return env_abs
+
+    # Bậc 3: Tìm mốc CLAUDE-MASTER/CLAUDE.md hoặc bash_parser.py
+    current = start_abs
+    for _ in range(9):
+        if (
+            os.path.isfile(os.path.join(current, "CLAUDE-MASTER", "CLAUDE.md"))
+            or os.path.isfile(os.path.join(current, "operations", "hooks", "bash_parser.py"))
+            or os.path.isfile(os.path.join(current, ".claude", "hooks", "bash_parser.py"))
+        ):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+    # Bậc 4: Fallback về CLAUDE_PROJECT_DIR hoặc start_abs
+    env_claude = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if env_claude:
+        return os.path.abspath(os.path.expanduser(env_claude))
+    return start_abs
+
+
 if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else None
     root = find_office_root(arg)
     print(root)
+

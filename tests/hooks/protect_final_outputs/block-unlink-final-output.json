@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "unlink projects/THU-SU-THAT/outputs/da-chot_final.md"
+  }
+}

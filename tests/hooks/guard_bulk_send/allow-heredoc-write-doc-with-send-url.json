@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat > notes.md <<'EOF'\nVi du: curl -X POST https://graph.facebook.com/v21.0/me/messages -d x=1\nEOF"
+  }
+}

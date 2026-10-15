@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat >> kenh.md <<'EOF'\nĐã kiểm tra thư mục ~/.config/opc-business-harness và ~/.config/aiboss-office.\nEOF"
+  }
+}
