@@ -74,6 +74,21 @@ Bảng dưới đây ghi nhận các dạng lệnh vượt ngoài khả năng ph
 
 ---
 
+### 3.3. Tồn dư MỞ sau vòng soi 8 (S17h 242a192, 15/10/2026) — chờ lô S17i
+
+> Quyết định gộp: `SO-QUYET-DINH-TU-CHU.md` nhà hồ sơ aiboss-office, hàng 02:1x và 03:0x 15/10/2026 (luật hội tụ: khi P1 còn lại thuộc nhóm (b) thì dừng vòng soi, gộp kèm sổ tồn dư, vá theo lô). Hermes vòng 8 (phiên 20261014_212322_7371c2) nêu ba phản ví dụ bằng truy vết tĩnh; PM chạy sống cả ba qua `tests/test_hooks.sh` ở ba mốc 242a192 · d01b914 (S17g) · 5c001e3 (bản đang chạy trước khi gộp). Số đo: `DANG-LAM/NOP/s17h-pm-do_20261015/f42-*.txt` của nhà hồ sơ.
+
+| Mã | Nhóm · mức | Lệnh mẫu | 242a192 | d01b914 | 5c001e3 | Hướng đóng (S17i) |
+|---|---|---|---|---|---|---|
+| F42 | (b) P1 hồi quy lọt ghi | `python3 -c "from pathlib import Path; p=Path('wip/a'); q=p.replace('wip/b'); q.replace('projects/x/inputs/a')"` | LỌT (mã 0): `_STR_RETURNING_TAIL_RE` coi `replace` là trả chuỗi, không phân biệt receiver Path | chặn | LỌT, kể cả dạng trực tiếp `p.replace('…inputs/a')` | suy kiểu trả về theo receiver: `str.replace` trả str, `Path.replace` và `Path.rename` trả Path; thêm fixture block chuỗi hai bước, giữ allow thay chuỗi |
+| F43 | (b) P1 hỏi oan lõi | `python3 -c "from pathlib import Path; p=Path('wip/a'); p=str(p); print(p.replace('/','-'))"` | CHẶN OAN (mã 2, «Path.replace dynamic source»): lịch sử từng là Path đưa `p` vào tập mơ hồ dù `p=str(p)` đứng ngay trước lời gọi | qua | qua | phân biệt «binding gần nhất chắc là str» với «nhiều binding không phân giải được»; lịch sử Path không được vô hiệu hoá một phép `str(...)` rõ ràng |
+| F44 | (b) P1 hỏi oan lõi | `node -e "let links=new Set(); links=new Set(['https://example.net/x']); links.delete('https://example.net/x')"` | CHẶN OAN (mã 2, HTTP write tới example.net): `block_public_publish.py` chỉ giữ miễn khi có đúng MỘT binding collection | qua | không đo (bản đó chưa có bộ fixture block_public_publish) | giữ miễn khi MỌI binding đều là collection, chỉ huỷ khi gặp kiểu khác hoặc không xác định; thêm đối chứng Set/Map khởi tạo lại song song với block Map→axios |
+
+- Vì sao gộp dù còn P1: so với bản đang chạy 5c001e3, S17h **không mở thêm đường lọt** (F42 dạng chuỗi đã hở sẵn, F42 dạng trực tiếp nay chặn) và chỉ thêm hai hỏi oan hình dạng hiếm; phát lại 47 lệnh thật/2 ngày của 8 ghế (§3.2) ra 0 hỏi oan. Đối chứng khi đo: F42 trực tiếp chặn, F43 thay chữ thường qua, Set khởi tạo một lần qua, `axios.delete` chặn.
+- Lô S17i: đóng F42–F44 cùng mọi P1 mới phát sinh tới hạn lô; mọi fixture `block-*` bản trước phải vẫn chặn; Hermes vòng 9 chỉ chấm ba ca này cùng hồi quy/hỏi oan lệnh lõi.
+- Trước khi cài cho khách thật: mở lại vòng soi đầy đủ (mức 3, anh Thanh quyết). Luật hội tụ chỉ áp cho bản nội bộ.
+
+
 ## 4. Tiêu Chí Phân Loại Lỗi và Gộp Nhánh (Merge Criteria)
 
 Từ phiên bản S17d/S17e/S17f/S17g/S17h, mọi kết quả rà soát an toàn (bao gồm các vòng soi của Hermes và kiểm thử nội bộ) áp dụng bộ tiêu chí phân loại thống nhất sau:
