@@ -1008,7 +1008,6 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         default_join = 'node' if base == 'node' else 'auto'
         var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join)
         module_vars = _extract_module_vars(combined_raw)
-        path_vars = _extract_path_vars(combined_raw)
 
         for call_args in _extract_module_call_arg_lists(combined_raw, r'\bopen\s*\(', module_vars):
             if not call_args:
@@ -1022,45 +1021,58 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
                     targets.append((resolved_target, label))
 
-        # F20a, F27, F28, F33 & F34: Receiver-based detection for pathlib methods (.write_text, .write_bytes, .open,
-        # .unlink, .rmdir, .touch, .mkdir, .symlink_to, .hardlink_to, .rename, .replace).
-        # F28 & F33: Skip true module receivers (os, fs, shutil, pathlib, io, require('fs'), etc.) while preserving
-        # constructor instances (path = Path(...), p = pathlib.Path(...)).
-        # F34: Only treat .rename(dst) / .replace(dst) as Path file moves when receiver has Path evidence.
-        for recv_expr, method_name, method_args in _extract_method_calls_with_receiver(
+        # F20a, F27, F28, F33, F34, F37 & F38 (S17h): Call-site-ordered receiver classification for pathlib methods
+        # (.write_text, .write_bytes, .open, .unlink, .rmdir, .touch, .mkdir, .symlink_to, .hardlink_to, .rename, .replace).
+        # Principle 1: Exempt ONLY when receiver at call_pos is provably non-file (module or string).
+        # Principle 2: When receiver at call_pos is ambiguous, classify .rename/.replace by argument shape.
+        # Principle 3: Use bindings active BEFORE call_pos (reassignments AFTER call_pos do not affect call_pos).
+        for recv_expr, method_name, method_args, call_pos in _extract_method_calls_with_receiver_and_pos(
             combined_raw,
             ('write_text', 'write_bytes', 'open', 'unlink', 'rmdir', 'touch', 'mkdir', 'symlink_to', 'hardlink_to', 'rename', 'replace'),
         ):
-            if not recv_expr or _is_module_receiver_expr(recv_expr, module_vars):
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join, call_pos=call_pos)
+            call_module_vars = _extract_module_vars(combined_raw, call_pos=call_pos)
+            call_path_vars, call_str_vars, call_ambig_vars = _extract_receiver_type_vars_at_pos(combined_raw, call_pos=call_pos)
+            if not recv_expr or _is_module_receiver_expr(recv_expr, call_module_vars):
                 continue
             if method_name == 'open':
                 mode_expr = _extract_open_mode_expr(method_args)
                 if mode_expr is None:
                     continue
-                resolved_mode = resolve_script_path_expr(mode_expr, var_env=var_env, default_join_style=default_join)
+                resolved_mode = resolve_script_path_expr(mode_expr, var_env=call_var_env, default_join_style=default_join)
                 if not (
                     resolved_mode.startswith('$DYNAMIC_WRITE:')
                     or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode)
                 ):
                     continue
-                resolved_target = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style=default_join)
+                resolved_target = resolve_script_path_expr(recv_expr, var_env=call_var_env, default_join_style=default_join)
                 label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.open"
                 targets.append((resolved_target, label))
             elif method_name in ('rename', 'replace'):
-                # F27c & F34: Only apply Path.rename(dst) / Path.replace(dst) when receiver is a Path expression/binding
-                if not _is_path_receiver_expr(recv_expr, path_vars):
+                recv_clean = _strip_outer_parens(recv_expr)
+                is_certain_str = (
+                    _is_provably_str_receiver_expr(recv_clean, call_str_vars)
+                    and recv_clean not in call_ambig_vars
+                )
+                if is_certain_str:
                     continue
-                resolved_src = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style='python')
+                is_certain_path = (
+                    _is_path_receiver_expr(recv_clean, call_path_vars)
+                    and recv_clean not in call_ambig_vars
+                )
+                if not is_certain_path and not _args_look_like_file_path_move(method_name, method_args, call_var_env):
+                    continue
+                resolved_src = resolve_script_path_expr(recv_expr, var_env=call_var_env, default_join_style='python')
                 src_label = f"python Path.{method_name} dynamic source" if resolved_src.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} source"
                 targets.append((resolved_src, src_label))
                 if method_args:
-                    resolved_dst = resolve_script_path_expr(method_args[0], var_env=var_env, default_join_style='python')
+                    resolved_dst = resolve_script_path_expr(method_args[0], var_env=call_var_env, default_join_style='python')
                 else:
                     resolved_dst = "$DYNAMIC_WRITE:empty"
                 dst_label = f"python Path.{method_name} dynamic destination" if resolved_dst.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} destination"
                 targets.append((resolved_dst, dst_label))
             else:
-                resolved_target = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style=default_join)
+                resolved_target = resolve_script_path_expr(recv_expr, var_env=call_var_env, default_join_style=default_join)
                 if method_name in ('unlink', 'rmdir'):
                     label = f"python Path.{method_name} dynamic delete" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} delete"
                 else:
@@ -1490,23 +1502,28 @@ def _split_top_level_plus(expr: str) -> List[str]:
     return _split_top_level_op(expr, '+')
 
 
-def _iter_top_level_assignments(text: str) -> List[Tuple[str, str]]:
+def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int, int]]:
     """
-    Yield (var_name, rhs) for top-level assignments across `;` and newline-separated statements,
-    including JS comma-separated declarations like `const fs=require('fs'),p=require('path')`.
+    S17h (Principle 3): Yield (var_name, rhs, start_pos, end_pos) in appearance order for top-level
+    assignments across `;` and newline-separated statements, including JS comma-separated declarations
+    like `const fs=require('fs'),p=require('path')`.
     """
-    assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$')
-    out: List[Tuple[str, str]] = []
-    for stmt in re.split(r'[;\n]+', text):
-        s = stmt.strip()
+    assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$', re.DOTALL)
+    out: List[Tuple[str, str, int, int]] = []
+    for m_stmt in re.finditer(r'[^;\n]+', text):
+        raw_stmt = m_stmt.group(0)
+        stmt_start = m_stmt.start()
+        stmt_end = m_stmt.end()
+        s = raw_stmt.strip()
         if not s:
             continue
-        s = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
-        clauses = [c.strip() for c in _split_top_level_op(s, ',') if c.strip()]
+        s_clean = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
+        clauses = [c.strip() for c in _split_top_level_op(s_clean, ',') if c.strip()]
         if len(clauses) > 1 and all(assign_re.match(c) for c in clauses):
             target_clauses = clauses
         else:
-            target_clauses = [s]
+            target_clauses = [s_clean]
+        offset_cursor = stmt_start
         for clause in target_clauses:
             m = assign_re.match(clause)
             if not m:
@@ -1515,18 +1532,37 @@ def _iter_top_level_assignments(text: str) -> List[Tuple[str, str]]:
             rhs = m.group(2).strip()
             if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
                 continue
-            out.append((var_name, rhs))
+            rel_idx = raw_stmt.find(clause, max(0, offset_cursor - stmt_start))
+            if rel_idx >= 0:
+                c_start = stmt_start + rel_idx
+                c_end = c_start + len(clause)
+                offset_cursor = c_end
+            else:
+                c_start = stmt_start
+                c_end = stmt_end
+            out.append((var_name, rhs, c_start, c_end))
     return out
 
 
-def _extract_simple_var_env(text: str, default_join_style: str = "auto") -> Dict[str, str]:
+def _iter_top_level_assignments(text: str) -> List[Tuple[str, str]]:
+    return [(v, r) for v, r, _, _ in _iter_top_level_assignments_with_pos(text)]
+
+
+def _extract_simple_var_env(
+    text: str,
+    default_join_style: str = "auto",
+    call_pos: Optional[int] = None,
+) -> Dict[str, str]:
     """
     Extract simple variable assignments (e.g. `p = Path(root) / 'projects' / ...` or `p = Path('wip') / 'a.md'`)
-    across `;` and newline-separated statements. Reassigned variables become $DYNAMIC_WRITE.
+    active BEFORE `call_pos` (Principle 3: reassignments AFTER `call_pos` do not affect `call_pos`).
+    Variables assigned multiple times before `call_pos` become $DYNAMIC_WRITE.
     """
     env: Dict[str, str] = {}
     counts: Dict[str, int] = {}
-    for var_name, rhs in _iter_top_level_assignments(text):
+    for var_name, rhs, _c_start, c_end in _iter_top_level_assignments_with_pos(text):
+        if call_pos is not None and c_end > call_pos:
+            continue
         counts[var_name] = counts.get(var_name, 0) + 1
         if counts[var_name] > 1:
             env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
@@ -1606,15 +1642,15 @@ def _extract_receiver_before_dot(text: str, dot_idx: int) -> str:
     return text[start_pos:end_pos].strip()
 
 
-def _extract_method_calls_with_receiver(
+def _extract_method_calls_with_receiver_and_pos(
     text: str,
     method_names: Tuple[str, ...],
-) -> List[Tuple[str, str, List[str]]]:
+) -> List[Tuple[str, str, List[str], int]]:
     """
-    F20a (S17e): Find all `.method_name(...)` calls in `text` and return
-    `(receiver_expr, method_name, method_args)` for each call.
+    F20a (S17e) & S17h: Find all `.method_name(...)` calls in `text` and return
+    `(receiver_expr, method_name, method_args, dot_idx)` for each call.
     """
-    results: List[Tuple[str, str, List[str]]] = []
+    results: List[Tuple[str, str, List[str], int]] = []
     alt = "|".join(re.escape(m) for m in method_names)
     pat = re.compile(rf'\.\s*({alt})\s*\(')
     for m in pat.finditer(text):
@@ -1624,8 +1660,15 @@ def _extract_method_calls_with_receiver(
         method_args, _ = _scan_balanced_paren_args(text, m.end())
         if method_args is None:
             method_args = []
-        results.append((receiver_expr, method_name, method_args))
+        results.append((receiver_expr, method_name, method_args, dot_idx))
     return results
+
+
+def _extract_method_calls_with_receiver(
+    text: str,
+    method_names: Tuple[str, ...],
+) -> List[Tuple[str, str, List[str]]]:
+    return [(r, m, a) for r, m, a, _ in _extract_method_calls_with_receiver_and_pos(text, method_names)]
 
 
 def _scan_balanced_paren_args(text: str, start_idx: int) -> Tuple[Optional[List[str]], int]:
@@ -1702,41 +1745,45 @@ _KNOWN_MODULE_RECEIVERS = {
 }
 
 
-def _extract_module_vars(text: str) -> set:
+def _extract_module_vars(text: str, call_pos: Optional[int] = None) -> set:
     """
-    F28 (S17f) & F33 (S17g): Identify module/namespace/class identifiers from real import/require/alias bindings
-    so module calls (os.unlink, fs.unlink) are not confused with pathlib receivers, while constructor instances
-    (path = Path(...), p = pathlib.Path(...)) are NEVER misclassified as modules.
+    F28 (S17f), F33 (S17g) & S17h (Principle 3): Identify module/namespace/class identifiers from real
+    import/require/alias bindings active BEFORE `call_pos`, while constructor instances (`path = Path(...)`,
+    `p = pathlib.Path(...)`) are NEVER misclassified as modules.
     """
     mods = set(_KNOWN_MODULE_RECEIVERS)
 
-    # Python imports: `import os`, `import os as my_os`, `from os import path`, `from os import path as osp`
     for m in re.finditer(
         r'\bimport\s+(?:os|posix|nt|shutil|pathlib|posixpath|ntpath|io|sys)(?:\.path)?(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?',
         text,
     ):
+        if call_pos is not None and m.end() > call_pos:
+            continue
         if m.group(1):
             mods.add(m.group(1))
     for m in re.finditer(
         r'\bfrom\s+(?:os|posix|nt|pathlib)\s+import\s+((?:path|Path|PurePath|PosixPath|WindowsPath|PurePosixPath|PureWindowsPath)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?)',
         text,
     ):
+        if call_pos is not None and m.end() > call_pos:
+            continue
         spec = m.group(1).strip()
         if ' as ' in spec:
             mods.add(spec.split(' as ', 1)[1].strip())
         else:
             mods.add(spec)
 
-    # JS ES module imports: `import fs from 'fs'`, `import * as path from 'node:path'`
     for m in re.finditer(
         r'\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s+from\s+[\'"](?:node:)?(?:fs(?:/promises)?|path(?:/posix)?|os|child_process)[\'"]',
         text,
     ):
+        if call_pos is not None and m.end() > call_pos:
+            continue
         mods.add(m.group(1))
 
-    # Inspect statement-level assignments: only bare module/namespace aliases (NO call parens!) count as modules;
-    # any variable assigned a constructor call `Path(...)` / `pathlib.Path(...)` or value is removed from `mods`.
-    for var_name, raw_rhs in _iter_top_level_assignments(text):
+    for var_name, raw_rhs, _c_start, c_end in _iter_top_level_assignments_with_pos(text):
+        if call_pos is not None and c_end > call_pos:
+            continue
         rhs = _strip_outer_parens(raw_rhs.strip()).rstrip("'\"").strip()
         if re.match(
             r'^require\s*\(\s*[\'"](?:node:)?(?:fs(?:/promises)?|path(?:/posix)?|os|child_process)[\'"]\s*\)(?:\s*\.\s*(?:promises|posix))?$',
@@ -1771,31 +1818,41 @@ def _is_module_receiver_expr(recv_expr: str, module_vars: Optional[set] = None) 
     return False
 
 
-def _extract_path_vars(text: str) -> set:
-    """
-    F33 & F34 (S17g): Track variables bound to `pathlib.Path` instances (`Path(...)`, `pathlib.Path(...)`,
-    `p / 'sub'`, `p.parent`, `p.resolve()`, `p.joinpath(...)`, `p.with_name(...)`, `p.with_suffix(...)`).
-    """
-    path_vars: set = set()
-    path_classes = {'Path', 'PurePath', 'PosixPath', 'WindowsPath', 'PurePosixPath', 'PureWindowsPath'}
-    for m in re.finditer(
-        r'\bfrom\s+pathlib\s+import\s+(?:Path|PurePath|PosixPath|WindowsPath|PurePosixPath|PureWindowsPath)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)',
-        text,
-    ):
-        path_classes.add(m.group(1))
-    for m in re.finditer(
-        r'\bimport\s+pathlib\s+as\s+([A-Za-z_][A-Za-z0-9_]*)',
-        text,
-    ):
-        path_classes.add(m.group(1) + '.Path')
+_PATH_RETURNING_CHAIN_TAIL_RE = re.compile(
+    r'^(?:\s*\.\s*(?:parent|with_name\s*\([^()]*\)|with_suffix\s*\([^()]*\)|with_stem\s*\([^()]*\)|resolve\s*\([^()]*\)|absolute\s*\([^()]*\)|expanduser\s*\([^()]*\)|joinpath\s*\([^()]*\)))*\s*$'
+)
 
-    for var_name, raw_rhs in _iter_top_level_assignments(text):
-        rhs = _strip_outer_parens(raw_rhs.strip())
-        if _is_path_receiver_expr(rhs, path_vars, path_classes):
-            path_vars.add(var_name)
-        else:
-            path_vars.discard(var_name)
-    return path_vars
+_STR_RETURNING_TAIL_RE = re.compile(
+    r'(?:\.\s*(?:name|stem|suffix)\s*$|\.\s*(?:as_posix|as_uri|strip|lstrip|rstrip|lower|upper|title|capitalize|casefold|swapcase|replace|format|join|decode|read_text)\s*\([^()]*\)\s*$)'
+)
+
+
+def _is_provably_str_receiver_expr(
+    recv_expr: str,
+    str_vars: Optional[set] = None,
+) -> bool:
+    """
+    S17h (Principle 1 & F37): Return True ONLY when `recv_expr` is provably a `str` at the call site:
+    - String literal (`'a b'`, `"abc"`), optionally chained with string methods (`'a b'.strip()`),
+    - `str(...)` call (`str(p)`),
+    - String-returning attribute or method on Path/str (`.name`, `.stem`, `.suffix`, `.as_posix()`, `.as_uri()`, `.strip()`, `.replace()`, `.read_text()`),
+    - Variable in `str_vars` whose active binding before `call_pos` is provably `str`.
+    """
+    s = _strip_outer_parens(recv_expr)
+    if not s:
+        return False
+    svars = str_vars if str_vars is not None else set()
+    if s in svars:
+        return True
+    if any(s.startswith(sv + '.') for sv in svars):
+        return True
+    if re.match(r"^(?:[rRbBuUfF]{0,2})(['\"])(?:\\.|(?!\1).)*\1(?:\s*\.\s*(?:strip|lstrip|rstrip|lower|upper|title|replace|format)\s*\([^()]*\))*\s*$", s):
+        return True
+    if re.match(r'^str\s*\(', s):
+        return True
+    if _STR_RETURNING_TAIL_RE.search(s):
+        return True
+    return False
 
 
 def _is_path_receiver_expr(
@@ -1804,11 +1861,17 @@ def _is_path_receiver_expr(
     path_classes: Optional[set] = None,
 ) -> bool:
     """
-    F34 (S17g): Return True if `recv_expr` has static evidence of being a `pathlib.Path` instance
-    (constructor call `Path(...)`/`pathlib.Path(...)`, `/` path join with a Path, or variable bound from Path).
+    F34 (S17g) & F37/F38 (S17h Principle 1): Return True ONLY when `recv_expr` has static evidence of being
+    a `pathlib.Path` instance at the call site.
+    Only propagates `Path` through constructors (`Path(...)`, `pathlib.Path(...)`, `Path.cwd()`, `Path.home()`),
+    `/` division with a `Path`, and Path-returning properties/methods (`.parent`, `.with_name()`, `.with_suffix()`,
+    `.with_stem()`, `.resolve()`, `.absolute()`, `.expanduser()`, `.joinpath()`).
+    NEVER propagates `Path` through `.name`, `.stem`, `.suffix`, `.as_posix()`, or `str(...)`.
     """
     s = _strip_outer_parens(recv_expr)
     if not s:
+        return False
+    if _is_provably_str_receiver_expr(s):
         return False
     pvars = path_vars if path_vars is not None else set()
     pclasses = path_classes if path_classes is not None else {
@@ -1816,20 +1879,152 @@ def _is_path_receiver_expr(
     }
     if s in pvars:
         return True
-    if any(s.startswith(pv + '.') for pv in pvars):
-        return True
-    if _PATHLIB_CTOR_PREFIX_RE.match(s):
-        return True
-    if re.match(r'^(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?(?:Path|PosixPath|WindowsPath)\s*\.\s*(?:cwd|home)\s*\(', s):
-        return True
-    for cls_name in pclasses:
-        if re.match(rf'^{re.escape(cls_name)}\s*\(', s):
+    for pv in pvars:
+        if s.startswith(pv + '.') and _PATH_RETURNING_CHAIN_TAIL_RE.match(s[len(pv):]):
             return True
+
+    for cls_pat in (
+        r'^(?:pathlib\s*\.\s*)?(?:Path|PurePath|PosixPath|WindowsPath|PurePosixPath|PureWindowsPath)\s*\(',
+        r'^(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?(?:Path|PosixPath|WindowsPath)\s*\.\s*(?:cwd|home)\s*\(',
+    ):
+        m_ctor = re.match(cls_pat, s)
+        if m_ctor:
+            _, close_idx = _scan_balanced_paren_args(s, m_ctor.end())
+            if close_idx < len(s) and _PATH_RETURNING_CHAIN_TAIL_RE.match(s[close_idx + 1:]):
+                return True
+
+    for cls_name in pclasses:
+        m_cls = re.match(rf'^{re.escape(cls_name)}\s*\(', s)
+        if m_cls:
+            _, close_idx = _scan_balanced_paren_args(s, m_cls.end())
+            if close_idx < len(s) and _PATH_RETURNING_CHAIN_TAIL_RE.match(s[close_idx + 1:]):
+                return True
+
     slash_parts = _split_top_level_op(s, '/')
     if len(slash_parts) > 1:
-        if any(_is_path_receiver_expr(part, pvars, pclasses) for part in slash_parts):
+        if not _is_provably_str_receiver_expr(slash_parts[-1]) and any(
+            _is_path_receiver_expr(part, pvars, pclasses) for part in slash_parts
+        ):
             return True
     return False
+
+
+def _extract_receiver_type_vars_at_pos(
+    text: str,
+    call_pos: Optional[int] = None,
+) -> Tuple[set, set, set]:
+    """
+    S17h (Principle 3 — F37 & F38): Compute `(path_vars, str_vars, ambig_vars)` at `call_pos` using
+    ONLY bindings that appear BEFORE `call_pos`.
+    If a variable is assigned `>= 2` bindings of different types before `call_pos`, it is placed in
+    `ambig_vars` so Principle 2 (argument-shape classification) applies.
+    """
+    path_vars: set = set()
+    str_vars: set = set()
+    ambig_vars: set = set()
+    seen_kinds: Dict[str, set] = {}
+    path_classes = {'Path', 'PurePath', 'PosixPath', 'WindowsPath', 'PurePosixPath', 'PureWindowsPath'}
+    for m in re.finditer(
+        r'\bfrom\s+pathlib\s+import\s+(?:Path|PurePath|PosixPath|WindowsPath|PurePosixPath|PureWindowsPath)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)',
+        text,
+    ):
+        if call_pos is not None and m.end() > call_pos:
+            continue
+        path_classes.add(m.group(1))
+    for m in re.finditer(
+        r'\bimport\s+pathlib\s+as\s+([A-Za-z_][A-Za-z0-9_]*)',
+        text,
+    ):
+        if call_pos is not None and m.end() > call_pos:
+            continue
+        path_classes.add(m.group(1) + '.Path')
+
+    for var_name, raw_rhs, _c_start, c_end in _iter_top_level_assignments_with_pos(text):
+        if call_pos is not None and c_end > call_pos:
+            continue
+        rhs = _strip_outer_parens(raw_rhs.strip())
+        if _is_provably_str_receiver_expr(rhs, str_vars):
+            kind = 'str'
+        elif _is_path_receiver_expr(rhs, path_vars, path_classes):
+            kind = 'path'
+        else:
+            kind = 'other'
+        kinds = seen_kinds.setdefault(var_name, set())
+        kinds.add(kind)
+        if len(kinds) > 1:
+            ambig_vars.add(var_name)
+            path_vars.discard(var_name)
+            str_vars.discard(var_name)
+        elif kind == 'path':
+            path_vars.add(var_name)
+            str_vars.discard(var_name)
+        elif kind == 'str':
+            str_vars.add(var_name)
+            path_vars.discard(var_name)
+        else:
+            path_vars.discard(var_name)
+            str_vars.discard(var_name)
+
+    return path_vars, str_vars, ambig_vars
+
+
+def _extract_path_vars(text: str, call_pos: Optional[int] = None) -> set:
+    path_vars, _, _ = _extract_receiver_type_vars_at_pos(text, call_pos=call_pos)
+    return path_vars
+
+
+def _expr_looks_like_file_path_arg(arg_expr: str, var_env: Dict[str, str]) -> bool:
+    """
+    S17h (Principle 2): Check whether a method argument looks like a file path (contains `/`,
+    has a file extension, matches protected directory segments, or is an unresolvable dynamic expression).
+    Plain string tokens (`' '`, `'-'`, `'_'`, `'a'`, `'b'`, numbers) return False.
+    """
+    s = _strip_outer_parens(arg_expr.strip())
+    if not s:
+        return False
+    if re.match(r'^[0-9]+$', s):
+        return False
+    resolved = resolve_script_path_expr(s, var_env=var_env, default_join_style='python')
+    if resolved.startswith('$DYNAMIC_WRITE:'):
+        # If it is a quoted literal, check the literal directly; otherwise unresolvable variable -> fail-closed
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            val = s[1:-1]
+        else:
+            return True
+    else:
+        val = resolved
+    if '/' in val or '\\' in val:
+        return True
+    low = val.lower()
+    for prot in (
+        'projects', 'cac-du-an', 'inputs', 'dau-vao', 'outputs', 'dau-ra',
+        'operations', 'approvals', '_sample-ground-truth', 'du-an-mau-su-that', '_final', 'wip', 'dang-lam',
+    ):
+        if prot in low:
+            return True
+    if re.search(r'[A-Za-z0-9_-]\.[A-Za-z0-9]{1,6}$', val):
+        return True
+    return False
+
+
+def _args_look_like_file_path_move(
+    method_name: str,
+    method_args: List[str],
+    var_env: Dict[str, str],
+) -> bool:
+    """
+    S17h (Principle 2): When the receiver of `.rename(...)` or `.replace(...)` is ambiguous at `call_pos`,
+    classify by argument shape:
+    - `.rename(dst)` is not a Python `str` method -> treat as file move when `len(method_args) >= 1`.
+    - `.replace(dst)` with 1 argument is `Path.replace(dst)` (`str.replace` requires >= 2 args).
+    - `.replace(a, b)` with >= 2 arguments is treated as file move if any of the first 2 arguments
+      looks like a file path (or is unresolvable), and exempted as `str.replace` when both are plain tokens.
+    """
+    if method_name == 'rename':
+        return len(method_args) >= 1
+    if len(method_args) <= 1:
+        return True
+    return any(_expr_looks_like_file_path_arg(arg, var_env) for arg in method_args[:2])
 
 
 def _extract_module_call_arg_lists(

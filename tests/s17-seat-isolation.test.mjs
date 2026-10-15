@@ -1205,8 +1205,44 @@ test('F26, F27, F28, F29 & F31 (S17f): Hook 2.1 resolves options/config variable
       assert.equal(r.status, 0, `F34 allow (${path.basename(hPath)}): "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
     }
   }
+
+  // 8. F37, F38, F39 & F41 (S17h): Call-site ordered receiver bindings, Path string attributes, and method shorthand shadowing
+  for (const cmd of [
+    "python3 -c \"from pathlib import Path; p=Path('wip/a b.txt'); name=p.name; print(name.replace(' ','-'))\"",
+    "python3 -c \"from pathlib import Path; p=Path('wip/a b.txt'); print(p.stem.replace(' ','-'), p.suffix.replace('.',''), p.as_posix().replace(' ','-'), str(p).replace(' ','-'))\"",
+  ]) {
+    for (const hPath of [hook7Path, hook4Path]) {
+      const r = spawnSync('/usr/bin/python3', [hPath], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, `F37 allow (${path.basename(hPath)}): "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+    }
+  }
+
+  for (const [hPath, prefix, cmd] of [
+    [hook7Path, '[opc-harness:lock_raw_inputs]', "python3 -c \"from pathlib import Path; p=Path('projects/x/inputs/a'); p.rename('wip/a'); p=str(p)\""],
+    [hook4Path, '[opc-harness:protect_final_outputs]', "python3 -c \"from pathlib import Path; p=Path('projects/x/outputs/a'); p.rename('wip/a'); p=str(p)\""],
+    [hook7Path, '[opc-harness:lock_raw_inputs]', "python3 -c \"from pathlib import Path; p=Path('projects/x/inputs/a'); p.replace('wip/a'); p=str(p)\""],
+    [hook4Path, '[opc-harness:protect_final_outputs]', "python3 -c \"from pathlib import Path; p=Path('projects/x/outputs/a'); p.replace('wip/a'); p=str(p)\""],
+    [hook21Path, '[opc-harness:block_public_publish]', "node -e \"let client=new Map(); client=require('axios'); client.delete('https://example.net/x')\""],
+    [hook21Path, '[opc-harness:block_public_publish]', "node -e \"const axios=require('axios'),client=axios.create(); const url='https://example.net/x'; client.delete(url)\""],
+    [hook21Path, '[opc-harness:block_public_publish]', "node -e \"const opts={}; const o={send(opts){fetch('https://example.net/x',opts)}}; o.send({method:'POST'})\""],
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hPath], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `S17h block (${path.basename(hPath)}): "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes(prefix), `S17h stderr prefix missing for "${cmd}"`);
+  }
+
+  {
+    const cmd = "node -e \"const axios=require('axios'),client=axios.create(); const url='https://example.net/x'; client.get(url)\"";
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, `F39 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  }
 });
-
-
-
-

@@ -238,9 +238,10 @@ def _split_top_level_statements_with_pos(text: str) -> list[tuple[str, int, int]
 
 def _extract_shadowed_or_mutated_vars(text: str) -> set[str]:
     """
-    F32b (S17g): Collect variable names that are function/arrow/lambda/catch parameters,
-    mutated via property/index assignment (`opts.method = ...`, `Object.assign(opts, ...)`),
-    or assigned more than once across the entire command text (including inside inner blocks/functions).
+    F32b (S17g) & F41 (S17h): Collect variable names that are function/arrow/lambda/catch/method-shorthand
+    parameters, mutated via property/index assignment (`opts.method = ...`, `Object.assign(opts, ...)`),
+    or assigned more than once across the entire command text (including inside inner blocks/functions and
+    comma-separated declarations).
     """
     shadowed: set[str] = set()
     param_lists: list[str] = []
@@ -250,6 +251,11 @@ def _extract_shadowed_or_mutated_vars(text: str) -> set[str]:
         param_lists.append(m.group(1))
     for m in re.finditer(r"\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=>", text):
         shadowed.add(m.group(1))
+    for m in re.finditer(
+        r"\b(?:async\s+)?(?!if\b|for\b|while\b|switch\b|catch\b|with\b|function\b)[A-Za-z_$][A-Za-z0-9_$]*\s*\(([^()]*)\)\s*\{",
+        text,
+    ):
+        param_lists.append(m.group(1))
     for m in re.finditer(r"\bdef\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^)]*)\)", text):
         param_lists.append(m.group(1))
     for m in re.finditer(r"\blambda\b([^:]*):", text):
@@ -274,7 +280,7 @@ def _extract_shadowed_or_mutated_vars(text: str) -> set[str]:
     # Count all variable declarations/assignments across all scopes
     assign_counts: dict[str, int] = {}
     for m in re.finditer(
-        r"(?:^|[;\n{(\s])(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])",
+        r"(?:^|[;\n{(\s,])(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])",
         text,
     ):
         vname = m.group(1)
@@ -292,39 +298,53 @@ def _extract_simple_obj_var_env(text: str) -> dict[str, tuple[str, int] | None]:
     """
     F26 (S17f) & F32 (S17g): Extract top-level one-step object/dict literal variable assignments
     (`const options = {...}`, `cfg = {...}`) that are unambiguous in scope.
-    Variables shadowed by function/arrow/lambda parameters, assigned multiple times, mutated,
+    Variables shadowed by function/arrow/lambda/method parameters, assigned multiple times, mutated,
     assigned non-object expressions, or containing spread `...` map to None (unresolvable -> fail-closed).
     """
     text = _unwrap_inline_script_text(text)
     env: dict[str, tuple[str, int] | None] = {}
     shadowed = _extract_shadowed_or_mutated_vars(text)
     counts: dict[str, int] = {}
-    for idx, (stmt, stmt_start, stmt_end) in enumerate(_split_top_level_statements_with_pos(text)):
-        s = stmt.strip()
-        if not s:
-            continue
-        if idx == 0:
-            s = re.sub(r"^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+['\"]?", "", s).strip()
-        m = re.match(r"^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$", s, re.DOTALL)
-        if not m:
-            continue
-        var_name = m.group(1)
-        rhs = bash_parser._strip_outer_parens(m.group(2).strip())
-        if len(rhs) >= 2 and rhs[-1] in ("'", '"') and rhs[0] == "{" and rhs[-2] == "}":
-            rhs = rhs[:-1].strip()
-        if var_name in ("import", "from", "return", "if", "elif", "while", "for", "assert"):
-            continue
+    for var_name, rhs, _c_start, c_end in bash_parser._iter_top_level_assignments_with_pos(text):
         counts[var_name] = counts.get(var_name, 0) + 1
         if counts[var_name] > 1 or var_name in shadowed:
             env[var_name] = None
             continue
         if rhs.startswith("{") and rhs.endswith("}") and not re.search(r"\.\.\.\s*[A-Za-z_$(]", rhs):
-            env[var_name] = (rhs, stmt_end)
+            env[var_name] = (rhs, c_end)
         else:
             env[var_name] = None
     for sh_name in shadowed:
         if sh_name in env:
             env[sh_name] = None
+    return env
+
+
+def _extract_str_var_env_at_pos(text: str, call_pos: int | None = None) -> dict[str, str]:
+    """
+    F39 (S17h): Extract top-level string literal bindings (`const url = 'https://...'`) active at `call_pos`
+    that have not been reassigned before `call_pos` or shadowed by parameters.
+    """
+    text = _unwrap_inline_script_text(text)
+    shadowed = _extract_shadowed_or_mutated_vars(text)
+    env: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    for var_name, rhs, _c_start, c_end in bash_parser._iter_top_level_assignments_with_pos(text):
+        if call_pos is not None and c_end > call_pos:
+            continue
+        counts[var_name] = counts.get(var_name, 0) + 1
+        if counts[var_name] > 1 or var_name in shadowed:
+            env.pop(var_name, None)
+            continue
+        if (
+            len(rhs) >= 2
+            and rhs[0] == rhs[-1]
+            and rhs[0] in ("'", '"', "`")
+            and "${" not in rhs
+        ):
+            env[var_name] = rhs
+        else:
+            env.pop(var_name, None)
     return env
 
 
@@ -374,27 +394,50 @@ _HTTP_LIB_IMPORT_RE = re.compile(
 )
 
 
-def _extract_data_and_http_vars(text: str) -> tuple[set[str], set[str]]:
+def _extract_data_and_http_vars(
+    text: str,
+    call_pos: int | None = None,
+) -> tuple[set[str], set[str]]:
     """
-    F35 (S17g): Track variables bound to data collections (`new Set(...)`, `new Map(...)`, `new Headers(...)`,
-    `new URLSearchParams(...)`) vs HTTP client libraries (`axios`, `got`, `superagent`, `undici`, `requests`, `httpx`, etc.).
+    F35 (S17g) & F39 (S17h): Track variables bound before `call_pos` in appearance order (including
+    comma-separated declarations `const axios=require('axios'),client=axios.create()`).
+    - Principle 1 (Exempt only when certain): A variable stays in `data_vars` ONLY if every binding
+      before `call_pos` is a data collection (`Set`, `Map`, `Headers`, `URLSearchParams`, etc.) and it has
+      never been reassigned to anything else before `call_pos`.
+    - If a variable is bound or reassigned to an HTTP client (`require('axios')`, `axios.create()`, etc.)
+      before `call_pos`, it is removed from `data_vars` and added to `http_vars`.
     """
     data_vars: set[str] = set()
     http_vars: set[str] = set()
+    seen_kinds: dict[str, list[str]] = {}
+
     for m in re.finditer(
-        r"(?:^|[;\n{(\s])(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])\s*([^;\n]+)",
+        r"\bimport\s+(?:requests|httpx|urllib3)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)",
         text,
     ):
-        vname = m.group(1)
-        rhs = bash_parser._strip_outer_parens(m.group(2).strip())
-        if re.match(
-            r"^(?:new\s+(?:Set|Map|WeakSet|WeakMap|Headers|URLSearchParams|FormData)\b|(?:localStorage|sessionStorage)\b|.*\.(?:headers|searchParams)\b)",
-            rhs,
-        ):
-            data_vars.add(vname)
-        elif (
+        if call_pos is None or m.end() <= call_pos:
+            http_vars.add(m.group(1))
+    for m in re.finditer(
+        r"\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s+from\s+['\"](?:node:)?(?:axios|got|superagent|undici|https?)['\"]",
+        text,
+    ):
+        if call_pos is None or m.end() <= call_pos:
+            http_vars.add(m.group(1))
+
+    for vname, rhs, _c_start, c_end in bash_parser._iter_top_level_assignments_with_pos(text):
+        if call_pos is not None and c_end > call_pos:
+            continue
+        is_collection = bool(
+            re.match(
+                r"^(?:new\s+(?:Set|Map|WeakSet|WeakMap|Headers|URLSearchParams|FormData)\b|(?:localStorage|sessionStorage)\b|.*\.(?:headers|searchParams)\b)",
+                rhs,
+            )
+        )
+        is_http = (
             rhs in _KNOWN_HTTP_CLIENT_NAMES
+            or rhs in http_vars
             or any(rhs.startswith(h + ".") for h in _KNOWN_HTTP_CLIENT_NAMES)
+            or any(rhs.startswith(hv + ".") for hv in http_vars)
             or bool(_HTTP_LIB_IMPORT_RE.search(rhs))
             or bool(
                 re.search(
@@ -402,19 +445,17 @@ def _extract_data_and_http_vars(text: str) -> tuple[set[str], set[str]]:
                     rhs,
                 )
             )
-        ):
+        )
+        kind = "http" if is_http else ("collection" if is_collection else "other")
+        seen_kinds.setdefault(vname, []).append(kind)
+        if seen_kinds[vname] == ["collection"]:
+            data_vars.add(vname)
+        else:
+            data_vars.discard(vname)
+        if is_http:
             http_vars.add(vname)
+            data_vars.discard(vname)
 
-    for m in re.finditer(
-        r"\bimport\s+(?:requests|httpx|urllib3)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)",
-        text,
-    ):
-        http_vars.add(m.group(1))
-    for m in re.finditer(
-        r"\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s+from\s+['\"](?:node:)?(?:axios|got|superagent|undici|https?)['\"]",
-        text,
-    ):
-        http_vars.add(m.group(1))
     return data_vars, http_vars
 
 
@@ -450,10 +491,12 @@ def _is_http_client_receiver(recv_expr: str, http_vars: set[str]) -> bool:
     return False
 
 
-def _looks_like_url_arg_expr(arg_expr: str) -> bool:
+def _looks_like_url_arg_expr(arg_expr: str, str_env: dict[str, str] | None = None) -> bool:
     s = bash_parser._strip_outer_parens(arg_expr.strip())
     if not s:
         return False
+    if str_env and s in str_env:
+        s = str_env[s]
     unquoted = s.strip("'\"`")
     if unquoted.lower().startswith(("http://", "https://", "//")):
         return True
@@ -466,21 +509,23 @@ def _looks_like_url_arg_expr(arg_expr: str) -> bool:
 
 def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
     """
-    F19b (S17e), F26 & F31 (S17f), F32 & F35 (S17g): Detect HTTP write calls in Python/JS using balanced
-    parenthesis argument lists, scope-aware options/config variable resolution (fail-closed when unresolvable),
-    and HTTP-client vs data-collection receiver classification for `.post`/`.put`/`.delete`/`.patch`/`.request`.
+    F19b (S17e), F26 & F31 (S17f), F32 & F35 (S17g), F39 & F41 (S17h): Detect HTTP write calls in Python/JS
+    using balanced parenthesis argument lists, scope-aware options/config variable resolution (fail-closed when
+    unresolvable), and call-site ordered HTTP-client vs data-collection receiver classification for
+    `.post`/`.put`/`.delete`/`.patch`/`.request`.
     Returns a list of raw URL argument expressions (or None when an HTTP write call has no extractable URL arg).
     """
     text = _unwrap_inline_script_text(text)
     url_exprs: list[str | None] = []
     obj_env = _extract_simple_obj_var_env(text)
-    data_vars, http_vars = _extract_data_and_http_vars(text)
 
-    # 1. F31 & F35: Write verbs `.post(...)`, `.put(...)`, `.delete(...)`, `.patch(...)`
-    #    Distinguish data-collection receivers (`Set`, `Map`, `Headers`, `URLSearchParams`, etc.)
-    #    from HTTP clients (`axios`, `got`, `superagent`, `undici`, `requests`, `httpx`, `require('axios')`, etc.).
+    # 1. F31, F35 & F39: Write verbs `.post(...)`, `.put(...)`, `.delete(...)`, `.patch(...)`
+    #    Evaluate receiver bindings and string variable bindings at `call_pos = m_verb.start()`.
     for m_verb in re.finditer(r"\.\s*(post|put|delete|patch)\s*\(", text):
-        recv_expr = bash_parser._extract_receiver_before_dot(text, m_verb.start())
+        call_pos = m_verb.start()
+        data_vars, http_vars = _extract_data_and_http_vars(text, call_pos)
+        str_env = _extract_str_var_env_at_pos(text, call_pos)
+        recv_expr = bash_parser._extract_receiver_before_dot(text, call_pos)
         call_args, _ = bash_parser._scan_balanced_paren_args(text, m_verb.end())
         if _is_data_collection_receiver(recv_expr, data_vars):
             continue
@@ -497,7 +542,7 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
                 break
         if url_expr is None:
             url_expr = call_args[0].strip()
-        if is_http_recv or (url_expr and _looks_like_url_arg_expr(url_expr)):
+        if is_http_recv or (url_expr and _looks_like_url_arg_expr(url_expr, str_env)):
             url_exprs.append(url_expr or None)
 
     # 2. F26 & F31: `.request(...)` on ANY receiver expression (requests, httpx, urllib3.PoolManager(),

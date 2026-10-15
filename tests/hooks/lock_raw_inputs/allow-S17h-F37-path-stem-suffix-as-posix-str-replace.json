@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 -c \"from pathlib import Path; p=Path('wip/a b.txt'); print(p.stem.replace(' ','-'), p.suffix.replace('.',''), p.as_posix().replace(' ','-'), str(p).replace(' ','-'))\""}}

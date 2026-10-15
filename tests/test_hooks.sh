@@ -276,6 +276,9 @@ POS_CONTROL_CASES=(
     "block_public_publish:block-S17g-F32-fetch-shadowed-opts-param.json"
     "block_public_publish:block-S17g-F35-require-axios-delete.json"
     "block_public_publish:block-S17g-F35-axios-client-var-delete.json"
+    "block_public_publish:block-S17h-F39-map-reassigned-axios-delete.json"
+    "block_public_publish:block-S17h-F39-comma-axios-create-delete-var-url.json"
+    "block_public_publish:block-S17h-F41-method-shorthand-shadowed-opts.json"
     "lock_raw_inputs:block-f16-node-cpSync-dst-approvals.json"
     "lock_raw_inputs:block-f16-python-open-hex-escape.json"
     "lock_raw_inputs:block-f16-python-path-join-write-text.json"
@@ -289,7 +292,11 @@ POS_CONTROL_CASES=(
     "lock_raw_inputs:block-S17g-F33-path-var-named-path-write-text.json"
     "lock_raw_inputs:block-S17g-F33-pathlib-qualified-ctor-write-text.json"
     "lock_raw_inputs:block-S17g-F34-path-replace-inputs.json"
+    "lock_raw_inputs:block-S17h-F38-path-rename-then-rebind-str.json"
+    "lock_raw_inputs:block-S17h-F38-path-replace-then-rebind-str.json"
     "protect_final_outputs:block-S17f-F27-path-rename-from-outputs.json"
+    "protect_final_outputs:block-S17h-F38-path-rename-then-rebind-str.json"
+    "protect_final_outputs:block-S17h-F38-path-replace-then-rebind-str.json"
 )
 
 saved_total=$TOTAL
@@ -314,7 +321,7 @@ PASSED=$saved_passed
 FAILED=$saved_failed
 
 if [ "$pos_control_ok" -eq 1 ]; then
-    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
     FAILED=$((FAILED + 1))
 fi

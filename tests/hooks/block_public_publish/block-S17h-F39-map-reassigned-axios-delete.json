@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"let client=new Map(); client=require('axios'); client.delete('https://example.net/x')\""}}

@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 -c \"from pathlib import Path; p=Path('projects/x/inputs/a'); p.rename('wip/a'); p=str(p)\""}}
