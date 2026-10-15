@@ -139,7 +139,15 @@ test('UI-3 §7: isSpeechRecognitionSupported hides mic in Electron and unsupport
 });
 
 test('UI-3 D: vi and en dictionaries contain all required composer and queue keys', () => {
-  assert.equal(vi.home.slot.placeholderQueue, 'Xếp hàng cho sau lượt này…');
+  assert.equal(vi.home.slot.placeholderQueue, 'Gõ tiếp, tin sẽ gửi sau lượt này…');
+  assert.equal(vi.home.composer.clearInput, 'Xoá chữ đang gõ');
+  assert.equal(vi.home.composer.micStop, 'Dừng nhập bằng giọng nói');
+  assert.equal(
+    vi.home.composer.micPermissionDenied,
+    'Trình duyệt chưa cho phép dùng micro — bật quyền micro trong cài đặt trang rồi thử lại',
+  );
+  assert.equal(vi.home.composer.micNoSpeech, 'Chưa nghe thấy tiếng nói, hãy thử lại');
+  assert.equal(vi.home.composer.micNetworkError, 'Không kết nối được dịch vụ nhận dạng giọng nói');
   assert.equal(en.home.slot.placeholderQueue, 'Queue for after this turn…');
 
   const requiredComposerKeys = [
