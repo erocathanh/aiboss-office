@@ -10,8 +10,8 @@ export async function resolve(specifier, context, nextResolve) {
   try {
     return await nextResolve(target, context);
   } catch (err) {
-    if (err.code === 'ERR_MODULE_NOT_FOUND') {
-      for (const ext of ['.ts', '.tsx', '.mjs', '.js', '.json']) {
+    if (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'ERR_UNSUPPORTED_DIR_IMPORT') {
+      for (const ext of ['.ts', '.tsx', '.mjs', '.js', '.json', '/index.ts', '/index.tsx', '/index.js']) {
         try {
           return await nextResolve(target + ext, context);
         } catch {

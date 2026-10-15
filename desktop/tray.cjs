@@ -3,6 +3,11 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { Tray, Menu, nativeImage, app } = require('electron');
+const {
+  FALLBACK_UI_LANGUAGE,
+  isDesktopLanguage,
+  getDesktopCopy,
+} = require('./i18n.cjs');
 
 let tray = null;
 let currentWindow = null;
@@ -10,22 +15,31 @@ let currentPort = 4330;
 let isServerOnline = false;
 let activeSeats = 0;
 let isStartAtLogin = false;
+let currentLanguage = FALLBACK_UI_LANGUAGE;
 
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'desktop-settings.json');
 }
 
-function loadSavedSettings() {
+function readRawSettings() {
   try {
     const file = getSettingsPath();
     if (fs.existsSync(file)) {
       const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (typeof data.startAtLogin === 'boolean') {
-        return data.startAtLogin;
+      if (data && typeof data === 'object') {
+        return data;
       }
     }
   } catch (e) {
     // ignore
+  }
+  return {};
+}
+
+function loadSavedSettings() {
+  const data = readRawSettings();
+  if (typeof data.startAtLogin === 'boolean') {
+    return data.startAtLogin;
   }
   try {
     const loginItem = app.getLoginItemSettings();
@@ -35,35 +49,55 @@ function loadSavedSettings() {
   }
 }
 
-function persistSettings(settings) {
+function loadSavedLanguage() {
+  const data = readRawSettings();
+  if (isDesktopLanguage(data.uiLanguage)) {
+    return data.uiLanguage;
+  }
+  return null;
+}
+
+function persistSettings(patch) {
   try {
     const dir = app.getPath('userData');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(getSettingsPath(), JSON.stringify(settings, null, 2), 'utf8');
+    const existing = readRawSettings();
+    const merged = {
+      ...existing,
+      startAtLogin: isStartAtLogin,
+      uiLanguage: currentLanguage,
+      ...patch,
+    };
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(merged, null, 2), 'utf8');
   } catch (e) {
     console.error('[AIBOSS Desktop] Failed to save desktop settings:', e.message);
   }
 }
 
-function buildMenu() {
-  const serverText = isServerOnline
-    ? `Server: Online (127.0.0.1:${currentPort})`
-    : `Server: Offline (127.0.0.1:${currentPort})`;
+function buildTrayMenuTemplate({
+  lang = currentLanguage,
+  serverOnline = isServerOnline,
+  port = currentPort,
+  seatsCount = activeSeats,
+  startAtLogin = isStartAtLogin,
+  onOpenWindow = () => {},
+  onToggleStartAtLogin = () => {},
+  onQuit = () => {},
+} = {}) {
+  const copy = getDesktopCopy(lang).tray;
+  const serverText = (serverOnline ? copy.serverOnline : copy.serverOffline).replace(
+    '{port}',
+    String(port),
+  );
+  const seatsText =
+    seatsCount > 0
+      ? copy.activeSeatsRunning.replace('{count}', String(seatsCount))
+      : copy.activeSeatsIdle;
 
-  const seatsText = activeSeats > 0
-    ? `Active Seats: ${activeSeats} running`
-    : `Active Seats: 0 running (idle)`;
-
-  return Menu.buildFromTemplate([
+  return [
     {
-      label: 'Open AIBOSS Office',
-      click: () => {
-        if (currentWindow && !currentWindow.isDestroyed()) {
-          if (currentWindow.isMinimized()) currentWindow.restore();
-          currentWindow.show();
-          currentWindow.focus();
-        }
-      },
+      label: copy.openOffice,
+      click: onOpenWindow,
     },
     { type: 'separator' },
     {
@@ -76,10 +110,36 @@ function buildMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Start at Login',
+      label: copy.startAtLogin,
       type: 'checkbox',
-      checked: isStartAtLogin,
-      click: (item) => {
+      checked: startAtLogin,
+      click: onToggleStartAtLogin,
+    },
+    { type: 'separator' },
+    {
+      label: copy.quit,
+      accelerator: 'CommandOrControl+Q',
+      click: onQuit,
+    },
+  ];
+}
+
+function buildMenu() {
+  return Menu.buildFromTemplate(
+    buildTrayMenuTemplate({
+      lang: currentLanguage,
+      serverOnline: isServerOnline,
+      port: currentPort,
+      seatsCount: activeSeats,
+      startAtLogin: isStartAtLogin,
+      onOpenWindow: () => {
+        if (currentWindow && !currentWindow.isDestroyed()) {
+          if (currentWindow.isMinimized()) currentWindow.restore();
+          currentWindow.show();
+          currentWindow.focus();
+        }
+      },
+      onToggleStartAtLogin: (item) => {
         isStartAtLogin = item.checked;
         try {
           app.setLoginItemSettings({
@@ -92,20 +152,18 @@ function buildMenu() {
           console.error('[AIBOSS Desktop] Failed to set login item settings:', err.message);
         }
       },
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit AIBOSS Office',
-      accelerator: 'CommandOrControl+Q',
-      click: () => {
+      onQuit: () => {
         app.isQuitting = true;
         app.quit();
       },
-    },
-  ]);
+    }),
+  );
 }
 
-function initTray({ window, port }) {
+function initTray({ window, port, lang }) {
+  if (isDesktopLanguage(lang)) {
+    currentLanguage = lang;
+  }
   if (tray) return tray;
 
   currentWindow = window;
@@ -124,8 +182,9 @@ function initTray({ window, port }) {
     icon.setTemplateImage(true);
   }
 
+  const copy = getDesktopCopy(currentLanguage).tray;
   tray = new Tray(icon);
-  tray.setToolTip('AIBOSS Office');
+  tray.setToolTip(copy.tooltip);
   tray.setContextMenu(buildMenu());
 
   tray.on('click', () => {
@@ -151,6 +210,25 @@ function updateTrayStatus({ serverOnline, activeSeatsCount }) {
   }
 }
 
+function setTrayLanguage(lang, { persist = true } = {}) {
+  if (isDesktopLanguage(lang)) {
+    currentLanguage = lang;
+  }
+  if (persist) {
+    persistSettings({ uiLanguage: currentLanguage });
+  }
+  if (tray && !tray.isDestroyed()) {
+    const copy = getDesktopCopy(currentLanguage).tray;
+    tray.setToolTip(copy.tooltip);
+    tray.setContextMenu(buildMenu());
+  }
+  return currentLanguage;
+}
+
+function getTrayLanguage() {
+  return currentLanguage;
+}
+
 function getDesktopStatus() {
   return {
     isElectron: true,
@@ -158,6 +236,7 @@ function getDesktopStatus() {
     port: currentPort,
     activeSeats,
     startAtLogin: isStartAtLogin,
+    language: currentLanguage,
   };
 }
 
@@ -191,4 +270,8 @@ module.exports = {
   getDesktopStatus,
   setStartAtLogin,
   destroyTray,
+  loadSavedLanguage,
+  setTrayLanguage,
+  getTrayLanguage,
+  buildTrayMenuTemplate,
 };

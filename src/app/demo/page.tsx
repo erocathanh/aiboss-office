@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { SAU_O, MUC_CHIA_O, CHU_KY_GIONG } from '@/lib/demo-man-hinh';
 import { readTextSize, applyTextSize, syncTextSizeOnStorageEvent } from '@/components/office/text-size';
+import { useT } from '@/i18n';
 
 /**
  * MÀN DEMO — dựng để CHỤP MÀN HÌNH đưa vào slide.
@@ -20,6 +21,7 @@ import { readTextSize, applyTextSize, syncTextSizeOnStorageEvent } from '@/compo
  * ⚠️ Chữ trong các ô nằm ở `src/lib/demo-man-hinh.ts`. Sửa chữ thì sửa BÊN ĐÓ.
  */
 export default function ManDemo() {
+  const { t } = useT();
   const [boCuc, setBoCuc] = useState<number>(6);
   const hien = SAU_O.slice(0, boCuc);
 
@@ -57,7 +59,7 @@ export default function ManDemo() {
       ` }} />
 
       <div className="thanh-tren">
-        <b style={{ letterSpacing: '.12em' }}>PHÒNG BAN AI</b>
+        <b style={{ letterSpacing: '.12em' }}>{t('demo.headerTitle')}</b>
         <div className="nhom-bo-cuc">
           {MUC_CHIA_O.map((n) => (
             <button
@@ -66,8 +68,8 @@ export default function ManDemo() {
               type="button"
               data-bc={n}
               onClick={() => setBoCuc(n)}
-              title={`${n} ô`}
-              aria-label={`Bố cục ${n} ô`}
+              title={t('demo.slotCountTitle', { count: n })}
+              aria-label={t('demo.slotCountAria', { count: n })}
             >
               {n}
             </button>

@@ -34,7 +34,12 @@ export const PHUT_FORK = Math.round(HAN_FORK_MS / 60_000);
  * 🔑 Gom thành MỘT hàm chứ KHÔNG để mỗi chỗ tự ghép chuỗi: dưới một phút thì «3 phút» đọc thành
  *    «0 phút», nên phép làm tròn cũng phải nằm ở MỘT chỗ.
  */
-export function moTaHanFork(): string {
+export function moTaHanFork(lang: 'en' | 'vi' = 'vi'): string {
+  if (lang === 'en') {
+    return HAN_FORK_MS < 60_000
+      ? `up to ${Math.round(HAN_FORK_MS / 1000)} seconds`
+      : `up to ${PHUT_FORK} minutes`;
+  }
   return HAN_FORK_MS < 60_000
     ? `tới ${Math.round(HAN_FORK_MS / 1000)} giây`
     : `tới ${PHUT_FORK} phút`;

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { DS_TIN } from '@/lib/demo-tin-khach';
 import { readTextSize, applyTextSize, syncTextSizeOnStorageEvent } from '@/components/office/text-size';
+import { useT } from '@/i18n';
 
 /**
  * Trang «danh sách câu soạn sẵn» — kết quả mà PHÒNG CHĂM KHÁCH trả về.
@@ -20,6 +21,7 @@ import { readTextSize, applyTextSize, syncTextSizeOnStorageEvent } from '@/compo
  *    ⛔ Đừng viết «đã gửi ✓» (nói quá) — cũng ⛔ viết «nút giả» (nói kém đi).
  */
 export default function TinKhach() {
+  const { t } = useT();
   const [daBam, setDaBam] = useState<number | null>(null);
 
   useEffect(() => {
@@ -53,26 +55,26 @@ export default function TinKhach() {
         .khu-tin .noi-that{margin-top:8px;font-size:calc(12.5px * var(--text-scale, 1));color:#e8955c;line-height:1.55}
       ` }} />
 
-      <h1>Câu soạn sẵn — chờ anh chị duyệt</h1>
-      <p className="phu">Mỗi dòng một khách. Đọc xong bấm duyệt từng cái, ⛔ gửi hàng loạt.</p>
+      <h1>{t('demo.customerMessages.title')}</h1>
+      <p className="phu">{t('demo.customerMessages.subtitle')}</p>
 
-      {DS_TIN.map((t, i) => (
-        <section key={t.ten} className="the">
+      {DS_TIN.map((item, i) => (
+        <section key={item.ten} className="the">
           <div className="dau">
-            <b>{t.ten}</b>
-            <span className="loai">hỏi {t.loai}</span>
+            <b>{item.ten}</b>
+            <span className="loai">{t('demo.customerMessages.topicPrefix', { topic: item.loai })}</span>
           </div>
-          <p className="hoi">“{t.hoi}”</p>
-          <p className={`tra${t.traLoi ? '' : ' trong'}`}>
-            {t.traLoi || 'Để trống — chờ anh chị quyết chính sách rồi mới soạn.'}
+          <p className="hoi">“{item.hoi}”</p>
+          <p className={`tra${item.traLoi ? '' : ' trong'}`}>
+            {item.traLoi || t('demo.customerMessages.emptyDraft')}
           </p>
-          {t.canDoc && <p className="can-doc">⚠️ {t.canDoc}</p>}
-          <button type="button" onClick={() => setDaBam(i)}>Duyệt và gửi</button>
+          {item.canDoc && <p className="can-doc">⚠️ {item.canDoc}</p>}
+          <button type="button" onClick={() => setDaBam(i)}>{t('demo.customerMessages.approveAndSend')}</button>
           {daBam === i && (
             <p className="noi-that">
-              Câu trả lời máy soạn xong rồi — phần anh chị thấy đây là thật.
-              Còn <b>đoạn ống nối sang fanpage</b> Thanh đang ráp; ráp xong thì bấm một cái
-              là tin bay thẳng tới khách.
+              {t('demo.customerMessages.pipelineNoticePrefix')}
+              <b>{t('demo.customerMessages.pipelineNoticeHighlight')}</b>
+              {t('demo.customerMessages.pipelineNoticeSuffix')}
             </p>
           )}
         </section>

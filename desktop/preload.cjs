@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('aibossDesktop', Object.freeze({
   getStatus: () => ipcRenderer.invoke('desktop:get-status'),
   getLoginItemSettings: () => ipcRenderer.invoke('desktop:get-login-item'),
   setLoginItemSettings: (enabled) => ipcRenderer.invoke('desktop:set-login-item', enabled),
+  getLanguage: () => ipcRenderer.invoke('desktop:get-language'),
+  setLanguage: (lang) => ipcRenderer.invoke('desktop:set-language', lang),
 }));

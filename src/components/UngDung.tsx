@@ -33,7 +33,7 @@ const dungTruocKhiVe = typeof window !== 'undefined' ? useLayoutEffect : useEffe
 
 import { BongBong } from '@/components/ung-dung/bong-bong';
 import {
-  CAU_LOI_O, cauNhacNapBoGhe, chayNapBoGhe, ghiSoO, soMotO,
+  layCauLoiO, cauNhacNapBoGhe, chayNapBoGhe, ghiSoO, soMotO,
   type KetQuaDatNguoi, type LyDoHong,
 } from '@/components/ung-dung/nap-bo-ghe';
 import {
@@ -46,6 +46,7 @@ import {
 import type { ViSaoDung } from '@/lib/kho-tien-trinh';
 // ⏱ Hạn fork: NHẬP từ nguồn duy nhất, KHÔNG gõ lại con số. Xem chú thích dài trong tệp đó.
 import { moTaHanFork } from '@/lib/han-gio-fork';
+import { useT } from '@/i18n';
 
 
 export default function UngDung({
@@ -55,6 +56,7 @@ export default function UngDung({
   nhanSu: NhanSu[];
   tong: { nhan_su: number; phong_ban: number; truong_phong: number };
 }) {
+  const { t } = useT();
   /* 👑 Ghế ghim (TỔNG GIÁM ĐỐC) — LUẬT CỨNG: ô 1 là nó, ở CẢ 3 chế độ. */
   const ongTrum = useMemo(() => nhanSu.find((n) => n.ghim) ?? null, [nhanSu]);
 
@@ -235,10 +237,10 @@ export default function UngDung({
         setCopiedSeat(seatId);
         setTimeout(() => setCopiedSeat(null), 2000);
       } catch {
-        window.prompt('Copy resume command:', cmd);
+        window.prompt(t('home.slot.copyResumePrompt'), cmd);
       }
     },
-    [seatActiveMap]
+    [seatActiveMap, t]
   );
 
   useEffect(() => {
@@ -334,7 +336,7 @@ export default function UngDung({
    *    Tôi vẫn làm cả phần đó (lớp 2, dưới đây), nhưng khôngdựa vào nó làm phanh duy nhất.
    */
   const noiHong = useCallback((i: number, ly: LyDoHong) => {
-    capNhat(i, { loiDan: CAU_LOI_O[ly] });
+    capNhat(i, { loiDan: layCauLoiO(ly) });
   }, [capNhat]);
   const baoHong = useCallback((i: number, ly: LyDoHong): KetQuaDatNguoi => {
     noiHong(i, ly);
@@ -795,12 +797,10 @@ export default function UngDung({
          */
         const pid = typeof j?.pid === 'number' ? j.pid : null;
         hienCau(
-          'KHÔNG dừng được, và lý do nằm ở chính app này, KHÔNG phải ở anh: sổ của máy chủ có HAI ô ' +
-          'cùng giữ một tiến trình. Đây là LỖI CỦA APP — nó KHÔNG được phép xảy ra, nên nếu anh ' +
-          'thấy câu này thì có một chỗ trong mã đang hỏng và cần báo lại.\n\n' +
+          t('home.messages.stopLedgerConflict') +
           (pid === null
-            ? 'Máy chủ KHÔNG trả về số hiệu tiến trình, nên chưa có gì để dừng tay.'
-            : 'Ghế VẪN ĐANG CHẠY. Dừng tay bằng lệnh:\n\n`kill ' + pid + '`'),
+            ? t('home.messages.stopNoPid')
+            : t('home.messages.stopManualKill', { pid })),
         );
       } else if (viSao === 'da_gui_dung' || viSao === 'da_ep_dung') {
         /**
@@ -823,16 +823,13 @@ export default function UngDung({
              * 🔑 Vắng con số thì nói vắng, ĐỪNG đoán: `giay_tu_ep` thiếu nghĩa là máy chủ cũ hơn
              *    trang đang mở ⇒ tôi bỏ hẳn vế «sau N giây» thay vì điền một số tôi tự nghĩ ra.
              */
-            ? 'Đã gửi lệnh dừng, nhưng tôi **chưa** thấy ghế thoát. Tín hiệu đã đi — con có nhận ' +
-              'hay không thì tôi chỉ biết khi nó thực sự đóng.\n\n' +
-              'Bấm Dừng **lần nữa** để ép dừng ngay.' +
+            ? t('home.messages.stopSignalSent') +
               (typeof j?.giay_tu_ep === 'number'
-                ? ' Nếu anh không bấm, sau ' + j.giay_tu_ep + ' giây tôi tự ép.'
+                ? t('home.messages.stopAutoForceSuffix', { seconds: j.giay_tu_ep })
                 : '') +
-              (pid === null ? '' : '\n\nDừng tay: `kill -9 ' + pid + '`')
-            : 'Đã **ép** dừng. Ghế sẽ đóng ngay, nhưng tôi giữ nút Dừng cho tới khi thấy nó đóng ' +
-              'thật — tôi KHÔNG khai một điều tôi chưa nhìn thấy.' +
-              (pid === null ? '' : '\n\nKiểm tay: `ps -p ' + pid + '`'),
+              (pid === null ? '' : t('home.messages.stopManualKill9', { pid }))
+            : t('home.messages.stopForceSent') +
+              (pid === null ? '' : t('home.messages.stopCheckPs', { pid })),
         );
       } else if (viSao === 'dong_rac' || viSao === 'khong_co_viec') {
         /**
@@ -878,11 +875,7 @@ export default function UngDung({
          *    **KHÔNG biết thì KHÔNG suy — và KHÔNG biết thì cũng KHÔNG được hạ cờ.**
          *    Hạ cờ mà việc còn chạy là dựng lại đúng câu ⑥: sổ nói rảnh trong khi ghế đang tiêu tiền.
          */
-        hienCau(
-          'Máy chủ trả lời bằng một lý do tôi CHƯA biết xử: «' + JSON.stringify(chuaXu) + '». ' +
-          'Tôi KHÔNG dám đoán nó nghĩa gì, nên tôi nói ra thay vì im. ' +
-          'Nhiều khả năng trang đang mở là bản CŨ hơn máy chủ — thử tải lại trang.',
-        );
+        hienCau(t('home.messages.stopUnknownReason', { reason: JSON.stringify(chuaXu) }));
       }
     } catch {
       /* mạng chập ⇒ bấm lại; KHÔNG doạ người dùng bằng lỗi đỏ. Cờ do chốt dưới lo. */
@@ -893,7 +886,7 @@ export default function UngDung({
        */
       if (!xacNhanDaDung) capNhat(i, { dangChay: true });
     }
-  }, [huyLuong, capNhat]);
+  }, [huyLuong, capNhat, t]);
 
   /* ---------- Khôi phục nguyên trạng: bố cục + tiêu điểm + phiên TỪNG Ô ---------- */
   useEffect(() => {
@@ -1161,8 +1154,8 @@ export default function UngDung({
       const trong = dsO.findIndex((o, k) => k > 0 && k < boCuc && !o.ns);
       if (trong === -1) {
         datNhacO1(boCuc === 1
-          ? 'Ô 1 là TỔNG GIÁM ĐỐC — bấm nút 2 ô / 4 ô để có chỗ cho agent khác'
-          : 'Ô 1 là TỔNG GIÁM ĐỐC — bấm vào ô 2/3/4 rồi chọn lại');
+          ? t('home.topbar.slot1LeadNoticeSingle')
+          : t('home.topbar.slot1LeadNoticeMulti'));
         return;
       }
       nhacNeuHong(trong + 1, await datNguoi(trong, n));
@@ -1267,8 +1260,7 @@ export default function UngDung({
        tải lại trang là mất. */
     if (!(await ghiO(i, ns.ten, p.ma))) {
       capNhat(i, {
-        loiDan: '🔴 KHÔNG ghi được vào sổ ô — tải lại trang là mất phiên vừa chọn. '
-          + 'Kiểm mạng rồi bấm lại.',
+        loiDan: '🔴 ' + t('home.messages.slotSaveFailedChooseSession'),
       });
       return;
     }
@@ -1293,7 +1285,10 @@ export default function UngDung({
     const o = dsORef.current[i];
     const ma = o?.phienChoFork;
     if (!o?.ns || !ma) return;
-    capNhat(i, { dangFork: true, loiDan: `🧬 Đang fork… Claude phải mở phiên gốc để tách — có thể ${moTaHanFork()}.` });
+    capNhat(i, {
+      dangFork: true,
+      loiDan: '🧬 ' + t('home.messages.forkInProgressNotice', { duration: moTaHanFork() }),
+    });
     try {
       const r = await fetch('/api/fork', {
         method: 'POST',
@@ -1302,7 +1297,7 @@ export default function UngDung({
       });
       const j = await r.json();
       if (!r.ok || j.loi) {
-        capNhat(i, { dangFork: false, loiDan: `⛔ ${j.loi ?? 'Fork thất bại.'}` });
+        capNhat(i, { dangFork: false, loiDan: `⚠️ ${j.loi ?? t('home.messages.forkFailedDefault')}` });
         return;
       }
       const dc = j.doi_chung as { nguyen_ven: boolean; so_dong_truoc: number; byte_truoc: number };
@@ -1319,9 +1314,15 @@ export default function UngDung({
         conNua: kq2.conNua, viTri: kq2.viTri,
         catDongDai: kq2.catDai,
         loiDan:
-          `✅ Fork xong — mã MỚI ${String(j.ma_moi).slice(0, 8)}… · đọc được ${lichSu.length} lượt · chuỗi ${tang} tầng. ` +
-          `Bản gốc ${dc?.nguyen_ven ? 'NGUYÊN VẸN' : '⚠️ ĐÃ ĐỔI — báo ngay'} ` +
-          `(${dc?.so_dong_truoc} dòng · ${dc?.byte_truoc} byte).`,
+          '✅ ' +
+          t('home.messages.forkSuccessNotice', {
+            id: String(j.ma_moi).slice(0, 8),
+            turns: lichSu.length,
+            depth: tang,
+            integrity: dc?.nguyen_ven ? t('home.messages.forkIntegrityIntact') : '⚠️ ' + t('home.messages.forkIntegrityModified'),
+            lines: dc?.so_dong_truoc ?? 0,
+            bytes: dc?.byte_truoc ?? 0,
+          }),
       });
       void napDsPhien(i, o.ns.ten);
       /**
@@ -1338,7 +1339,7 @@ export default function UngDung({
         void guiRef.current(i, cauDau, undefined, true);
       }
     } catch {
-      capNhat(i, { dangFork: false, loiDan: '⛔ Không gọi được máy chủ để fork.' });
+      capNhat(i, { dangFork: false, loiDan: '⚠️ ' + t('home.messages.forkServerUnreachable') });
     }
   }
 
@@ -1347,10 +1348,10 @@ export default function UngDung({
     if (!o?.ns) return;
     const ma = (o.chuoiDan.match(MAU_UUID) ?? [])[0];
     if (!ma) {
-      capNhat(i, { loiDan: '⛔ Không thấy mã phiên trong chuỗi vừa dán. Cần một mã dạng 8-4-4-4-12 chữ số/chữ cái.' });
+      capNhat(i, { loiDan: '⚠️ ' + t('home.messages.resumeMissingUuid') });
       return;
     }
-    capNhat(i, { loiDan: 'Đang kiểm bản ghi phiên…' });
+    capNhat(i, { loiDan: t('home.messages.resumeChecking') });
     try {
       /**
        * 🐛 Hermes vòng 4: đường resume ⛔ kiểm `r.ok` ⇒ lỗi MÁY CHỦ bị biến thành
@@ -1367,22 +1368,7 @@ export default function UngDung({
         //    Chìa ra nút Fork ngay tại đây (Owner chốt round-122 (bos-funnel) · 15/08).
         capNhat(i, {
           phienChoFork: ma,
-          loiDan:
-            /**
-             * 🎨 SỬA 01/09/2026 (@app-pm khoanh, @exe làm) — ca thật: Owner bấm fork ở
-             *    «Quản Lý Trường», thấy dòng này mở đầu bằng ký hiệu CẤM nên đọc thành
-             *    «app hỏng», chụp màn hình gửi đi. Luồng chạy ĐÚNG; chỉ CHỮ nói sai việc.
-             * 📌 Ba vế phải có, thiếu vế nào là Owner lại quyết sai:
-             *    ① KHÔNG tô cảnh báo cho một trạng thái BÌNH THƯỜNG
-             *    ② nói rõ Fork ĐÁNH ĐỔI GÌ — nó KHÔNG lùi lại được
-             *    ③ chìa LỐI ĐÚNG trước, Fork sau
-             */
-            `Mã ${ma.slice(0, 8)}… đọc được. Bản ghi của phiên đó nằm ở kho của THƯ MỤC KHÁC, ` +
-            'nên ghế này chưa đọc thẳng được — đây là trạng thái bình thường, KHÔNG phải app hỏng.\n' +
-            '· Nối NGUYÊN VẸN (nên làm trước): khai `thu_muc` cho ghế trong `du-lieu/nhan-su.json` ' +
-            'rồi dựng lại — giữ đủ nội dung, KHÔNG mất gì.\n' +
-            '· Fork là đường CUỐI: bản mới chỉ mang theo khoảng 6,5% nội dung ' +
-            '(đo 20/08: 19.305 → 1.257 dòng), và phần mất KHÔNG lấy lại được.',
+          loiDan: t('home.messages.resumeOtherDirectoryNotice', { id: ma.slice(0, 8) }),
         });
         return;
       }
@@ -1391,7 +1377,7 @@ export default function UngDung({
         phienHienTai: ma, tin: lichSu, noiTiep: true, chiPhi: null, token: null,
         conNua: kq.conNua, viTri: kq.viTri,
         catDongDai: kq.catDai,
-        loiDan: `✅ Đã nối phiên ${ma.slice(0, 8)}… — đọc được ${lichSu.length} lượt.`, chuoiDan: '',
+        loiDan: '✅ ' + t('home.messages.resumeAttachedSuccess', { id: ma.slice(0, 8), turns: lichSu.length }), chuoiDan: '',
       });
       /* 🔴 VÒNG 3 ② — ĐÂY LÀ LỖ CHÍNH bản vá vòng 2 của tôi mở ra, và nó tệ hơn «nuốt lỗi»:
          · TRƯỚC vòng 2: `ghiO` là `await fetch(...)` trần ⇒ rớt mạng thì NÉM ⇒ rơi vào `catch`
@@ -1404,13 +1390,12 @@ export default function UngDung({
             nhất khi rà, vì nó khôngcó dòng nào để rà. */
       if (!(await ghiO(i, o.ns.ten, ma))) {
         capNhat(i, {
-          loiDan: `⚠️ Đã đọc được ${lichSu.length} lượt, nhưng KHÔNG ghi được vào sổ ô — `
-            + 'tải lại trang là mất. Kiểm mạng rồi bấm «Nối phiên» lại.',
+          loiDan: '⚠️ ' + t('home.messages.resumeAttachedSaveWarning', { turns: lichSu.length }),
         });
       }
       void napDsPhien(i, o.ns.ten);
     } catch {
-      capNhat(i, { loiDan: '⛔ Không gọi được máy chủ để kiểm phiên.' });
+      capNhat(i, { loiDan: '⚠️ ' + t('home.messages.resumeServerUnreachable') });
     }
   }
 
@@ -1436,7 +1421,7 @@ export default function UngDung({
     // ý định THẬT: Owner bấm mở PHIÊN MỚI (xoá liên kết phiên cũ trong sổ)
     if (!(await ghiO(i, ns.ten, null, true))) {
       capNhat(i, {
-        loiDan: '🔴 KHÔNG ghi được vào sổ ô — phiên mới chưa được ghi nhận. Kiểm mạng rồi bấm lại.',
+        loiDan: '🔴 ' + t('home.messages.newSessionSaveFailed'),
       });
     }
   }
@@ -1615,8 +1600,8 @@ export default function UngDung({
       });
 
       if (!r.ok || !r.body) {
-        const j = await r.json().catch(() => ({ loi: `Máy chủ trả mã ${r.status}.` }));
-        themLoi(j.loi ?? 'Lỗi không rõ.');
+        const j = await r.json().catch(() => ({ loi: t('home.messages.serverReturnedStatus', { status: r.status }) }));
+        themLoi(j.loi ?? t('home.messages.unknownError'));
         return;
       }
 
@@ -1655,7 +1640,7 @@ export default function UngDung({
     } catch (e) {
       // Ô bị đóng / đổi agent giữa chừng thì luồng bị CẮT CÓ CHỦ Ý — ⛔ đừng báo như lỗi.
       if (!(e instanceof DOMException && e.name === 'AbortError')) {
-        themLoi(e instanceof Error ? e.message : 'Mất kết nối.');
+        themLoi(e instanceof Error ? e.message : t('home.messages.connectionLost'));
       }
     } finally {
       if (huyRefs.current[i] === huy) huyRefs.current[i] = null;
@@ -2194,8 +2179,8 @@ export default function UngDung({
           <button
             className="nut-tron nut-ve-chat" type="button"
             onClick={() => datAnKhu(false)}
-            title="Return to conversation space"
-            aria-label="Return to conversation space"
+            title={t('home.banners.returnToChat')}
+            aria-label={t('home.banners.returnToChat')}
           >
             <ChatCircleDots size={17} weight={DAM_ICON} aria-hidden="true" />
           </button>
@@ -2210,15 +2195,15 @@ export default function UngDung({
         <div className={`bang-ma-cu${maCu ? '' : ' bang-cua-hong'}`} ref={banRef} role="status">
           {maCu ? (
             <span>
-              A new build is available on the server. This page is running an <b>OUTDATED</b> version.
+              {t('home.banners.outdatedPrefix')} <b>{t('home.banners.outdatedHighlight')}</b> {t('home.banners.outdatedSuffix')}
             </span>
           ) : tinhLaiHong ? (
             <span>
-              Tab resumed but <b>failed to retrieve previous history</b> (tried 3 times). New messages may not be displayed.
+              {t('home.banners.resumeFailedPrefix')} <b>{t('home.banners.resumeFailedHighlight')}</b> {t('home.banners.resumeFailedSuffix')}
             </span>
           ) : (
             <span>
-              Server connection <b>unresponsive after 3 attempts</b>. Messages dispatched to seats may be delayed.
+              {t('home.banners.serverUnresponsivePrefix')} <b>{t('home.banners.serverUnresponsiveHighlight')}</b>{t('home.banners.serverUnresponsiveSuffix')}
             </span>
           )}
           <button
@@ -2226,7 +2211,7 @@ export default function UngDung({
             className="nut-tai-lai"
             onClick={() => window.location.reload()}
           >
-            Reload
+            {t('common.reload')}
           </button>
         </div>
       )}
@@ -2234,11 +2219,11 @@ export default function UngDung({
       <div className={`khung bc-${boCuc}${(anCot === null ? boCuc === 6 : anCot) ? ' an-cot' : ' hien-cot'}`}>
         {/* ===== Cột 1 — cây phòng ban ===== */}
         <aside className="cot cot-1">
-          <div className="de-cot">Organization Structure</div>
+          <div className="de-cot">{t('home.sidebar.orgStructure')}</div>
           <div className="cay">
             <div className="goc nut-vao-pb de-muc">
               <span className="ic">🏢</span>
-              <span className="nhan-ten">Enter department</span>
+              <span className="nhan-ten">{t('home.sidebar.enterDepartment')}</span>
             </div>
 
             <div className="menu-vao-pb" role="menu">
@@ -2249,11 +2234,11 @@ export default function UngDung({
                 disabled={!boGheCu}
                 title={boGheCu
                   ? boGheCu.map((m) => m.ten).filter(Boolean).join(' · ')
-                  : 'No saved layout — select a department to save current layout'}
+                  : t('home.sidebar.noSavedLayoutHint')}
                 onClick={() => { void napBoGhe(boGheCu ?? [], false); }}
               >
                 <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
-                {boGheCu ? 'Current Layout (Saved)' : 'No saved layout'}
+                {boGheCu ? t('home.sidebar.currentLayoutSaved') : t('home.sidebar.noSavedLayout')}
               </button>
 
               {SO_BO_GHE.map((bo) => {
@@ -2266,7 +2251,7 @@ export default function UngDung({
                     onClick={() => { void napBoGhe(bo.ghe, true); }}
                   >
                     <Icon size={15} weight={DAM_ICON} aria-hidden="true" />
-                    {bo.ten} — {bo.ghe.length} slots
+                    {bo.ma === 'marketing' ? t('home.sidebar.presetMarketingDept') : bo.ten} — {bo.ghe.length} {t('home.sidebar.presetSlotsSuffix')}
                   </button>
                 );
               })}
@@ -2282,7 +2267,7 @@ export default function UngDung({
               onClick={() => { datPhongChon(null); datPhongMo(null); }}
             >
               <span className="ic">🏛</span>
-              <span className="nhan-ten">All Seats</span>
+              <span className="nhan-ten">{t('home.sidebar.allSeats')}</span>
               <span className="dem-nho">{nhanSu.length}</span>
             </div>
 
@@ -2324,15 +2309,15 @@ export default function UngDung({
               📏 Cột trái rộng 264px, mà `.so-lieu` xếp một hàng ngang rộng 290px ⇒ KHÔNG vừa.
                  ⇒ đổi sang LƯỚI 3 CỘT — xem `.cot-1 .so-lieu` trong mau09.css. */}
           <div className="so-lieu">
-            <div className="o-so"><b>{tong.nhan_su}</b><span>Seats</span></div>
+            <div className="o-so"><b>{tong.nhan_su}</b><span>{t('home.sidebar.statSeats')}</span></div>
             <div className="vach" />
-            <div className="o-so"><b>{tong.phong_ban}</b><span>Departments</span></div>
+            <div className="o-so"><b>{tong.phong_ban}</b><span>{t('home.sidebar.statDepartments')}</span></div>
             <div className="vach" />
-            <div className="o-so"><b>{tong.truong_phong}</b><span>Leads</span></div>
+            <div className="o-so"><b>{tong.truong_phong}</b><span>{t('home.sidebar.statLeads')}</span></div>
           </div>
 
           <div className="thanh-mau">
-            <div className="tieu">Seat Distribution</div>
+            <div className="tieu">{t('home.sidebar.seatDistribution')}</div>
             <div className="thanh-ty">
               {phongBan.map((p, i) => (
                 <i key={p.ma} style={{
@@ -2356,18 +2341,18 @@ export default function UngDung({
         {/* ===== Column 2 — Seat Directory & Cards ===== */}
         <section className="cot cot-2">
           <div className="de-cot">
-            <span>{phongChon ? phongBan.find((p) => p.ma === phongChon)?.ten : 'All Seats'}</span>
+            <span>{phongChon ? phongBan.find((p) => p.ma === phongChon)?.ten : t('home.sidebar.allSeats')}</span>
             <span className="dem">{dsHien.length}</span>
           </div>
           <div className="hop-tim">
             <input
               type="search" autoComplete="off" value={tuKhoa}
               onChange={(e) => datTuKhoa(e.target.value)}
-              placeholder="Search by role or seat name…"
+              placeholder={t('home.sidebar.searchPlaceholder')}
             />
           </div>
           <div className="ds">
-            {dsHien.length === 0 && <div className="rong">No matching seats found.</div>}
+            {dsHien.length === 0 && <div className="rong">{t('home.sidebar.noMatchingSeats')}</div>}
             {dsHien.map((n) => (
               <div
                 key={n.ten}
@@ -2438,15 +2423,15 @@ export default function UngDung({
                 datAnKhu(!anKhu);       // mobile  THẤY: vào/rời danh bạ
               }}
               title={(anCot === null ? boCuc === 6 : anCot)
-                ? 'Show sidebar columns'
-                : 'Hide sidebar columns'}
-              aria-label="Toggle sidebar columns"
+                ? t('home.topbar.showSidebar')
+                : t('home.topbar.hideSidebar')}
+              aria-label={t('home.topbar.toggleSidebarAria')}
               aria-pressed={(anCot === null ? boCuc === 6 : anCot)}
             >
               <List size={17} weight={DAM_ICON} aria-hidden="true" />
             </button>
-            <span className="nhan-khu ten-app" title="AIBOSS Office">AIBOSS Office</span>
-            <span className="nhan-that">● Connected to Claude Code on this machine</span>
+            <span className="nhan-khu ten-app" title={t('common.appName')}>{t('common.appName')}</span>
+            <span className="nhan-that">{t('home.topbar.connectedStatus')}</span>
             {nhacO1 && (
               <span className="nhan-mau" title={nhacO1}>
                 <Crown size={12} weight={DAM_ICON} aria-hidden="true" className="vuong-mien" /> {nhacO1}
@@ -2456,7 +2441,7 @@ export default function UngDung({
               <button
                 className={`nut-bc${boCuc === 1 ? ' chon' : ''}`} type="button" data-bc="1"
                 onClick={() => doiBoCuc(1)}
-                title="1 slot — single full conversation" aria-label="1 slot layout"
+                title={t('home.topbar.layout1Title')} aria-label={t('home.topbar.layout1Aria')}
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2466,7 +2451,7 @@ export default function UngDung({
                 className={`nut-bc${boCuc === 2 && kieuHai === 'tren-duoi' ? ' chon' : ''}`}
                 type="button" data-bc="2"
                 onClick={() => doiBoCuc(2, 'tren-duoi')}
-                title="2 slots — split top / bottom" aria-label="2 slots top bottom"
+                title={t('home.topbar.layout2TopBottomTitle')} aria-label={t('home.topbar.layout2TopBottomAria')}
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2477,7 +2462,7 @@ export default function UngDung({
                 className={`nut-bc${boCuc === 2 && kieuHai === 'trai-phai' ? ' chon' : ''}`}
                 type="button" data-bc="2-tp"
                 onClick={() => doiBoCuc(2, 'trai-phai')}
-                title="2 slots — split left / right" aria-label="2 slots left right"
+                title={t('home.topbar.layout2LeftRightTitle')} aria-label={t('home.topbar.layout2LeftRightAria')}
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2487,7 +2472,7 @@ export default function UngDung({
               <button
                 className={`nut-bc${boCuc === 4 ? ' chon' : ''}`} type="button" data-bc="4"
                 onClick={() => doiBoCuc(4)}
-                title="4 slots — 2×2 grid" aria-label="4 slots grid"
+                title={t('home.topbar.layout4Title')} aria-label={t('home.topbar.layout4Aria')}
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2498,7 +2483,7 @@ export default function UngDung({
               <button
                 className={`nut-bc${boCuc === 6 ? ' chon' : ''}`} type="button" data-bc="6"
                 onClick={() => doiBoCuc(6)}
-                title="6 slots — 3 columns, 2 rows" aria-label="6 slots grid"
+                title={t('home.topbar.layout6Title')} aria-label={t('home.topbar.layout6Aria')}
               >
                 <svg viewBox="0 0 18 14" aria-hidden="true">
                   <rect x=".8" y=".8" width="16.4" height="12.4" rx="2" />
@@ -2507,14 +2492,14 @@ export default function UngDung({
                   <line x1=".8" y1="7" x2="17.2" y2="7" />
                 </svg>
               </button>
-              <div className="goi-y-phim">Keys <b>1</b>…<b>6</b> switch slot focus</div>
+              <div className="goi-y-phim">{t('home.topbar.keysHintPrefix')} <b>1</b>…<b>6</b> {t('home.topbar.keysHintSuffix')}</div>
             </div>
             <div className="boc-menu boc-cai-dat">
               <Link
                 href="/settings"
                 className="nut-tron nut-menu nut-cai-dat"
-                title="Office Settings"
-                aria-label="Open Office Settings"
+                title={t('home.topbar.officeSettingsTitle')}
+                aria-label={t('home.topbar.openOfficeSettingsAria')}
               >
                 <GearSix size={17} weight={DAM_ICON} aria-hidden="true" />
               </Link>
@@ -2534,25 +2519,25 @@ export default function UngDung({
                     <div className="de-o">
                       <button
                         className="nut-tron nut-lui" type="button"
-                        onClick={() => datAnKhu(true)} title="Back to team list"
-                        aria-label="Back to team list"
+                        onClick={() => datAnKhu(true)} title={t('home.slot.backToTeamList')}
+                        aria-label={t('home.slot.backToTeamList')}
                       >
                         <ArrowLeft size={17} weight={DAM_ICON} aria-hidden="true" />
                       </button>
                       <div className="anh-o trong-o">—</div>
                       <div className="tt-o">
-                        <b>Empty Slot</b>
-                        <div className="ma-ky-thuat">No seat selected</div>
+                        <b>{t('home.slot.emptySlotTitle')}</b>
+                        <div className="ma-ky-thuat">{t('home.slot.noSeatSelected')}</div>
                       </div>
-                      <span className="so-o" title={`Slot ${i + 1}`} aria-label={`Slot ${i + 1}`}>
+                      <span className="so-o" title={t('home.slot.slotLabel', { index: i + 1 })} aria-label={t('home.slot.slotLabel', { index: i + 1 })}>
                         {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
                           return <IconSo size={17} weight={DAM_ICON} aria-hidden="true" />; })()}
                       </span>
                     </div>
                     <div className="rong-o">
                       <div className="to">💬</div>
-                      <b>Slot {i + 1} is empty</b>
-                      <span>Click this slot and select a seat from the team list to begin.</span>
+                      <b>{t('home.slot.slotEmptyHeading', { index: i + 1 })}</b>
+                      <span>{t('home.slot.slotEmptyHint')}</span>
                     </div>
                   </>
                 ) : (
@@ -2562,21 +2547,21 @@ export default function UngDung({
                         {o.ns.viet_tat}
                         <span
                           className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
-                          title={o.matKetNoi ? 'Connection lost — stream interrupted, send to reconnect'
-                            : o.dangChay ? 'Running — generating response'
-                            : o.phienHienTai ? 'Ready — session active'
-                            : 'Idle — no active session'}
-                          aria-label={o.matKetNoi ? 'Connection lost' : o.dangChay ? 'Running' : o.phienHienTai ? 'Ready' : 'Idle'}
+                          title={o.matKetNoi ? t('home.slot.statusConnectionLostTitle')
+                            : o.dangChay ? t('home.slot.statusRunningTitle')
+                            : o.phienHienTai ? t('home.slot.statusReadyTitle')
+                            : t('home.slot.statusIdleTitle')}
+                          aria-label={o.matKetNoi ? t('home.slot.statusConnectionLostAria') : o.dangChay ? t('home.slot.statusRunningAria') : o.phienHienTai ? t('home.slot.statusReadyAria') : t('home.slot.statusIdleAria')}
                         />
                       </div>
                       <div className="tt-o">
                         <b title={o.ns.nhan}>
-                          {i === 0 && <Crown size={14} weight={DAM_ICON} aria-label="Lead Seat" className="vuong-mien" />}
+                          {i === 0 && <Crown size={14} weight={DAM_ICON} aria-label={t('home.slot.leadSeatAria')} className="vuong-mien" />}
                           {o.ns.nhan}
                         </b>
                         <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
                         {seatRunMap[o.ns.ten] && (
-                          <div className="last-run-status" title={`Run status: ${seatRunMap[o.ns.ten].status}`}>
+                          <div className="last-run-status" title={t('home.slot.runStatusTitle', { status: seatRunMap[o.ns.ten].status })}>
                             <span className={`run-dot dot-${seatRunMap[o.ns.ten].status}`} />
                             <span className="run-text">
                               {(() => {
@@ -2589,16 +2574,16 @@ export default function UngDung({
                                     const diffSec = Math.max(0.1, (new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000);
                                     dur = ` · ${diffSec.toFixed(1)}s`;
                                   }
-                                  return `Last run: finished ${timeStr}${dur} · exit ${r.exitCode ?? 0}`;
+                                  return t('home.slot.lastRunFinished', { time: timeStr, duration: dur, code: r.exitCode ?? 0 });
                                 }
-                                if (r.status === 'running') return `Last run: running ${timeStr}`;
-                                if (r.status === 'claimed') return `Last run: claimed ${timeStr}`;
-                                if (r.status === 'queued') return `Last run: queued ${timeStr}`;
-                                if (r.status === 'failed' || r.status === 'killed' || r.status === 'timeout') {
-                                  const code = r.exitCode !== null && r.exitCode !== undefined ? ` · exit ${r.exitCode}` : '';
-                                  return `Last run: ${r.status} ${timeStr}${code}`;
-                                }
-                                return `Last run: ${r.status} ${timeStr}`;
+                                if (r.status === 'running') return t('home.slot.lastRunRunning', { time: timeStr });
+                                if (r.status === 'claimed') return t('home.slot.lastRunClaimed', { time: timeStr });
+                                if (r.status === 'queued') return t('home.slot.lastRunQueued', { time: timeStr });
+                                const code = r.exitCode !== null && r.exitCode !== undefined ? ` · exit ${r.exitCode}` : '';
+                                if (r.status === 'failed') return t('home.slot.lastRunFailed', { time: timeStr, code });
+                                if (r.status === 'killed') return t('home.slot.lastRunKilled', { time: timeStr, code });
+                                if (r.status === 'timeout') return t('home.slot.lastRunTimeout', { time: timeStr, code });
+                                return `${r.status} ${timeStr}`;
                               })()}
                             </span>
                           </div>
@@ -2607,17 +2592,17 @@ export default function UngDung({
                       {seatActiveMap[o.ns.ten]?.is_terminal_held && (
                         <span
                           className="nhan-seat-terminal"
-                          title={`Seat is open in terminal (PID ${seatActiveMap[o.ns.ten]?.pid ?? ''})`}
+                          title={t('home.slot.seatOpenInTerminalTitle', { pid: seatActiveMap[o.ns.ten]?.pid ?? '' })}
                         >
-                          Seat open in terminal
+                          {t('home.slot.seatOpenInTerminalBadge')}
                         </span>
                       )}
                       <button
                         className={`nut-resume-terminal${copiedSeat === o.ns.ten ? ' da-chep' : ''}`}
                         type="button"
                         onClick={() => void chaoResumeTerminal(o.ns!.ten, o.ns!.phong, o.phienHienTai)}
-                        title="Copy command to resume this session in terminal"
-                        aria-label="Resume in terminal"
+                        title={t('home.slot.copyResumeTitle')}
+                        aria-label={t('home.slot.resumeInTerminal')}
                       >
                         <svg
                           width="12"
@@ -2633,13 +2618,13 @@ export default function UngDung({
                           <polyline points="4 17 10 11 4 5" />
                           <line x1="12" y1="19" x2="20" y2="19" />
                         </svg>
-                        <span>{copiedSeat === o.ns.ten ? 'Copied!' : 'Resume in terminal'}</span>
+                        <span>{copiedSeat === o.ns.ten ? t('common.copied') : t('home.slot.resumeInTerminal')}</span>
                       </button>
                       <button
                         className={`so-o nut-so${o.moHoSo ? ' bat' : ''}`} type="button"
                         onClick={() => capNhat(i, { moHoSo: !o.moHoSo })}
-                        title={`Slot ${i + 1} — view seat profile · session · tokens · cost`}
-                        aria-label={`Slot ${i + 1} — seat profile`}
+                        title={t('home.slot.slotProfileTitle', { index: i + 1 })}
+                        aria-label={t('home.slot.slotProfileAria', { index: i + 1 })}
                         aria-pressed={o.moHoSo}
                       >
                         {(() => { const IconSo = ICON_SO_O[i] ?? NumberOne;
@@ -2650,8 +2635,8 @@ export default function UngDung({
                         <button
                           className="nut-tron nut-thu" type="button"
                           onClick={() => capNhat(i, { thuKhung: !o.thuKhung })}
-                          title={o.thuKhung ? 'Expand chat pane' : 'Collapse chat pane'}
-                          aria-label={o.thuKhung ? 'Expand chat pane' : 'Collapse chat pane'}
+                          title={o.thuKhung ? t('home.slot.expandChatPane') : t('home.slot.collapseChatPane')}
+                          aria-label={o.thuKhung ? t('home.slot.expandChatPane') : t('home.slot.collapseChatPane')}
                           aria-expanded={!o.thuKhung}
                         >
                           {o.thuKhung
@@ -2664,8 +2649,8 @@ export default function UngDung({
                           className="nut-tron nut-lich-su" type="button"
                           disabled={o.dangNap || o.dangChay}
                           onClick={() => keoThem(i, o.ns!.ten, o.phienHienTai!, o.viTri)}
-                          title={o.dangNap ? 'Loading older history…' : 'Load older messages'}
-                          aria-label="Load older messages"
+                          title={o.dangNap ? t('home.slot.loadingOlderHistory') : t('home.slot.loadOlderMessages')}
+                          aria-label={t('home.slot.loadOlderMessages')}
                         >
                           <ClockCounterClockwise size={18} weight={DAM_ICON} aria-hidden="true" />
                         </button>
@@ -2673,8 +2658,8 @@ export default function UngDung({
                       <button
                         className={`nut-tron nut-toan${toanMan === i ? ' bat' : ''}`} type="button"
                         onClick={() => { ghiNhoDay(); datToanMan(toanMan === i ? null : i); }}
-                        title={toanMan === i ? 'Return to grid' : 'View slot fullscreen'}
-                        aria-label="View slot fullscreen"
+                        title={toanMan === i ? t('home.slot.returnToGrid') : t('home.slot.viewSlotFullscreen')}
+                        aria-label={t('home.slot.viewSlotFullscreen')}
                         aria-pressed={toanMan === i}
                       >
                         {toanMan === i
@@ -2685,8 +2670,8 @@ export default function UngDung({
                         <button
                           className={`nut-tron nut-menu${o.moMenu ? ' bat' : ''}`} type="button"
                           onClick={() => capNhat(i, { moMenu: !o.moMenu })}
-                          title="Slot actions"
-                          aria-label="Slot menu"
+                          title={t('home.slot.slotActionsTitle')}
+                          aria-label={t('home.slot.slotMenuAria')}
                           aria-expanded={o.moMenu}
                         >
                           <DotsThreeVertical size={18} weight={DAM_ICON} aria-hidden="true" />
@@ -2694,7 +2679,7 @@ export default function UngDung({
                         {o.moMenu && (
                           <>
                             <button
-                              className="man-che" type="button" aria-label="Close menu"
+                              className="man-che" type="button" aria-label={t('home.slot.closeMenuAria')}
                               onClick={() => capNhat(i, { moMenu: false })}
                             />
                             <div className="menu-xo" role="menu">
@@ -2703,7 +2688,7 @@ export default function UngDung({
                                 onClick={() => capNhat(i, { moHoSo: !o.moHoSo, moMenu: false })}
                               >
                                 <Info size={15} weight={DAM_ICON} aria-hidden="true" />
-                                {o.moHoSo ? 'Close Seat Profile' : 'Seat Profile · Session · Tokens'}
+                                {o.moHoSo ? t('home.slot.closeSeatProfile') : t('home.slot.openSeatProfile')}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
@@ -2711,8 +2696,8 @@ export default function UngDung({
                               >
                                 <ClockCounterClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
                                 {o.dsPhien.length === 0
-                                  ? 'No sessions yet'
-                                  : `Session History (${o.dsPhien.length})`}
+                                  ? t('home.slot.noSessionsYet')
+                                  : t('home.slot.sessionHistoryCount', { count: o.dsPhien.length })}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
@@ -2721,31 +2706,31 @@ export default function UngDung({
                               >
                                 <ArrowsClockwise size={15} weight={DAM_ICON} aria-hidden="true" />
                                 {o.dangChay
-                                  ? 'Running — reload later'
+                                  ? t('home.slot.runningReloadLater')
                                   : !o.phienHienTai
-                                    ? 'No session to reload'
-                                    : 'Reload Chat'}
+                                    ? t('home.slot.noSessionToReload')
+                                    : t('home.slot.reloadChat')}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => capNhat(i, { hienMau: !o.hienMau, moMenu: false })}
                               >
                                 <TextAlignLeft size={15} weight={DAM_ICON} aria-hidden="true" />
-                                {o.hienMau ? 'Hide Chunk Boundaries' : 'Show Chunk Boundaries'}
+                                {o.hienMau ? t('home.slot.hideChunkBoundaries') : t('home.slot.showChunkBoundaries')}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => { capNhat(i, { moMenu: false }); void phienMoi(i); }}
                               >
                                 <Plus size={15} weight={DAM_ICON} aria-hidden="true" />
-                                New Session
+                                {t('home.slot.newSessionMenu')}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => capNhat(i, { moDan: !o.moDan, loiDan: '', moMenu: false })}
                               >
                                 <ClipboardText size={15} weight={DAM_ICON} aria-hidden="true" />
-                                Paste Resume Command
+                                {t('home.slot.pasteResumeCommand')}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
@@ -2768,14 +2753,14 @@ export default function UngDung({
                                   <polyline points="4 17 10 11 4 5" />
                                   <line x1="12" y1="19" x2="20" y2="19" />
                                 </svg>
-                                Resume in Terminal
+                                {t('home.slot.resumeInTerminalMenu')}
                               </button>
                               <button
                                 className="muc-menu" type="button" role="menuitem"
                                 onClick={() => { capNhat(i, { soan: '', moMenu: false }); }}
                               >
                                 <X size={15} weight={DAM_ICON} aria-hidden="true" />
-                                Clear Input Text
+                                {t('home.slot.clearInputText')}
                               </button>
                               {i > 0 && (
                                 <>
@@ -2785,7 +2770,7 @@ export default function UngDung({
                                     onClick={() => { void dongOTuMenu(i); }}
                                   >
                                     <X size={15} weight={DAM_ICON} aria-hidden="true" />
-                                    Close Slot — Clear
+                                    {t('home.slot.closeSlotClear')}
                                   </button>
                                 </>
                               )}
@@ -2799,14 +2784,14 @@ export default function UngDung({
                       <div className="nhac-phien">
                         {o.phienHienTai ? (
                           <>
-                            Active session <code>{o.phienHienTai.slice(0, 8)}…</code>.{' '}
+                            {t('home.slot.activeSessionPrefix')} <code>{o.phienHienTai.slice(0, 8)}…</code>.{' '}
                             <button type="button" className="lien-ket" onClick={() => phienMoi(i)}>
-                              Start new session
+                              {t('home.slot.startNewSessionLink')}
                             </button>{' '}
-                            to reset conversational context.
+                            {t('home.slot.resetContextSuffix')}
                           </>
                         ) : (
-                          <>New session — session ID assigned upon first message.</>
+                          <>{t('home.slot.newSessionNotice')}</>
                         )}
                       </div>
                     )}
@@ -2814,8 +2799,8 @@ export default function UngDung({
                     {o.moDan && (
                       <div className="hop-dan">
                         <div className="dan-nhan">
-                          Paste command copied from session notebook (<code>resume.erocathanh.com</code>) — supports
-                          <code>claude --resume &lt;id&gt;</code>, commands with <code>cd &quot;…&quot;</code>, or raw UUID.
+                          {t('home.slot.pasteInstructionPrefix')}<code>resume.erocathanh.com</code>{t('home.slot.pasteInstructionMid1')}
+                          <code>claude --resume &lt;id&gt;</code>{t('home.slot.pasteInstructionMid2')} <code>cd &quot;…&quot;</code>{t('home.slot.pasteInstructionSuffix')}
                         </div>
                         <div className="dan-hang">
                           <input
@@ -2827,7 +2812,7 @@ export default function UngDung({
                             spellCheck={false}
                           />
                           <button className="nut-chu manh" type="button" onClick={() => danLenhResume(i)}>
-                            Attach Session
+                            {t('home.slot.attachSession')}
                           </button>
                         </div>
                         {o.loiDan && <div className="dan-ket-qua">{o.loiDan}</div>}
@@ -2835,10 +2820,10 @@ export default function UngDung({
                         {o.phienChoFork && (
                           <div className="khoi-fork">
                             <button className="nut-chu manh" type="button" disabled={o.dangFork} onClick={() => forkVeGhe(i)}>
-                              {o.dangFork ? `🧬 Forking… (${moTaHanFork()})` : '🧬 Fork to this seat'}
+                              {o.dangFork ? `🧬 ${t('home.slot.forkingStatus', { duration: moTaHanFork() })}` : `🧬 ${t('home.slot.forkToThisSeat')}`}
                             </button>
                             <span className="ghi-chu-fork">
-                              Create a new session branch for this seat. The original session remains untouched.
+                              {t('home.slot.forkDescription')}
                             </span>
                             {/**
                               * 🗣 CÂU DẶN ĐẦU — tuỳ chọn. Gửi NGAY sau khi fork xong.
@@ -2849,7 +2834,7 @@ export default function UngDung({
                               className="o-dan o-cau-dau"
                               value={o.cauDauFork}
                               onChange={(e) => capNhat(i, { cauDauFork: e.target.value })}
-                              placeholder="Initial prompt after fork (optional)"
+                              placeholder={t('home.slot.forkInitialPromptPlaceholder')}
                               spellCheck={false}
                             />
                           </div>
@@ -2861,7 +2846,7 @@ export default function UngDung({
                       <div className="chon-nhanh">
                         <div className="ds-nhanh">
                           {o.dsPhien.length === 0 && (
-                            <div className="rong">No sessions found. Send your first message to start a session.</div>
+                            <div className="rong">{t('home.slot.noSessionsFound')}</div>
                           )}
                           {o.dsPhien.map((p) => (
                             <div
@@ -2869,16 +2854,16 @@ export default function UngDung({
                               className={`mon${p.dang_chay ? ' dang-chay' : ''}`}
                               onClick={() => chonPhien(i, p)}
                               title={p.dang_chay
-                                ? 'Running elsewhere — attaching may disrupt session state'
+                                ? t('home.slot.runningElsewhereTitle')
                                 : p.ma}
                             >
                               <b>
                                 {p.ma === o.phienHienTai ? '● ' : ''}
-                                {p.tin_cuoi || '(empty)'}
+                                {p.tin_cuoi || t('home.slot.emptySessionPreview')}
                               </b>
                               <i>
-                                {p.moc_doc} · {p.so_luot} turns
-                                {p.dang_chay ? ' · ⛔ running elsewhere' : ''}
+                                {t('home.slot.sessionTurns', { time: p.moc_doc, count: p.so_luot })}
+                                {p.dang_chay ? t('home.slot.runningElsewhereSuffix') : ''}
                               </i>
                             </div>
                           ))}
@@ -2891,12 +2876,12 @@ export default function UngDung({
                         className="bang-tin"
                         ref={(el) => { bangTinRefs.current[i] = el; }}
                       >
-                        {o.dangNap && <div className="moc-ngay">Loading session history…</div>}
+                        {o.dangNap && <div className="moc-ngay">{t('home.slot.loadingSessionHistory')}</div>}
                         {!o.dangNap && o.tin.length === 0 && (
                           <div className="rong-o">
                             <div className="to">✨</div>
-                            <b>{o.phienHienTai ? 'Empty Session' : 'New Session'}</b>
-                            <span>Type your message below to get started.</span>
+                            <b>{o.phienHienTai ? t('home.slot.emptySessionHeading') : t('home.slot.newSessionHeading')}</b>
+                            <span>{t('home.slot.typeMessageHint')}</span>
                           </div>
                         )}
                         {/**
@@ -2913,33 +2898,33 @@ export default function UngDung({
                           */}
                         {chuaBietAiChay && (
                           <div className="moc-ngay canh-hut">
-                            ⚠️ Unable to query running agent status from server — Stop button may not appear even if the seat is running. Reload the page to retry.
+                            ⚠️ {t('home.slot.unknownRunningStatusWarning')}
                           </div>
                         )}
                         {o.catDongDai && (
                           <div className="moc-ngay canh-hut">
-                            ⚠️ Message truncated due to excessive length. Original content remains in session log.
+                            ⚠️ {t('home.slot.truncatedMessageWarning')}
                           </div>
                         )}
-                        {o.tin.map((t) => (
-                          <div key={t.ma} className={`dong-tin ${t.ai}`}>
-                            <div className="anh-nho">{t.ai === 'toi' ? 'ET' : o.ns!.viet_tat}</div>
+                        {o.tin.map((tin) => (
+                          <div key={tin.ma} className={`dong-tin ${tin.ai}`}>
+                            <div className="anh-nho">{tin.ai === 'toi' ? 'ET' : o.ns!.viet_tat}</div>
                             <div>
                               {/* 🔔 Câu này máy tự gửi, ⛔ KHÔNG phải Owner gõ — phải nói rõ ai gọi. */}
-                              {t.tu_ai && (
-                                <span className="nhan-danh-thuc" title={`Seat ${t.tu_ai} woke this seat`}>
-                                  Woken by {nhanCua(t.tu_ai)}
+                              {tin.tu_ai && (
+                                <span className="nhan-danh-thuc" title={t('home.slot.wokenByTitle', { seat: tin.tu_ai })}>
+                                  {t('home.slot.wokenByBadge', { seat: nhanCua(tin.tu_ai) })}
                                 </span>
                               )}
                               {/* 💬 Bong bóng MEMO HOÁ — markdown dựng NGAY CẢ khi đang chảy.
                                   Tin cũ ⛔ không đổi chữ ⇒ ⛔ không dựng lại ⇒ hết nóng máy.
                                   (Học từ `openclaw` trên máy Owner: nó cũng luôn dựng markdown.) */}
                               <BongBong
-                                chu={t.chu}
-                                ranh={t.ranh}
-                                hienMau={o.hienMau && t.ai === 'ho' && !t.loi}
-                                loi={t.loi}
-                                dangChay={o.dangChay && Boolean(t.dang)}
+                                chu={tin.chu}
+                                ranh={tin.ranh}
+                                hienMau={o.hienMau && tin.ai === 'ho' && !tin.loi}
+                                loi={tin.loi}
+                                dangChay={o.dangChay && Boolean(tin.dang)}
                               />
                               {(() => {
                                 /**
@@ -2949,8 +2934,8 @@ export default function UngDung({
                                  * 🔴 Thiếu `luc` ⇒ `dayDu` rỗng ⇒ lùi về `t.gio`, và ⛔ có ngày nào
                                  *    được vẽ ra. Đó là ý đồ: thà thiếu còn hơn BỊA.
                                  */
-                                const dayDu = mocDayDu(t.luc);
-                                const hien = t.tuLichSu && dayDu ? dayDu : t.gio;
+                                const dayDu = mocDayDu(tin.luc);
+                                const hien = tin.tuLichSu && dayDu ? dayDu : tin.gio;
                                 return (
                                   <span className="gio" title={dayDu || undefined}>{hien}</span>
                                 );
@@ -2972,8 +2957,8 @@ export default function UngDung({
                           <span className="so-cho">⏭ {o.hangCho.length}</span>
                           <span className="chu-cho" title={o.hangCho.join('\n———\n')}>
                             {o.hangCho.length === 1
-                              ? `Queued message: ${o.hangCho[0]}`
-                              : `Queued messages (will be sent in batch): ${o.hangCho.join(' / ')}`}
+                              ? t('home.slot.queuedSingle', { message: o.hangCho[0] })
+                              : t('home.slot.queuedMultiple', { messages: o.hangCho.join(' / ') })}
                           </span>
                           <button
                             className="lien-ket" type="button"
@@ -2997,9 +2982,9 @@ export default function UngDung({
                                 el?.focus();
                               }, 0);
                             }}
-                            title="Return queued messages to input box to edit"
+                            title={t('home.slot.editQueueTitle')}
                           >
-                            edit queue
+                            {t('home.slot.editQueueButton')}
                           </button>
                         </div>
                       )}
@@ -3045,10 +3030,10 @@ export default function UngDung({
                           rows={1}
                           /* Ô hẹp thì lời nhắc dài sẽ xuống dòng rồi bị cắt cụt — rút gọn. */
                           placeholder={o.dangChay
-                            ? 'Responding…'
+                            ? t('home.slot.placeholderResponding')
                             : (camUng || manHep)
-                              ? `Message ${o.ns ? o.ns.nhan : 'seat'}…`
-                              : `Message ${o.ns ? o.ns.nhan : 'seat'}… (Enter to send)`}
+                              ? t('home.slot.placeholderShort', { seat: o.ns ? o.ns.nhan : t('home.slot.placeholderDefaultSeat') })
+                              : t('home.slot.placeholderDesktop', { seat: o.ns ? o.ns.nhan : t('home.slot.placeholderDefaultSeat') })}
                         />
                         {/**
                           * 🛑 NÚT DỪNG — Owner 18/08: «nút stop hiện ngay sau khi bấm nút gửi
@@ -3066,8 +3051,8 @@ export default function UngDung({
                           <button
                             className="nut-dung nut-dung-soan" type="button"
                             onClick={() => dungViec(i)}
-                            title="Stop task running in this slot"
-                            aria-label="Stop running task"
+                            title={t('home.slot.stopTaskTitle')}
+                            aria-label={t('home.slot.stopTaskAria')}
                           >
                             <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
                           </button>
@@ -3076,16 +3061,16 @@ export default function UngDung({
                           className="nut-clear-soan" type="button"
                           onClick={() => capNhat(i, { soan: '' })}
                           disabled={!o.soan.trim()}
-                          title="Clear input text"
+                          title={t('home.slot.clearInputTitle')}
                         >
-                          Clear
+                          {t('common.clear')}
                         </button>
                         <button
                           className="nut-gui" type="button"
                           onClick={() => gui(i)} disabled={!o.soan.trim()}
-                          title={o.dangChay ? 'Seat is responding — this message will be queued' : 'Send'}
+                          title={o.dangChay ? t('home.slot.sendQueuedTitle') : t('home.slot.sendTitle')}
                         >
-                          Send
+                          {t('common.send')}
                         </button>
                       </div>
 
@@ -3099,37 +3084,37 @@ export default function UngDung({
                       {o.moHoSo && (
                         <div className="the-ho-so">
                           <div className="hs-hang">
-                            <span className="hs-nhan">Seat</span>
+                            <span className="hs-nhan">{t('home.slot.profileSeat')}</span>
                             <span className="hs-gia"><b>{o.ns.nhan}</b> · <code>{o.ns.ten}</code></span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Role</span>
+                            <span className="hs-nhan">{t('home.slot.profileRole')}</span>
                             <span className="hs-gia">{o.ns.vai} · {o.ns.ten_phong}</span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Department</span>
+                            <span className="hs-nhan">{t('home.slot.profileDepartment')}</span>
                             <span className="hs-gia">{o.ns.ten_phong}</span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Status</span>
+                            <span className="hs-nhan">{t('home.slot.profileStatus')}</span>
                             <span className="hs-gia"><span className={`seat-badge ${o.ns.status || 'idle'}`}>{o.ns.status || 'idle'}</span></span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Session</span>
+                            <span className="hs-nhan">{t('home.slot.profileSession')}</span>
                             <span className="hs-gia">
                               <span className={`cham-noi${o.phienHienTai ? '' : ' tat'}`} />
                               {o.phienHienTai
-                                ? <><code>{o.phienHienTai}</code>{o.noiTiep ? ' · continuous' : ''}</>
-                                : 'New session — no ID'}
+                                ? <><code>{o.phienHienTai}</code>{o.noiTiep ? t('home.slot.profileContinuous') : ''}</>
+                                : t('home.slot.profileNewSessionNoId')}
                             </span>
                           </div>
                           <div className="hs-hang">
-                            <span className="hs-nhan">Last Turn</span>
+                            <span className="hs-nhan">{t('home.slot.profileLastTurn')}</span>
                             <span className="hs-gia">
                               {o.token === null && o.chiPhi === null
-                                ? '— no measurements'
+                                ? t('home.slot.profileNoMeasurements')
                                 : <>
-                                    {o.token !== null && <b style={{ color: 'var(--vang-sang)' }}>{o.token.toLocaleString('en-US')} tokens</b>}
+                                    {o.token !== null && <b style={{ color: 'var(--vang-sang)' }}>{t('home.slot.profileTokens', { count: o.token.toLocaleString('en-US') })}</b>}
                                     {o.token !== null && o.chiPhi !== null && ' · '}
                                     {o.chiPhi !== null && `≈ $${o.chiPhi.toFixed(4)}`}
                                   </>}
@@ -3137,7 +3122,7 @@ export default function UngDung({
                           </div>
                           {o.ns.soul && (
                             <div className="hs-hang">
-                              <span className="hs-nhan">Soul</span>
+                              <span className="hs-nhan">{t('home.slot.profileSoul')}</span>
                               <span className="hs-gia"><code>{o.ns.soul}</code></span>
                             </div>
                           )}

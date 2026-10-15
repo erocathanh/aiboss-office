@@ -14,6 +14,8 @@
  *    vừa đụng sổ ô thật, vừa KHÔNG dựng lại được ca hỏng theo ý muốn.
  */
 
+import { t } from '../../i18n/core.ts';
+
 /** Ô bị BỎ QUA — có lý do chính đáng, KHÔNG phải hỏng. */
 export type LyDoBoQua = 'dang-chay' | 'thieu-ghe' | 'trung-o' | 'o-mot' | 'loi-thoi';
 /** Ô HỎNG THẬT — người bấm phải biết, vì thứ họ vừa yêu cầu đã KHÔNG xảy ra. */
@@ -49,17 +51,16 @@ export type KetQuaNapBoGhe = {
  *    viết câu cho nó thì **tsc chặn**. Người dùng khôngbao giờ gặp một ô hỏng mà im lặng chỉ vì
  *    người viết mã quên một nhánh.
  */
-export const CAU_LOI_O: Record<LyDoHong, string> = {
-  'ghi-so': '🔴 KHÔNG ghi được vào sổ ô — tải lại trang là mất lựa chọn này. '
-    + 'Kiểm mạng rồi chọn lại.',
-  'doc-lich-su': '⚠️ Đã đổi ghế cho ô này, nhưng KHÔNG đọc được lịch sử. '
-    + 'Bấm «Nạp lại» khi mạng ổn.',
-  'doc-ds-phien': '⚠️ Đã chuyển ô sang ghế này, nhưng KHÔNG đọc được danh sách phiên '
-    + '(mạng hoặc máy chủ). Lịch sử CHƯA nạp — bấm «Nạp lại» khi mạng ổn, hoặc chọn phiên bằng tay.',
-  'ghim-mat': '🔴 Ghế này khai MỘT PHIÊN GHIM, mà phiên đó KHÔNG có trong kho của ghế. '
-    + 'KHÔNG tự chọn phiên khác — chọn bừa là nối vào việc của ghế khác. '
-    + 'Kiểm `phien_ghim` trong du-lieu/nhan-su.json.',
+export const CAU_LOI_O_KEY: Record<LyDoHong, string> = {
+  'ghi-so': 'home.messages.slotErrSave',
+  'doc-lich-su': 'home.messages.slotErrLoadHistory',
+  'doc-ds-phien': 'home.messages.slotErrLoadSessions',
+  'ghim-mat': 'home.messages.slotErrPinnedMissing',
 };
+
+export function layCauLoiO(ly: LyDoHong): string {
+  return t(CAU_LOI_O_KEY[ly]);
+}
 
 /** sổ kết quả cho ĐÚNG MỘT ô — để chỗ gọi lẻ dùng chung `cauNhacNapBoGhe`, khôngtự chế câu khác */
 export function soMotO(o: number, r: KetQuaDatNguoi): KetQuaNapBoGhe {
@@ -90,27 +91,22 @@ export function ghiVaoSo(kq: KetQuaNapBoGhe, o: number, r: KetQuaDatNguoi): void
 /**
  * 🗣 Kể lại kết quả. Luật DUY NHẤT phải giữ bằng mọi giá:
  *    **có bất kỳ ô nào HỎNG thì câu nhắc KHÔNG được chứa chữ «xong».**
- *    Bộ đo `thu-nhac-bo-ghe.test.mts` canh đúng câu đó trên MỌI tổ hợp.
- */
-/**
- * 🗣 Kể lại kết quả. Luật DUY NHẤT phải giữ bằng mọi giá:
- *    **có bất kỳ ô nào HỎNG thì câu nhắc KHÔNG được chứa chữ «xong».**
  *
  * 🔑 Hai bảng dưới đây khai bằng `Record<...>`, cố ý: thêm một lý do vào `LyDoHong`/`LyDoBoQua`
  *    mà quên viết câu chữ cho nó thì **tsc chặn ngay**, khôngphải chờ người soi phát hiện ra
  *    một ô hỏng bị kể thành ô trống. Sổ bẫy: khai bằng KIỂU, đừng khai bằng chú thích.
  */
-const LOI_HONG: Record<LyDoHong, string> = {
-  'ghi-so': 'KHÔNG ghi được vào sổ ô',
-  'doc-lich-su': 'nạp được ghế nhưng KHÔNG đọc được lịch sử',
-  'doc-ds-phien': 'KHÔNG đọc được danh sách phiên (ghế đã đổi nhưng lịch sử chưa nạp)',
-  'ghim-mat': 'phiên ghim KHÔNG có trong kho của ghế — KHÔNG tự chọn phiên khác',
+const LOI_HONG_KEY: Record<LyDoHong, string> = {
+  'ghi-so': 'home.messages.batchErrSave',
+  'doc-lich-su': 'home.messages.batchErrLoadHistory',
+  'doc-ds-phien': 'home.messages.batchErrLoadSessions',
+  'ghim-mat': 'home.messages.batchErrPinnedMissing',
 };
-const LOI_BO_QUA: Record<Exclude<LyDoBoQua, 'loi-thoi'>, string> = {
-  'dang-chay': 'đang chạy — chưa đổi. Xong việc rồi bấm lại',
-  'thieu-ghe': 'không tìm thấy ghế trong danh bạ',
-  'trung-o': 'ghế này đã mở ở ô khác — đã chuyển tiêu điểm sang đó',
-  'o-mot': 'là ô ông trùm, không đổi được',
+const LOI_BO_QUA_KEY: Record<Exclude<LyDoBoQua, 'loi-thoi'>, string> = {
+  'dang-chay': 'home.messages.batchSkipRunning',
+  'thieu-ghe': 'home.messages.batchSkipMissingSeat',
+  'trung-o': 'home.messages.batchSkipDuplicate',
+  'o-mot': 'home.messages.batchSkipSlotOne',
 };
 
 export function cauNhacNapBoGhe(kq: KetQuaNapBoGhe): string {
@@ -119,18 +115,32 @@ export function cauNhacNapBoGhe(kq: KetQuaNapBoGhe): string {
     for (const x of ds_) m.set(x.vi_sao, [...(m.get(x.vi_sao) ?? []), x.o]);
     return m;
   };
-  const ve = [...gom(kq.hong)].map(([ly, os]) => `Ô ${ds(os)} ${LOI_HONG[ly]}`);
+  const ve = [...gom(kq.hong)].map(([ly, os]) =>
+    t('home.messages.batchSummarySlotPrefix', { slots: ds(os), reason: t(LOI_HONG_KEY[ly]) }),
+  );
   if (ve.length) {
     // 🔴 Có hỏng ⇒ mở đầu bằng cảnh báo, và tuyệt đối KHÔNG nói «xong».
-    const them = [...gom(kq.boQua)]
-      .map(([ly, os]) => `ô ${ds(os)} ${LOI_BO_QUA[ly as Exclude<LyDoBoQua, 'loi-thoi'>]}`);
-    return `🔴 ${ve.join('; ')}. Kiểm mạng rồi bấm lại.${them.length ? ` (Ngoài ra: ${them.join('; ')}.)` : ''}`;
+    const them = [...gom(kq.boQua)].map(([ly, os]) =>
+      t('home.messages.batchSummarySlotLowerPrefix', {
+        slots: ds(os),
+        reason: t(LOI_BO_QUA_KEY[ly as Exclude<LyDoBoQua, 'loi-thoi'>]),
+      }),
+    );
+    return (
+      t('home.messages.batchSummaryErrorPrefix', { errors: ve.join('; ') }) +
+      (them.length ? t('home.messages.batchSummaryErrorAlso', { skips: them.join('; ') }) : '')
+    );
   }
-  const nhe = [...gom(kq.boQua)]
-    .map(([ly, os]) => `Ô ${ds(os)} ${LOI_BO_QUA[ly as Exclude<LyDoBoQua, 'loi-thoi'>]}.`);
+  const nhe = [...gom(kq.boQua)].map(
+    ([ly, os]) =>
+      `${t('home.messages.batchSummarySlotPrefix', {
+        slots: ds(os),
+        reason: t(LOI_BO_QUA_KEY[ly as Exclude<LyDoBoQua, 'loi-thoi'>]),
+      })}.`,
+  );
   if (nhe.length) return nhe.join(' ');
-  if (kq.loiThoi.length) return `Đã nạp xong bộ ghế. (Ô ${ds(kq.loiThoi)} có lượt mới hơn đè lên.)`;
-  return 'Đã nạp xong bộ ghế.';
+  if (kq.loiThoi.length) return t('home.messages.batchSummaryStaleSuffix', { slots: ds(kq.loiThoi) });
+  return t('home.messages.batchSummarySuccess');
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -260,10 +270,24 @@ export type ThanGhiO = {
  */
 export async function ghiSoO(than: ThanGhiO, goiMang: typeof fetch = fetch): Promise<boolean> {
   try {
+    let payload: ThanGhiO = than;
+    if (!than.binding && goiMang === fetch) {
+      try {
+        const curRes = await goiMang('/api/o');
+        if (curRes && curRes.ok) {
+          const curJson = (await curRes.json()) as {
+            o?: Record<string, { ma_nhan_su: string | null; ma_phien: string | null; generation?: number }>;
+          };
+          payload = { ...than, binding: bindingOf(curJson?.o?.[than.ma_o]) };
+        }
+      } catch {
+        // Ignore fallback binding lookup failure
+      }
+    }
     const res = await goiMang('/api/o', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(than),
+      body: JSON.stringify(payload),
     });
     return res.ok;
   } catch {
