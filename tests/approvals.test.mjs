@@ -51,6 +51,7 @@ import {
 import { GET as getApprovalsRoute } from '../src/app/api/approvals/route.ts';
 import { POST as postDecisionRoute } from '../src/app/api/approvals/[requestId]/decision/route.ts';
 import { ApprovalsSettingsCard } from '../src/components/office/ApprovalsSettingsCard.tsx';
+import SettingsPage from '../src/app/settings/page.tsx';
 
 const LEDGER_SCRIPT = path.resolve(process.cwd(), 'operations/scripts/approval_ledger.py');
 const CHECK_SCRIPT = path.resolve(process.cwd(), 'operations/scripts/approval_check.py');
@@ -3921,7 +3922,169 @@ approval_check.main()
     }
     console.log('  [PASS] Case 42 (F22 + F29 + F31 P2 v09): Isolated ledger verifies 100% of lines parse as valid JSON + read-back check/dump executed after 1-byte LF truncation AND after injected write-missing-LF + EIO');
 
-    console.log('>>> ALL 42 A-4 v09 APPROVAL LEDGER TEST CASES PASSED <<<');
+    // =========================================================================
+    // CASE 43 (DE-A4-v10 F34 & F33): `/settings` page error boundary
+    // Ledger failures (`io_error` when python3 fails/missing, `ledger_unreadable`
+    // when ledger file is chmod 000, `lock_timeout` when lock is held) MUST NOT
+    // crash `/settings`; UI-1 cards (`display-settings-card`, `Text size`,
+    // `Agent Response Language`) must still render alongside
+    // `data-testid="approvals-error-card"` with the exact reason code and `Retry`
+    // button, and NEVER show "No pending approval requests." while in error state.
+    // =========================================================================
+    const c43IsolatedDir = path.join(testDataDir, 'case43-settings-boundary');
+    const c43ApprovalsDir = path.join(c43IsolatedDir, 'approvals');
+    fs.mkdirSync(c43ApprovalsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(c43ApprovalsDir, '.test-ledger'),
+      'aiboss-test-ledger-marker\n',
+      'utf-8'
+    );
+    const prevDataDir43 = process.env.AIBOSS_DATA_DIR;
+    const prevPath43 = process.env.PATH;
+    const prevLockTimeout43 = process.env.AIBOSS_TEST_LOCK_TIMEOUT_SEC;
+    process.env.AIBOSS_DATA_DIR = c43IsolatedDir;
+    const c43TodayPath = getApprovalLogPathForDate(new Date());
+    fs.writeFileSync(c43TodayPath, '', 'utf-8');
+
+    try {
+      // 43a: Broken/missing python3 on PATH -> io_error card on /settings, UI-1 intact
+      const emptyBinDir43 = path.join(c43IsolatedDir, 'empty-bin');
+      fs.mkdirSync(emptyBinDir43, { recursive: true });
+      process.env.PATH = emptyBinDir43;
+      const html43a = renderToStaticMarkup(React.createElement(SettingsPage));
+      process.env.PATH = prevPath43;
+
+      assert.ok(
+        html43a.includes('display-settings-card'),
+        'Case 43a (F34): /settings must still render display-settings-card when python3 is unavailable'
+      );
+      assert.ok(
+        html43a.includes('Text size'),
+        'Case 43a (F34/F33): /settings must still render "Text size" label when python3 is unavailable'
+      );
+      assert.ok(
+        html43a.includes('Agent Response Language'),
+        'Case 43a (F34): /settings must still render "Agent Response Language" when python3 is unavailable'
+      );
+      assert.ok(
+        html43a.includes('id="approvals-settings-card"'),
+        'Case 43a (F34): /settings must render approvals-settings-card section'
+      );
+      assert.ok(
+        html43a.includes('data-testid="approvals-error-card"'),
+        'Case 43a (F34): /settings must render data-testid="approvals-error-card" on io_error'
+      );
+      assert.ok(
+        html43a.includes('data-error-code="io_error"') && html43a.includes('>io_error</code>'),
+        'Case 43a (F34): approvals-error-card must display reason code io_error'
+      );
+      assert.ok(
+        html43a.includes('data-testid="approvals-retry-btn"') && html43a.includes('>Retry</button>'),
+        'Case 43a (F34): approvals-error-card must include Retry button'
+      );
+      assert.ok(
+        !html43a.includes('No pending approval requests.'),
+        'Case 43a (F34): must NOT masquerade io_error as empty pending approvals'
+      );
+      assert.ok(
+        !html43a.includes('No decided requests recorded yet.'),
+        'Case 43a (F34): must NOT masquerade io_error as empty decided ledger'
+      );
+
+      // 43b: Unreadable ledger file (chmod 000) -> ledger_unreadable card on /settings, UI-1 intact
+      fs.chmodSync(c43TodayPath, 0o000);
+      let html43b = '';
+      try {
+        html43b = renderToStaticMarkup(React.createElement(SettingsPage));
+      } finally {
+        fs.chmodSync(c43TodayPath, 0o644);
+      }
+      assert.ok(
+        html43b.includes('display-settings-card') && html43b.includes('Text size'),
+        'Case 43b (F34): /settings must still render display-settings-card and "Text size" when ledger is chmod 000'
+      );
+      assert.ok(
+        html43b.includes('data-testid="approvals-error-card"'),
+        'Case 43b (F34): /settings must render data-testid="approvals-error-card" on chmod 000'
+      );
+      assert.ok(
+        html43b.includes('data-error-code="ledger_unreadable"') &&
+          html43b.includes('>ledger_unreadable</code>'),
+        'Case 43b (F34): approvals-error-card must display reason code ledger_unreadable'
+      );
+      assert.ok(
+        html43b.includes('data-testid="approvals-retry-btn"'),
+        'Case 43b (F34): approvals-error-card must include Retry button on ledger_unreadable'
+      );
+      assert.ok(
+        !html43b.includes('No pending approval requests.'),
+        'Case 43b (F34): must NOT masquerade ledger_unreadable as empty pending approvals'
+      );
+
+      // 43c: Lock timeout (ApprovalLockTimeoutError thrown by getApprovals) -> lock_timeout card on /settings, UI-1 intact
+      const lockTimeoutBinDir43 = path.join(c43IsolatedDir, 'lock-timeout-bin');
+      fs.mkdirSync(lockTimeoutBinDir43, { recursive: true });
+      const lockTimeoutPy43 = path.join(lockTimeoutBinDir43, 'python3');
+      fs.writeFileSync(
+        lockTimeoutPy43,
+        '#!/bin/sh\nprintf \'{"status":"lock_timeout"}\\n\'\nexit 2\n',
+        'utf-8'
+      );
+      fs.chmodSync(lockTimeoutPy43, 0o755);
+      process.env.PATH = `${lockTimeoutBinDir43}:${prevPath43}`;
+      let html43c = '';
+      try {
+        html43c = renderToStaticMarkup(React.createElement(SettingsPage));
+      } finally {
+        process.env.PATH = prevPath43;
+      }
+      assert.ok(
+        html43c.includes('display-settings-card') && html43c.includes('Text size'),
+        'Case 43c (F34): /settings must still render display-settings-card and "Text size" on lock_timeout'
+      );
+      assert.ok(
+        html43c.includes('data-testid="approvals-error-card"') &&
+          html43c.includes('data-error-code="lock_timeout"') &&
+          html43c.includes('>lock_timeout</code>'),
+        'Case 43c (F34): approvals-error-card must display reason code lock_timeout'
+      );
+      assert.ok(
+        !html43c.includes('No pending approval requests.'),
+        'Case 43c (F34): must NOT masquerade lock_timeout as empty pending approvals'
+      );
+
+      // 43d: Normal healthy ledger -> renders normal Approvals card without error card
+      const html43d = renderToStaticMarkup(React.createElement(SettingsPage));
+      assert.ok(
+        html43d.includes('display-settings-card') &&
+          html43d.includes('Text size') &&
+          html43d.includes('Agent Response Language') &&
+          html43d.includes('id="approvals-settings-card"'),
+        'Case 43d (F34/F33): normal /settings must render display-settings-card, "Text size", "Agent Response Language", and id="approvals-settings-card"'
+      );
+      assert.ok(
+        !html43d.includes('data-testid="approvals-error-card"'),
+        'Case 43d (F34): normal /settings must NOT render approvals-error-card'
+      );
+      assert.ok(
+        html43d.includes('Pending Requests') &&
+          html43d.includes('Decided Ledger') &&
+          html43d.includes('No pending approval requests.'),
+        'Case 43d (F34): normal empty ledger on /settings renders Pending Requests & Decided Ledger normally'
+      );
+    } finally {
+      process.env.PATH = prevPath43;
+      process.env.AIBOSS_DATA_DIR = prevDataDir43;
+      if (prevLockTimeout43 === undefined) {
+        delete process.env.AIBOSS_TEST_LOCK_TIMEOUT_SEC;
+      } else {
+        process.env.AIBOSS_TEST_LOCK_TIMEOUT_SEC = prevLockTimeout43;
+      }
+      fs.rmSync(c43IsolatedDir, { recursive: true, force: true });
+    }
+    console.log('  [PASS] Case 43 (F34 + F33 P2 v10): /settings page error boundary isolates io_error, ledger_unreadable, and lock_timeout into approvals-error-card while keeping DisplaySettingsCard ("Text size") intact');
+
+    console.log('>>> ALL 43 A-4 v10 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

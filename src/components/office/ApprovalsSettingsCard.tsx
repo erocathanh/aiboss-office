@@ -4,8 +4,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle, ClockCountdown, ShieldCheck, XCircle } from '@phosphor-icons/react';
 import type { ApprovalItem, ApprovalStatus } from '@/lib/approvals-ledger';
 
+export type ApprovalLoadErrorCode = 'ledger_unreadable' | 'io_error' | 'lock_timeout';
+
 export interface ApprovalsSettingsCardProps {
   initialApprovals?: ApprovalItem[];
+  initialError?: ApprovalLoadErrorCode | null;
 }
 
 function formatRelativeAge(isoTs: string): string {
@@ -128,9 +131,11 @@ function getStatusBadgeStyle(status: ApprovalStatus): {
 
 export function ApprovalsSettingsCard({
   initialApprovals,
+  initialError = null,
 }: ApprovalsSettingsCardProps = {}) {
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals ?? []);
-  const [loading, setLoading] = useState(!initialApprovals);
+  const [loadError, setLoadError] = useState<ApprovalLoadErrorCode | null>(initialError ?? null);
+  const [loading, setLoading] = useState(!initialApprovals && !initialError);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -142,9 +147,19 @@ export function ApprovalsSettingsCard({
         if (Array.isArray(data.approvals)) {
           setApprovals(data.approvals);
         }
+        setLoadError(null);
+      } else {
+        const errData = (await res.json().catch(() => ({}))) as { error?: string };
+        const code: ApprovalLoadErrorCode =
+          errData.error === 'ledger_unreadable' ||
+          errData.error === 'lock_timeout' ||
+          errData.error === 'io_error'
+            ? errData.error
+            : 'io_error';
+        setLoadError(code);
       }
     } catch {
-      /* ignore transient fetch errors */
+      setLoadError('io_error');
     } finally {
       setLoading(false);
     }
@@ -218,6 +233,57 @@ export function ApprovalsSettingsCard({
         </div>
       )}
 
+      {loadError ? (
+        <div
+          data-testid="approvals-error-card"
+          data-error-code={loadError}
+          role="alert"
+          style={{
+            marginTop: '14px',
+            padding: '12px 14px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.14)',
+            border: '1px solid rgba(239, 68, 68, 0.42)',
+            color: '#fecaca',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
+            gap: '12px',
+            fontSize: '13px',
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <span>Ledger error: </span>
+            <code
+              style={{
+                fontWeight: 700,
+                color: '#fca5a5',
+              }}
+            >
+              {loadError}
+            </code>
+          </div>
+          <button
+            type="button"
+            data-testid="approvals-retry-btn"
+            onClick={() => void fetchApprovals()}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid rgba(248, 113, 113, 0.5)',
+              background: 'rgba(239, 68, 68, 0.22)',
+              color: '#fee2e2',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
       <div
         style={{
           display: 'flex',
@@ -577,6 +643,7 @@ export function ApprovalsSettingsCard({
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }
