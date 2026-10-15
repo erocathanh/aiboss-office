@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s -X POST -H \"Authorization: Bearer $T\" https://api.cloudflare.com/client/v4/zones/$ZID/dns_records --data '{\"type\":\"TXT\"}'"
+  }
+}

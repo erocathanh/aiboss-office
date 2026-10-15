@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "cwd": "projects/BAN-SAO-LONG",
+  "tool_input": {
+    "file_path": "../THU-SU-THAT/outputs/bao-cao.md",
+    "content": "de"
+  }
+}

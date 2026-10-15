@@ -33,6 +33,7 @@ const MAPPINGS = [
   { from: /BAN-MAU/g, to: 'templates' },
   { from: /nhat-ky\.md/g, to: 'CHANNEL.md' },
   { from: /BANG-DIEU-KHIEN\.md/g, to: 'PROGRESS.md' },
+  { from: /Gọi chị Lan 0912 345 678/g, to: 'Nguyen Van A 0900 000 000 nguyen.van.a@example.com' },
 ];
 
 let totalConverted = 0;
@@ -58,7 +59,11 @@ for (const hookName of hookDirs) {
       content = content.replace(m.from, m.to);
     }
 
-    const dstFile = path.join(dstHookDir, file);
+    const targetFileName =
+      hookName === 'guard_bulk_send' && file.startsWith('ask-')
+        ? file.replace(/^ask-/, 'block-')
+        : file;
+    const dstFile = path.join(dstHookDir, targetFileName);
     fs.writeFileSync(dstFile, content, 'utf-8');
     totalConverted++;
   }

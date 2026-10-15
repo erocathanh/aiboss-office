@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "tee wip/summary.md <<'EOF'\nDanh sách tệp chìa: meta-page-token, hash-salt.\nEOF"
+  }
+}

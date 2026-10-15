@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "projects/THU-SU-THAT/inputs/b.md",
+    "content": "Nguyen Van A 0900 000 000 nguyen.van.a@example.com"
+  }
+}

@@ -56,33 +56,63 @@ INPUTS_DIR_ALL = (
 )
 OUTPUTS_DIR_ALL = (OUTPUTS_DIR, OPC_OUTPUTS_DIR)
 SAMPLE_GROUND_TRUTH_ALL = (SAMPLE_GROUND_TRUTH_DIR, OPC_SAMPLE_GROUND_TRUTH_DIR)
+CHANNEL_FILE_ALL = (CHANNEL_FILE, OPC_CHANNEL_FILE)
+PROGRESS_FILE_ALL = (PROGRESS_FILE, OPC_PROGRESS_FILE)
 
 
 def is_projects_root(name: str) -> bool:
-    """Kiểm tra tên thư mục gốc dự án (projects hoặc CAC-DU-AN)."""
-    return name in (PROJECTS_DIR, OPC_PROJECTS_DIR)
+    """Kiểm tra tên thư mục gốc dự án (projects hoặc CAC-DU-AN, không phân biệt hoa thường)."""
+    return name.lower() in (PROJECTS_DIR.lower(), OPC_PROJECTS_DIR.lower())
 
 
 def is_inputs_dir(name: str) -> bool:
-    """Kiểm tra tên thư mục đầu vào/tham khảo/bản mẫu bất biến (inputs/DAU-VAO, references/THAM-KHAO, templates/BAN-MAU)."""
-    return name in INPUTS_DIR_ALL
+    """Kiểm tra tên thư mục đầu vào/tham khảo/bản mẫu bất biến (không phân biệt hoa thường)."""
+    return name.lower() in tuple(x.lower() for x in INPUTS_DIR_ALL)
+
+
+def is_references_dir(name: str) -> bool:
+    """Kiểm tra tên thư mục tham khảo (references hoặc THAM-KHAO, không phân biệt hoa thường)."""
+    return name.lower() in (REFERENCES_DIR.lower(), OPC_REFERENCES_DIR.lower())
+
+
+def is_templates_dir(name: str) -> bool:
+    """Kiểm tra tên thư mục bản mẫu (templates hoặc BAN-MAU, không phân biệt hoa thường)."""
+    return name.lower() in (TEMPLATES_DIR.lower(), OPC_TEMPLATES_DIR.lower())
 
 
 def is_wip_dir(name: str) -> bool:
-    """Kiểm tra tên thư mục đang làm (wip hoặc DANG-LAM)."""
-    return name in (WIP_DIR, OPC_WIP_DIR)
+    """Kiểm tra tên thư mục đang làm (wip hoặc DANG-LAM, không phân biệt hoa thường)."""
+    return name.lower() in (WIP_DIR.lower(), OPC_WIP_DIR.lower())
 
 
 def is_outputs_dir(name: str) -> bool:
-    """Kiểm tra tên thư mục đầu ra (outputs hoặc DAU-RA)."""
-    return name in (OUTPUTS_DIR, OPC_OUTPUTS_DIR)
+    """Kiểm tra tên thư mục đầu ra (outputs hoặc DAU-RA, không phân biệt hoa thường)."""
+    return name.lower() in (OUTPUTS_DIR.lower(), OPC_OUTPUTS_DIR.lower())
 
 
 def is_sample_ground_truth(name: str) -> bool:
-    """Kiểm tra thư mục dự án mẫu sự thật (không khớp -2)."""
-    return name in (SAMPLE_GROUND_TRUTH_DIR, OPC_SAMPLE_GROUND_TRUTH_DIR)
+    """Kiểm tra thư mục dự án mẫu sự thật (không khớp -2, không phân biệt hoa thường)."""
+    return name.lower() in (SAMPLE_GROUND_TRUTH_DIR.lower(), OPC_SAMPLE_GROUND_TRUTH_DIR.lower())
 
 
 def is_channel_file(name: str) -> bool:
-    """Kiểm tra tệp nhật ký / kênh trao đổi dự án (chỉ cho phép nối thêm)."""
-    return name in (CHANNEL_FILE, OPC_CHANNEL_FILE)
+    """Kiểm tra tệp nhật ký / kênh trao đổi dự án (chỉ cho phép nối thêm, không phân biệt hoa thường)."""
+    return name.lower() in (CHANNEL_FILE.lower(), OPC_CHANNEL_FILE.lower())
+
+
+def is_progress_file(name: str) -> bool:
+    """Kiểm tra tệp tiến độ / bảng điều khiển dự án (PROGRESS.md hoặc BANG-DIEU-KHIEN.md, không phân biệt hoa thường)."""
+    return name.lower() in (PROGRESS_FILE.lower(), OPC_PROGRESS_FILE.lower())
+
+
+def has_final_suffix(name: str) -> bool:
+    """Kiểm tra tên tệp có chứa hậu tố _final (không phân biệt hoa thường)."""
+    return FINAL_SUFFIX.lower() in name.lower()
+
+
+def resolve_project_root(cwd: str = "") -> str:
+    """Lấy thư mục gốc dự án ưu tiên theo CLAUDE_PROJECT_DIR; chỉ khi biến này trống mới đi lên từ cwd."""
+    import office_root as _office_root
+    return _office_root.resolve_project_root(cwd)
+
+

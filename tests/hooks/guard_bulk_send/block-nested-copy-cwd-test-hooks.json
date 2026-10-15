@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "cwd": "projects/BAN-SAO-LONG",
+  "tool_input": {
+    "command": "bash scripts/test_hooks.sh"
+  }
+}

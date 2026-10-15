@@ -249,4 +249,4 @@ Tất cả các bộ kiểm thử đều phải vượt qua 100%:
 - `tests/danh-thuc-route.test.mjs`: Luồng đánh thức và cách ly môi trường.
 - `tests/session-history.test.mjs`: Phát hiện phiên bền vững, dự phòng tệp lớn và đa kho lưu trữ.
 - `tests/budget.test.mjs`: 30 trường hợp kiểm thử nghiêm ngặt về trần ngân sách và khôi phục khi gặp sự cố.
-- `tests/s17-seat-isolation.test.mjs` & `pnpm test:hooks`: Kiểm thử cô lập ngữ cảnh ghế (`--setting-sources project`, `.mcp.json` theo ghế), sàn an toàn cấp ghế và Hook 2.1 chặn đăng công khai.
+- `tests/s17-seat-isolation.test.mjs` & `pnpm test:hooks`: Kiểm thử cô lập ngữ cảnh ghế (`--setting-sources project`, `.mcp.json` theo ghế), sàn an toàn cấp ghế, bộ hook đồng bộ ở mốc harness v15 (`b3cfaf5`) và Hook 2.1 chặn đăng công khai.

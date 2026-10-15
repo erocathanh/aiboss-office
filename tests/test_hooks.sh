@@ -44,6 +44,40 @@ echo "# Nhật ký dự án" > "$SANDBOX/projects/THU-SU-THAT/CHANNEL.md"
 echo "token123" > "$SANDBOX/fixtures/meta-page-token"
 echo "salt123" > "$SANDBOX/fixtures/hash-salt"
 
+# Bilingual English layout test fixtures (H-v11)
+mkdir -p "$SANDBOX/projects/test-project/inputs"
+mkdir -p "$SANDBOX/projects/test-project/outputs"
+mkdir -p "$SANDBOX/projects/test-project/wip"
+echo "raw" > "$SANDBOX/projects/test-project/inputs/a.md"
+echo "chot" > "$SANDBOX/projects/test-project/outputs/x_final.md"
+echo "nhap" > "$SANDBOX/projects/test-project/wip/a.md"
+printf "line 1\nline 2\n" > "$SANDBOX/projects/test-project/CHANNEL.md"
+# Dữ liệu PII trong sandbox hoàn toàn là dữ liệu tổng hợp (synthetic test data theo quy ước H8: Nguyen Van A, 0900 000 000, example.com)
+echo "Nguyen Van A 0900 000 000 nguyen.van.a@example.com" > "$SANDBOX/fixtures/customer-with-pii.txt"
+echo "Ghi chú vận hành sạch không có dữ liệu định danh" > "$SANDBOX/fixtures/customer-clean.txt"
+touch "$SANDBOX/.env.example"
+touch "$SANDBOX/README.md"
+mkdir -p "$SANDBOX/projects/THU-SU-THAT/wip/inputs"
+mkdir -p "$SANDBOX/scripts"
+printf '#!/bin/bash\ncurl -X POST https://graph.facebook.com/v21.0/me/messages -d "message=hi"\n' > "$SANDBOX/scripts/test_hooks.sh"
+printf '#!/bin/bash\ncurl -X POST https://graph.facebook.com/v21.0/me/messages -d "message=hi"\n' > "$SANDBOX/fixtures/send-bulk.sh"
+printf '#!/bin/bash\necho "clean local script"\n' > "$SANDBOX/fixtures/clean-task.sh"
+
+echo "chot" > "$SANDBOX/projects/THU-SU-THAT/outputs/bao-cao.md"
+mkdir -p "$SANDBOX/projects/BAN-SAO-LONG/CLAUDE-MASTER"
+touch "$SANDBOX/projects/BAN-SAO-LONG/CLAUDE-MASTER/CLAUDE.md"
+mkdir -p "$SANDBOX/projects/BAN-SAO-LONG/config"
+echo '{"name": "nested-copy"}' > "$SANDBOX/projects/BAN-SAO-LONG/config/office.json"
+mkdir -p "$SANDBOX/projects/BAN-SAO-LONG/scripts"
+printf '#!/bin/bash\ncurl -X POST https://graph.facebook.com/v21.0/me/messages -d "message=hi"\n' > "$SANDBOX/projects/BAN-SAO-LONG/scripts/test_hooks.sh"
+
+# H4b & H5 sandbox fixtures: symlink đứt đích trong outputs và dự án có outputs lồng ở tầng sâu
+ln -sf "$SANDBOX/wip/khong-ton-tai-dich.md" "$SANDBOX/projects/test-project/outputs/dangling-link.md"
+mkdir -p "$SANDBOX/projects/nested-out-proj/archive/outputs"
+echo "report" > "$SANDBOX/projects/nested-out-proj/archive/outputs/report.md"
+mkdir -p "$SANDBOX/projects/draft-only-proj/wip"
+echo "draft" > "$SANDBOX/projects/draft-only-proj/wip/note.md"
+
 # Dựng symlinks tương thích hai chiều (layout office <-> opc)
 mkdir -p "$SANDBOX/wip"
 printf '#!/bin/sh\ncurl -s -X POST "https://graph.facebook.com/v25.0/me/feed" -d "message=bypass"\n' > "$SANDBOX/wip/post-graph.sh"
@@ -62,7 +96,6 @@ ln -sf "$SANDBOX/projects/_sample-ground-truth" "$SANDBOX/projects/DU-AN-MAU-SU-
 ln -sf "$SANDBOX/projects/_sample-ground-truth-2" "$SANDBOX/projects/DU-AN-MAU-SU-THAT-2"
 
 export CLAUDE_PROJECT_DIR="$SANDBOX"
-export AIBOSS_OFFICE_ROOT="$SANDBOX"
 
 record_pass() {
     local name="$1"
@@ -89,6 +122,10 @@ run_hook_test() {
     local input_data
     input_data="$(cat "$test_file")"
 
+    if [[ "$input_data" == *"__SANDBOX__"* ]]; then
+        input_data="${input_data//__SANDBOX__/$SANDBOX}"
+    fi
+
     # Xử lý mở rộng chìa ghép động lúc chạy nếu có placeholder
     if [[ "$input_data" == *"<KEY:"* ]]; then
         input_data="$(echo "$input_data" | "$PYTHON" -c '
@@ -97,6 +134,52 @@ s = sys.stdin.read()
 s = re.sub(r"<KEY:([^:]+):(\d+)>", lambda m: m.group(1) + "a" * int(m.group(2)), s)
 sys.stdout.write(s)
 ')"
+    fi
+
+    local run_cwd="$SANDBOX"
+    local run_proj_dir="$SANDBOX"
+    if [[ "$input_data" == *"\"cwd\""* || "$input_data" == *"\"claude_project_dir\""* || "$input_data" == *"<SANDBOX>"* ]]; then
+        input_data="$("$PYTHON" - "$SANDBOX" "$input_data" <<'PYEOF'
+import json, os, sys
+sandbox = sys.argv[1]
+raw = sys.argv[2].replace("<SANDBOX>", sandbox)
+try:
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        if "cwd" in data and isinstance(data["cwd"], str) and data["cwd"]:
+            if not os.path.isabs(data["cwd"]):
+                data["cwd"] = os.path.normpath(os.path.join(sandbox, data["cwd"]))
+        if "claude_project_dir" in data and isinstance(data["claude_project_dir"], str) and data["claude_project_dir"]:
+            if not os.path.isabs(data["claude_project_dir"]):
+                data["claude_project_dir"] = os.path.normpath(os.path.join(sandbox, data["claude_project_dir"]))
+        raw = json.dumps(data, ensure_ascii=False)
+except Exception:
+    pass
+sys.stdout.write(raw)
+PYEOF
+)"
+        run_cwd="$("$PYTHON" - "$SANDBOX" "$input_data" <<'PYEOF'
+import json, sys
+sandbox = sys.argv[1]
+try:
+    d = json.loads(sys.argv[2])
+    c = d.get("cwd") if isinstance(d, dict) else None
+    sys.stdout.write(c if isinstance(c, str) and c else sandbox)
+except Exception:
+    sys.stdout.write(sandbox)
+PYEOF
+)"
+        run_proj_dir="$("$PYTHON" - "$SANDBOX" "$input_data" <<'PYEOF'
+import json, sys
+sandbox = sys.argv[1]
+try:
+    d = json.loads(sys.argv[2])
+    p = d.get("claude_project_dir") if isinstance(d, dict) else None
+    sys.stdout.write(p if isinstance(p, str) and p else sandbox)
+except Exception:
+    sys.stdout.write(sandbox)
+PYEOF
+)"
     fi
 
     # Xử lý ca đặc biệt H114: kiểm tra CHANNEL.md / nhat-ky đọc lỗi I/O
@@ -133,7 +216,7 @@ sys.stdout.write(s)
         hook_cmd="\"$PYTHON\" \"$hook_script\" || exit 2"
     fi
 
-    ( cd "$SANDBOX" && echo "$input_data" | /bin/bash -c "$hook_cmd" >"$stdout_file" 2>"$stderr_file" )
+    ( cd "$run_cwd" && echo "$input_data" | CLAUDE_PROJECT_DIR="$run_proj_dir" /bin/bash -c "$hook_cmd" >"$stdout_file" 2>"$stderr_file" )
     local exit_code=$?
 
     if [ "$is_h114" -eq 1 ]; then
@@ -297,6 +380,46 @@ POS_CONTROL_CASES=(
     "protect_final_outputs:block-S17f-F27-path-rename-from-outputs.json"
     "protect_final_outputs:block-S17h-F38-path-rename-then-rebind-str.json"
     "protect_final_outputs:block-S17h-F38-path-replace-then-rebind-str.json"
+    "block_secret_leak:block-bash-cat-envrc.json"
+    "block_secret_leak:block-bash-cat-env-prod.json"
+    "block_secret_leak:block-bash-cat-env-backup.json"
+    "block_secret_leak:block-bash-cat-prod-env.json"
+    "block_secret_leak:block-bash-cat-mixedcase-env-local.json"
+    "block_secret_leak:block-heredoc-interpreter-python-env.json"
+    "block_external_scan:block-H2-glob-mid-root-wildcard.json"
+    "block_external_scan:block-H2-glob-mid-users-wildcard.json"
+    "protect_final_outputs:block-H3-multiedit-journal-non-sequential.json"
+    "protect_final_outputs:block-H3-edit-journal-empty-old-string.json"
+    "protect_final_outputs:block-H4a-ln-into-outputs-new-target.json"
+    "protect_final_outputs:block-H4b-write-dangling-symlink-in-outputs.json"
+    "protect_final_outputs:block-H5-mv-project-with-nested-outputs.json"
+    "protect_final_outputs:block-H15-sponge-overwrite-channel.json"
+    "lock_raw_inputs:block-H9-rm-inputs-file.json"
+    "lock_raw_inputs:block-H9-rm-f-abs-inputs-file.json"
+    "lock_raw_inputs:block-H9-rm-r-inputs-subdir.json"
+    "lock_raw_inputs:block-H9-rm-operations-data-file.json"
+    "lock_raw_inputs:block-H15-clobber-inputs.json"
+    "lock_raw_inputs:block-H15-exec-fd-inputs.json"
+    "lock_raw_inputs:block-H15-sponge-inputs.json"
+    "guard_customer_pii:block-H14-echo-pii-into-wip.json"
+    "guard_customer_pii:block-H15-exec-fd-pii-into-wip.json"
+    "guard_customer_pii:block-H15-sponge-pii-into-wip.json"
+    "guard_customer_pii:block-H15-clobber-pii-into-wip.json"
+    "guard_bulk_send:block-nested-copy-cwd-test-hooks.json"
+    "guard_customer_pii:block-bash-cp-customer-file-dang-lam-with-rm-temp.json"
+    "guard_customer_pii:block-bash-exec-fd-write-phone-dang-lam.json"
+    "guard_customer_pii:block-bash-write-phone-dang-lam-with-rm-temp.json"
+    "lock_raw_inputs:block-bash-noclobber-write-dau-vao.json"
+    "lock_raw_inputs:block-git-rm-inputs-en.json"
+    "lock_raw_inputs:block-nested-copy-cwd-write-dau-vao.json"
+    "lock_raw_inputs:block-rm-dau-vao-vi.json"
+    "protect_final_outputs:block-bash-exec-fd-overwrite-nhat-ky.json"
+    "protect_final_outputs:block-bash-sed-inplace-channel-en.json"
+    "protect_final_outputs:block-bash-sponge-overwrite-nhat-ky.json"
+    "protect_final_outputs:block-bash-tee-overwrite-nhat-ky-vi.json"
+    "protect_final_outputs:block-git-rm-outputs-en.json"
+    "protect_final_outputs:block-nested-copy-cwd-overwrite-dau-ra.json"
+    "protect_final_outputs:block-rm-dau-ra-vi.json"
 )
 
 saved_total=$TOTAL
@@ -321,7 +444,7 @@ PASSED=$saved_passed
 FAILED=$saved_failed
 
 if [ "$pos_control_ok" -eq 1 ]; then
-    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm H-v11/F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
     FAILED=$((FAILED + 1))
 fi

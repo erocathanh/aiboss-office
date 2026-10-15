@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -X POST https://graph.facebook.com/v21.0/123/feed -d message=x"
+  }
+}
