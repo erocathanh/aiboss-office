@@ -1030,9 +1030,10 @@ def should_block_bulk_send(
                 if prefix_has_signal:
                     chain_has_bulk_send_signal = True
 
-                # Xử lý find ... -exec / -execdir / -ok / -okdir (H27 §1b)
+                # Handle find ... -exec / -execdir / -ok / -okdir (H27 & H32f)
                 if sc and sc.executable == 'find' and len(sc.words) > 1:
                     raw_words = getattr(sc, "raw_words", None) or sc.words
+                    handled_find_exec = False
                     f_idx = 1
                     while f_idx < len(sc.words):
                         fw = sc.words[f_idx]
@@ -1041,6 +1042,7 @@ def should_block_bulk_send(
                             while end_idx < len(sc.words) and sc.words[end_idx] not in (';', '+'):
                                 end_idx += 1
                             if end_idx > f_idx + 1:
+                                handled_find_exec = True
                                 exec_raw_cmd = " ".join(raw_words[f_idx + 1 : end_idx])
                                 exec_sc = parse_simple_command_safe(exec_raw_cmd, cur_cwd)
                                 exec_child_static = dict(child_static_vars)
@@ -1074,8 +1076,6 @@ def should_block_bulk_send(
                                             )
                                             if inner_reason:
                                                 return inner_reason
-                                            if prefix_has_signal or exec_prefix_sig:
-                                                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                                             break
                                 else:
                                     inner_reason = should_block_bulk_send(
@@ -1091,22 +1091,25 @@ def should_block_bulk_send(
                             f_idx = end_idx + 1
                         else:
                             f_idx += 1
+                    if handled_find_exec and not pipeline_has_runner:
+                        continue
 
-                # Bóc wrapper shell (bash -c, sh -c, zsh -c, dash -c, ksh -c, eval) tới lệnh bên trong (H16a, H19, H24 & H27)
+                # Unwrap shell wrappers (bash -c, sh -c, zsh -c, dash -c, ksh -c, eval) into inner command (H16a, H19, H24, H27 & H32)
                 if sc and sc.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(sc.words) > 1:
                     handled_shell_c = False
                     raw_words = getattr(sc, "raw_words", None) or sc.words
                     for c_idx, w in enumerate(sc.words[1:], start=1):
                         if w.startswith('-') and not w.startswith('--') and 'c' in w and c_idx + 1 < len(sc.words):
                             raw_nested = raw_words[c_idx + 1] if (c_idx + 1) < len(raw_words) else sc.words[c_idx + 1]
-                            # H23 & H27(a): Mở rộng đối số của -c ở SHELL CHA bằng bảng cha (static_vars, unresolved_vars)
+                            # H23 & H27(a): Expand -c argument in parent shell using parent table (static_vars, unresolved_vars)
                             expanded_nested, nested_unresolved = expand_shell_vars_in_raw_token(
                                 raw_nested, static_vars, unresolved_vars
                             )
                             if nested_unresolved and chain_has_bulk_send_signal:
                                 return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
                             try:
-                                # H27(b,c): Phân tích lệnh bên trong SHELL CON bằng bảng môi trường con (child_static_vars, child_unresolved_vars)
+                                # H27(b,c) & H32 (v08): Analyze inner command in child shell using child environment (child_static_vars, child_unresolved_vars).
+                                # When inner command is resolved and harmless, do not block solely on prefix_has_signal.
                                 inner_reason = should_block_bulk_send(
                                     "Bash",
                                     {"command": expanded_nested},
@@ -1117,9 +1120,6 @@ def should_block_bulk_send(
                                 )
                                 if inner_reason:
                                     return inner_reason
-                                # H27(d): Xấp xỉ bảo thủ khi gán đầu lệnh của shell con có mẫu SMTP/nodemailer mà không giải được đường dùng
-                                if prefix_has_signal:
-                                    return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                                 handled_shell_c = True
                             except Exception:
                                 pass
@@ -1149,8 +1149,6 @@ def should_block_bulk_send(
                         )
                         if inner_reason:
                             return inner_reason
-                        if prefix_has_signal:
-                            return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                         continue
                     except Exception:
                         pass
@@ -1175,10 +1173,14 @@ def should_block_bulk_send(
                             uncertain_code_reason = check_inline_code_uncertain_network_write(candidate_code)
                             if uncertain_code_reason:
                                 return uncertain_code_reason
+                            if prefix_has_signal and re.search(
+                                r'\b(?:os\.environ|os\.getenv|process\.env|ENV\[)\b', candidate_code
+                            ):
+                                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                         if code_unresolved and chain_has_bulk_send_signal:
                             return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-                # (b2) Kiểm tra SMTP trên argv / subcommand (H13, H16a, H19 & H24: chỉ mở rộng biến ngoài nháy đơn)
+                # (b2) Check SMTP on command argv / subcommand words after stripping prefix env assignments (H13, H16a, H19, H24 & H32d)
                 sc_joined_words = " ".join(sc.words) if (sc and sc.words) else sub
                 if sc and getattr(sc, "raw_words", None):
                     expanded_word_list = [
@@ -1189,7 +1191,12 @@ def should_block_bulk_send(
                 else:
                     expanded_words = sc_joined_words
 
-                if SMTP_PATTERN.search(sc_joined_words) or SMTP_PATTERN.search(sub) or SMTP_PATTERN.search(expanded_words):
+                has_argv_smtp = (
+                    (SMTP_PATTERN.search(sc_joined_words) or SMTP_PATTERN.search(expanded_words))
+                    if (sc and sc.words)
+                    else SMTP_PATTERN.search(sub)
+                )
+                if has_argv_smtp:
                     _, sub_base = extract_subcommand_executable(sub)
                     if sub_base in EXEMPT_PRINT_COMMANDS and not pipeline_has_runner:
                         pass
@@ -1216,7 +1223,12 @@ def should_block_bulk_send(
 
                 # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin đã biết không (B1 giữ nguyên reason chắc chắn)
                 for endpoint in BULK_SEND_ENDPOINTS:
-                    if endpoint.search(sc_joined_words) or endpoint.search(sub) or endpoint.search(expanded_words):
+                    has_argv_endpoint = (
+                        (endpoint.search(sc_joined_words) or endpoint.search(expanded_words))
+                        if (sc and sc.words)
+                        else endpoint.search(sub)
+                    )
+                    if has_argv_endpoint:
                         if sub_is_curl:
                             # Với curl, chỉ chặn khi có cờ POST / data / upload
                             if has_curl_post_flags(sub):
