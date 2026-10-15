@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\nfor p in ['wip/a', 'wip/b']:\n    open(p, 'w').write('x')\nPY"}}
