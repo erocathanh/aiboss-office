@@ -974,6 +974,11 @@ table.bang td.ma {
   gap: 8px;
 }
 
+.settings-row:nth-child(4) .settings-value {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .settings-value code {
   background: rgba(250, 247, 240, 0.08);
   padding: 2px 6px;

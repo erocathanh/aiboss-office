@@ -6,7 +6,10 @@ const http = require('node:http');
 const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 
 // APP_BASIC_REALM must match the realm in src/app/api/approvals/[requestId]/decision/route.ts
-const { resolvePort, APP_BASIC_REALM = 'aiboss-office' } = require('./config.cjs');
+const { resolvePort, APP_BASIC_REALM } = require('./config.cjs');
+if (typeof APP_BASIC_REALM !== 'string' || !APP_BASIC_REALM.trim()) {
+  throw new Error('desktop/main.cjs requires APP_BASIC_REALM to be exported by desktop/config.cjs');
+}
 const { ensureServerReady, stopSpawnedServer, probeServer } = require('./server-manager.cjs');
 const {
   initTray,
@@ -83,9 +86,8 @@ if (!gotTheLock) {
       typeof authInfo.isProxy !== 'boolean' ||
       typeof authInfo.scheme !== 'string' ||
       typeof authInfo.host !== 'string' ||
-      authInfo.port === undefined ||
-      authInfo.port === null ||
-      authInfo.port === '' ||
+      typeof authInfo.port !== 'number' ||
+      !Number.isInteger(authInfo.port) ||
       typeof authInfo.realm !== 'string'
     ) {
       return;
@@ -99,11 +101,11 @@ if (!gotTheLock) {
     if (authInfo.scheme.toLowerCase() !== 'basic') {
       return;
     }
-    // 3. Host must be loopback AND port must match targetPort from resolvePort
+    // 3. Host must be loopback AND port must match targetPort from resolvePort (strict integer type, F41)
     const host = authInfo.host.toLowerCase();
     const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
-    const port = Number(authInfo.port);
-    if (!isLoopback || !Number.isInteger(port) || port !== targetPort) {
+    const port = authInfo.port;
+    if (!isLoopback || port !== targetPort) {
       return;
     }
     // 4. Realm must match APP_BASIC_REALM ('aiboss-office', must match src/app/api/approvals/[requestId]/decision/route.ts)

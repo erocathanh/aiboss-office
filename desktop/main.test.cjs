@@ -43,7 +43,7 @@ test('main.cjs takes single instance lock before initialization and quits if ano
         };
       }
       if (name === './config.cjs') {
-        return { resolvePort: () => 4330 };
+        return { resolvePort: () => 4330, APP_BASIC_REALM: 'aiboss-office' };
       }
       if (name === './server-manager.cjs') {
         return { ensureServerReady: async () => ({ ok: true }), stopSpawnedServer: () => {}, probeServer: async () => true };
@@ -170,7 +170,7 @@ test('main.cjs initializes menu from app.getLocale() and rebuilds app menu, tray
         };
       }
       if (name === './config.cjs') {
-        return { resolvePort: () => 4330 };
+        return { resolvePort: () => 4330, APP_BASIC_REALM: 'aiboss-office' };
       }
       if (name === './server-manager.cjs') {
         return {
@@ -522,4 +522,109 @@ test('F39 (x): after 60s cooldown window elapses, login handler unblocks and sup
   });
   assert.equal(resAfter.prevented, true);
   assert.deepEqual(resAfter.cbCalls, [['test-user', 'test-pass']]);
+});
+
+test('F41 (i): login handler ignores challenge when port is a string ("4330") instead of a number', () => {
+  const { fire } = createLoginHarness();
+  const res = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: '4330',
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, false);
+  assert.equal(res.cbCalls.length, 0);
+});
+
+test('F41 (ii): loading main.cjs throws when config.cjs does not export APP_BASIC_REALM', () => {
+  const code = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
+  assert.throws(
+    () => {
+      vm.runInNewContext(code, {
+        require: (name) => {
+          if (name === 'electron') {
+            return {
+              app: { requestSingleInstanceLock: () => false, quit: () => {}, on: () => {} },
+              BrowserWindow: class {},
+              Menu: { buildFromTemplate: () => ({}), setApplicationMenu: () => {} },
+              ipcMain: { handle: () => {} },
+            };
+          }
+          if (name === './config.cjs') {
+            return { resolvePort: () => 4330 };
+          }
+          return require(name);
+        },
+        __dirname,
+        process,
+        console,
+      });
+    },
+    /APP_BASIC_REALM/,
+    'main.cjs must throw at load time if APP_BASIC_REALM is missing from config.cjs',
+  );
+});
+
+function parseTsElectronDictionary(tsFilePath) {
+  const src = fs.readFileSync(tsFilePath, 'utf8');
+  const idx = src.indexOf('  electron: {');
+  assert.notEqual(idx, -1, `electron block must exist in ${tsFilePath}`);
+  const sub = src.slice(idx);
+  const wtMatch = sub.match(/windowTitle:\s*'([^']*)'/);
+  const menuMatch = sub.match(/menu:\s*\{([\s\S]*?)\n\s*\},/);
+  const trayMatch = sub.match(/tray:\s*\{([\s\S]*?)\n\s*\},/);
+  assert.ok(menuMatch, `electron.menu block must exist in ${tsFilePath}`);
+  assert.ok(trayMatch, `electron.tray block must exist in ${tsFilePath}`);
+  const parseBlock = (block) => {
+    const out = {};
+    const re = /(\w+):\s*'((?:\\'|[^'])*)'/g;
+    let m;
+    while ((m = re.exec(block)) !== null) {
+      out[m[1]] = m[2].replace(/\\'/g, "'");
+    }
+    return out;
+  };
+  return {
+    windowTitle: wtMatch ? wtMatch[1] : null,
+    menu: parseBlock(menuMatch[1]),
+    tray: parseBlock(trayMatch[1]),
+  };
+}
+
+test('UI-2d B: desktop/i18n.cjs matches electron.menu.* and electron.tray.* in src/i18n/vi.ts and src/i18n/en.ts character-for-character', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const langs = [
+    { lang: 'en', relPath: 'src/i18n/en.ts' },
+    { lang: 'vi', relPath: 'src/i18n/vi.ts' },
+  ];
+
+  const mismatches = [];
+  for (const { lang, relPath } of langs) {
+    const tsDict = parseTsElectronDictionary(path.join(repoRoot, relPath));
+    const cjsDict = desktopI18n.getDesktopCopy(lang);
+    if (tsDict.windowTitle !== cjsDict.windowTitle) {
+      mismatches.push(
+        `[${lang}] electron.windowTitle: ${relPath}="${tsDict.windowTitle}" !== desktop/i18n.cjs="${cjsDict.windowTitle}"`,
+      );
+    }
+    for (const section of ['menu', 'tray']) {
+      const tsSection = tsDict[section];
+      const cjsSection = cjsDict[section];
+      const allKeys = new Set([...Object.keys(tsSection), ...Object.keys(cjsSection)]);
+      for (const k of allKeys) {
+        if (tsSection[k] !== cjsSection[k]) {
+          mismatches.push(
+            `[${lang}] electron.${section}.${k}: ${relPath}=${JSON.stringify(tsSection[k])} !== desktop/i18n.cjs=${JSON.stringify(cjsSection[k])}`,
+          );
+        }
+      }
+    }
+  }
+
+  assert.equal(
+    mismatches.length,
+    0,
+    `Two-source desktop i18n mismatch(es) detected:\n${mismatches.join('\n')}`,
+  );
 });
