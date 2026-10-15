@@ -104,6 +104,8 @@ case "$ACTION" in
 
         FAILED=0
         DEVIATED_COUNT=0
+        DIFF_FROM_SRC_COUNT=0
+        SAME_AS_SRC_COUNT=0
 
         MANAGED_FILES=(
             "bash_parser.py"
@@ -119,6 +121,21 @@ case "$ACTION" in
             "layout.py"
             "office_root.py"
         )
+
+        # Danh sách tường minh các tệp chỉ tồn tại ở Office (không có blob nguồn tương ứng ở OPC).
+        # Hiện tại cả 12 tệp trong MANAGED_FILES đều có ánh xạ nguồn OPC bắt buộc.
+        OFFICE_ONLY_FILES=()
+
+        is_office_only_file() {
+            local target="$1"
+            local item
+            for item in "${OFFICE_ONLY_FILES[@]+"${OFFICE_ONLY_FILES[@]}"}"; do
+                if [ "$item" = "$target" ]; then
+                    return 0
+                fi
+            done
+            return 1
+        }
 
         for fname in "${MANAGED_FILES[@]}"; do
             fpath="$HOOKS_DIR/$fname"
@@ -137,20 +154,24 @@ case "$ACTION" in
             if [ -n "$row" ]; then
                 expected_src_hash="$(echo "$row" | awk -F'|' '{print $3}' | tr -d ' `' || true)"
                 expected_office_hash="$(echo "$row" | awk -F'|' '{print $4}' | tr -d ' `' || true)"
-            else
-                expected_office_hash="$(grep -E "\`?$fname\`?.*\(.*[0-9a-f]{32}.*\)" "$MANIFEST_FILE" | grep -o -E '[0-9a-f]{32}' | head -1 || true)"
             fi
 
             if [ -z "$expected_office_hash" ] || ! [[ "$expected_office_hash" =~ ^[0-9a-f]{32}$ ]]; then
-                echo "[sync-harness: LỖI] Không tìm thấy hash MD5 AIBOSS Office hợp lệ của $fname trong manifest!" >&2
+                echo "[sync-harness: LỖI] Không tìm thấy hash MD5 AIBOSS Office hợp lệ (32 ký tự hex thường) của $fname trong manifest!" >&2
                 FAILED=1
                 DEVIATED_COUNT=$((DEVIATED_COUNT + 1))
                 continue
             fi
 
-            # 1. Kiểm chiều nguồn OPC (nếu tệp có cột MD5 nguồn 32 ký tự hex trong bảng mục 2)
+            # 1. Kiểm chiều nguồn OPC (bắt buộc 32 ký tự hex thường cho mọi tệp không nằm trong OFFICE_ONLY_FILES — H10 fail-closed)
             src_status="N/A (tệp riêng Office)"
-            if [[ "$expected_src_hash" =~ ^[0-9a-f]{32}$ ]]; then
+            if ! is_office_only_file "$fname"; then
+                if [ -z "$expected_src_hash" ] || ! [[ "$expected_src_hash" =~ ^[0-9a-f]{32}$ ]]; then
+                    echo "[sync-harness: LỖI] Không tìm thấy hash MD5 nguồn OPC hợp lệ (32 ký tự hex thường) của $fname trong manifest (nhận: '${expected_src_hash}')!" >&2
+                    FAILED=1
+                    DEVIATED_COUNT=$((DEVIATED_COUNT + 1))
+                    continue
+                fi
                 src_rel="$(source_rel_path_for "$fname")"
                 if ! git -C "$SOURCE_REPO" cat-file -e "${manifest_commit}:${src_rel}" 2>/dev/null; then
                     echo "[sync-harness: LỖI NGUỒN] Không tìm thấy blob ${manifest_commit}:${src_rel} trong kho nguồn!" >&2
@@ -166,9 +187,14 @@ case "$ACTION" in
                     continue
                 fi
                 src_status="nguồn=$actual_src_hash"
+                if [ "$actual_src_hash" = "$current_office_hash" ]; then
+                    SAME_AS_SRC_COUNT=$((SAME_AS_SRC_COUNT + 1))
+                else
+                    DIFF_FROM_SRC_COUNT=$((DIFF_FROM_SRC_COUNT + 1))
+                fi
             fi
 
-            # 2. Kiểm chiều AIBOSS Office (tệp thật trên đĩa so với cột 4 / mục 3)
+            # 2. Kiểm chiều AIBOSS Office (tệp thật trên đĩa so với cột 4)
             if [ "$current_office_hash" != "$expected_office_hash" ]; then
                 echo "[sync-harness: LỆCH OFFICE] $fname: đĩa=$current_office_hash != manifest=$expected_office_hash" >&2
                 FAILED=1
@@ -183,7 +209,7 @@ case "$ACTION" in
             echo "[sync-harness: THẤT BẠI] Có $DEVIATED_COUNT mục bị lệch hoặc thiếu so với manifest!" >&2
             exit 1
         else
-            echo "[sync-harness: THÀNH CÔNG] Cả 2 chiều (blob nguồn tại $manifest_commit_short và 12 tệp AIBOSS Office trên đĩa) khớp manifest 100%."
+            echo "[sync-harness: THÀNH CÔNG] Cả 2 chiều (blob nguồn tại $manifest_commit_short và ${#MANAGED_FILES[@]} tệp AIBOSS Office trên đĩa) khớp SỔ 100% — office KHÁC nguồn ở ${DIFF_FROM_SRC_COUNT}/${#MANAGED_FILES[@]} tệp (có chủ đích: lớp riêng office), trùng byte ${SAME_AS_SRC_COUNT}/${#MANAGED_FILES[@]}."
             exit 0
         fi
         ;;

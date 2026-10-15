@@ -665,14 +665,18 @@ def extract_substitutions_safe(cmd_str: str) -> List[str]:
 
     return subs
 
-def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleCommand], Dict[str, str]]:
+def parse_bash_script(
+    full_cmd: str,
+    initial_cwd: str,
+    initial_symlinks: Optional[Dict[str, str]] = None,
+) -> Tuple[List[SimpleCommand], Dict[str, str]]:
     """
     Phân tích toàn diện một lệnh bash.
     Theo dõi cd và ln -s.
     Phân tích substitution và heredoc theo đúng cwd thời điểm thực thi.
     """
     commands: List[SimpleCommand] = []
-    symlinks: Dict[str, str] = {}
+    symlinks: Dict[str, str] = dict(initial_symlinks) if initial_symlinks else {}
     current_cwd = initial_cwd
 
     # Tách các segments kèm thân heredoc
@@ -687,25 +691,26 @@ def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleComma
         # Phân tích substitutions với current_cwd hiện tại!
         subs = extract_substitutions_safe(clean_seg)
         for sub in subs:
-            sub_list, sub_links = parse_bash_script(sub, current_cwd)
+            sub_list, sub_links = parse_bash_script(sub, current_cwd, symlinks)
             commands.extend(sub_list)
             symlinks.update(sub_links)
 
         # 2. Xử lý subshell: ( ... )
         if clean_seg.startswith('(') and clean_seg.endswith(')'):
             inner = clean_seg[1:-1].strip()
-            sub_list, sub_links = parse_bash_script(inner, current_cwd)
+            sub_list, sub_links = parse_bash_script(inner, current_cwd, symlinks)
             commands.extend(sub_list)
             symlinks.update(sub_links)
             continue
 
         cmd = SimpleCommand(clean_seg, current_cwd, heredoc_bodies=hd_bodies)
+        cmd.symlinks = dict(symlinks)
         commands.append(cmd)
 
         # Nếu lệnh là shell (sh, bash, zsh, ksh, dash) nhận heredoc -> phân tích đệ quy thân heredoc như script shell
         if cmd.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and cmd.heredoc_bodies:
             for hd_body in cmd.heredoc_bodies:
-                nested_list, nested_links = parse_bash_script(hd_body, current_cwd)
+                nested_list, nested_links = parse_bash_script(hd_body, current_cwd, symlinks)
                 commands.extend(nested_list)
                 symlinks.update(nested_links)
 
@@ -722,32 +727,67 @@ def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleComma
                 new_dir = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(dest)))
                 current_cwd = new_dir
 
-        # Xử lý `ln -s`: giải target tương đối từ dirname của link
+        # Xử lý `ln -s`: giải target tương đối từ dirname của link (kể cả 1 toán hạng và -t <dir>)
         if cmd.executable == 'ln' and cmd.words:
             flags = []
             non_flags = []
-            for w in cmd.words[1:]:
-                if w.startswith('-'):
-                    flags.append(w)
+            target_dir = None
+            after_dd = False
+            skip_next = False
+            for idx_w, w in enumerate(cmd.words[1:], start=1):
+                if skip_next:
+                    skip_next = False
+                    continue
+                if not after_dd:
+                    if w == '--':
+                        after_dd = True
+                        continue
+                    if w in ('-t', '--target-directory'):
+                        flags.append(w)
+                        if idx_w + 1 < len(cmd.words):
+                            target_dir = cmd.words[idx_w + 1].strip("'\"")
+                        skip_next = True
+                        continue
+                    if w.startswith('--target-directory='):
+                        flags.append(w)
+                        target_dir = w.split('=', 1)[1].strip("'\"")
+                        continue
+                    if w.startswith('-t') and not w.startswith('--') and len(w) > 2:
+                        flags.append('-t')
+                        target_dir = w[2:].strip("'\"")
+                        continue
+                    if w.startswith('-'):
+                        flags.append(w)
+                        continue
+                non_flags.append(w.strip("'\""))
+
+            is_symbolic = any(f == '--symbolic' or (not f.startswith('--') and 's' in f) for f in flags)
+            if is_symbolic and len(non_flags) >= 1:
+                link_pairs = []
+                if target_dir is not None:
+                    for src_target in non_flags:
+                        base_s = os.path.basename(src_target.rstrip('/'))
+                        if base_s:
+                            link_pairs.append((src_target, os.path.join(target_dir, base_s)))
+                elif len(non_flags) >= 2:
+                    src_target = non_flags[0]
+                    link_name = non_flags[1]
+                    link_pairs.append((src_target, link_name))
                 else:
-                    non_flags.append(w)
+                    src_target = non_flags[0]
+                    link_name = os.path.basename(src_target.rstrip('/'))
+                    if link_name:
+                        link_pairs.append((src_target, link_name))
 
-            is_symbolic = any('s' in f for f in flags)
-            if is_symbolic and len(non_flags) >= 2:
-                src_target = non_flags[0]
-                link_name = non_flags[1]
-
-                abs_link = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(link_name)))
-                link_dir = os.path.dirname(abs_link)
-
-                # Nếu target là tương đối: giải từ link_dir!
-                if not os.path.isabs(src_target):
-                    abs_src = os.path.normpath(os.path.join(link_dir, os.path.expanduser(src_target)))
-                else:
-                    abs_src = os.path.normpath(os.path.expanduser(src_target))
-
-                symlinks[abs_link] = abs_src
-                symlinks[link_name] = abs_src
+                for src_target, link_name in link_pairs:
+                    abs_link = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(link_name)))
+                    link_dir = os.path.dirname(abs_link)
+                    if not os.path.isabs(src_target):
+                        abs_src = os.path.normpath(os.path.join(link_dir, os.path.expanduser(src_target)))
+                    else:
+                        abs_src = os.path.normpath(os.path.expanduser(src_target))
+                    symlinks[abs_link] = abs_src
+                    symlinks[link_name] = abs_src
 
         # Xử lý đệ quy cho sh -c, bash -c, zsh -c, eval (kể cả cờ gộp như -lc, -ec)
         if cmd.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(cmd.words) > 1:
@@ -755,13 +795,13 @@ def parse_bash_script(full_cmd: str, initial_cwd: str) -> Tuple[List[SimpleComma
                 # Nhận cờ có chứa 'c' (ví dụ -c, -lc, -ec, -xc)
                 if w.startswith('-') and 'c' in w and c_idx + 1 < len(cmd.words):
                     nested_cmd = cmd.words[c_idx + 1]
-                    nested_list, nested_links = parse_bash_script(nested_cmd, current_cwd)
+                    nested_list, nested_links = parse_bash_script(nested_cmd, current_cwd, symlinks)
                     commands.extend(nested_list)
                     symlinks.update(nested_links)
                     break
         elif cmd.executable == 'eval' and len(cmd.words) > 1:
             nested_cmd = " ".join(cmd.words[1:])
-            nested_list, nested_links = parse_bash_script(nested_cmd, current_cwd)
+            nested_list, nested_links = parse_bash_script(nested_cmd, current_cwd, symlinks)
             commands.extend(nested_list)
             symlinks.update(nested_links)
 
@@ -961,20 +1001,61 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         targets.append(("$DYNAMIC_WRITE:xargs", f"{base} via xargs"))
 
     if base in ('cp', 'install', 'rsync', 'ditto'):
+        flags = []
         non_flags = []
+        target_dir = None
         skip_next = False
-        for w in words[1:]:
+        after_dd = False
+        for idx_w, w in enumerate(words[1:], start=1):
             if skip_next:
                 skip_next = False
                 continue
-            if base == 'install' and w in ('-m', '-o', '-g', '-S'):
-                skip_next = True
-                continue
-            if not w.startswith('-'):
-                non_flags.append(w.strip("'\""))
-        if len(non_flags) >= 2:
+            if not after_dd:
+                if w == '--':
+                    after_dd = True
+                    continue
+                if base == 'install' and w in ('-m', '-o', '-g', '-S'):
+                    flags.append(w)
+                    skip_next = True
+                    continue
+                if base in ('cp', 'install') and w in ('-t', '--target-directory'):
+                    flags.append(w)
+                    if idx_w + 1 < len(words):
+                        target_dir = words[idx_w + 1].strip("'\"")
+                    skip_next = True
+                    continue
+                if base in ('cp', 'install') and w.startswith('--target-directory='):
+                    flags.append(w)
+                    target_dir = w.split('=', 1)[1].strip("'\"")
+                    continue
+                if base in ('cp', 'install') and w.startswith('-t') and not w.startswith('--') and len(w) > 2:
+                    flags.append('-t')
+                    target_dir = w[2:].strip("'\"")
+                    continue
+                if w.startswith('-'):
+                    flags.append(w)
+                    continue
+            non_flags.append(w.strip("'\""))
+        is_cp_hardlink = (base == 'cp') and any(
+            f == '--link' or (f.startswith('-') and not f.startswith('--') and 'l' in f[1:])
+            for f in flags
+        )
+        if target_dir is not None and len(non_flags) >= 1:
+            sources = non_flags
+            if is_cp_hardlink:
+                for s in sources:
+                    targets.append((s, "cp hardlink source"))
+            if is_dynamic_write_target(target_dir):
+                targets.append((target_dir, f"{base} dynamic destination"))
+            else:
+                for s in sources:
+                    targets.append((os.path.join(target_dir, os.path.basename(s.rstrip('/'))), f"{base} to directory"))
+        elif len(non_flags) >= 2:
             dest = non_flags[-1]
             sources = non_flags[:-1]
+            if is_cp_hardlink:
+                for s in sources:
+                    targets.append((s, "cp hardlink source"))
             if is_dynamic_write_target(dest):
                 targets.append((dest, f"{base} dynamic destination"))
             else:
@@ -987,15 +1068,62 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     or _seg_matches_protected(dest_base, layout.OUTPUTS_DIR_ALL + layout.INPUTS_DIR_ALL)
                 ):
                     for s in sources:
-                        targets.append((os.path.join(dest, os.path.basename(s)), f"{base} to directory"))
+                        targets.append((os.path.join(dest, os.path.basename(s.rstrip('/'))), f"{base} to directory"))
                 else:
                     targets.append((dest, f"{base} destination"))
 
     elif base == 'ln':
-        flags = [w for w in words[1:] if w.startswith('-')]
-        non_flags = [w.strip("'\"") for w in words[1:] if not w.startswith('-')]
+        flags = []
+        non_flags = []
+        target_dir = None
+        after_dd = False
+        skip_next = False
+        for idx_w, w in enumerate(words[1:], start=1):
+            if skip_next:
+                skip_next = False
+                continue
+            if not after_dd:
+                if w == '--':
+                    after_dd = True
+                    continue
+                if w in ('-t', '--target-directory'):
+                    flags.append(w)
+                    if idx_w + 1 < len(words):
+                        target_dir = words[idx_w + 1].strip("'\"")
+                    skip_next = True
+                    continue
+                if w.startswith('--target-directory='):
+                    flags.append(w)
+                    target_dir = w.split('=', 1)[1].strip("'\"")
+                    continue
+                if w.startswith('-t') and not w.startswith('--') and len(w) > 2:
+                    flags.append('-t')
+                    target_dir = w[2:].strip("'\"")
+                    continue
+                if w.startswith('-'):
+                    flags.append(w)
+                    continue
+            non_flags.append(w.strip("'\""))
         is_symbolic = any(f == '--symbolic' or (not f.startswith('--') and 's' in f) for f in flags)
-        if len(non_flags) >= 2:
+        if target_dir is not None and len(non_flags) >= 1:
+            sources = non_flags
+            if not is_symbolic:
+                for s in sources:
+                    targets.append((s, "ln hardlink source"))
+            if is_dynamic_write_target(target_dir):
+                targets.append((target_dir, "ln dynamic destination"))
+            else:
+                for s in sources:
+                    base_s = os.path.basename(s.rstrip('/'))
+                    targets.append((os.path.join(target_dir, base_s) if base_s else target_dir, "ln to directory"))
+        elif len(non_flags) == 1:
+            src = non_flags[0]
+            if not is_symbolic:
+                targets.append((src, "ln hardlink source"))
+            implicit_dest = os.path.basename(src.rstrip('/'))
+            if implicit_dest:
+                targets.append((implicit_dest, "ln destination"))
+        elif len(non_flags) >= 2:
             dest = non_flags[-1]
             sources = non_flags[:-1]
             if not is_symbolic:
@@ -1011,9 +1139,10 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     or os.path.isdir(dest_abs)
                     or layout.is_outputs_dir(dest_base)
                     or _seg_matches_protected(dest_base, layout.OUTPUTS_DIR_ALL + layout.INPUTS_DIR_ALL)
+                    or len(sources) > 1
                 ):
                     for s in sources:
-                        targets.append((os.path.join(dest, os.path.basename(s)), "ln to directory"))
+                        targets.append((os.path.join(dest, os.path.basename(s.rstrip('/'))), "ln to directory"))
                 else:
                     targets.append((dest, "ln destination"))
 
@@ -1026,9 +1155,23 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         w_idx = 1
         subcmd = None
         subcmd_args: List[str] = []
+        git_cwd = cmd.cwd
         while w_idx < len(words):
             w = words[w_idx]
-            if w in ('-C', '-c', '--git-dir', '--work-tree'):
+            if w == '-C':
+                if w_idx + 1 < len(words):
+                    c_dir = words[w_idx + 1].strip("'\"")
+                    if c_dir:
+                        git_cwd = os.path.normpath(os.path.join(git_cwd, os.path.expanduser(c_dir)))
+                w_idx += 2
+                continue
+            if w.startswith('-C') and len(w) > 2:
+                c_dir = w[2:].strip("'\"")
+                if c_dir:
+                    git_cwd = os.path.normpath(os.path.join(git_cwd, os.path.expanduser(c_dir)))
+                w_idx += 1
+                continue
+            if w in ('-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env'):
                 w_idx += 2
                 continue
             if w.startswith('-'):
@@ -1037,10 +1180,27 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
             subcmd = w
             subcmd_args = words[w_idx + 1:]
             break
+
+        def resolve_git_path(raw_arg: str) -> str:
+            clean_a = raw_arg.strip("'\"")
+            if not clean_a:
+                return ""
+            if git_cwd != cmd.cwd and not os.path.isabs(clean_a):
+                return os.path.normpath(os.path.join(git_cwd, os.path.expanduser(clean_a)))
+            return clean_a
+
         if subcmd == 'mv':
+            after_dd = False
             for a in subcmd_args:
-                if not a.startswith('-'):
-                    targets.append((a.strip("'\""), "git mv source or destination"))
+                if not after_dd:
+                    if a == '--':
+                        after_dd = True
+                        continue
+                    if a.startswith('-'):
+                        continue
+                resolved_a = resolve_git_path(a)
+                if resolved_a:
+                    targets.append((resolved_a, "git mv source or destination"))
         elif subcmd == 'rm':
             has_cached = False
             after_dd = False
@@ -1055,12 +1215,58 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                         continue
                     if a.startswith('-'):
                         continue
-                clean_a = a.strip("'\"")
-                if clean_a:
-                    rm_paths.append(clean_a)
+                resolved_a = resolve_git_path(a)
+                if resolved_a:
+                    rm_paths.append(resolved_a)
             if not has_cached:
                 for p in rm_paths:
                     targets.append((p, "git rm target"))
+        elif subcmd == 'checkout':
+            if '--' in subcmd_args:
+                dd_idx = subcmd_args.index('--')
+                for a in subcmd_args[dd_idx + 1:]:
+                    resolved_a = resolve_git_path(a)
+                    if resolved_a:
+                        targets.append((resolved_a, "git checkout target"))
+        elif subcmd == 'restore':
+            has_staged = False
+            has_worktree = False
+            after_dd = False
+            skip_next = False
+            restore_paths = []
+            for a in subcmd_args:
+                if skip_next:
+                    skip_next = False
+                    continue
+                if not after_dd:
+                    if a == '--':
+                        after_dd = True
+                        continue
+                    if a in ('-s', '--source', '--pathspec-from-file'):
+                        skip_next = True
+                        continue
+                    if a in ('-S', '--staged'):
+                        has_staged = True
+                        continue
+                    if a in ('-W', '--worktree'):
+                        has_worktree = True
+                        continue
+                    if a.startswith('-') and not a.startswith('--'):
+                        if 'S' in a[1:]:
+                            has_staged = True
+                        if 'W' in a[1:]:
+                            has_worktree = True
+                        if 's' in a[1:] and len(a) == 2:
+                            skip_next = True
+                        continue
+                    if a.startswith('-'):
+                        continue
+                resolved_a = resolve_git_path(a)
+                if resolved_a:
+                    restore_paths.append(resolved_a)
+            if not has_staged or has_worktree:
+                for p in restore_paths:
+                    targets.append((p, "git restore target"))
 
     elif base in ('rm', 'touch', 'truncate', 'unlink', 'rmdir'):
         after_dd = False

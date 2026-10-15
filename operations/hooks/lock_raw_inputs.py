@@ -49,14 +49,15 @@ def check_lock(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> 
         commands, symlinks = bash_parser.parse_bash_script(cmd, cwd)
 
         for sc in commands:
-            targets = bash_parser.extract_write_targets(sc, symlinks)
+            sc_symlinks = getattr(sc, "symlinks", symlinks)
+            targets = bash_parser.extract_write_targets(sc, sc_symlinks)
             for target_path, reason in targets:
                 if bash_parser.is_dynamic_write_target(target_path) and (
                     bash_parser.is_cwd_inside_office(sc.cwd, project_dir)
                     or office_root.find_nearest_office_root(sc.cwd, sc.cwd) is not None
                 ):
                     return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
-                for cand, _root in office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, symlinks):
+                for cand, _root in office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, sc_symlinks):
                     if bash_parser.is_in_project_dau_vao(cand):
                         label = get_inputs_label(cand)
                         return f"Lệnh có đích ghi hoặc xoá nhắm vào thư mục {label} ({target_path}) bị chặn. Dữ liệu thô chỉ được đọc, không được xoá, ghi đè hay sửa đổi bằng lệnh shell."

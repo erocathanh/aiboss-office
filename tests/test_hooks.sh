@@ -420,6 +420,17 @@ POS_CONTROL_CASES=(
     "protect_final_outputs:block-git-rm-outputs-en.json"
     "protect_final_outputs:block-nested-copy-cwd-overwrite-dau-ra.json"
     "protect_final_outputs:block-rm-dau-ra-vi.json"
+    "guard_bulk_send:block-H13-grep-then-python-smtp-send.json"
+    "lock_raw_inputs:block-H11-git-C-C-rm-inputs.json"
+    "lock_raw_inputs:block-H11-git-C-rm-inputs.json"
+    "lock_raw_inputs:block-H12-cp-l-from-inputs.json"
+    "lock_raw_inputs:block-H12-hardlink-from-inputs-single-operand.json"
+    "lock_raw_inputs:block-git-c-rm-inputs-en.json"
+    "protect_final_outputs:block-H12-ln-s-single-operand-in-outputs.json"
+    "protect_final_outputs:block-H12-ln-single-operand-in-outputs.json"
+    "protect_final_outputs:block-H12-ln-t-outputs.json"
+    "protect_final_outputs:block-cp-hardlink-from-dau-ra-vi.json"
+    "protect_final_outputs:block-ln-single-operand-in-dau-ra-vi.json"
 )
 
 saved_total=$TOTAL

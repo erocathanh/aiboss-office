@@ -208,7 +208,8 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                 return f"Hành vi xoá trong thư mục đầu ra đã chốt ({w}) bị chặn."
 
             # B. Kiểm tra tất cả write targets
-            targets = bash_parser.extract_write_targets(sc, symlinks)
+            sc_symlinks = getattr(sc, "symlinks", symlinks)
+            targets = bash_parser.extract_write_targets(sc, sc_symlinks)
             is_move_or_rm_cmd = (
                 exe in ('mv', 'rm', 'rmdir')
                 or (exe == 'git' and ('mv' in words or 'rm' in words))
@@ -218,7 +219,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                 if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
                     return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
 
-                cands_with_roots = office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, symlinks)
+                cands_with_roots = office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, sc_symlinks)
 
                 for cand, r_dir in cands_with_roots:
                     # Rào 0 (H5): Dời hoặc xoá cả thư mục gốc dự án hoặc thư mục dự án có ngăn kết quả / bản chốt
@@ -241,9 +242,9 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                     if bash_parser.is_dau_ra_or_final(cand):
                         out_label, _ = get_outputs_labels(cand)
                         abs_t = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(target_path)))
-                        rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, symlinks)
-                        if symlinks and cand == rel_canon_r:
-                            for l_k, t_v in symlinks.items():
+                        rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, sc_symlinks)
+                        if sc_symlinks and cand == rel_canon_r:
+                            for l_k, t_v in sc_symlinks.items():
                                 abs_lk = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(l_k)))
                                 abs_tv = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(t_v)))
                                 if abs_t == abs_lk:
@@ -256,7 +257,8 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                         real_t = os.path.realpath(abs_t)
                         is_delete_or_link_op = (
                             exe in ('unlink', 'rmdir', 'rm', 'ln')
-                            or reason.startswith(('rm ', 'git rm', 'unlink', 'rmdir', 'ln '))
+                            or reason.startswith(('rm ', 'git rm', 'git mv', 'git checkout', 'git restore', 'unlink', 'rmdir', 'ln '))
+                            or reason == 'cp hardlink source'
                             or any(
                                 k in reason
                                 for k in (
@@ -274,6 +276,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                     'Path.rename source',
                                     'Path.replace source',
                                     'ln hardlink',
+                                    'cp hardlink',
                                 )
                             )
                         )

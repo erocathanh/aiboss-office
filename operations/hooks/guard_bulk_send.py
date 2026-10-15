@@ -59,9 +59,9 @@ BULK_SEND_ENDPOINTS = [
     re.compile(r'api\.sendgrid\.com', re.IGNORECASE),
 ]
 
-# Mẫu SMTP cần chặn duyệt (trong Python chỉ chặn khi thật sự import/dùng smtplib)
+# Mẫu SMTP cần chặn duyệt (trong Python chỉ chặn khi thật sự import/dùng smtplib, hoặc gọi client thật)
 SMTP_PATTERN = re.compile(
-    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|smtps?://|--mail-rcpt\b|\bsendmail\b)',
+    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|smtps?://|--mail-rcpt\b|\bsendmail\b|\bmsmtp\b|\bswaks\b)',
     re.IGNORECASE,
 )
 
@@ -103,14 +103,60 @@ CURL_DELETE_FLAG_PATTERNS = [
 # Kiểm tra MCP gửi tin/nội dung
 MCP_SEND_PATTERN = re.compile(r'mcp__.*(?:send|broadcast|reply|forward|post_message|publish)', re.IGNORECASE)
 
-# Các trình chạy script và đuôi tệp script
-SCRIPT_RUNNERS = {'python', 'python3', 'node', 'bash', 'sh', 'zsh'}
+# Các trình chạy script, client gửi thật và lệnh chỉ in/đọc/tìm tài liệu
+SCRIPT_RUNNERS = {'python', 'python3', 'py', 'node', 'ruby', 'perl', 'php', 'bash', 'sh', 'zsh', 'ksh', 'dash', 'eval', 'exec', 'osascript', 'xargs'}
+SMTP_CLIENT_BINARIES = {'sendmail', 'msmtp', 'swaks', 'curl', 'wget', 'nc', 'ncat', 'netcat', 'openssl', 'telnet', 'mail', 'mailx', 'mutt'}
+COMMAND_WRAPPERS = {'env', 'sudo', 'command', 'nohup', 'nice', 'time', 'caffeinate'}
 SCRIPT_EXTENSIONS = ('.py', '.sh', '.js', '.mjs')
-EXEMPT_PRINT_COMMANDS = {'echo', 'printf', 'grep', 'rg', 'cat', 'sed', 'awk', 'head', 'tail', 'less'}
+EXEMPT_PRINT_COMMANDS = {
+    'echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack',
+    'cat', 'sed', 'awk', 'head', 'tail', 'less', 'more', 'wc', 'sort', 'uniq', 'tr', 'cut', 'tee',
+}
 
 
 def split_tokens(sub_cmd: str) -> list[str]:
     return bash_parser.split_shell_tokens(sub_cmd)
+
+
+def extract_subcommand_executable(sub_cmd: str) -> tuple[str, str]:
+    """Trích xuất (first_token, base_cmd) của subcommand sau khi bỏ qua phép gán VAR=val và wrapper."""
+    tokens = split_tokens(sub_cmd)
+    if not tokens:
+        return "", ""
+    idx = 0
+    while idx < len(tokens):
+        tok = tokens[idx].strip('\'"')
+        if '=' in tok and not tok.startswith('-'):
+            idx += 1
+            continue
+        base = os.path.basename(tok)
+        if base in COMMAND_WRAPPERS:
+            idx += 1
+            while idx < len(tokens) and tokens[idx].strip('\'"').startswith('-'):
+                idx += 1
+            continue
+        return tok, base
+    return "", ""
+
+
+def is_code_or_smtp_runner(sub_cmd: str) -> bool:
+    """Kiểm tra subcommand có phải là trình thông dịch mã, chạy script, hoặc gọi client mạng/SMTP thật không."""
+    first_tok, base_cmd = extract_subcommand_executable(sub_cmd)
+    if not base_cmd:
+        return False
+    if base_cmd in EXEMPT_PRINT_COMMANDS:
+        return False
+    if (
+        base_cmd in SCRIPT_RUNNERS
+        or base_cmd.startswith('python3.')
+        or base_cmd in SMTP_CLIENT_BINARIES
+        or first_tok.startswith(('./', '../'))
+        or any(first_tok.endswith(ext) or base_cmd.endswith(ext) for ext in SCRIPT_EXTENSIONS)
+    ):
+        return True
+    if base_cmd == 'git' and re.search(r'\bsend-email\b', sub_cmd):
+        return True
+    return False
 
 
 def has_curl_post_flags(cmd: str) -> bool:
@@ -377,60 +423,72 @@ def should_block_bulk_send(tool_name: str, tool_input: dict, cwd: str = "") -> s
             if ("batch=" in cmd_joined or "relative_url" in cmd_joined) and any(ep in cmd_joined for ep in ('messages', 'feed', 'comments', 'photos')):
                 return "Phát hiện batch request gửi dữ liệu qua graph.facebook.com. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-        # Tách lệnh con ở && || ; | và ở chỗ xuống dòng; xét TỪNG lệnh con
-        sub_cmds = re.split(r'&&|\|\||;|\||\n', cmd_joined)
-        cur_cwd = base_cwd
-
-        for raw_sub in sub_cmds:
-            sub = raw_sub.strip()
-            if not sub:
-                continue
-
-            # Cập nhật cur_cwd nếu là lệnh cd
-            new_cwd = extract_cd_target(sub, cur_cwd)
-            if new_cwd != cur_cwd:
-                cur_cwd = new_cwd
-                continue
-
-            # (a) Cờ --dong-y khi chạy script
-            if check_script_dong_y(sub):
-                return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
-
-            # (b) Kiểm tra SMTP
-            if SMTP_PATTERN.search(sub):
+        # 2e. Kiểm tra thân heredoc thực thi (chảy vào python/node/sh hoặc ghi-rồi-chạy)
+        for hd_body in bash_parser.extract_executed_heredocs(raw_cmd):
+            if SMTP_PATTERN.search(hd_body):
                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-            sub_is_curl = is_curl_command(sub)
+        # Tách câu lệnh theo && || ; newline (mỗi mệnh đề có thể là một đường ống |)
+        clauses = re.split(r'&&|\|\||;|\n', cmd_joined)
+        cur_cwd = base_cwd
 
-            if sub_is_curl:
-                # Kiểm tra curl DELETE tới graph.facebook.com
-                if "graph.facebook.com" in sub and has_curl_delete_flags(sub):
-                    return "Phát hiện lệnh curl DELETE tới graph.facebook.com xoá dữ liệu. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+        for raw_clause in clauses:
+            clause = raw_clause.strip()
+            if not clause:
+                continue
+            pipe_subs = [s.strip() for s in clause.split('|') if s.strip()]
+            pipeline_has_runner = any(is_code_or_smtp_runner(ps) for ps in pipe_subs)
 
-                # Kiểm tra curl có cờ gửi dữ liệu mà địa chỉ đích mở đầu bằng biến ($X, ${X}/...)
-                if has_curl_post_flags(sub) and has_curl_variable_url(sub):
-                    return "Phát hiện lệnh curl gửi dữ liệu tới địa chỉ mở đầu bằng biến môi trường/shell. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+            for sub in pipe_subs:
+                # Cập nhật cur_cwd nếu là lệnh cd
+                new_cwd = extract_cd_target(sub, cur_cwd)
+                if new_cwd != cur_cwd:
+                    cur_cwd = new_cwd
+                    continue
 
-                # Miễn trừ /conversations: CHỈ áp khi lệnh con là curl, không có cờ POST hay data, và không có endpoint gửi/đăng
-                if "graph.facebook.com" in sub and "conversations" in sub:
-                    if not has_curl_post_flags(sub) and not any(ep in sub for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
-                        continue
+                # (a) Cờ --dong-y khi chạy script
+                if check_script_dong_y(sub):
+                    return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-            # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin không
-            for endpoint in BULK_SEND_ENDPOINTS:
-                if endpoint.search(sub):
-                    if sub_is_curl:
-                        # Với curl, chỉ chặn khi có cờ POST / data / upload
-                        if has_curl_post_flags(sub):
-                            return "Phát hiện lệnh POST gửi tin nhắn/email ra dịch vụ bên ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt."
-                    else:
-                        # Với công cụ khác (wget, http, python, node, v.v.), có endpoint gửi là chặn
-                        return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                # (b) Kiểm tra SMTP (H13: chỉ chặn khi thực thi mã/script/heredoc chạy hoặc gọi client thật; miễn lệnh chỉ in/đọc/tìm tài liệu)
+                if SMTP_PATTERN.search(sub):
+                    _, sub_base = extract_subcommand_executable(sub)
+                    if sub_base in EXEMPT_PRINT_COMMANDS and not pipeline_has_runner:
+                        pass
+                    elif is_code_or_smtp_runner(sub) or pipeline_has_runner:
+                        return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-            # (c) Kiểm tra chạy tệp kịch bản trong dự án (< 1 MB hoặc vừa ghi từ heredoc)
-            script_reason = check_script_file_bulk_send(sub, cur_cwd, heredoc_written_files)
-            if script_reason:
-                return script_reason
+                sub_is_curl = is_curl_command(sub)
+
+                if sub_is_curl:
+                    # Kiểm tra curl DELETE tới graph.facebook.com
+                    if "graph.facebook.com" in sub and has_curl_delete_flags(sub):
+                        return "Phát hiện lệnh curl DELETE tới graph.facebook.com xoá dữ liệu. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                    # Kiểm tra curl có cờ gửi dữ liệu mà địa chỉ đích mở đầu bằng biến ($X, ${X}/...)
+                    if has_curl_post_flags(sub) and has_curl_variable_url(sub):
+                        return "Phát hiện lệnh curl gửi dữ liệu tới địa chỉ mở đầu bằng biến môi trường/shell. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                    # Miễn trừ /conversations: CHỈ áp khi lệnh con là curl, không có cờ POST hay data, và không có endpoint gửi/đăng
+                    if "graph.facebook.com" in sub and "conversations" in sub:
+                        if not has_curl_post_flags(sub) and not any(ep in sub for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
+                            continue
+
+                # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin không
+                for endpoint in BULK_SEND_ENDPOINTS:
+                    if endpoint.search(sub):
+                        if sub_is_curl:
+                            # Với curl, chỉ chặn khi có cờ POST / data / upload
+                            if has_curl_post_flags(sub):
+                                return "Phát hiện lệnh POST gửi tin nhắn/email ra dịch vụ bên ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                        else:
+                            # Với công cụ khác (wget, http, python, node, v.v.), có endpoint gửi là chặn
+                            return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                # (c) Kiểm tra chạy tệp kịch bản trong dự án (< 1 MB hoặc vừa ghi từ heredoc)
+                script_reason = check_script_file_bulk_send(sub, cur_cwd, heredoc_written_files)
+                if script_reason:
+                    return script_reason
 
     return ""
 
