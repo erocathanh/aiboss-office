@@ -791,44 +791,101 @@ test('F15 & Item 5: Hook 2.1 blocks xargs/wrapped HTTP writes & symlinked skill 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
-  // 4. Item 5 & F24/F25: Threat Model & Residual Risk Register file exists, contains all 4 required sections,
-  // preserves PM §3.2 replay metrics, and defines concrete P1 vs P2 conditions per RR without blanket non-blocking wording
+  // 4. Item 5 & F24/F25/F29/F30: Threat Model & Residual Risk Register parsed by section and table row/cell
   const sanAnToanPath = path.join(REPO_ROOT, 'operations', 'SAN-AN-TOAN-GHE.md');
   assert.ok(fs.existsSync(sanAnToanPath), 'Item 5: operations/SAN-AN-TOAN-GHE.md must exist');
   const sanAnToanContent = fs.readFileSync(sanAnToanPath, 'utf8');
-  for (const requiredPhrase of [
-    'Mô Hình Đe Doạ',
-    'bypassPermissions',
-    'prompt injection',
-    'Kiến Trúc Hai Lớp Bảo Vệ',
-    'permissions.deny',
-    'Sổ Rủi Ro Tồn Dư',
-    'RR-01',
-    'RR-02',
-    'RR-03',
-    'RR-04',
-    'RR-05',
+
+  // Verify top-level sections exist in order
+  const sec1Idx = sanAnToanContent.indexOf('## 1. Mô Hình Đe Doạ');
+  const sec2Idx = sanAnToanContent.indexOf('## 2. Kiến Trúc Hai Lớp Bảo Vệ');
+  const sec3Idx = sanAnToanContent.indexOf('## 3. Sổ Rủi Ro Tồn Dư');
+  const sec32Idx = sanAnToanContent.indexOf('### 3.2. Mục «Hỏi Oan»');
+  const sec4Idx = sanAnToanContent.indexOf('## 4. Tiêu Chí Phân Loại Lỗi và Gộp Nhánh');
+  assert.ok(sec1Idx >= 0 && sec2Idx > sec1Idx && sec3Idx > sec2Idx && sec32Idx > sec3Idx && sec4Idx > sec32Idx, 'F30: All required sections (§1, §2, §3, §3.2, §4) must exist in order');
+
+  // F30: Verify §3.2 specifically contains the replay measurements and 1-week re-measurement commitment
+  const sec32Body = sanAnToanContent.slice(sec32Idx, sec4Idx);
+  for (const metricPhrase of [
     '47 lệnh/2 ngày',
     'MỚI CHẶN 7',
     'NỚI 0',
     '0 hỏi oan',
-    'caffeinate',
-    'script',
-    'io.FileIO',
-    'shutil.move',
-    'MAX_SCRIPT_DEPTH = 4',
-    'Tiêu Chí Phân Loại Lỗi và Gộp Nhánh',
-    'phân loại từng phản ví dụ theo §4.1',
+    'đo lại sau một tuần',
   ]) {
     assert.ok(
-      sanAnToanContent.includes(requiredPhrase),
-      `Item 5 / F24: operations/SAN-AN-TOAN-GHE.md must include "${requiredPhrase}"`
+      sec32Body.includes(metricPhrase),
+      `F30: §3.2 must specifically contain "${metricPhrase}"`
     );
   }
+
+  // F30: Parse markdown table rows in §3.1 (between §3 and §3.2) and check each cell of RR-01..RR-05
+  const sec31Body = sanAnToanContent.slice(sec3Idx, sec32Idx);
+  const rrRows = new Map();
+  for (const rawLine of sec31Body.split('\n')) {
+    const line = rawLine.trim();
+    if (!line.startsWith('|') || !line.endsWith('|')) continue;
+    const cells = line
+      .slice(1, -1)
+      .split('|')
+      .map((c) => c.trim());
+    if (cells.length < 5) continue;
+    const mCode = cells[0].match(/\b(RR-0[1-5])\b/);
+    if (mCode) {
+      rrRows.set(mCode[1], {
+        codeCell: cells[0],
+        conditionCell: cells[1],
+        reasonCell: cells[2],
+        defenseCell: cells[3],
+        riskLevelCell: cells[4],
+      });
+    }
+  }
+
+  assert.equal(rrRows.size, 5, 'F30: §3 table must contain exactly RR-01 through RR-05 rows');
+  const rrExpectations = {
+    'RR-02': ['caffeinate', 'script'],
+    'RR-03': ['F27', 'F28', 'copytree', 'os.unlink', 'io.FileIO', 'shutil.move'],
+    'RR-04': ['F26', 'F31', "require('axios')"],
+    'RR-05': ['F29', 'MAX_SCRIPT_DEPTH = 4', 'npm run', 'Không phân loại `P2` theo trình chạy'],
+  };
+
+  for (const [rrId, expectedPhrases] of Object.entries(rrExpectations)) {
+    const row = rrRows.get(rrId);
+    assert.ok(row, `F30: table row ${rrId} must exist in §3`);
+    assert.ok(
+      row.conditionCell.includes('Điều kiện thuộc `P1`') && row.conditionCell.includes('Điều kiện thuộc `P2`'),
+      `F30: ${rrId} condition cell (column 2) must contain both "Điều kiện thuộc \`P1\`" and "Điều kiện thuộc \`P2\`"`
+    );
+    for (const phrase of expectedPhrases) {
+      assert.ok(
+        row.conditionCell.includes(phrase),
+        `F30: ${rrId} condition cell must include "${phrase}"`
+      );
+    }
+    assert.ok(
+      row.riskLevelCell.includes('**P1**') && row.riskLevelCell.includes('**P2**'),
+      `F30: ${rrId} risk-level cell (column 5) must explicitly declare both **P1** and **P2** (got: ${row.riskLevelCell})`
+    );
+  }
+
+  // F29: RR-05 must not classify normal npm run / make / cmake runners as P2
+  const rr05 = rrRows.get('RR-05');
+  assert.equal(
+    rr05.riskLevelCell.includes('công cụ build/daemon ngoài danh sách trình thông dịch'),
+    false,
+    'F29/F30: RR-05 risk-level cell must not classify normal build runners as P2'
+  );
+
+  const sec4Body = sanAnToanContent.slice(sec4Idx);
+  assert.ok(
+    sec4Body.includes('phân loại từng phản ví dụ theo §4.1'),
+    'F30: §4 must require classifying each counterexample per §4.1'
+  );
   assert.equal(
     sanAnToanContent.includes('không dùng làm lý do chặn gộp'),
     false,
-    'F24: operations/SAN-AN-TOAN-GHE.md must not contain blanket "không dùng làm lý do chặn gộp" clause'
+    'F24/F30: operations/SAN-AN-TOAN-GHE.md must not contain blanket "không dùng làm lý do chặn gộp" clause'
   );
 });
 
@@ -1003,6 +1060,94 @@ test('F21, F22 & F23 (S17e): gen-seat-files.mjs runs under --no-experimental-str
     );
   } finally {
     fs.rmSync(tmpRepo, { recursive: true, force: true });
+  }
+});
+
+test('F26, F27, F28, F29 & F31 (S17f): Hook 2.1 resolves options/config variables fail-closed and blocks arbitrary receiver HTTP write methods, and Hook 7/4 protects copytree/link/symlink/pathlib rename-replace while allowing os.unlink/fs.unlink on wip', () => {
+  const hook21Path = path.join(REPO_ROOT, 'operations', 'hooks', 'block_public_publish.py');
+  const hook7Path = path.join(REPO_ROOT, 'operations', 'hooks', 'lock_raw_inputs.py');
+  const hook4Path = path.join(REPO_ROOT, 'operations', 'hooks', 'protect_final_outputs.py');
+
+  // 1. F26 & F31 block cases on Hook 2.1
+  for (const cmd of [
+    "node -e \"const options={method:'POST',body:'x'}; fetch('https://example.net/ingest',options)\"",
+    "node -e \"const options=getOpts(); fetch('https://example.net/ingest',options)\"",
+    "node -e \"const axios=require('axios'); const cfg={url:'https://example.net/ingest',method:'POST'}; axios(cfg)\"",
+    "node -e \"require('axios').post('https://example.net/ingest',{a:1})\"",
+    "node -e \"(await import('axios')).default.post('https://example.net/ingest',{a:1})\"",
+    "node -e \"require('node-fetch')('https://example.net/ingest',{method:'POST',body:'x'})\"",
+    "node -e \"require('got').post('https://example.net/ingest',{json:{a:1}})\"",
+    "node -e \"require('superagent').post('https://example.net/ingest').send({a:1})\"",
+    "node -e \"const undici=require('undici'); undici.request('https://example.net/ingest',{method:'POST',body:'x'})\"",
+    "python3 -c \"import urllib3; urllib3.PoolManager().request('POST','https://example.net/ingest')\"",
+    "python3 -c \"import http.client; http.client.HTTPSConnection('example.net').request('POST','/ingest','x')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F26/F31 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:block_public_publish]'), `F26/F31 stderr prefix missing for "${cmd}"`);
+  }
+
+  // 2. F26 & F31 allow cases on Hook 2.1
+  for (const cmd of [
+    "node -e \"fetch('https://example.net/status')\"",
+    "node -e \"const options={method:'GET'}; fetch('https://example.net/status',options)\"",
+    "node -e \"const axios=require('axios'); axios.get('https://example.net/status')\"",
+    "python3 -c \"import urllib3; urllib3.PoolManager().request('GET','https://example.net/status')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, `F26/F31 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  }
+
+  // 3. F27 & F28 block cases on Hook 7 (lock_raw_inputs)
+  for (const cmd of [
+    "python3 -c \"import shutil; shutil.copytree('wip','projects/demo/inputs/sub')\"",
+    "python3 -c \"import os; os.link('wip/a','projects/demo/inputs/a')\"",
+    "python3 -c \"import os; os.symlink('../../../wip/a','projects/demo/inputs/a')\"",
+    "python3 -c \"from pathlib import Path; p=Path('projects/demo/inputs/a'); p.rename('wip/a')\"",
+    "python3 -c \"from pathlib import Path; p=Path('projects/demo/inputs/a'); p.replace('wip/a')\"",
+    "python3 -c \"import shutil; shutil.rmtree('projects/demo/inputs/sub')\"",
+    "python3 -c \"import os; os.unlink('projects/THU-SU-THAT/inputs/a')\"",
+    "node -e \"const fs=require('fs'); fs.unlinkSync('projects/THU-SU-THAT/inputs/a')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook7Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F27/F28 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:lock_raw_inputs]'), `F27/F28 stderr prefix missing for "${cmd}"`);
+  }
+
+  // 4. F27 block cases on Hook 4 (protect_final_outputs)
+  for (const cmd of [
+    "python3 -c \"from pathlib import Path; p=Path('projects/THU-SU-THAT/outputs/bao-cao.md'); p.rename('wip/bao-cao.md')\"",
+    "python3 -c \"from pathlib import Path; Path('projects/THU-SU-THAT/outputs/bao-cao.md').unlink()\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook4Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F27 Hook 4 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:protect_final_outputs]'), `F27 Hook 4 stderr prefix missing for "${cmd}"`);
+  }
+
+  // 5. F28 allow cases on Hook 7 (no false positive on os.unlink/os.remove/fs.unlinkSync/fs.unlink in wip)
+  for (const cmd of [
+    "python3 -c \"import os; os.unlink('wip/tmp')\"",
+    "python3 -c \"import os; os.remove('wip/tmp')\"",
+    "node -e \"const fs=require('fs'); fs.unlinkSync('wip/tmp')\"",
+    "node -e \"const fs=require('fs'); fs.unlink('wip/tmp', () => {})\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook7Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, `F28 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
   }
 });
 

@@ -138,26 +138,94 @@ def is_curl_write(cmd: str) -> bool:
 
 
 def _is_non_readonly_method_spec(options_text: str) -> bool:
-    """Return True if options_text specifies an HTTP method that is POST/PUT/DELETE/PATCH or non-readonly."""
+    """Return True if options_text specifies an HTTP method that is POST/PUT/DELETE/PATCH or non-literal/non-readonly."""
     for m in re.finditer(r"\bmethod\s*[:=]\s*(['\"]?[A-Za-z0-9_$.]+['\"]?)", options_text, re.I):
-        val = m.group(1).strip().strip("'\"").upper()
+        raw_val = m.group(1).strip()
+        if not (len(raw_val) >= 2 and raw_val[0] == raw_val[-1] and raw_val[0] in ("'", '"')):
+            return True
+        val = raw_val[1:-1].strip().upper()
         if val not in ("GET", "HEAD", "OPTIONS"):
             return True
     return False
 
 
+def _has_body_prop(options_text: str) -> bool:
+    return bool(
+        re.search(r"\bbody\s*:", options_text)
+        or re.search(r"\{\s*(?:[A-Za-z0-9_$]+\s*,\s*)*body\s*(?:,|\})", options_text)
+    )
+
+
+def _has_body_or_data_prop(options_text: str) -> bool:
+    return _has_body_prop(options_text) or bool(
+        re.search(r"\bdata\s*:", options_text)
+        or re.search(r"\{\s*(?:[A-Za-z0-9_$]+\s*,\s*)*data\s*(?:,|\})", options_text)
+    )
+
+
+def _extract_simple_obj_var_env(text: str) -> dict[str, str | None]:
+    """
+    F26 (S17f): Extract one-step object/dict literal variable assignments (`const options = {...}`, `cfg = {...}`)
+    within the same command text. Variables assigned multiple times, assigned non-object expressions, or containing
+    spread `...` map to None (unresolvable -> fail-closed when passed as request options/config).
+    """
+    env: dict[str, str | None] = {}
+    counts: dict[str, int] = {}
+    for stmt in re.split(r"[;\n]+", text):
+        s = stmt.strip()
+        if not s:
+            continue
+        s = re.sub(r"^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+['\"]?", "", s).strip()
+        m = re.match(r"^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$", s, re.DOTALL)
+        if not m:
+            continue
+        var_name = m.group(1)
+        rhs = bash_parser._strip_outer_parens(m.group(2).strip())
+        if len(rhs) >= 2 and rhs[-1] in ("'", '"') and rhs[0] == "{" and rhs[-2] == "}":
+            rhs = rhs[:-1].strip()
+        if var_name in ("import", "from", "return", "if", "elif", "while", "for", "assert"):
+            continue
+        counts[var_name] = counts.get(var_name, 0) + 1
+        if counts[var_name] > 1:
+            env[var_name] = None
+            continue
+        if rhs.startswith("{") and rhs.endswith("}") and not re.search(r"\.\.\.\s*[A-Za-z_$(]", rhs):
+            env[var_name] = rhs
+        else:
+            env[var_name] = None
+    return env
+
+
+def _resolve_options_literal(opt_expr: str, obj_env: dict[str, str | None]) -> str | None:
+    """
+    F26 (S17f): Resolve an options/config argument to a static `{...}` literal string,
+    or return None if it cannot be statically resolved (variable out of scope, spread, function call, etc.).
+    """
+    s = bash_parser._strip_outer_parens(opt_expr)
+    if not s:
+        return ""
+    if s.startswith("{") and s.endswith("}"):
+        if re.search(r"\.\.\.\s*[A-Za-z_$(]", s):
+            return None
+        return s
+    if re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$", s):
+        return obj_env.get(s, None)
+    return None
+
+
 def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
     """
-    F19b (S17e): Detect HTTP write calls in Python/JS using balanced parenthesis argument lists
-    so nested parentheses in arguments (e.g. `fetch(new URL('/ingest','https://example.net'), {method:'POST',body:'x'})`)
-    never truncate detection.
+    F19b (S17e), F26 & F31 (S17f): Detect HTTP write calls in Python/JS using balanced parenthesis argument lists,
+    one-step options/config variable resolution (fail-closed when unresolvable), and arbitrary receiver expressions
+    for `.post`/`.put`/`.delete`/`.patch`/`.request` (e.g. `require('axios').post(...)`, `urllib3.PoolManager().request(...)`).
     Returns a list of raw URL argument expressions (or None when an HTTP write call has no extractable URL arg).
     """
     url_exprs: list[str | None] = []
+    obj_env = _extract_simple_obj_var_env(text)
 
-    # 1. Explicit write verbs: requests/httpx/axios/got/client/session . (post|put|delete|patch)(...)
+    # 1. F31: Explicit write verbs `.post(...)`, `.put(...)`, `.delete(...)`, `.patch(...)` on ANY receiver expression
     for call_args in bash_parser._extract_call_arg_lists(
-        text, r"\b(?:requests|httpx|axios|got|client|session)\s*\.\s*(?:post|put|delete|patch)\s*\("
+        text, r"\.\s*(?:post|put|delete|patch)\s*\("
     ):
         if not call_args:
             url_exprs.append(None)
@@ -172,80 +240,182 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
             url_expr = call_args[0].strip()
         url_exprs.append(url_expr or None)
 
-    # 2. (requests|httpx|client|session).request(method, url, ...)
-    for call_args in bash_parser._extract_call_arg_lists(
-        text, r"\b(?:requests|httpx|client|session)\s*\.\s*request\s*\("
-    ):
-        if not call_args:
-            continue
-        method_arg = call_args[0].strip().strip("'\"").upper()
-        rest_text = " , ".join(call_args[1:])
-        is_write = method_arg not in ("GET", "HEAD", "OPTIONS") or bool(
-            re.search(r"\b(?:data|json|files|content)\s*=", rest_text)
-        )
-        if not is_write:
-            continue
-        url_expr = None
-        for extra in call_args:
-            s_extra = extra.strip()
-            if s_extra.startswith("url") and "=" in s_extra:
-                url_expr = s_extra.split("=", 1)[1].strip()
-                break
-        if url_expr is None and len(call_args) >= 2:
-            url_expr = call_args[1].strip()
-        url_exprs.append(url_expr or None)
-
-    # 3. fetch(resource, options?) — inspect balanced args so new URL(...) in arg 0 never breaks parsing
-    for call_args in bash_parser._extract_call_arg_lists(text, r"\bfetch\s*\("):
-        if not call_args:
-            continue
-        first_arg = call_args[0].strip()
-        opts_text = " , ".join(call_args[1:])
-        combined_opts = f"{first_arg} , {opts_text}" if first_arg.startswith("new Request") else opts_text
-        has_write_method = _is_non_readonly_method_spec(combined_opts)
-        has_body = bool(
-            re.search(r"\bbody\s*:", combined_opts)
-            or re.search(r"\{\s*(?:[A-Za-z0-9_]+\s*,\s*)*body\s*(?:,|\})", combined_opts)
-        )
-        if has_write_method or has_body:
-            url_exprs.append(first_arg or None)
-
-    # 4. axios(config_or_url, config?) / axios.request(config)
-    for call_args in bash_parser._extract_call_arg_lists(
-        text, r"\baxios(?:\s*\.\s*request)?\s*\("
-    ):
-        if not call_args:
-            continue
-        joined_args = " , ".join(call_args)
-        has_write = _is_non_readonly_method_spec(joined_args) or bool(
-            re.search(r"\b(?:data|body)\s*:", joined_args)
-        )
-        if not has_write:
-            continue
-        first_arg = call_args[0].strip()
-        if first_arg.startswith("{"):
-            m_url = re.search(r"\burl\s*:\s*([^,}]+)", first_arg)
-            url_exprs.append(m_url.group(1).strip() if m_url else None)
-        else:
-            url_exprs.append(first_arg or None)
-
-    # 5. Node http.request(...) / https.request(...)
-    for call_args in bash_parser._extract_call_arg_lists(
-        text, r"\bhttps?\s*\.\s*request\s*\("
-    ):
-        if not call_args:
+    # 2. F26 & F31: `.request(...)` on ANY receiver expression (requests, httpx, urllib3.PoolManager(),
+    #    http.client.HTTPSConnection(host), axios, undici, http/https)
+    for m_req in re.finditer(r"\.\s*request\s*\(", text):
+        dot_idx = m_req.start()
+        recv_expr = bash_parser._extract_receiver_before_dot(text, dot_idx)
+        call_args, _ = bash_parser._scan_balanced_paren_args(text, m_req.end())
+        if call_args is None or not call_args:
             url_exprs.append(None)
             continue
-        joined_args = " , ".join(call_args)
-        explicit_readonly = bool(
-            re.search(r"\bmethod\s*:\s*['\"](?:GET|HEAD|OPTIONS)['\"]", joined_args, re.I)
-        ) and not bool(re.search(r"\.write\s*\(", text))
-        if explicit_readonly:
+
+        # 2a. Python http.client.HTTPConnection(host) / HTTPSConnection(host) .request(method, path, body?...)
+        if "HTTPConnection" in recv_expr or "HTTPSConnection" in recv_expr or re.search(r"\bHTTPS?Connection\s*\(", text):
+            arg0 = call_args[0].strip()
+            is_quoted_readonly = (
+                len(arg0) >= 2
+                and arg0[0] == arg0[-1]
+                and arg0[0] in ("'", '"')
+                and arg0[1:-1].strip().upper() in ("GET", "HEAD", "OPTIONS")
+            )
+            has_body_arg = len(call_args) >= 3 and call_args[2].strip() not in ("None", "''", '""')
+            if not is_quoted_readonly or has_body_arg:
+                conn_arg_lists = bash_parser._extract_call_arg_lists(text, r"\bHTTPS?Connection\s*\(")
+                if conn_arg_lists and conn_arg_lists[0]:
+                    host_expr = conn_arg_lists[0][0].strip()
+                    if (
+                        len(host_expr) >= 2
+                        and host_expr[0] == host_expr[-1]
+                        and host_expr[0] in ("'", '"')
+                        and not any(ch in host_expr for ch in ("$", "`", "{", "}", " "))
+                    ):
+                        host_val = host_expr[1:-1].strip()
+                        scheme = "https" if "HTTPSConnection" in text else "http"
+                        url_exprs.append(f"'{scheme}://{host_val}/'")
+                    else:
+                        url_exprs.append(None)
+                else:
+                    url_exprs.append(None)
+            continue
+
+        # 2b. Single-argument `.request(config_or_url)` (e.g. axios.request(cfg), http.request(opts), undici.request(url))
+        if len(call_args) == 1:
+            arg0 = call_args[0].strip()
+            if (
+                _STRICT_STATIC_URL_LITERAL_RE.match(arg0)
+                and not bool(re.search(r"\.write\s*\(", text))
+                and recv_expr not in ("http", "https")
+            ):
+                continue
+            resolved_cfg = _resolve_options_literal(arg0, obj_env)
+            if resolved_cfg is None:
+                url_exprs.append(None)
+            else:
+                explicit_readonly = (
+                    bool(re.search(r"\bmethod\s*:\s*['\"](?:GET|HEAD|OPTIONS)['\"]", resolved_cfg, re.I))
+                    and not _has_body_or_data_prop(resolved_cfg)
+                    and not bool(re.search(r"\.write\s*\(", text))
+                )
+                if not explicit_readonly:
+                    m_url = re.search(r"""\burl\s*:\s*(['"][^'"]+['"]|[^,}\s]+)""", resolved_cfg)
+                    url_exprs.append(m_url.group(1).strip() if m_url else None)
+            continue
+
+        # 2c. Two+ arguments: distinguish Method-first `.request(method, url, ...)` vs URL-first `.request(url, options, ...)`
+        arg0 = call_args[0].strip()
+        arg0_unquoted = (
+            arg0[1:-1].strip().upper()
+            if (len(arg0) >= 2 and arg0[0] == arg0[-1] and arg0[0] in ("'", '"'))
+            else ""
+        )
+        is_url_first = (
+            arg0.strip("'\"").lower().startswith(("http://", "https://"))
+            or arg0.startswith("new URL")
+        )
+        if not is_url_first:
+            # Method-first: requests.request(method, url, ...), httpx.request(method, url, ...), urllib3.PoolManager().request(method, url, ...)
+            rest_text = " , ".join(call_args[1:])
+            is_readonly = arg0_unquoted in ("GET", "HEAD", "OPTIONS") and not bool(
+                re.search(r"\b(?:data|json|files|content|body|fields)\s*[:=]", rest_text)
+            )
+            if not is_readonly:
+                url_expr = None
+                for extra in call_args[1:]:
+                    s_extra = extra.strip()
+                    if s_extra.startswith("url") and "=" in s_extra:
+                        url_expr = s_extra.split("=", 1)[1].strip()
+                        break
+                if url_expr is None:
+                    url_expr = call_args[1].strip()
+                url_exprs.append(url_expr or None)
+        else:
+            # URL-first: undici.request(url, options), http.request(url, options), axios.request(url, config)
+            opt_arg = call_args[1].strip()
+            if opt_arg in ("undefined", "null", "{}") and not bool(re.search(r"\.write\s*\(", text)) and recv_expr not in ("http", "https"):
+                continue
+            resolved_opt = _resolve_options_literal(opt_arg, obj_env)
+            if resolved_opt is None:
+                url_exprs.append(arg0 or None)
+            else:
+                has_write = (
+                    _is_non_readonly_method_spec(resolved_opt)
+                    or _has_body_or_data_prop(resolved_opt)
+                    or bool(re.search(r"\.write\s*\(", text))
+                )
+                is_http_req_without_readonly = recv_expr in ("http", "https") and not bool(
+                    re.search(r"\bmethod\s*:\s*['\"](?:GET|HEAD|OPTIONS)['\"]", resolved_opt, re.I)
+                )
+                if has_write or is_http_req_without_readonly:
+                    url_exprs.append(arg0 or None)
+
+    # 3. F26 & F31: fetch(resource, options?) and require('node-fetch')(resource, options?) / (await import('node-fetch')).default(...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text,
+        r"(?:\bfetch|require\s*\(\s*['\"](?:node-fetch|cross-fetch|isomorphic-fetch)['\"]\s*\)|\(\s*await\s+import\s*\(\s*['\"](?:node-fetch|cross-fetch|isomorphic-fetch)['\"]\s*\)\s*\)(?:\s*\.\s*default)?)\s*\(",
+    ):
+        if not call_args:
             continue
         first_arg = call_args[0].strip()
-        url_exprs.append(first_arg or None)
+        if first_arg.startswith("new Request"):
+            req_arg_lists = bash_parser._extract_call_arg_lists(first_arg, r"^new\s+Request\s*\(")
+            if not req_arg_lists or not req_arg_lists[0]:
+                url_exprs.append(None)
+                continue
+            req_args = req_arg_lists[0]
+            req_url = req_args[0].strip()
+            opt_candidates = req_args[1:] + call_args[1:]
+            if not opt_candidates:
+                continue
+            for opt_cand in opt_candidates:
+                opt_s = opt_cand.strip()
+                if opt_s in ("undefined", "null", "{}"):
+                    continue
+                resolved_opt = _resolve_options_literal(opt_s, obj_env)
+                if resolved_opt is None or _is_non_readonly_method_spec(resolved_opt) or _has_body_prop(resolved_opt):
+                    url_exprs.append(req_url or None)
+                    break
+            continue
 
-    # 6. Python urllib.request.Request(...) / urlopen(...)
+        if len(call_args) == 1:
+            continue
+        opt_arg = call_args[1].strip()
+        if opt_arg in ("undefined", "null", "{}"):
+            continue
+        resolved_opt = _resolve_options_literal(opt_arg, obj_env)
+        if resolved_opt is None:
+            # F26: Options is an unresolvable variable/expression/spread -> fail-closed!
+            url_exprs.append(first_arg or None)
+        elif _is_non_readonly_method_spec(resolved_opt) or _has_body_prop(resolved_opt):
+            url_exprs.append(first_arg or None)
+
+    # 4. F26 & F31: axios(config_or_url, config?) / require('axios')(...) / (await import('axios')).default(...)
+    for call_args in bash_parser._extract_call_arg_lists(
+        text,
+        r"(?:\baxios|require\s*\(\s*['\"]axios['\"]\s*\)|\(\s*await\s+import\s*\(\s*['\"]axios['\"]\s*\)\s*\)(?:\s*\.\s*default)?)\s*\(",
+    ):
+        if not call_args:
+            continue
+        if len(call_args) == 1:
+            arg0 = call_args[0].strip()
+            if _STRICT_STATIC_URL_LITERAL_RE.match(arg0):
+                continue
+            resolved_cfg = _resolve_options_literal(arg0, obj_env)
+            if resolved_cfg is None:
+                url_exprs.append(None)
+            elif _is_non_readonly_method_spec(resolved_cfg) or _has_body_or_data_prop(resolved_cfg):
+                m_url = re.search(r"""\burl\s*:\s*(['"][^'"]+['"]|[^,}\s]+)""", resolved_cfg)
+                url_exprs.append(m_url.group(1).strip() if m_url else None)
+        else:
+            url_arg = call_args[0].strip()
+            cfg_arg = call_args[1].strip()
+            if cfg_arg in ("undefined", "null", "{}"):
+                continue
+            resolved_cfg = _resolve_options_literal(cfg_arg, obj_env)
+            if resolved_cfg is None or _is_non_readonly_method_spec(resolved_cfg) or _has_body_or_data_prop(resolved_cfg):
+                url_exprs.append(url_arg or None)
+
+    # 5. Python urllib.request.Request(...) / urlopen(...)
     for call_args in bash_parser._extract_call_arg_lists(
         text, r"\b(?:urllib\.request\.)?(?:Request|urlopen)\s*\("
     ):
@@ -272,6 +442,7 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
             url_exprs.append(url_expr or None)
 
     return url_exprs
+
 
 
 def has_code_http_write(cmd: str) -> bool:
@@ -537,6 +708,61 @@ def extract_candidate_script_paths(sc: bash_parser.SimpleCommand) -> list[str]:
     return candidates
 
 
+STANDARD_SAFE_PACKAGE_SCRIPTS = {
+    "build",
+    "test",
+    "test:hooks",
+    "test:desktop",
+    "lint",
+    "lint:dem",
+    "prestart",
+    "postbuild",
+    "start",
+    "dev",
+    "desktop",
+    "typecheck",
+    "check",
+}
+
+
+def extract_package_script_invocations(sc: bash_parser.SimpleCommand) -> list[tuple[str, str]]:
+    """
+    F29 (S17f): Extract (pkg_cwd, script_name) when npm/pnpm/yarn invokes a package.json script
+    via `npm run <script>`, `pnpm run <script>`, `yarn run <script>` (or `run-script`).
+    """
+    exe = sc.executable
+    words = sc.words
+    if exe not in ("npm", "pnpm", "yarn") or len(words) < 2:
+        return []
+
+    pkg_cwd = sc.cwd
+    i = 1
+    while i < len(words):
+        w = words[i]
+        if w in ("-C", "--dir", "--prefix") and i + 1 < len(words):
+            dir_arg = words[i + 1].strip("'\"")
+            pkg_cwd = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(dir_arg)))
+            i += 2
+            continue
+        if w.startswith(("--dir=", "--prefix=")):
+            dir_arg = w.split("=", 1)[1].strip("'\"")
+            pkg_cwd = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(dir_arg)))
+            i += 1
+            continue
+        if w.startswith("-"):
+            i += 1
+            continue
+        if w in ("run", "run-script"):
+            j = i + 1
+            while j < len(words) and words[j].startswith("-"):
+                j += 1
+            if j < len(words):
+                return [(pkg_cwd, words[j].strip("'\""))]
+            return []
+        break
+    return []
+
+
 TRUSTED_EXEMPT_SKILL_RELPATHS = (
     "doc-comment-fanpage/scripts/doc-comment.py",
     "tra-loi-inbox-fanpage/scripts/inbox.py",
@@ -752,6 +978,39 @@ def check_command_text(
             )
             if sub_violation:
                 return sub_violation
+
+        for pkg_cwd, script_name in extract_package_script_invocations(sc):
+            if "$" in script_name or "`" in script_name:
+                return f"Executing npm/pnpm/yarn run with dynamic script name ({script_name}) is blocked fail-closed by Hook 2.1."
+            if script_name in STANDARD_SAFE_PACKAGE_SCRIPTS:
+                continue
+            pkg_json_path = os.path.normpath(os.path.join(pkg_cwd, "package.json"))
+            if not os.path.isfile(pkg_json_path) and project_dir:
+                pkg_json_path = os.path.normpath(os.path.join(project_dir, "package.json"))
+                pkg_cwd = project_dir
+            if not os.path.isfile(pkg_json_path):
+                return f"package.json not found for script '{script_name}'; blocked fail-closed by Hook 2.1."
+            try:
+                with open(pkg_json_path, "r", encoding="utf-8", errors="replace") as pf:
+                    pkg_data = json.load(pf)
+            except Exception as e:
+                return f"Cannot parse package.json for script '{script_name}' ({e}); blocked fail-closed by Hook 2.1."
+            scripts_dict = pkg_data.get("scripts") if isinstance(pkg_data, dict) else None
+            if not isinstance(scripts_dict, dict) or script_name not in scripts_dict:
+                return f"Script '{script_name}' is not defined in package.json; blocked fail-closed by Hook 2.1."
+            script_cmd = scripts_dict.get(script_name)
+            if not isinstance(script_cmd, str) or not script_cmd.strip():
+                return f"Script '{script_name}' in package.json is empty or non-string; blocked fail-closed by Hook 2.1."
+            pkg_violation = check_command_text(
+                script_cmd,
+                pkg_cwd,
+                project_dir,
+                allowed_hosts,
+                depth + 1,
+                visited_files,
+            )
+            if pkg_violation:
+                return pkg_violation
 
     return ""
 

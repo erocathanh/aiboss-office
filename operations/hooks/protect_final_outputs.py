@@ -147,10 +147,14 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                 break
 
                     real_t = os.path.realpath(abs_t)
-                    if os.path.exists(real_t):
+                    is_destructive_op = any(
+                        k in reason for k in ("delete", "unlink", "rmdir", "rmtree", "rename source", "move/rename source", "Path.rename source", "Path.replace source")
+                    )
+                    if os.path.exists(real_t) or is_destructive_op:
                         return f"Lệnh ghi đè lên tệp đã có ({os.path.basename(target_path)}) trong DAU-RA bị chặn. Đầu ra đã chốt là bất biến."
 
     return ""
+
 
 def main():
     try:

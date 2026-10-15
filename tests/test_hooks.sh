@@ -268,6 +268,10 @@ POS_CONTROL_CASES=(
     "block_public_publish:block-f19a-script-curl-post.json"
     "block_public_publish:block-f19b-node-fetch-new-url-post.json"
     "block_public_publish:block-f19b-python-urllib-request-post.json"
+    "block_public_publish:block-S17f-F26-fetch-options-var-post.json"
+    "block_public_publish:block-S17f-F26-axios-config-var-post.json"
+    "block_public_publish:block-pm-node-axios-post.json"
+    "block_public_publish:block-S17f-F31-urllib3-poolmanager-request.json"
     "lock_raw_inputs:block-f16-node-cpSync-dst-approvals.json"
     "lock_raw_inputs:block-f16-python-open-hex-escape.json"
     "lock_raw_inputs:block-f16-python-path-join-write-text.json"
@@ -275,6 +279,10 @@ POS_CONTROL_CASES=(
     "lock_raw_inputs:block-f20a-python-path-var-write-text.json"
     "lock_raw_inputs:block-f20b-python-shutil-move-from-inputs.json"
     "lock_raw_inputs:block-f20c-node-path-join-leading-slash-inputs.json"
+    "lock_raw_inputs:block-S17f-F27-shutil-copytree-inputs.json"
+    "lock_raw_inputs:block-S17f-F27-path-rename-from-inputs.json"
+    "lock_raw_inputs:block-S17f-F28-os-unlink-inputs.json"
+    "protect_final_outputs:block-S17f-F27-path-rename-from-outputs.json"
 )
 
 saved_total=$TOTAL
@@ -299,7 +307,7 @@ PASSED=$saved_passed
 FAILED=$saved_failed
 
 if [ "$pos_control_ok" -eq 1 ]; then
-    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20/F26/F27/F28/F31): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
     FAILED=$((FAILED + 1))
 fi

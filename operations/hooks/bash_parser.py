@@ -974,31 +974,42 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 dest = w[3:].strip("'\"")
                 targets.append((dest, "dd output file"))
 
-    # 3. Inline script & heredoc writes (F5, F10, F12, F16, F20: python open, Path.write_*, shutil.copy/move, os.rename/replace, node fs.*FileSync, copyFileSync/cpSync/renameSync)
+    # 3. Inline script & heredoc writes (F5, F10, F12, F16, F20, F27, F28)
     combined_raw = "\n".join([cmd.raw_str] + getattr(cmd, "heredoc_bodies", []))
     if (
         base in ('python', 'python3', 'py', 'node')
+        or base.startswith('python3.')
         or 'open(' in combined_raw
         or 'write_' in combined_raw
         or 'Path(' in combined_raw
         or 'FileSync' in combined_raw
         or 'cpSync' in combined_raw
+        or 'cp(' in combined_raw
         or 'writeFile' in combined_raw
         or 'appendFile' in combined_raw
         or 'copyFile' in combined_raw
+        or 'copytree' in combined_raw
+        or 'rmtree' in combined_raw
         or 'rename' in combined_raw
+        or 'replace' in combined_raw
         or 'unlink' in combined_raw
+        or 'rmdir' in combined_raw
+        or 'mkdir' in combined_raw
+        or 'makedirs' in combined_raw
+        or 'touch' in combined_raw
+        or 'link' in combined_raw
+        or 'symlink' in combined_raw
         or 'rmSync' in combined_raw
+        or 'rm(' in combined_raw
         or 'shutil.' in combined_raw
-        or 'os.replace' in combined_raw
-        or 'os.rename' in combined_raw
-        or 'os.remove' in combined_raw
-        or 'os.unlink' in combined_raw
+        or 'os.' in combined_raw
+        or 'fs.' in combined_raw
     ):
         default_join = 'node' if base == 'node' else 'auto'
         var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join)
+        module_vars = _extract_module_vars(combined_raw)
 
-        for call_args in _extract_call_arg_lists(combined_raw, r'(?<!\.)\bopen\s*\('):
+        for call_args in _extract_module_call_arg_lists(combined_raw, r'\bopen\s*\(', module_vars):
             if not call_args:
                 continue
             path_expr = call_args[0]
@@ -1010,12 +1021,15 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
                     targets.append((resolved_target, label))
 
-        # F20a: Receiver-based detection for .write_text(...), .write_bytes(...), .open(...)
-        # Handles Path(...).write_text(...), (Path('a')/'b').write_text(...), and p = ...; p.write_text(...)
+        # F20a, F27 & F28: Receiver-based detection for pathlib methods (.write_text, .write_bytes, .open,
+        # .unlink, .rmdir, .touch, .mkdir, .symlink_to, .hardlink_to, .rename, .replace).
+        # F28: Skip module receivers (os, fs, shutil, pathlib, io, require('fs'), etc.) so module APIs
+        # like os.unlink('wip/tmp') or fs.unlink('wip/tmp', cb) are never misclassified as pathlib receivers.
         for recv_expr, method_name, method_args in _extract_method_calls_with_receiver(
-            combined_raw, ('write_text', 'write_bytes', 'open', 'unlink')
+            combined_raw,
+            ('write_text', 'write_bytes', 'open', 'unlink', 'rmdir', 'touch', 'mkdir', 'symlink_to', 'hardlink_to', 'rename', 'replace'),
         ):
-            if not recv_expr:
+            if not recv_expr or _is_module_receiver_expr(recv_expr, module_vars):
                 continue
             if method_name == 'open':
                 mode_expr = _extract_open_mode_expr(method_args)
@@ -1027,14 +1041,33 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode)
                 ):
                     continue
-            resolved_target = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style=default_join)
-            label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.write"
-            targets.append((resolved_target, label))
+                resolved_target = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style=default_join)
+                label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.open"
+                targets.append((resolved_target, label))
+            elif method_name in ('rename', 'replace'):
+                # F27c: pathlib p.rename(dst) / p.replace(dst) modifies BOTH source (receiver p) and destination (arg[0])
+                resolved_src = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style='python')
+                src_label = f"python Path.{method_name} dynamic source" if resolved_src.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} source"
+                targets.append((resolved_src, src_label))
+                if method_args:
+                    resolved_dst = resolve_script_path_expr(method_args[0], var_env=var_env, default_join_style='python')
+                else:
+                    resolved_dst = "$DYNAMIC_WRITE:empty"
+                dst_label = f"python Path.{method_name} dynamic destination" if resolved_dst.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} destination"
+                targets.append((resolved_dst, dst_label))
+            else:
+                resolved_target = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style=default_join)
+                if method_name in ('unlink', 'rmdir'):
+                    label = f"python Path.{method_name} dynamic delete" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} delete"
+                else:
+                    label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name}"
+                targets.append((resolved_target, label))
 
-        # Node fs single-target writes & deletes
-        for call_args in _extract_call_arg_lists(
+        # Node fs single-target writes, deletes & mkdir (F27 & F28: only module/standalone calls)
+        for call_args in _extract_module_call_arg_lists(
             combined_raw,
-            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|unlinkSync|unlink|rmSync)\s*\(',
+            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|unlinkSync|rmSync|rm|rmdirSync|mkdirSync|truncateSync)\s*\(',
+            module_vars,
         ):
             if not call_args:
                 continue
@@ -1042,21 +1075,48 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
             label = "node fs dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs write"
             targets.append((resolved_target, label))
 
-        # Node fs copy (destination is arg[1])
-        for call_args in _extract_call_arg_lists(
+        # Node fs callback/promise unlink/rmdir/mkdir (distinguished from Python os.unlink/rmdir/mkdir by default_join)
+        if base == 'node' or 'fs.' in combined_raw or "require('fs" in combined_raw or 'require("fs' in combined_raw or "require('node:fs" in combined_raw or 'require("node:fs' in combined_raw:
+            for call_args in _extract_module_call_arg_lists(
+                combined_raw,
+                r'\b(?:unlink|rmdir|mkdir|truncate)\s*\(',
+                module_vars,
+            ):
+                if not call_args:
+                    continue
+                resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
+                label = "node fs dynamic delete" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs delete"
+                targets.append((resolved_target, label))
+
+        # Node fs copy & link/symlink (destination is arg[1])
+        for call_args in _extract_module_call_arg_lists(
             combined_raw,
-            r'\b(?:copyFileSync|cpSync|copyFile)\s*\(',
+            r'\b(?:copyFileSync|cpSync|copyFile|cp|linkSync|symlinkSync)\s*\(',
+            module_vars,
         ):
             if len(call_args) < 2:
                 continue
             resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='node')
-            label = "node fs dynamic copy" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs copy"
+            label = "node fs dynamic copy/link" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs copy/link"
             targets.append((resolved_target, label))
 
+        if base == 'node' or 'fs.' in combined_raw or "require('fs" in combined_raw or 'require("fs' in combined_raw or "require('node:fs" in combined_raw or 'require("node:fs' in combined_raw:
+            for call_args in _extract_module_call_arg_lists(
+                combined_raw,
+                r'\b(?:link|symlink)\s*\(',
+                module_vars,
+            ):
+                if len(call_args) < 2:
+                    continue
+                resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='node')
+                label = "node fs dynamic link" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs link"
+                targets.append((resolved_target, label))
+
         # F20b: Node fs rename / renameSync — check BOTH source (arg[0]) and destination (arg[1])
-        for call_args in _extract_call_arg_lists(
+        for call_args in _extract_module_call_arg_lists(
             combined_raw,
             r'\b(?:renameSync|rename)\s*\(',
+            module_vars,
         ):
             if len(call_args) < 2:
                 continue
@@ -1065,10 +1125,11 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 label = f"node fs dynamic rename {role}" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"node fs rename {role}"
                 targets.append((resolved_target, label))
 
-        # Python shutil.copy / copy2 / copyfile (destination is arg[1])
-        for call_args in _extract_call_arg_lists(
+        # F27a: Python shutil.copy / copy2 / copyfile / copytree (destination is arg[1])
+        for call_args in _extract_module_call_arg_lists(
             combined_raw,
-            r'\bshutil\.(?:copy|copy2|copyfile)\s*\(',
+            r'\b(?:shutil\.)?(?:copy|copy2|copyfile|copytree)\s*\(',
+            module_vars,
         ):
             if len(call_args) < 2:
                 continue
@@ -1076,10 +1137,23 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
             label = "python shutil dynamic copy" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python shutil copy"
             targets.append((resolved_target, label))
 
-        # F20b: Python shutil.move, os.rename, os.replace — check BOTH source (arg[0]) and destination (arg[1])
-        for call_args in _extract_call_arg_lists(
+        # F27b: Python os.link / os.symlink (destination is arg[1])
+        for call_args in _extract_module_call_arg_lists(
             combined_raw,
-            r'\b(?:shutil\.move|os\.(?:replace|rename))\s*\(',
+            r'\b(?:os\.)?(?:link|symlink)\s*\(',
+            module_vars,
+        ):
+            if len(call_args) < 2:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='python')
+            label = "python os.link dynamic destination" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python os.link destination"
+            targets.append((resolved_target, label))
+
+        # F20b: Python shutil.move, os.rename, os.replace — check BOTH source (arg[0]) and destination (arg[1])
+        for call_args in _extract_module_call_arg_lists(
+            combined_raw,
+            r'\b(?:shutil\.move|os\.(?:replace|rename)|replace)\s*\(',
+            module_vars,
         ):
             if len(call_args) < 2:
                 continue
@@ -1088,10 +1162,11 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 label = f"python move/rename dynamic {role}" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python move/rename {role}"
                 targets.append((resolved_target, label))
 
-        # Python os.remove, os.unlink, shutil.rmtree (single target arg[0])
-        for call_args in _extract_call_arg_lists(
+        # F27 & F28: Python os.remove, os.unlink, os.rmdir, os.removedirs, os.mkdir, os.makedirs, shutil.rmtree (single target arg[0])
+        for call_args in _extract_module_call_arg_lists(
             combined_raw,
-            r'\b(?:os\.(?:remove|unlink)|shutil\.rmtree)\s*\(',
+            r'\b(?:os\.(?:remove|unlink|rmdir|removedirs|mkdir|makedirs|truncate)|shutil\.rmtree|remove|removedirs|makedirs|rmtree)\s*\(',
+            module_vars,
         ):
             if not call_args:
                 continue
@@ -1099,7 +1174,20 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
             label = "python delete dynamic target" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python delete target"
             targets.append((resolved_target, label))
 
+        if base != 'node':
+            for call_args in _extract_module_call_arg_lists(
+                combined_raw,
+                r'\b(?:unlink|rmdir|mkdir)\s*\(',
+                module_vars,
+            ):
+                if not call_args:
+                    continue
+                resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='python')
+                label = "python delete dynamic target" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python delete target"
+                targets.append((resolved_target, label))
+
     return targets
+
 
 
 def _extract_open_mode_expr(extra_args: List[str]) -> Optional[str]:
@@ -1409,6 +1497,8 @@ def _extract_simple_var_env(text: str, default_join_style: str = "auto") -> Dict
         s = stmt.strip()
         if not s:
             continue
+        # Strip leading interpreter inline flag prefix (e.g. `python3 -c "` or `node -e "`)
+        s = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
         m = re.match(r'^(?:(?:const|let|var)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(?![=~>])(.+)$', s)
         if not m:
             continue
@@ -1459,6 +1549,10 @@ def _extract_receiver_before_dot(text: str, dot_idx: int) -> str:
                 i -= 1
             continue
         if ch in ("'", '"') and (i == 0 or text[i - 1] != '\\'):
+            # Only treat quote as a string literal if it is at the end of the receiver or immediately precedes '/'
+            right_tail = text[i + 1 : end_pos].lstrip()
+            if i < end_pos - 1 and not right_tail.startswith('/'):
+                break
             q = ch
             i -= 1
             while i >= 0:
@@ -1577,6 +1671,71 @@ def _extract_call_arg_lists(text: str, prefix_pattern: str) -> List[List[str]]:
         if args is not None:
             results.append(args)
     return results
+
+
+_KNOWN_MODULE_RECEIVERS = {
+    'os', 'posix', 'nt', 'shutil', 'fs', 'fsp', 'fsPromises',
+    'path', 'posixpath', 'ntpath', 'pathlib', 'io', 'sys',
+    'Path', 'PurePath', 'PosixPath', 'WindowsPath',
+    'PurePosixPath', 'PureWindowsPath',
+}
+
+
+def _extract_module_vars(text: str) -> set:
+    """F28 (S17f): Identify module/namespace identifiers so module calls are not confused with pathlib receivers."""
+    mods = set(_KNOWN_MODULE_RECEIVERS)
+    for m in re.finditer(r'\bimport\s+(?:os|posix|nt|shutil|pathlib|io)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)', text):
+        mods.add(m.group(1))
+    for m in re.finditer(
+        r'([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:require\s*\(\s*[\'"](?:node:)?(?:fs(?:/promises)?|path|os|child_process)[\'"]\s*\)(?:\s*\.\s*promises)?|(?:fs|os|shutil|pathlib)\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)',
+        text,
+    ):
+        mods.add(m.group(1))
+    return mods
+
+
+def _is_module_receiver_expr(recv_expr: str, module_vars: Optional[set] = None) -> bool:
+    """Return True if recv_expr is a module/namespace/class receiver (e.g. os, fs, fs.promises, require('fs')), NOT a Path instance."""
+    s = _strip_outer_parens(recv_expr)
+    if not s:
+        return True
+    mods = module_vars if module_vars is not None else _KNOWN_MODULE_RECEIVERS
+    if s in mods:
+        return True
+    if '(' not in s and any(s.startswith(m_name + '.') for m_name in mods):
+        return True
+    if re.match(
+        r"^require\s*\(\s*['\"](?:node:)?(?:fs(?:/promises)?|path|os|child_process|shutil)['\"]\s*\)(?:\s*\.\s*promises)?$",
+        s,
+    ):
+        return True
+    return False
+
+
+def _extract_module_call_arg_lists(
+    text: str,
+    prefix_pattern: str,
+    module_vars: Optional[set] = None,
+) -> List[List[str]]:
+    """
+    F28 (S17f): Extract argument lists for module/standalone function calls.
+    If the matched call is preceded by `.` (a method call), only accept it if the receiver before `.`
+    is a module/namespace receiver (`_is_module_receiver_expr`), skipping pathlib Path instance calls.
+    """
+    results: List[List[str]] = []
+    for m in re.finditer(prefix_pattern, text):
+        j = m.start() - 1
+        while j >= 0 and text[j] in (' ', '\t'):
+            j -= 1
+        if j >= 0 and text[j] == '.':
+            recv_expr = _extract_receiver_before_dot(text, j)
+            if not _is_module_receiver_expr(recv_expr, module_vars):
+                continue
+        args, _ = _scan_balanced_paren_args(text, m.end())
+        if args is not None:
+            results.append(args)
+    return results
+
 
 
 def _extract_chained_call_arg_lists(
