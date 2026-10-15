@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle, ClockCountdown, ShieldCheck, XCircle } from '@phosphor-icons/react';
 import type { ApprovalItem, ApprovalStatus } from '@/lib/approvals-ledger';
+import { useT } from '@/i18n';
 
 export type ApprovalLoadErrorCode = 'ledger_unreadable' | 'io_error' | 'lock_timeout';
 
@@ -11,17 +12,20 @@ export interface ApprovalsSettingsCardProps {
   initialError?: ApprovalLoadErrorCode | null;
 }
 
-function formatRelativeAge(isoTs: string): string {
+function formatRelativeAge(
+  isoTs: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
   const tsMs = Date.parse(isoTs);
   if (Number.isNaN(tsMs)) return '-';
   const diffSec = Math.max(0, Math.floor((Date.now() - tsMs) / 1000));
-  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 60) return t('settings.approvals.relativeSecondsAgo', { count: diffSec });
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffMin < 60) return t('settings.approvals.relativeMinutesAgo', { count: diffMin });
   const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffHr < 24) return t('settings.approvals.relativeHoursAgo', { count: diffHr });
   const diffDays = Math.floor(diffHr / 24);
-  return `${diffDays}d ago`;
+  return t('settings.approvals.relativeDaysAgo', { count: diffDays });
 }
 
 const LEGACY_H1_REASON_MAP: Array<{ match: RegExp; code: string }> = [
@@ -77,7 +81,10 @@ function formatApprovalHead60(raw: string): string {
   return trimmed;
 }
 
-function getStatusBadgeStyle(status: ApprovalStatus): {
+function getStatusBadgeStyle(
+  status: ApprovalStatus,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): {
   bg: string;
   color: string;
   border: string;
@@ -89,42 +96,42 @@ function getStatusBadgeStyle(status: ApprovalStatus): {
         bg: 'rgba(56, 189, 248, 0.15)',
         color: '#7dd3fc',
         border: '1px solid rgba(56, 189, 248, 0.4)',
-        label: 'APPROVED',
+        label: t('settings.approvals.statusApproved'),
       };
     case 'denied':
       return {
         bg: 'rgba(239, 68, 68, 0.18)',
         color: '#fca5a5',
         border: '1px solid rgba(239, 68, 68, 0.4)',
-        label: 'DENIED',
+        label: t('settings.approvals.statusDenied'),
       };
     case 'executed':
       return {
         bg: 'rgba(34, 197, 94, 0.18)',
         color: '#86efac',
         border: '1px solid rgba(34, 197, 94, 0.4)',
-        label: 'EXECUTED',
+        label: t('settings.approvals.statusExecuted'),
       };
     case 'failed':
       return {
         bg: 'rgba(239, 68, 68, 0.22)',
         color: '#f87171',
         border: '1px solid rgba(239, 68, 68, 0.45)',
-        label: 'FAILED',
+        label: t('settings.approvals.statusFailed'),
       };
     case 'expired':
       return {
         bg: 'rgba(148, 163, 184, 0.16)',
         color: '#cbd5e1',
         border: '1px solid rgba(148, 163, 184, 0.35)',
-        label: 'EXPIRED',
+        label: t('settings.approvals.statusExpired'),
       };
     default:
       return {
         bg: 'rgba(234, 179, 8, 0.18)',
         color: '#fde047',
         border: '1px solid rgba(234, 179, 8, 0.4)',
-        label: 'PENDING',
+        label: t('settings.approvals.statusPending'),
       };
   }
 }
@@ -133,6 +140,7 @@ export function ApprovalsSettingsCard({
   initialApprovals,
   initialError = null,
 }: ApprovalsSettingsCardProps = {}) {
+  const { t } = useT();
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals ?? []);
   const [loadError, setLoadError] = useState<ApprovalLoadErrorCode | null>(initialError ?? null);
   const [loading, setLoading] = useState(!initialApprovals && !initialError);
@@ -183,11 +191,13 @@ export function ApprovalsSettingsCard({
       });
       if (!res.ok) {
         const errData = (await res.json().catch(() => ({}))) as { message?: string };
-        setErrorMessage(errData.message || `Decision failed (${res.status}).`);
+        setErrorMessage(
+          errData.message || t('settings.approvals.decisionFailed', { status: res.status }),
+        );
       }
       await fetchApprovals();
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : 'Network error.');
+      setErrorMessage(err instanceof Error ? err.message : t('settings.approvals.networkError'));
     } finally {
       setBusyId(null);
     }
@@ -209,9 +219,9 @@ export function ApprovalsSettingsCard({
       <div className="settings-card-header">
         <ShieldCheck size={20} weight="bold" className="settings-card-icon" />
         <div style={{ minWidth: 0 }}>
-          <h2>Approvals</h2>
+          <h2>{t('settings.approvals.title')}</h2>
           <p className="settings-card-subtitle">
-            Action approval ledger connecting guarded tool requests, SHA-256 digests, decisions, and single-use runs
+            {t('settings.approvals.subtitle')}
           </p>
         </div>
       </div>
@@ -254,7 +264,7 @@ export function ApprovalsSettingsCard({
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <span>Ledger error: </span>
+            <span>{t('settings.approvals.ledgerErrorLabel')}</span>
             <code
               style={{
                 fontWeight: 700,
@@ -280,7 +290,7 @@ export function ApprovalsSettingsCard({
               whiteSpace: 'nowrap',
             }}
           >
-            Retry
+            {t('settings.approvals.retry')}
           </button>
         </div>
       ) : (
@@ -315,13 +325,13 @@ export function ApprovalsSettingsCard({
               }}
             >
               <ClockCountdown size={15} weight="bold" />
-              Pending Requests ({pendingItems.length})
+              {t('settings.approvals.pendingRequests', { count: pendingItems.length })}
             </span>
           </div>
 
           {loading && pendingItems.length === 0 ? (
             <div style={{ padding: '12px', color: '#94a3b8', fontSize: '13px' }}>
-              Loading approvals...
+              {t('settings.approvals.loading')}
             </div>
           ) : pendingItems.length === 0 ? (
             <div
@@ -334,7 +344,7 @@ export function ApprovalsSettingsCard({
                 fontSize: '13px',
               }}
             >
-              No pending approval requests.
+              {t('settings.approvals.noPending')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -431,7 +441,7 @@ export function ApprovalsSettingsCard({
                       >
                         <code>{item.requestId}</code>
                         <span>·</span>
-                        <span>{formatRelativeAge(item.ts)}</span>
+                        <span>{formatRelativeAge(item.ts, t)}</span>
                       </div>
                     </div>
 
@@ -467,7 +477,9 @@ export function ApprovalsSettingsCard({
                           fontFamily: 'monospace',
                         }}
                       >
-                        sha256: {item.sha256.slice(0, 12)}…
+                        {t('settings.approvals.sha256Prefix', {
+                          prefix: item.sha256.slice(0, 12),
+                        })}
                       </span>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -491,7 +503,7 @@ export function ApprovalsSettingsCard({
                           }}
                         >
                           <CheckCircle size={14} weight="bold" />
-                          Approve
+                          {t('settings.approvals.approve')}
                         </button>
                         <button
                           type="button"
@@ -513,7 +525,7 @@ export function ApprovalsSettingsCard({
                           }}
                         >
                           <XCircle size={14} weight="bold" />
-                          Deny
+                          {t('settings.approvals.deny')}
                         </button>
                       </div>
                     </div>
@@ -543,7 +555,7 @@ export function ApprovalsSettingsCard({
                 color: '#94a3b8',
               }}
             >
-              Decided Ledger ({decidedItems.length})
+              {t('settings.approvals.decidedLedger', { count: decidedItems.length })}
             </span>
           </div>
 
@@ -558,12 +570,12 @@ export function ApprovalsSettingsCard({
                 fontSize: '13px',
               }}
             >
-              No decided requests recorded yet.
+              {t('settings.approvals.noDecided')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {decidedItems.map((item) => {
-                const badge = getStatusBadgeStyle(item.status);
+                const badge = getStatusBadgeStyle(item.status, t);
                 return (
                   <div
                     key={item.requestId}
@@ -630,11 +642,17 @@ export function ApprovalsSettingsCard({
                         color: '#94a3b8',
                       }}
                     >
-                      {item.decidedBy && <span>by {item.decidedBy}</span>}
-                      {item.expiresAt && item.status === 'approved' && (
-                        <span>ttl: {item.expiresAt}</span>
+                      {item.decidedBy && (
+                        <span>
+                          {t('settings.approvals.byActor', { actor: item.decidedBy })}
+                        </span>
                       )}
-                      <span>{formatRelativeAge(item.ts)}</span>
+                      {item.expiresAt && item.status === 'approved' && (
+                        <span>
+                          {t('settings.approvals.ttlLabel', { expiresAt: item.expiresAt })}
+                        </span>
+                      )}
+                      <span>{formatRelativeAge(item.ts, t)}</span>
                     </div>
                   </div>
                 );

@@ -7,8 +7,23 @@ const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 
 const { resolvePort } = require('./config.cjs');
 const { ensureServerReady, stopSpawnedServer, probeServer } = require('./server-manager.cjs');
-const { initTray, updateTrayStatus, getDesktopStatus, setStartAtLogin, destroyTray } = require('./tray.cjs');
+const {
+  initTray,
+  updateTrayStatus,
+  getDesktopStatus,
+  setStartAtLogin,
+  destroyTray,
+  loadSavedLanguage,
+  setTrayLanguage,
+} = require('./tray.cjs');
 const { updatePowerSaveState } = require('./power.cjs');
+const {
+  FALLBACK_UI_LANGUAGE,
+  resolveDesktopSystemLanguage,
+  normalizeDesktopLanguage,
+  getWindowTitle,
+  buildAppMenuTemplate,
+} = require('./i18n.cjs');
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -18,6 +33,7 @@ if (!gotTheLock) {
 } else {
   let mainWindow = null;
   let statusInterval = null;
+  let currentLanguage = FALLBACK_UI_LANGUAGE;
   const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
   const repoRoot = path.resolve(__dirname, '..');
   const targetPort = resolvePort({ argv: process.argv, env: process.env, repoRoot });
@@ -34,75 +50,70 @@ if (!gotTheLock) {
   console.log('9. [AIBOSS Desktop] Background monitor: polling every 10s (tray + power assertion)');
   console.log('10. [AIBOSS Desktop] Desktop shell ready');
 
-  // Handle second-instance focus
-  app.on('second-instance', () => {
+  function focusAndShowWindow() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
     }
+  }
+
+  function openSettingsView() {
+    focusAndShowWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(`http://127.0.0.1:${targetPort}/settings`);
+    }
+  }
+
+  // Handle second-instance focus
+  app.on('second-instance', () => {
+    focusAndShowWindow();
   });
 
-  // Build minimal macOS application menu
-  function setupAppMenu() {
-    const template = [
-      {
-        label: 'AIBOSS Office',
-        submenu: [
-          { role: 'about', label: 'About AIBOSS Office' },
-          { type: 'separator' },
-          { role: 'services' },
-          { type: 'separator' },
-          { role: 'hide', label: 'Hide AIBOSS Office' },
-          { role: 'hideOthers', label: 'Hide Others' },
-          { role: 'unhide', label: 'Show All' },
-          { type: 'separator' },
-          {
-            label: 'Quit AIBOSS Office',
-            accelerator: 'CommandOrControl+Q',
-            click: () => {
-              app.isQuitting = true;
-              app.quit();
-            },
-          },
-        ],
+  // Build localized application menu (File · Edit · View · Window · Help)
+  function setupAppMenu(lang = currentLanguage) {
+    const template = buildAppMenuTemplate({
+      lang,
+      isDev,
+      onQuit: () => {
+        app.isQuitting = true;
+        app.quit();
       },
-      {
-        label: 'Edit',
-        submenu: [
-          { role: 'undo' },
-          { role: 'redo' },
-          { type: 'separator' },
-          { role: 'cut' },
-          { role: 'copy' },
-          { role: 'paste' },
-          { role: 'selectAll' },
-        ],
-      },
-      {
-        label: 'View',
-        submenu: [
-          { role: 'reload', accelerator: 'CommandOrControl+R' },
-          { role: 'forceReload', accelerator: 'CommandOrControl+Shift+R' },
-          ...(isDev
-            ? [
-                { type: 'separator' },
-                { role: 'toggleDevTools', accelerator: 'Alt+CommandOrControl+I' },
-              ]
-            : []),
-        ],
-      },
-      {
-        label: 'Window',
-        submenu: [
-          { role: 'minimize', accelerator: 'CommandOrControl+M' },
-          { role: 'close', accelerator: 'CommandOrControl+W' },
-        ],
-      },
-    ];
+      onOpenWindow: focusAndShowWindow,
+      onOpenSettings: openSettingsView,
+    });
 
     const menu = Menu.buildFromTemplate(template);
     Menu.setApplicationMenu(menu);
+    return template;
+  }
+
+  function resolveInitialLanguage() {
+    const saved = typeof loadSavedLanguage === 'function' ? loadSavedLanguage() : null;
+    if (saved === 'en' || saved === 'vi') {
+      return saved;
+    }
+    const systemLocale = typeof app.getLocale === 'function' ? app.getLocale() : '';
+    return resolveDesktopSystemLanguage(systemLocale);
+  }
+
+  function applyDesktopLanguage(nextLang, { persist = true } = {}) {
+    const systemLocale = typeof app.getLocale === 'function' ? app.getLocale() : '';
+    const normalized = normalizeDesktopLanguage(nextLang, systemLocale);
+    currentLanguage = normalized;
+
+    setupAppMenu(currentLanguage);
+    if (typeof setTrayLanguage === 'function') {
+      setTrayLanguage(currentLanguage, { persist });
+    }
+    if (mainWindow && !mainWindow.isDestroyed() && typeof mainWindow.setTitle === 'function') {
+      mainWindow.setTitle(getWindowTitle(currentLanguage));
+    }
+
+    return {
+      language: currentLanguage,
+      windowTitle: getWindowTitle(currentLanguage),
+    };
   }
 
   // Polls backend status and seats count
@@ -170,14 +181,14 @@ if (!gotTheLock) {
   }
 
   // Creates the main desktop window
-  function createMainWindow() {
+  function createMainWindow(lang = currentLanguage) {
     const geo = parseWindowGeometry();
     mainWindow = new BrowserWindow({
       width: geo.width,
       height: geo.height,
       minWidth: 900,
       minHeight: 600,
-      title: 'AIBOSS Office',
+      title: getWindowTitle(lang),
       backgroundColor: '#0a1929',
       webPreferences: {
         preload: path.join(__dirname, 'preload.cjs'),
@@ -188,17 +199,29 @@ if (!gotTheLock) {
       },
     });
 
-    // Close button hides window into tray instead of exiting
-    mainWindow.on('close', (event) => {
-      if (!app.isQuitting) {
-        event.preventDefault();
-        mainWindow.hide();
-      }
-    });
+    if (typeof mainWindow.on === 'function') {
+      // Keep localized window title synchronized with currentLanguage
+      mainWindow.on('page-title-updated', (event) => {
+        if (event && typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+        if (mainWindow && !mainWindow.isDestroyed() && typeof mainWindow.setTitle === 'function') {
+          mainWindow.setTitle(getWindowTitle(currentLanguage));
+        }
+      });
 
-    mainWindow.on('closed', () => {
-      mainWindow = null;
-    });
+      // Close button hides window into tray instead of exiting
+      mainWindow.on('close', (event) => {
+        if (!app.isQuitting) {
+          event.preventDefault();
+          mainWindow.hide();
+        }
+      });
+
+      mainWindow.on('closed', () => {
+        mainWindow = null;
+      });
+    }
 
     return mainWindow;
   }
@@ -231,9 +254,10 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(async () => {
-    setupAppMenu();
-    const win = createMainWindow();
-    initTray({ window: win, port: targetPort });
+    currentLanguage = resolveInitialLanguage();
+    setupAppMenu(currentLanguage);
+    const win = createMainWindow(currentLanguage);
+    initTray({ window: win, port: targetPort, lang: currentLanguage });
 
     const routePath = parseRoutePath();
     const serverUrl = `http://127.0.0.1:${targetPort}${routePath}`;
@@ -297,6 +321,10 @@ if (!gotTheLock) {
     ipcMain.handle('desktop:get-status', () => getDesktopStatus());
     ipcMain.handle('desktop:get-login-item', () => app.getLoginItemSettings());
     ipcMain.handle('desktop:set-login-item', (_e, enabled) => setStartAtLogin(enabled));
+    ipcMain.handle('desktop:get-language', () => currentLanguage);
+    ipcMain.handle('aiboss-desktop:get-language', () => currentLanguage);
+    ipcMain.handle('desktop:set-language', (_e, nextLang) => applyDesktopLanguage(nextLang, { persist: true }));
+    ipcMain.handle('aiboss-desktop:set-language', (_e, nextLang) => applyDesktopLanguage(nextLang, { persist: true }));
     ipcMain.handle('desktop:report-running', (_e, count) => {
       updatePowerSaveState(count);
       return count;
@@ -363,7 +391,7 @@ if (!gotTheLock) {
       mainWindow.show();
       mainWindow.focus();
     } else {
-      createMainWindow();
+      createMainWindow(currentLanguage);
     }
   });
 }
