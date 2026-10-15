@@ -57,7 +57,12 @@ export function SessionPicker({ slot, seat, current, busy, onConnect }: {
     try {
       const response = await fetch(`/api/phien?ma_o=${encodeURIComponent(slot)}&ma_nhan_su=${encodeURIComponent(seat)}&owner_picker=1`, { cache: 'no-store' });
       const data = await response.json();
-      if (!response.ok || !Array.isArray(data.phien)) throw new Error(t('home.sessionPicker.loadErrorTryAgain'));
+      if (!response.ok || !Array.isArray(data.phien)) {
+        if (mounted.current && id === requestId.current) {
+          setError(t('home.sessionPicker.loadErrorTryAgain'));
+        }
+        return;
+      }
       if (!mounted.current || id !== requestId.current) return;
       setSessions(data.phien);
       setError('');

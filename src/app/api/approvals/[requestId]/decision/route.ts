@@ -140,9 +140,16 @@ export async function POST(
 
   const auth = resolveDecisionActor(req);
   if (!auth.allowed || !auth.by) {
+    const status = auth.status || 401;
     return NextResponse.json(
       { error: 'unauthorized', message: auth.message || 'Authentication required.' },
-      { status: auth.status || 401 }
+      {
+        status,
+        headers:
+          status === 401
+            ? { 'WWW-Authenticate': 'Basic realm="aiboss-office"' }
+            : undefined,
+      }
     );
   }
 

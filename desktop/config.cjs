@@ -81,7 +81,11 @@ function resolvePort(options = {}) {
   return 4330;
 }
 
+// Must match the realm in src/app/api/approvals/[requestId]/decision/route.ts
+const APP_BASIC_REALM = 'aiboss-office';
+
 module.exports = {
+  APP_BASIC_REALM,
   parseCliPort,
   readConfigPort,
   resolvePort,

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -13,7 +13,7 @@ import {
 import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
 import { BudgetSettingsCard } from '@/components/office/BudgetSettingsCard';
-import { useT } from '@/i18n';
+import { useT, formatLocalTimestamp } from '@/i18n';
 
 export interface OfficeConfigData {
   version: number;
@@ -62,6 +62,10 @@ export function SettingsPageClient({
   costCardSlot,
 }: SettingsPageClientProps) {
   const { lang, t } = useT();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const agentLanguageLabel =
     effectiveLanguage === 'vi'
@@ -199,7 +203,7 @@ export function SettingsPageClient({
               <div className="settings-row">
                 <span className="settings-label">{t('settings.rhythm.lastEdited')}</span>
                 <span className="settings-value settings-dim">
-                  {config.last_edited.at} {t('settings.rhythm.byAuthor')}{' '}
+                  {formatLocalTimestamp(config.last_edited.at, lang, mounted)} {t('settings.rhythm.byAuthor')}{' '}
                   <code>{config.last_edited.by}</code>
                 </span>
               </div>

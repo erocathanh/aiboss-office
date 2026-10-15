@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const http = require('node:http');
 const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 
-const { resolvePort } = require('./config.cjs');
+// APP_BASIC_REALM must match the realm in src/app/api/approvals/[requestId]/decision/route.ts
+const { resolvePort, APP_BASIC_REALM = 'aiboss-office' } = require('./config.cjs');
 const { ensureServerReady, stopSpawnedServer, probeServer } = require('./server-manager.cjs');
 const {
   initTray,
@@ -64,6 +65,77 @@ if (!gotTheLock) {
       mainWindow.loadURL(`http://127.0.0.1:${targetPort}/settings`);
     }
   }
+
+  // Handle HTTP Basic Auth challenges fail-closed for the exact local AIBOSS Office server only (F37, F38).
+  // Policy for F38 retry lifecycle: keyed by `${host}:${port}:${realm}`; after 1 rejected attempt, keep blocking
+  // (cancel via callback()) until a 60-second cooldown window elapses.
+  const LOGIN_RETRY_COOLDOWN_MS = 60 * 1000;
+  const loginAttemptState = new Map();
+  app.on('login', (event, _webContents, _details, authInfo, callback) => {
+    const envUser = typeof process.env.PHONGBAN_USER === 'string' ? process.env.PHONGBAN_USER : '';
+    const envPass = typeof process.env.PHONGBAN_PASS === 'string' ? process.env.PHONGBAN_PASS : '';
+    if (!envUser || !envPass || typeof callback !== 'function') {
+      return;
+    }
+    if (
+      !authInfo ||
+      typeof authInfo !== 'object' ||
+      typeof authInfo.isProxy !== 'boolean' ||
+      typeof authInfo.scheme !== 'string' ||
+      typeof authInfo.host !== 'string' ||
+      authInfo.port === undefined ||
+      authInfo.port === null ||
+      authInfo.port === '' ||
+      typeof authInfo.realm !== 'string'
+    ) {
+      return;
+    }
+
+    // 1. Must not be a proxy challenge
+    if (authInfo.isProxy !== false) {
+      return;
+    }
+    // 2. Scheme must be basic (case-insensitive)
+    if (authInfo.scheme.toLowerCase() !== 'basic') {
+      return;
+    }
+    // 3. Host must be loopback AND port must match targetPort from resolvePort
+    const host = authInfo.host.toLowerCase();
+    const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+    const port = Number(authInfo.port);
+    if (!isLoopback || !Number.isInteger(port) || port !== targetPort) {
+      return;
+    }
+    // 4. Realm must match APP_BASIC_REALM ('aiboss-office', must match src/app/api/approvals/[requestId]/decision/route.ts)
+    if (authInfo.realm !== APP_BASIC_REALM) {
+      return;
+    }
+
+    const key = `${host}:${port}:${authInfo.realm}`;
+    const now = Date.now();
+    let state = loginAttemptState.get(key);
+    if (state && state.blockedUntil > 0 && now >= state.blockedUntil) {
+      loginAttemptState.delete(key);
+      state = undefined;
+    }
+
+    if (state && state.attempts >= 1) {
+      if (state.blockedUntil === 0) {
+        state.blockedUntil = now + LOGIN_RETRY_COOLDOWN_MS;
+        console.log(
+          `[AIBOSS Desktop] app Basic Auth rejected for ${key}; not retrying until ${new Date(state.blockedUntil).toISOString()} (60s cooldown)`,
+        );
+      }
+      callback();
+      return;
+    }
+
+    loginAttemptState.set(key, { attempts: 1, blockedUntil: 0 });
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    callback(envUser, envPass);
+  });
 
   // Handle second-instance focus
   app.on('second-instance', () => {
