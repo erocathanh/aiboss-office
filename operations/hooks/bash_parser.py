@@ -85,6 +85,16 @@ class SimpleCommand:
         w_idx = 0
         while w_idx < len(remaining_tokens):
             w = remaining_tokens[w_idx]
+            raw_w = remaining_raw_tokens[w_idx] if w_idx < len(remaining_raw_tokens) else w
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\+?=.*$', w, re.DOTALL):
+                k, v = w.split('=', 1)
+                is_append = k.endswith('+')
+                clean_k = k.rstrip('+')
+                self.env_vars[clean_k] = v
+                raw_rhs = raw_w.split('=', 1)[1] if '=' in raw_w else v
+                self.raw_env_assignments.append((clean_k, is_append, raw_rhs))
+                w_idx += 1
+                continue
             clean_w = w.lstrip('\\')
             base_w = os.path.basename(clean_w).lower()
 
@@ -1002,7 +1012,7 @@ def parse_bash_script(
                     symlinks[abs_link] = abs_src
                     symlinks[link_name] = abs_src
 
-        # Xử lý đệ quy cho sh -c, bash -c, zsh -c, eval (kể cả cờ gộp như -lc, -ec)
+        # Xử lý đệ quy cho sh -c, bash -c, zsh -c, eval (kể cả cờ gộp như -lc, -ec) và find -exec/-execdir
         if cmd.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(cmd.words) > 1:
             for c_idx, w in enumerate(cmd.words[1:], start=1):
                 # Nhận cờ có chứa 'c' (ví dụ -c, -lc, -ec, -xc)
@@ -1017,6 +1027,23 @@ def parse_bash_script(
             nested_list, nested_links = parse_bash_script(nested_cmd, current_cwd, symlinks)
             commands.extend(nested_list)
             symlinks.update(nested_links)
+        elif cmd.executable == 'find' and len(cmd.words) > 1:
+            raw_words = getattr(cmd, "raw_words", None) or cmd.words
+            f_idx = 1
+            while f_idx < len(cmd.words):
+                fw = cmd.words[f_idx]
+                if fw in ('-exec', '-execdir', '-ok', '-okdir') and f_idx + 1 < len(cmd.words):
+                    end_idx = f_idx + 1
+                    while end_idx < len(cmd.words) and cmd.words[end_idx] not in (';', '+'):
+                        end_idx += 1
+                    if end_idx > f_idx + 1:
+                        nested_cmd = " ".join(raw_words[f_idx + 1 : end_idx])
+                        nested_list, nested_links = parse_bash_script(nested_cmd, current_cwd, symlinks)
+                        commands.extend(nested_list)
+                        symlinks.update(nested_links)
+                    f_idx = end_idx + 1
+                else:
+                    f_idx += 1
 
     return commands, symlinks
 

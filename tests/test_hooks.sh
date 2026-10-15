@@ -448,6 +448,10 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-PCN-hex-escaped-url-post.json"
     "guard_bulk_send:block-PCN-python-joined-url-post.json"
     "guard_bulk_send:block-PCN-xargs-curl-post.json"
+    "guard_bulk_send:block-H27-prefix-assign-child-shell-smtp.json"
+    "guard_bulk_send:block-H27c-prefix-assign-bash-c-smtp.json"
+    "guard_bulk_send:block-H28-xargs-harmless-then-smtp.json"
+    "guard_bulk_send:block-H28d-xargs-harmless-and-sendmail.json"
 )
 
 saved_total=$TOTAL

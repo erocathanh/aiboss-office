@@ -667,19 +667,23 @@ def update_shell_var_bindings(
     sc: bash_parser.SimpleCommand | None,
     static_vars: dict[str, str],
     unresolved_vars: set[str],
-) -> bool:
-    """H19 (v05) & H23 (v06): Cập nhật bảng gán biến shell `static_vars` / `unresolved_vars`
+) -> tuple[bool, dict[str, str], set[str]]:
+    """H19 (v05), H23 (v06) & H27 (v07): Cập nhật bảng gán biến shell của CHA (`static_vars` / `unresolved_vars`),
+    đồng thời dựng bảng môi trường của TIẾN TRÌNH CON (`child_static_vars` / `child_unresolved_vars`)
     và kiểm tra tín hiệu gửi trong vế phải phép gán.
     - H23 (v06): Tách «biến môi trường tạm đầu lệnh» (`VAR=val cmd ...`, khi `sc.executable` là lệnh thực thi)
-      khỏi «bảng binding dài hạn của shell» (gán thuần `VAR=val` không có lệnh, hoặc builtin khai báo
+      khỏi «bảng binding dài hạn của shell cha» (gán thuần `VAR=val` không có lệnh, hoặc builtin khai báo
       `export`/`local`/`declare`/`typeset`/`readonly`/`read`).
       Trong POSIX/Bash, khi chạy `CODE='print(1)' python3 -c "$CODE"`, bước mở rộng `"$CODE"` trên argv
-      dùng giá trị `CODE` CÓ TRƯỚC lệnh; phép gán đầu lệnh `CODE='print(1)'` chỉ cấp biến môi trường tạm
-      cho tiến trình con và KHÔNG ghi đè `static_vars` dùng để mở rộng argv hay trạng thái dài hạn.
-    - Lưu ý bảo thủ (Hermes / H23): trường hợp chỉ có `CODE='…smtplib…' python3 -c "$CODE"` (chưa gán `CODE`
-      trước đó) thực tế shell truyền chuỗi rỗng cho `-c` nhưng biến `CODE` đã vào `os.environ` của tiến trình con;
-      hook trả `found_signal = True` (bật `chain_has_bulk_send_signal`) và chặn qua nhánh biến chưa giải tĩnh
-      là chặn bảo thủ có chủ đích (over-approximation), không phải coi `$CODE` đã mở rộng thành chuỗi đó.
+      dùng giá trị `CODE` CÓ TRƯỚC lệnh ở bảng cha; phép gán đầu lệnh `CODE='print(1)'` chỉ cấp biến môi trường
+      cho tiến trình con và KHÔNG ghi đè `static_vars` của cha.
+    - H27 (v07): Khi lệnh thực thi là shell con (`sh -c`/`bash -c`/`zsh -c`/`dash -c`/`ksh -c`, `eval`, hoặc qua
+      wrapper `xargs sh -c`, `find -exec sh -c`, `nohup sh -c`, `timeout N sh -c`, `sudo -E sh -c`), tiến trình
+      shell con nhận môi trường `child_static_vars` = bảng cha + các phép gán đầu lệnh áp đè lên. Bảng con KHÔNG
+      ghi ngược vào bảng cha sau khi lệnh kết thúc.
+    - Lưu ý bảo thủ (Hermes / H23 / H27 §1d): trường hợp gán tạm đầu lệnh có mẫu SMTP/nodemailer mà không giải
+      được đường dùng (hoặc chỉ có `CODE='…smtplib…' python3 -c "$CODE"` chưa gán trước) trả `found_signal = True`
+      và chặn bảo thủ có chủ đích (over-approximation).
     """
     found_signal = False
     sub_has_cmd_subst = bool(bash_parser.extract_substitutions_safe(sub_cmd))
@@ -734,16 +738,34 @@ def update_shell_var_bindings(
                 unresolved_vars.add(clean_w)
                 static_vars.pop(clean_w, None)
 
+    child_static_vars: dict[str, str] = dict(static_vars)
+    child_unresolved_vars: set[str] = set(unresolved_vars)
+
     for var_name, is_append, raw_rhs in raw_assignments:
         if has_bulk_send_signal(raw_rhs):
             found_signal = True
         expanded_rhs, rhs_unresolved = expand_shell_vars_in_raw_token(raw_rhs, static_vars, unresolved_vars)
         if has_bulk_send_signal(expanded_rhs):
             found_signal = True
-        if not persist_bindings:
-            # H23: Gán đầu lệnh (env tạm của tiến trình con) KHÔNG ghi vào static_vars dùng để mở rộng argv.
-            continue
         is_dynamic = rhs_unresolved or (sub_has_cmd_subst and ('$ (' in raw_rhs or '$(' in raw_rhs or '`' in raw_rhs))
+
+        # H27: Luôn áp phép gán đầu lệnh lên bảng môi trường của tiến trình con (child_static_vars / child_unresolved_vars)
+        if is_dynamic:
+            child_unresolved_vars.add(var_name)
+            child_static_vars.pop(var_name, None)
+        else:
+            if is_append:
+                if var_name in child_unresolved_vars:
+                    child_static_vars.pop(var_name, None)
+                else:
+                    child_static_vars[var_name] = child_static_vars.get(var_name, "") + expanded_rhs
+            else:
+                child_unresolved_vars.discard(var_name)
+                child_static_vars[var_name] = expanded_rhs
+
+        if not persist_bindings:
+            # H23 & H27(c): Gán đầu lệnh (env tạm của tiến trình con) KHÔNG ghi ngược vào static_vars của cha.
+            continue
         if is_dynamic:
             unresolved_vars.add(var_name)
             static_vars.pop(var_name, None)
@@ -757,7 +779,7 @@ def update_shell_var_bindings(
                 unresolved_vars.discard(var_name)
                 static_vars[var_name] = expanded_rhs
 
-    return found_signal
+    return found_signal, child_static_vars, child_unresolved_vars
 
 
 def check_inline_code_uncertain_network_write(code_text: str) -> str:
@@ -828,12 +850,13 @@ def check_curl_or_wget_uncertain_write(
     """
     exe = sc.executable if sc else ""
     via_xargs = bool(sc and sc.via_xargs)
+    unwrapped_cmd = " ".join(sc.words) if (sc and sc.words) else sub_cmd
 
     if exe in ('nc', 'ncat', 'netcat'):
         return f"Không chắc đích ghi mạng: lệnh kết nối socket ({exe}) có thể gửi dữ liệu tới đích không xác định. Lệnh bị chặn và ghi sổ duyệt."
 
-    if exe == "wget" or sub_cmd.strip().startswith("wget "):
-        if not has_wget_write_flags(sub_cmd):
+    if exe == "wget" or (not exe and sub_cmd.strip().startswith("wget ")):
+        if not has_wget_write_flags(unwrapped_cmd):
             return ""
         if via_xargs:
             return "Không chắc đích ghi mạng: lệnh wget ghi mạng chạy qua xargs nhận đích động từ stdin. Lệnh bị chặn và ghi sổ duyệt."
@@ -846,8 +869,8 @@ def check_curl_or_wget_uncertain_write(
     if not is_curl_command(sub_cmd):
         return ""
 
-    # Chỉ xét lệnh curl CÓ GHI; lệnh curl GET/đọc cho qua ngay
-    if not has_curl_write_flags(sub_cmd):
+    # Chỉ xét lệnh curl CÓ GHI (trên lệnh curl đã bóc wrapper); lệnh curl GET/đọc cho qua ngay
+    if not has_curl_write_flags(unwrapped_cmd):
         return ""
 
     if via_xargs:
@@ -944,7 +967,7 @@ def should_block_bulk_send(
             if uncertain_hd_reason:
                 return uncertain_hd_reason
 
-        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a, H19, H23, H24)
+        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a, H19, H23, H24, H27, H28)
         pipelines = split_clauses_and_pipelines_safe(cmd_joined)
         cur_cwd = base_cwd
         static_vars: dict[str, str] = dict(_inherited_static_vars) if _inherited_static_vars else {}
@@ -954,8 +977,12 @@ def should_block_bulk_send(
         for pipe_subs in pipelines:
             for ps in pipe_subs:
                 ps_sc = parse_simple_command_safe(ps, cur_cwd)
-                if ps_sc and ps_sc.via_xargs and (has_curl_write_flags(ps) or has_wget_write_flags(ps)):
-                    return check_curl_or_wget_uncertain_write(ps, ps_sc, static_vars, unresolved_vars)
+                # H28 (v07): Chỉ vào nhánh xét trước xargs khi executable mạng thật sau bóc wrapper là curl/wget/nc,
+                # và KHÔNG kết thúc hàm nếu helper trả chuỗi rỗng (để tiếp tục xét các lệnh sau ;, &&, ||, |).
+                if ps_sc and ps_sc.via_xargs and ps_sc.executable in ("curl", "wget", "nc", "ncat", "netcat"):
+                    xargs_reason = check_curl_or_wget_uncertain_write(ps, ps_sc, static_vars, unresolved_vars)
+                    if xargs_reason:
+                        return xargs_reason
 
             pipeline_has_runner = any(is_code_or_smtp_runner(ps) for ps in pipe_subs)
 
@@ -995,34 +1022,104 @@ def should_block_bulk_send(
 
                 sc = parse_simple_command_safe(sub, cur_cwd)
 
-                # H19 (v05) & H23 (v06): Cập nhật bảng gán biến shell (chỉ ghi static_vars khi là gán thuần/declaration builtin;
-                # gán đầu lệnh chỉ kiểm tra tín hiệu gửi chứ không ghi đè static_vars dùng để mở rộng argv).
-                if update_shell_var_bindings(sub, sc, static_vars, unresolved_vars):
+                # H19 (v05), H23 (v06) & H27 (v07): Cập nhật bảng gán biến shell của CHA (static_vars) và dựng bảng môi trường
+                # của TIẾN TRÌNH CON (child_static_vars = static_vars + prefix assignments áp đè lên; không ghi ngược vào cha).
+                prefix_has_signal, child_static_vars, child_unresolved_vars = update_shell_var_bindings(
+                    sub, sc, static_vars, unresolved_vars
+                )
+                if prefix_has_signal:
                     chain_has_bulk_send_signal = True
 
-                # Bóc wrapper shell (bash -c, sh -c, zsh -c, eval) tới lệnh bên trong (H16a, H19 & H24)
+                # Xử lý find ... -exec / -execdir / -ok / -okdir (H27 §1b)
+                if sc and sc.executable == 'find' and len(sc.words) > 1:
+                    raw_words = getattr(sc, "raw_words", None) or sc.words
+                    f_idx = 1
+                    while f_idx < len(sc.words):
+                        fw = sc.words[f_idx]
+                        if fw in ('-exec', '-execdir', '-ok', '-okdir') and f_idx + 1 < len(sc.words):
+                            end_idx = f_idx + 1
+                            while end_idx < len(sc.words) and sc.words[end_idx] not in (';', '+'):
+                                end_idx += 1
+                            if end_idx > f_idx + 1:
+                                exec_raw_cmd = " ".join(raw_words[f_idx + 1 : end_idx])
+                                exec_sc = parse_simple_command_safe(exec_raw_cmd, cur_cwd)
+                                exec_child_static = dict(child_static_vars)
+                                exec_child_unres = set(child_unresolved_vars)
+                                exec_prefix_sig, exec_child_static, exec_child_unres = update_shell_var_bindings(
+                                    exec_raw_cmd, exec_sc, exec_child_static, exec_child_unres
+                                )
+                                if exec_prefix_sig:
+                                    chain_has_bulk_send_signal = True
+                                if exec_sc and exec_sc.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(exec_sc.words) > 1:
+                                    exec_raw_words = getattr(exec_sc, "raw_words", None) or exec_sc.words
+                                    for c_idx, w in enumerate(exec_sc.words[1:], start=1):
+                                        if w.startswith('-') and not w.startswith('--') and 'c' in w and c_idx + 1 < len(exec_sc.words):
+                                            raw_nested = (
+                                                exec_raw_words[c_idx + 1]
+                                                if (c_idx + 1) < len(exec_raw_words)
+                                                else exec_sc.words[c_idx + 1]
+                                            )
+                                            expanded_nested, nested_unresolved = expand_shell_vars_in_raw_token(
+                                                raw_nested, static_vars, unresolved_vars
+                                            )
+                                            if nested_unresolved and chain_has_bulk_send_signal:
+                                                return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                                            inner_reason = should_block_bulk_send(
+                                                "Bash",
+                                                {"command": expanded_nested},
+                                                cur_cwd,
+                                                exec_child_static,
+                                                exec_child_unres,
+                                                chain_has_bulk_send_signal,
+                                            )
+                                            if inner_reason:
+                                                return inner_reason
+                                            if prefix_has_signal or exec_prefix_sig:
+                                                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                                            break
+                                else:
+                                    inner_reason = should_block_bulk_send(
+                                        "Bash",
+                                        {"command": exec_raw_cmd},
+                                        cur_cwd,
+                                        exec_child_static,
+                                        exec_child_unres,
+                                        chain_has_bulk_send_signal,
+                                    )
+                                    if inner_reason:
+                                        return inner_reason
+                            f_idx = end_idx + 1
+                        else:
+                            f_idx += 1
+
+                # Bóc wrapper shell (bash -c, sh -c, zsh -c, dash -c, ksh -c, eval) tới lệnh bên trong (H16a, H19, H24 & H27)
                 if sc and sc.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(sc.words) > 1:
                     handled_shell_c = False
                     raw_words = getattr(sc, "raw_words", None) or sc.words
                     for c_idx, w in enumerate(sc.words[1:], start=1):
                         if w.startswith('-') and not w.startswith('--') and 'c' in w and c_idx + 1 < len(sc.words):
                             raw_nested = raw_words[c_idx + 1] if (c_idx + 1) < len(raw_words) else sc.words[c_idx + 1]
+                            # H23 & H27(a): Mở rộng đối số của -c ở SHELL CHA bằng bảng cha (static_vars, unresolved_vars)
                             expanded_nested, nested_unresolved = expand_shell_vars_in_raw_token(
                                 raw_nested, static_vars, unresolved_vars
                             )
                             if nested_unresolved and chain_has_bulk_send_signal:
                                 return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
                             try:
+                                # H27(b,c): Phân tích lệnh bên trong SHELL CON bằng bảng môi trường con (child_static_vars, child_unresolved_vars)
                                 inner_reason = should_block_bulk_send(
                                     "Bash",
                                     {"command": expanded_nested},
                                     cur_cwd,
-                                    static_vars,
-                                    unresolved_vars,
+                                    child_static_vars,
+                                    child_unresolved_vars,
                                     chain_has_bulk_send_signal,
                                 )
                                 if inner_reason:
                                     return inner_reason
+                                # H27(d): Xấp xỉ bảo thủ khi gán đầu lệnh của shell con có mẫu SMTP/nodemailer mà không giải được đường dùng
+                                if prefix_has_signal:
+                                    return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                                 handled_shell_c = True
                             except Exception:
                                 pass
@@ -1046,12 +1143,14 @@ def should_block_bulk_send(
                             "Bash",
                             {"command": expanded_nested},
                             cur_cwd,
-                            static_vars,
-                            unresolved_vars,
+                            child_static_vars,
+                            child_unresolved_vars,
                             chain_has_bulk_send_signal,
                         )
                         if inner_reason:
                             return inner_reason
+                        if prefix_has_signal:
+                            return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                         continue
                     except Exception:
                         pass
@@ -1100,9 +1199,11 @@ def should_block_bulk_send(
                 sub_is_curl = is_curl_command(sub)
 
                 if sub_is_curl:
-                    # Nếu curl chạy qua xargs và có cờ ghi mạng -> hỏi duyệt không chắc đích (PCN A1)
-                    if sc and sc.via_xargs and has_curl_write_flags(sub):
-                        return check_curl_or_wget_uncertain_write(sub, sc, static_vars, unresolved_vars)
+                    # Nếu curl chạy qua xargs và có cờ ghi mạng -> hỏi duyệt không chắc đích (PCN A1 & H28)
+                    if sc and sc.via_xargs and has_curl_write_flags(sc_joined_words):
+                        xargs_curl_reason = check_curl_or_wget_uncertain_write(sub, sc, static_vars, unresolved_vars)
+                        if xargs_curl_reason:
+                            return xargs_curl_reason
 
                     # Kiểm tra curl DELETE tới graph.facebook.com
                     if "graph.facebook.com" in sub and has_curl_delete_flags(sub):
