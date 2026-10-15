@@ -3288,12 +3288,87 @@ time.sleep(60)
         if (savedDisableLock === undefined) delete process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK;
         else process.env.AIBOSS_TEST_DISABLE_APPROVAL_LOCK = savedDisableLock;
       }
+      // (39e — F31 coverage preservation): E2E concurrent `--consume` and `POST /api/approvals/<id>/decision`
+      // on `f21NoMarkerDir` (directory without `.test-ledger`) -> lock remains active (`[0, 2]`, `['approved', 'claimed']`) and POST returns 200
+      const f21NoMarkerLogPath = path.join(f21NoMarkerApprovalsDir, `${f21Date}.jsonl`);
+      const f21NmTs1 = '2026-10-14T16:03:00Z';
+      const f21NmSeat1 = 'seat-c39-nomarker-race';
+      const f21NmSha1 = 'c399c399c399c399c399c399c399c399c399c399c399c399c399c399c399c399';
+      const reqF21NmRace = computeRequestId(f21NmTs1, f21NmSeat1, 'Bash', f21NmSha1);
+      const f21NmTs2 = '2026-10-14T16:03:30Z';
+      const f21NmSeat2 = 'seat-c39-nomarker-post';
+      const f21NmSha2 = 'c39ac39ac39ac39ac39ac39ac39ac39ac39ac39ac39ac39ac39ac39ac39ac39a';
+      const reqF21NmPost = computeRequestId(f21NmTs2, f21NmSeat2, 'Bash', f21NmSha2);
+      fs.appendFileSync(
+        f21NoMarkerLogPath,
+        [
+          JSON.stringify({
+            ts: f21NmTs1,
+            seat: f21NmSeat1,
+            tool: 'Bash',
+            host: 'api.example.com',
+            len: 64,
+            sha256: f21NmSha1,
+            head60: 'curl -X POST https://api.example.com/c39-nm1',
+            reason: 'external_post_send',
+          }),
+          JSON.stringify({
+            type: 'decision',
+            requestId: reqF21NmRace,
+            decision: 'approved',
+            by: 'owner',
+            at: recentAtIso,
+            expiresAt: futureExpIso,
+          }),
+          JSON.stringify({
+            ts: f21NmTs2,
+            seat: f21NmSeat2,
+            tool: 'Bash',
+            host: 'api.example.com',
+            len: 64,
+            sha256: f21NmSha2,
+            head60: 'curl -X POST https://api.example.com/c39-nm2',
+            reason: 'external_post_send',
+          }),
+        ].join('\n') + '\n',
+        'utf-8'
+      );
+      const f21NoMarkerRace = await runTwoConcurrentConsumers(
+        f21NoMarkerDir,
+        f21NmSeat1,
+        'Bash',
+        f21NmSha1,
+        reqF21NmRace,
+        {
+          NODE_ENV: 'test',
+          AIBOSS_TEST_MODE: '1',
+          AIBOSS_TEST_DISABLE_APPROVAL_LOCK: '1',
+        }
+      );
+      assert.deepEqual(f21NoMarkerRace.codes, [0, 2]);
+      assert.deepEqual(f21NoMarkerRace.statuses, ['approved', 'claimed']);
+
+      const savedDataDirNm = process.env.AIBOSS_DATA_DIR;
+      try {
+        process.env.AIBOSS_DATA_DIR = f21NoMarkerDir;
+        const postNmRes = await postDecisionRoute(
+          new NextRequest(`http://127.0.0.1:4330/api/approvals/${reqF21NmPost}/decision`, {
+            method: 'POST',
+            headers: { host: '127.0.0.1:4330', 'content-type': 'application/json' },
+            body: JSON.stringify({ decision: 'approved', note: 'No-marker dir normal POST 200' }),
+          }),
+          { params: Promise.resolve({ requestId: reqF21NmPost }) }
+        );
+        assert.equal(postNmRes.status, 200);
+      } finally {
+        process.env.AIBOSS_DATA_DIR = savedDataDirNm;
+      }
     } finally {
       fs.rmSync(f21NoMarkerDir, { recursive: true, force: true });
       fs.rmSync(f26SymlinkDir, { recursive: true, force: true });
       fs.rmSync(f27RealMarkerDir, { recursive: true, force: true });
     }
-    console.log('  [PASS] Case 39 (F21 + F26 P1 + F27 P2 v08): Symlink .test-ledger rejected via lstat+S_ISREG+O_NOFOLLOW; missing DISABLE_LOCK negative control verified; buildPythonCliEnv stripping isolated via held flock -> HTTP 503');
+    console.log('  [PASS] Case 39 (F21 + F26 P1 + F27 P2 + F31 v09): Symlink .test-ledger rejected via lstat+S_ISREG+O_NOFOLLOW; missing DISABLE_LOCK & no-marker E2E verified; buildPythonCliEnv stripping isolated via held flock -> HTTP 503');
 
     // Case 40 (F23 P2 v07): Option values starting with dash (`"--review"`, `"-x"`, `"--line1\n--line2"`, Unicode)
     // pass cleanly through `--flag=<value>` in `src/lib/approvals-ledger.ts` and return HTTP 200 with exact persistence.
@@ -3376,9 +3451,11 @@ time.sleep(60)
     assert.equal(f23BadEmojiRes.status, 400, 'Case 40 (F23): >200 code points starting with -- must still return 400');
     console.log('  [PASS] Case 40 (F23 P2 v07): Dash-prefixed notes ("--review", "-x", "--line1\\n--line2", Unicode) and --run-id pass via --flag=<value> and return HTTP 200');
 
-    // Case 41 (F24 + F28 P2 v08): CLI JSON contract verification for `approval_check.py` and `approval_mark.py`
-    // Verifies exact key sets AND exact values/types for all v05 keys (`status`, `requestId`, `claimId`, `expiresAt`, `idempotent`)
-    // and exit codes (`0` / `2`), plus additive v06/v07 keys (`ok`, `message`) on `approval_mark.py`.
+    // Case 41 (F24 + F28 + F32 P2 v09): CLI JSON contract verification for `approval_check.py` and `approval_mark.py`
+    // Verifies exact key sets AND exact values/types for tested branches (`not_found`, `pending`, `approved`,
+    // `consume`, `claimed`, `claim_mismatch`, `executed` idempotent=false/true, `superseded` with `latestRequestId`,
+    // and strict `.mmmZ` UTC ISO regex on `expiresAt`).
+    const ISO_UTC_MS_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
     const c41Ts = '2026-10-14T16:20:00Z';
     const c41Seat = 'seat-c41-f24';
     const c41Tool = 'Bash';
@@ -3447,6 +3524,7 @@ time.sleep(60)
     assert.equal(checkApproved41.body.status, 'approved');
     assert.equal(checkApproved41.body.requestId, reqC41);
     assert.equal(typeof checkApproved41.body.expiresAt, 'string');
+    assert.match(checkApproved41.body.expiresAt, ISO_UTC_MS_REGEX);
     assert.ok(
       typeof parseIsoTimestampMs(checkApproved41.body.expiresAt) === 'number',
       'Case 41 (F28): checkApproved41.body.expiresAt must be a valid ISO timestamp'
@@ -3461,6 +3539,7 @@ time.sleep(60)
     assert.equal(checkConsumed41.body.status, 'approved');
     assert.equal(checkConsumed41.body.requestId, reqC41);
     assert.equal(checkConsumed41.body.expiresAt, checkApproved41.body.expiresAt);
+    assert.match(checkConsumed41.body.expiresAt, ISO_UTC_MS_REGEX);
     assert.ok(typeof parseIsoTimestampMs(checkConsumed41.body.expiresAt) === 'number');
     assert.match(checkConsumed41.body.claimId, /^[0-9a-f]{16}$/);
 
@@ -3474,6 +3553,7 @@ time.sleep(60)
     assert.equal(checkClaimed41.body.requestId, reqC41, 'Case 41 (F28): claimed response must have requestId === reqC41');
     assert.equal(checkClaimed41.body.claimId, checkConsumed41.body.claimId);
     assert.equal(checkClaimed41.body.expiresAt, checkApproved41.body.expiresAt);
+    assert.match(checkClaimed41.body.expiresAt, ISO_UTC_MS_REGEX);
     assert.ok(typeof parseIsoTimestampMs(checkClaimed41.body.expiresAt) === 'number');
 
     const markMismatch41 = runMarkCli(reqC41, 'executed', 'run-41', '0000000000000000');
@@ -3532,17 +3612,47 @@ time.sleep(60)
     assert.equal(checkExecuted41.body.requestId, reqC41);
     assert.equal(checkExecuted41.body.claimId, checkConsumed41.body.claimId);
     assert.equal(checkExecuted41.body.expiresAt, checkApproved41.body.expiresAt);
-    console.log('  [PASS] Case 41 (F24 + F28 P2 v08): CLI JSON contract keys & exact values verified across all check & mark branches (including idempotent claimId, claimed requestId, and ISO expiresAt)');
+    assert.match(checkExecuted41.body.expiresAt, ISO_UTC_MS_REGEX);
 
-    // Case 42 (F22 + F29 P2 v08): Dedicated isolated ledger for Case 42 so EVERY SINGLE LINE in the `.jsonl` file
-    // is parsed and verified (0 skipped lines, 0 `.slice(-4)`):
+    // 4. superseded branch (F32): append a newer request for the same (seat, tool, sha256) and verify `--request-id` of older request
+    const c41TsNewer = '2026-10-14T16:25:00Z';
+    const reqC41Newer = computeRequestId(c41TsNewer, c41Seat, c41Tool, c41Sha);
+    fs.appendFileSync(
+      todayPath,
+      JSON.stringify({
+        ts: c41TsNewer,
+        seat: c41Seat,
+        tool: c41Tool,
+        host: 'api.example.com',
+        len: 64,
+        sha256: c41Sha,
+        head60: 'curl -X POST https://api.example.com/c41-newer',
+        reason: 'external_post_send',
+      }) + '\n',
+      'utf-8'
+    );
+    const checkSuperseded41 = runCheckCli(c41Seat, c41Tool, c41Sha, ['--request-id', reqC41]);
+    assert.equal(checkSuperseded41.status, 2);
+    assert.deepEqual(
+      Object.keys(checkSuperseded41.body).sort(),
+      ['latestRequestId', 'requestId', 'status']
+    );
+    assert.equal(checkSuperseded41.body.status, 'superseded');
+    assert.equal(checkSuperseded41.body.requestId, reqC41);
+    assert.equal(checkSuperseded41.body.latestRequestId, reqC41Newer);
+    console.log('  [PASS] Case 41 (F24 + F28 + F32 P2 v09): CLI JSON contract keys & exact values verified (including idempotent claimId, claimed requestId, superseded latestRequestId, and .mmmZ ISO expiresAt)');
+
+    // Case 42 (F22 + F29 + F31 P2 v09): Dedicated isolated ledger for Case 42 so EVERY SINGLE LINE in the `.jsonl` file
+    // is parsed and verified (0 skipped lines, 0 `.slice(-4)`), PLUS read-back verification (`check` + `dump`) after `mark`:
     // - (42a) Truncating 1 byte (`\n`) after `--consume` -> second `--consume` exits 2 (`status: "claimed"`),
-    //   `approval_mark.py --claim-id` exits 0 (`status: "executed"`) and repairs the missing `\n`, and EVERY line in the ledger parses as valid JSON.
+    //   `approval_mark.py --claim-id` exits 0 (`status: "executed"`), read-back via `check` and `dump --request-id` confirms
+    //   `status === "executed"` with matching `requestId`, `claimId`, and `runId`, and EVERY line in the ledger parses as valid JSON.
     // - (42b) Injecting a partial `os.write` that writes `b[:-1]` (complete JSON claim object missing only its trailing `\n`)
     //   and then raises `OSError(errno.EIO)` during `approval_check.py --consume`:
-    //   - First caller receives `exit 2` with `{"status": "io_error", "reason": "EIO"}` (never `approved`).
-    //   - Subsequent `approval_check.py --consume` folds the complete JSON object at EOF and exits 2 (`status: "claimed"`, with 16-hex `claimId`).
-    //   - `approval_mark.py --claim-id` repairs the missing `\n`, records `executed` (`exit 0`), and EVERY SINGLE LINE in the ledger parses as valid JSON!
+    //   - First caller receives `exit 2` with `{"status": "io_error", "reason": "EIO"}` (never `approved`), and the ledger file ends with byte `0x7d` (`}`).
+    //   - Subsequent `approval_check.py --consume` folds the complete JSON object at EOF and exits 2 (`status: "claimed"`, with matching 16-hex `claimId`).
+    //   - `approval_mark.py --claim-id` repairs the missing `\n`, records `executed` (`exit 0`), read-back via `check` and `dump --request-id`
+    //     confirms `status === "executed"` with matching `requestId`, `claimId`, and `runId`, and EVERY SINGLE LINE in the ledger parses as valid JSON!
     const c42IsolatedDir = path.join(
       os.tmpdir(),
       'aiboss-c42-f29-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
@@ -3580,6 +3690,19 @@ time.sleep(60)
         });
         const out = (res.stdout || '').trim();
         return { status: res.status, body: out ? JSON.parse(out) : null };
+      };
+
+      const runDumpItemC42 = (reqId) => {
+        const res = spawnSync(
+          'python3',
+          [LEDGER_SCRIPT, 'dump', '--json', `--request-id=${reqId}`],
+          {
+            env: { ...process.env, AIBOSS_DATA_DIR: c42IsolatedDir },
+            encoding: 'utf-8',
+          }
+        );
+        assert.equal(res.status, 0, `runDumpItemC42 failed: ${res.stderr}`);
+        return JSON.parse(res.stdout.trim()).item;
       };
 
       // Helper that parses EVERY SINGLE LINE in `c42LogPath` with zero exemptions
@@ -3660,14 +3783,29 @@ time.sleep(60)
       assert.equal(markAfterTrunc42a.status, 0);
       assert.equal(markAfterTrunc42a.body.status, 'executed');
 
+      // Read-back verification on isolated ledger after 42a mark (F31)
+      const checkAfterMark42a = runCheckC42(c42SeatA, c42ToolA, c42ShaA);
+      assert.equal(checkAfterMark42a.status, 2);
+      assert.equal(checkAfterMark42a.body.status, 'executed');
+      assert.equal(checkAfterMark42a.body.requestId, reqC42A);
+      assert.equal(checkAfterMark42a.body.claimId, claimId42a);
+      const dumpItem42a = runDumpItemC42(reqC42A);
+      assert.equal(dumpItem42a.status, 'executed');
+      assert.equal(dumpItem42a.requestId, reqC42A);
+      assert.equal(dumpItem42a.claim.claimId, claimId42a);
+      assert.equal(dumpItem42a.execution.claimId, claimId42a);
+      assert.equal(dumpItem42a.execution.result, 'executed');
+      assert.equal(dumpItem42a.execution.runId, 'run-c42a');
+
       // Parse EVERY SINGLE LINE in `c42LogPath` (4 lines: request, decision, claim, execution)
       assertAllLedgerLinesValidJson(4, '42a-post-mark');
 
-      // (42b — F29): Inject `os.write` that writes `b[:-1]` (complete JSON claim object without trailing `\n`)
+      // (42b — F29 + F31): Inject `os.write` that writes `b[:-1]` (complete JSON claim object without trailing `\n`)
       // and raises `OSError(errno.EIO)` on the remaining 1 byte:
-      // - Caller 1 receives `exit 2`, `status: "io_error"`, `reason: "EIO"`.
-      // - Caller 2 (`--consume`) sees `status: "claimed"` (`exit 2`) with the 16-hex `claimId`.
+      // - Caller 1 receives `exit 2`, `status: "io_error"`, `reason: "EIO"`, and the file ends with byte `0x7d` (`}`).
+      // - Caller 2 (`--consume`) sees `status: "claimed"` (`exit 2`) with the exact `claimId` from the unterminated tail line.
       // - `approval_mark.py` repairs the missing `\n` and records `executed` (`exit 0`),
+      //   read-back (`check` + `dump`) confirms `executed` with matching `requestId`/`claimId`/`runId`,
       //   and all 8 lines in `c42LogPath` parse cleanly as valid JSON!
       const c42TsB = '2026-10-14T16:31:00Z';
       const c42SeatB = 'seat-c42b-f29';
@@ -3736,27 +3874,54 @@ approval_check.main()
       assert.equal(body42bCaller1.status, 'io_error');
       assert.equal(body42bCaller1.reason, 'EIO');
 
-      // Second `--consume` sees `status: "claimed"` (`exit 2`) because the JSON object body was complete
+      // Directly assert the ledger file currently ends with byte 0x7d ('}') and parse the unterminated claim line
+      const rawBytesAfterEio42b = fs.readFileSync(c42LogPath);
+      assert.equal(
+        rawBytesAfterEio42b[rawBytesAfterEio42b.length - 1],
+        0x7d,
+        'Case 42b (F29): ledger file immediately after write-without-LF + EIO must end with 0x7d (})'
+      );
+      const rawLinesAfterEio42b = rawBytesAfterEio42b.toString('utf-8').split('\n');
+      const unterminatedTail42b = JSON.parse(rawLinesAfterEio42b[rawLinesAfterEio42b.length - 1]);
+      assert.equal(unterminatedTail42b.type, 'claim');
+      assert.equal(unterminatedTail42b.requestId, reqC42B);
+
+      // Second `--consume` sees `status: "claimed"` (`exit 2`) with the exact claimId from the unterminated tail line
       const secondConsume42b = runCheckC42(c42SeatB, c42ToolB, c42ShaB, ['--consume']);
       assert.equal(secondConsume42b.status, 2);
       assert.equal(secondConsume42b.body.status, 'claimed');
       assert.equal(secondConsume42b.body.requestId, reqC42B);
       const claimId42b = secondConsume42b.body.claimId;
       assert.match(claimId42b, /^[0-9a-f]{16}$/);
+      assert.equal(claimId42b, unterminatedTail42b.claimId);
 
       // `approval_mark.py` repairs the missing `\n` and records `executed` (`exit 0`)
       const markAfterEio42b = runMarkC42(reqC42B, 'executed', 'run-c42b', claimId42b);
       assert.equal(markAfterEio42b.status, 0);
       assert.equal(markAfterEio42b.body.status, 'executed');
 
+      // Read-back verification on isolated ledger after 42b mark (F31)
+      const checkAfterMark42b = runCheckC42(c42SeatB, c42ToolB, c42ShaB);
+      assert.equal(checkAfterMark42b.status, 2);
+      assert.equal(checkAfterMark42b.body.status, 'executed');
+      assert.equal(checkAfterMark42b.body.requestId, reqC42B);
+      assert.equal(checkAfterMark42b.body.claimId, claimId42b);
+      const dumpItem42b = runDumpItemC42(reqC42B);
+      assert.equal(dumpItem42b.status, 'executed');
+      assert.equal(dumpItem42b.requestId, reqC42B);
+      assert.equal(dumpItem42b.claim.claimId, claimId42b);
+      assert.equal(dumpItem42b.execution.claimId, claimId42b);
+      assert.equal(dumpItem42b.execution.result, 'executed');
+      assert.equal(dumpItem42b.execution.runId, 'run-c42b');
+
       // Parse EVERY SINGLE LINE in `c42LogPath` (all 8 lines across 42a + 42b must be valid JSON!)
       assertAllLedgerLinesValidJson(8, '42b-all-8-lines');
     } finally {
       fs.rmSync(c42IsolatedDir, { recursive: true, force: true });
     }
-    console.log('  [PASS] Case 42 (F22 + F29 P2 v08): Isolated ledger verifies 100% of lines parse as valid JSON after 1-byte LF truncation AND after injected write-missing-LF + EIO');
+    console.log('  [PASS] Case 42 (F22 + F29 + F31 P2 v09): Isolated ledger verifies 100% of lines parse as valid JSON + read-back check/dump executed after 1-byte LF truncation AND after injected write-missing-LF + EIO');
 
-    console.log('>>> ALL 42 A-4 v08 APPROVAL LEDGER TEST CASES PASSED <<<');
+    console.log('>>> ALL 42 A-4 v09 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

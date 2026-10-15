@@ -263,8 +263,11 @@ Mọi lệnh CLI đều chạy dưới lớp bắt lỗi ngoài cùng `run_cli_w
      - Lỗi hạ tầng (`exit 2`):
        - `lock_timeout` (trước khi ghi, `0` byte ghi): `{"status": "lock_timeout"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`).
        - `ledger_unreadable` (trước khi ghi, `0` byte ghi): `{"status": "ledger_unreadable", "file": "<basename>", "reason": "<ERRNO>"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`).
-       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`). Nếu lỗi I/O xảy ra trước khi mở/ghi tệp (`EACCES`, `EROFS`), `0` byte được ghi; nếu lỗi xảy ra **sau khi đã bắt đầu ghi** (ví dụ `os.write` bị cụt dòng hoặc lỗi ở bước `fsync`/đọc kiểm tra đuôi), trên đĩa có thể còn lại một dòng cụt chưa hoàn chỉnh — bộ đọc sẽ tự bỏ qua dòng cụt đó, và lần ghi hợp lệ tiếp theo sẽ tự chèn byte `\n` để sửa đuôi tệp.
-3. **Đánh dấu kết quả sau khi thực thi (`operations/scripts/approval_mark.py` — Hook H4, Hợp đồng Schema Cộng Thêm F24, F28):**
+       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>"}` (kèm `"requestId": "<16-hex>"` nếu truyền `--request-id`). Nếu lỗi I/O xảy ra trước khi mở/ghi tệp (`EACCES`, `EROFS`), `0` byte được ghi; nếu lỗi xảy ra **sau khi đã bắt đầu ghi** trong `append_jsonl_safely` (xem chi tiết tại **§5.5**), có đúng **3 trường hợp hậu quả trên đĩa**:
+         1. **JSON chưa đủ (mảnh dòng cụt giữa chừng):** bộ đọc `read_and_fold_ledger` tự bỏ qua mảnh không phải JSON hợp lệ, trạng thái sổ không đổi, và lần ghi hợp lệ kế tiếp tự chèn byte `\n` để sửa đuôi tệp.
+         2. **JSON đủ nội dung nhưng thiếu byte `\n` cuối:** bộ đọc `read_and_fold_ledger` vẫn parse và fold bản ghi cuối này (ví dụ `claim` chuyển trạng thái sang `"claimed"` để chặn tiêu thụ hai lần), và lần ghi hợp lệ kế tiếp tự chèn byte `\n` trước khi nối dòng mới (xem **§5.5 — F22**).
+         3. **Bản ghi đã ghi đủ (kể cả byte `\n`) nhưng lỗi ở bước đồng bộ đĩa (`os.fsync`) hoặc đọc kiểm tra lại (`readback`):** bản ghi hoàn chỉnh đã nằm trên đĩa nên các lần đọc tiếp theo vẫn fold bản ghi đó thành trạng thái mới (`claimed` / `executed` / `decision`).
+3. **Đánh dấu kết quả sau khi thực thi (`operations/scripts/approval_mark.py` — Hook H4, Hợp đồng Schema Cộng Thêm F24, F28, F30):**
    ```bash
    python3 operations/scripts/approval_mark.py --request-id=<id> --result=<executed|failed> [--claim-id=<claimId>] [--run-id=<runId>]
    ```
@@ -278,7 +281,7 @@ Mọi lệnh CLI đều chạy dưới lớp bắt lỗi ngoài cùng `run_cli_w
      - Lỗi hạ tầng (`exit 2`):
        - `lock_timeout`: `{"status": "lock_timeout", "requestId": "<16-hex>"}` (trước khi ghi, `0` byte ghi).
        - `ledger_unreadable`: `{"status": "ledger_unreadable", "file": "<basename>", "reason": "<ERRNO>", "requestId": "<16-hex>"}` (trước khi ghi, `0` byte ghi).
-       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>", "requestId": "<16-hex>"}` (`0` byte nếu lỗi trước khi ghi; nếu lỗi xảy ra sau khi đã bắt đầu ghi như short write thì dòng cụt được bộ đọc bỏ qua và lần ghi kế tiếp tự sửa đuôi).
+       - `io_error`: `{"status": "io_error", "reason": "<ERRNO>", "requestId": "<16-hex>"}` (`0` byte nếu lỗi trước khi ghi; nếu lỗi xảy ra sau khi đã bắt đầu ghi thì theo đúng **3 trường hợp hậu quả trên đĩa** như mục `approval_check.py` ở trên và **§5.5**: JSON chưa đủ thì bị bỏ qua và lần ghi kế tiếp sửa đuôi `\n`; JSON đủ nhưng thiếu `\n` hoặc bản ghi đã đủ nhưng lỗi ở `os.fsync`/readback thì bản ghi `execution` vẫn được bộ đọc fold thành `"executed"`/`"failed"`).
 
 ### 5.4. API, Quy Tắc Xác Thực (F13) & Giao Diện `/settings`
 - `GET /api/approvals?status=pending|approved|denied|executed|expired&limit=50`: gọi `approval_ledger.py dump --json`, lọc qua `sanitizeApprovalItem` và trả danh sách yêu cầu kèm `total`. Nếu gặp `lock_timeout`, `ledger_unreadable` hoặc `io_error`, trả về HTTP `503` với thông điệp chung an toàn (không lộ đường dẫn tệp nội bộ).
