@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { CAU_HINH } from '@/lib/cau-hinh';
+import { spawnClaudeSeatProcess } from '@/lib/chay-agent';
 import { timNhanSu } from '@/lib/nhan-su';
 import { thuMucAgent, mocTepPhien } from '@/lib/doc-phien';
 import { themMatXich, khoCua, doTep } from '@/lib/goc-tich';
@@ -108,13 +108,14 @@ export async function POST(req: NextRequest) {
    *    thì đó là quyết định của PM/Owner, KHÔNG phải thứ người viết mã tự chọn.
    * ⇒ Vậy nên quãng kiểm-rồi-ghi Ở ĐƯỜNG GỐC TÍCH VẪN CÒN. Tôi KHÔNG khai đã đóng nó.
    */
-  fs.mkdirSync(thuMuc, { recursive: true });
   const maMoi = await new Promise<string | null>((giai) => {
-    const tien = spawn(
-      CAU_HINH.lenhClaude,
-      ['-p', '--output-format', 'json', '--resume', maPhien, '--fork-session', '--model', CAU_HINH.moHinh],
-      { cwd: thuMuc, stdio: ['pipe', 'pipe', 'pipe'], env: process.env },
-    );
+    const { tien } = spawnClaudeSeatProcess({
+      thuMuc,
+      maNhanSu,
+      outputFormat: 'json',
+      maPhienCu: maPhien,
+      forkSession: true,
+    });
     let ra = '';
     tien.stdout.on('data', (c: Buffer) => { ra += c.toString('utf8'); });
     tien.stdin.write('Trả lời đúng 1 chữ: ok');

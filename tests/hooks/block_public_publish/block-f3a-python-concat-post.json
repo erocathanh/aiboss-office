@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"import requests; requests.post('https://graph.' + 'facebook.com/v25.0/me/feed', data={'message':'hi'})\""
+  }
+}

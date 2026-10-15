@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"(await import('axios')).default.post('https://example.net/ingest',{a:1})\""
+  }
+}

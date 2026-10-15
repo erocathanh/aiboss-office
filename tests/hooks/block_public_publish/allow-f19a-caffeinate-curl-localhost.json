@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "caffeinate -i curl -X POST http://127.0.0.1:4330/api/health -d x"}}

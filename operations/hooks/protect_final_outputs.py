@@ -122,6 +122,8 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
             # B. Kiểm tra tất cả write targets
             targets = bash_parser.extract_write_targets(sc, symlinks)
             for target_path, reason in targets:
+                if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
+                    return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
                 rel = bash_parser.canonical_path(target_path, sc.cwd, project_dir, symlinks)
 
                 # Rào 1: Ghi vào DU-AN-MAU-SU-THAT
@@ -145,10 +147,14 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                 break
 
                     real_t = os.path.realpath(abs_t)
-                    if os.path.exists(real_t):
+                    is_destructive_op = any(
+                        k in reason for k in ("delete", "unlink", "rmdir", "rmtree", "rename source", "move/rename source", "Path.rename source", "Path.replace source")
+                    )
+                    if os.path.exists(real_t) or is_destructive_op:
                         return f"Lệnh ghi đè lên tệp đã có ({os.path.basename(target_path)}) trong DAU-RA bị chặn. Đầu ra đã chốt là bất biến."
 
     return ""
+
 
 def main():
     try:

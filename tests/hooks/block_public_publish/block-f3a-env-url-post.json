@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "GRAPH_URL=\"https://graph.facebook.com/v25.0/me/feed\"; curl -s -X POST \"$GRAPH_URL\" -d \"message=hi\""
+  }
+}

@@ -46,6 +46,8 @@ echo "salt123" > "$SANDBOX/fixtures/hash-salt"
 
 # Dựng symlinks tương thích hai chiều (layout office <-> opc)
 mkdir -p "$SANDBOX/wip"
+printf '#!/bin/sh\ncurl -s -X POST "https://graph.facebook.com/v25.0/me/feed" -d "message=bypass"\n' > "$SANDBOX/wip/post-graph.sh"
+"$PYTHON" -c "open('$SANDBOX/wip/big-script.sh', 'w').write('#!/bin/sh\n' + '# padding\n' * 25000)"
 ln -sf "$SANDBOX/projects/THU-SU-THAT/outputs/da-chot_final.md" "$SANDBOX/wip/lien-ket-chot.md"
 ln -sf "$SANDBOX/projects/THU-SU-THAT/inputs" "$SANDBOX/wip/raw-link"
 
@@ -104,6 +106,19 @@ sys.stdout.write(s)
         chmod 000 "$SANDBOX/projects/THU-SU-THAT/CHANNEL.md" 2>/dev/null || true
     fi
 
+    # Xử lý ca đặc biệt S17-16: kiểm tra thư mục approvals chỉ đọc vs ghi được
+    local is_s17_16_ro=0
+    local is_s17_16_rw=0
+    local approvals_lines_before=0
+    if [[ "$filename" == *"s17-16-readonly-approvals"* ]]; then
+        is_s17_16_ro=1
+        chmod 0400 "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null || true
+        chmod 0500 "$SANDBOX/operations/data/approvals" 2>/dev/null || true
+    elif [[ "$filename" == *"s17-16-writable-approvals"* ]]; then
+        is_s17_16_rw=1
+        approvals_lines_before=$(cat "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
     local stdout_file stderr_file
     stdout_file="$(mktemp)"
     stderr_file="$(mktemp)"
@@ -123,6 +138,14 @@ sys.stdout.write(s)
 
     if [ "$is_h114" -eq 1 ]; then
         chmod 0644 "$SANDBOX/projects/THU-SU-THAT/CHANNEL.md" 2>/dev/null || true
+    fi
+    if [ "$is_s17_16_ro" -eq 1 ]; then
+        chmod 0755 "$SANDBOX/operations/data/approvals" 2>/dev/null || true
+        chmod 0644 "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null || true
+    fi
+    local approvals_lines_after=0
+    if [ "$is_s17_16_rw" -eq 1 ]; then
+        approvals_lines_after=$(cat "$SANDBOX/operations/data/approvals/"*.jsonl 2>/dev/null | wc -l | tr -d ' ')
     fi
 
     local out_content err_content
@@ -148,7 +171,15 @@ sys.stdout.write(s)
     if [ "$expected_decision" == "block" ]; then
         if [ "$exit_code" -eq 2 ]; then
             if [[ "$err_content" == "[opc-harness:$hook_name]"* ]]; then
-                record_pass "$hook_name / $filename (chặn đúng mã 2 và đúng tiền tố stderr)"
+                if [ "$is_s17_16_ro" -eq 1 ] && [[ "$err_content" != *"approval request NOT recorded:"* ]]; then
+                    record_fail "$hook_name / $filename" "Mã 2 nhưng thiếu 'approval request NOT recorded:' trên stderr khi approvals chỉ đọc: $err_content"
+                elif [ "$is_s17_16_rw" -eq 1 ] && [[ "$err_content" == *"approval request NOT recorded:"* ]]; then
+                    record_fail "$hook_name / $filename" "Thư mục approvals ghi được nhưng stderr lại báo NOT recorded: $err_content"
+                elif [ "$is_s17_16_rw" -eq 1 ] && [ "$approvals_lines_after" -le "$approvals_lines_before" ]; then
+                    record_fail "$hook_name / $filename" "Thư mục approvals ghi được nhưng số dòng không tăng ($approvals_lines_before -> $approvals_lines_after)"
+                else
+                    record_pass "$hook_name / $filename (chặn đúng mã 2 và đúng tiền tố stderr)"
+                fi
             else
                 record_fail "$hook_name / $filename" "Mã 2 nhưng stderr không bắt đầu bằng [opc-harness:$hook_name]: $err_content"
             fi
@@ -188,7 +219,7 @@ sys.stdout.write(s)
     fi
 }
 
-echo "=== BẮT ĐẦU KIỂM TRA 8 HOOK AN TOÀN AIBOSS OFFICE ==="
+echo "=== BẮT ĐẦU KIỂM TRA 11 HOOK AN TOÀN AIBOSS OFFICE ==="
 
 HOOKS=(
     "block_mass_delete"
@@ -199,6 +230,9 @@ HOOKS=(
     "guard_bulk_send"
     "lock_raw_inputs"
     "remind_cross_check"
+    "block_ollama"
+    "block_ad_account_write"
+    "block_public_publish"
 )
 
 for hook in "${HOOKS[@]}"; do
@@ -224,28 +258,74 @@ for hook in "${HOOKS[@]}"; do
     done
 done
 
-# Kiểm tra đối chứng dương: khi TẮT hook (thay bằng no-op true), ca block-* qua runner PHẢI báo FAIL.
-# Nếu runner báo FAIL khi hook bị câm/tắt, thì đối chứng dương ĐẠT (bộ kiểm thử không mù).
-echo "--- Kiểm tra đối chứng dương (Positive Control) ---"
-pos_script="$REPO_ROOT/operations/hooks/block_mass_delete.py"
-pos_file="$REPO_ROOT/tests/hooks/block_mass_delete/positive-control-rm-rf.json"
+# Kiểm tra đối chứng dương: khi TẮT hook (thay bằng no-op true), các ca block-* (gồm cả F15/F16/F19/F20)
+# trả mã thoát 0 nên qua runner PHẢI báo FAIL. Nếu runner báo FAIL khi hook bị câm/tắt, thì đối chứng dương ĐẠT.
+echo "--- Kiểm tra đối chứng dương (Positive Control: HOOKS_DISABLED=1) ---"
+POS_CONTROL_CASES=(
+    "block_mass_delete:positive-control-rm-rf.json"
+    "block_public_publish:block-f15-xargs-curl-post.json"
+    "block_public_publish:block-f19a-caffeinate-curl-post.json"
+    "block_public_publish:block-f19a-script-curl-post.json"
+    "block_public_publish:block-f19b-node-fetch-new-url-post.json"
+    "block_public_publish:block-f19b-python-urllib-request-post.json"
+    "block_public_publish:block-S17f-F26-fetch-options-var-post.json"
+    "block_public_publish:block-S17f-F26-axios-config-var-post.json"
+    "block_public_publish:block-pm-node-axios-post.json"
+    "block_public_publish:block-S17f-F31-urllib3-poolmanager-request.json"
+    "block_public_publish:block-S17g-F32-fetch-quoted-method-post.json"
+    "block_public_publish:block-S17g-F32-fetch-shadowed-opts-param.json"
+    "block_public_publish:block-S17g-F35-require-axios-delete.json"
+    "block_public_publish:block-S17g-F35-axios-client-var-delete.json"
+    "block_public_publish:block-S17h-F39-map-reassigned-axios-delete.json"
+    "block_public_publish:block-S17h-F39-comma-axios-create-delete-var-url.json"
+    "block_public_publish:block-S17h-F41-method-shorthand-shadowed-opts.json"
+    "lock_raw_inputs:block-f16-node-cpSync-dst-approvals.json"
+    "lock_raw_inputs:block-f16-python-open-hex-escape.json"
+    "lock_raw_inputs:block-f16-python-path-join-write-text.json"
+    "lock_raw_inputs:block-f20a-python-path-div-write-text.json"
+    "lock_raw_inputs:block-f20a-python-path-var-write-text.json"
+    "lock_raw_inputs:block-f20b-python-shutil-move-from-inputs.json"
+    "lock_raw_inputs:block-f20c-node-path-join-leading-slash-inputs.json"
+    "lock_raw_inputs:block-S17f-F27-shutil-copytree-inputs.json"
+    "lock_raw_inputs:block-S17f-F27-path-rename-from-inputs.json"
+    "lock_raw_inputs:block-S17f-F28-os-unlink-inputs.json"
+    "lock_raw_inputs:block-S17g-F33-path-var-named-path-write-text.json"
+    "lock_raw_inputs:block-S17g-F33-pathlib-qualified-ctor-write-text.json"
+    "lock_raw_inputs:block-S17g-F34-path-replace-inputs.json"
+    "lock_raw_inputs:block-S17h-F38-path-rename-then-rebind-str.json"
+    "lock_raw_inputs:block-S17h-F38-path-replace-then-rebind-str.json"
+    "protect_final_outputs:block-S17f-F27-path-rename-from-outputs.json"
+    "protect_final_outputs:block-S17h-F38-path-rename-then-rebind-str.json"
+    "protect_final_outputs:block-S17h-F38-path-replace-then-rebind-str.json"
+)
 
 saved_total=$TOTAL
 saved_passed=$PASSED
 saved_failed=$FAILED
 
-control_out=$(HOOKS_DISABLED=1 run_hook_test "$pos_script" "block_mass_delete" "$pos_file" 2>&1)
+pos_control_ok=1
+for entry in "${POS_CONTROL_CASES[@]}"; do
+    pc_hook="${entry%%:*}"
+    pc_file="${entry#*:}"
+    pc_script="$REPO_ROOT/operations/hooks/${pc_hook}.py"
+    pc_path="$REPO_ROOT/tests/hooks/${pc_hook}/${pc_file}"
+    control_out=$(HOOKS_DISABLED=1 run_hook_test "$pc_script" "$pc_hook" "$pc_path" 2>&1)
+    if [[ "$control_out" != *"[FAIL]"* || "$control_out" != *"nhận mã 0"* ]]; then
+        echo "  [FAIL] Ca đối chứng dương ($pc_hook/$pc_file): khi HOOKS_DISABLED=1, không phát hiện nhận mã 0: $control_out"
+        pos_control_ok=0
+    fi
+done
 
 TOTAL=$saved_total
 PASSED=$saved_passed
 FAILED=$saved_failed
 
-if [[ "$control_out" == *"[FAIL]"* ]]; then
-    echo "  [PASS] Ca đối chứng dương: khi tắt hook (thay bằng no-op true), runner phát hiện và báo FAIL. Bộ test không mù, thước biết nói KHÔNG!"
+if [ "$pos_control_ok" -eq 1 ]; then
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
-    echo "  [FAIL] Ca đối chứng dương: khi tắt hook, runner không báo FAIL: $control_out"
     FAILED=$((FAILED + 1))
 fi
+
 
 echo ""
 echo "=== KẾT QUẢ KIỂM THỬ ==="

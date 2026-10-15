@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -X POST https://api.resend.com/emails -d '{\"to\":\"a@b.com\"}'"
+  }
+}

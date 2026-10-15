@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"from pathlib import Path; Path('projects/THU-SU-THAT/outputs/bao-cao.md').unlink()\""
+  }
+}

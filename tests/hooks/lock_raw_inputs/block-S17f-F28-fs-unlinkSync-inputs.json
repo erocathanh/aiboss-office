@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"const fs=require('fs'); fs.unlinkSync('projects/THU-SU-THAT/inputs/a')\""
+  }
+}

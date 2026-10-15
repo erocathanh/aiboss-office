@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -L -X POST \"https://my-redirector.example.com/publish\" -d \"message=hi\""
+  }
+}

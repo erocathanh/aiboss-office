@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "cat wip/endpoint.txt | xargs curl -X POST -d x"}}

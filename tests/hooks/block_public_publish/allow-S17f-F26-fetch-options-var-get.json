@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"const options={method:'GET'}; fetch('https://example.net/status',options)\""
+  }
+}

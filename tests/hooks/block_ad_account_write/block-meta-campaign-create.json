@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s -X POST \"https://graph.facebook.com/v25.0/act_123456/campaigns\" -d \"name=test&objective=OUTCOME_SALES&status=PAUSED\""
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s -G \"https://graph.facebook.com/v25.0/act_123456/insights\" --data-urlencode \"fields=spend,impressions,clicks\""
+  }
+}

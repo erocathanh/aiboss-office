@@ -207,8 +207,9 @@ def log_approval_request(tool_name: str, tool_input: dict, reason: str, cwd: str
         }
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        short_reason = f"{type(e).__name__}: {e}".strip()
+        sys.stderr.write(f"[opc-harness:{HOOK_NAME}] approval request NOT recorded: {short_reason}\n")
 
 
 def main():

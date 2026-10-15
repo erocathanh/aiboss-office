@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"fetch(new URL('/status','https://example.net'))\""}}
