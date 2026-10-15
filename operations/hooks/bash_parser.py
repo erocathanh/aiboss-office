@@ -288,7 +288,7 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
                 i += 1
                 continue
 
-            # Kiểm tra redirection ngoài nháy: >, >>, <, <<, <<-, 1>, 1>>, 2>, 2>>, 0<
+            # Kiểm tra redirection ngoài nháy: >, >>, >|, <, <<, <<-, N>, N>>, N>|, N<
             # Xét xem ký tự này có phải là bắt đầu toán tử redirection không
             is_redir = False
             op = ""
@@ -297,6 +297,9 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
             if ch in ('>', '<'):
                 if i + 1 < length and chars[i:i+2] == ['>', '>']:
                     op = '>>'
+                    step = 2
+                elif i + 1 < length and chars[i:i+2] == ['>', '|']:
+                    op = '>|'
                     step = 2
                 elif i + 2 < length and chars[i:i+3] == ['<', '<', '-']:
                     op = '<<-'
@@ -309,16 +312,22 @@ def tokenize_command(cmd_str: str) -> Tuple[List[str], List[Tuple[str, str]]]:
                     step = 1
                 is_redir = True
 
-            elif ch.isdigit() and i + 1 < length and chars[i+1] in ('>', '<'):
-                # Ví dụ 1>, 2>, 0<, 1>>
-                if i + 2 < length and chars[i+1:i+3] == ['>', '>']:
-                    op = ch + '>>'
-                    step = 3
-                else:
-                    op = ch + chars[i+1]
-                    step = 2
-                # Chỉ coi là file descriptor redirection nếu trước nó là khoảng trắng hoặc đầu dòng
-                if not current_word:
+            elif ch.isdigit() and not current_word:
+                # Ví dụ 1>, 2>, 0<, 1>>, 2>|, 3>, 3>>
+                d_end = i
+                while d_end < length and chars[d_end].isdigit():
+                    d_end += 1
+                if d_end < length and chars[d_end] in ('>', '<'):
+                    fd_str = ''.join(chars[i:d_end])
+                    if d_end + 1 < length and chars[d_end:d_end+2] == ['>', '>']:
+                        op = fd_str + '>>'
+                        step = (d_end - i) + 2
+                    elif d_end + 1 < length and chars[d_end:d_end+2] == ['>', '|']:
+                        op = fd_str + '>|'
+                        step = (d_end - i) + 2
+                    else:
+                        op = fd_str + chars[d_end]
+                        step = (d_end - i) + 1
                     is_redir = True
 
             if is_redir:
@@ -502,6 +511,13 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str], Lis
                 if subshell_depth > 0 or backtick:
                     current_cmd.append(ch)
                     i += 1
+                    continue
+
+                # Toán tử chuyển hướng ghi đè >| (không phải ống |)
+                if ch == '>' and i + 1 < length and chars[i+1] == '|':
+                    current_cmd.append(ch)
+                    current_cmd.append(chars[i+1])
+                    i += 2
                     continue
 
                 # Toán tử phân tách: &&, ||, ;, |, \n, &
@@ -923,24 +939,24 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
     """
     targets: List[Tuple[str, str]] = []
 
-    # 1. Redirections: >, >>, 1>, 1>>, 2>, 2>>
+    # 1. Redirections: >, >>, >|, N>, N>>, N>|
     for op, target in cmd.redirections:
         clean_target = target.strip("'\"")
-        if clean_target in ('/dev/null', '&1', '&2'):
+        if clean_target in ('/dev/null', '&1', '&2') or clean_target.startswith('&'):
             continue
-        if op in ('>', '>>', '1>', '1>>', '2>', '2>>'):
+        if re.match(r'^\d*(?:>>|>\||>)$', op):
             targets.append((clean_target, f"redirection {op}"))
 
     for tf in getattr(cmd, "script_transcript_files", []):
         if tf and tf != '/dev/null':
             targets.append((tf, "script transcript file"))
 
-    # 2. Lệnh ghi file: cp, mv, git mv, ln, install, rsync, ditto, touch, truncate, unlink, rmdir, tee, sed, perl, dd
+    # 2. Lệnh ghi file: cp, mv, git mv, git rm, ln, install, rsync, ditto, rm, touch, truncate, unlink, rmdir, tee, sponge, sed, perl, dd
     base = cmd.executable
     words = cmd.words
 
     if getattr(cmd, "via_xargs", False) and base in (
-        'cp', 'install', 'rsync', 'ditto', 'ln', 'mv', 'touch', 'truncate', 'unlink', 'rmdir', 'tee', 'sed', 'perl', 'dd'
+        'cp', 'install', 'rsync', 'ditto', 'ln', 'mv', 'rm', 'touch', 'truncate', 'unlink', 'rmdir', 'tee', 'sponge', 'sed', 'perl', 'dd'
     ):
         targets.append(("$DYNAMIC_WRITE:xargs", f"{base} via xargs"))
 
@@ -1025,16 +1041,85 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
             for a in subcmd_args:
                 if not a.startswith('-'):
                     targets.append((a.strip("'\""), "git mv source or destination"))
+        elif subcmd == 'rm':
+            has_cached = False
+            after_dd = False
+            rm_paths = []
+            for a in subcmd_args:
+                if not after_dd:
+                    if a == '--':
+                        after_dd = True
+                        continue
+                    if a == '--cached':
+                        has_cached = True
+                        continue
+                    if a.startswith('-'):
+                        continue
+                clean_a = a.strip("'\"")
+                if clean_a:
+                    rm_paths.append(clean_a)
+            if not has_cached:
+                for p in rm_paths:
+                    targets.append((p, "git rm target"))
 
-    elif base in ('touch', 'truncate', 'unlink', 'rmdir'):
+    elif base in ('rm', 'touch', 'truncate', 'unlink', 'rmdir'):
+        after_dd = False
+        skip_next = False
         for w in words[1:]:
-            if not w.startswith('-'):
-                targets.append((w.strip("'\""), f"{base} target"))
+            if skip_next:
+                skip_next = False
+                continue
+            if not after_dd:
+                if w == '--':
+                    after_dd = True
+                    continue
+                if base == 'truncate' and w in ('-s', '--size', '-r', '--reference'):
+                    skip_next = True
+                    continue
+                if base == 'touch' and w in ('-t', '-d', '-r'):
+                    skip_next = True
+                    continue
+                if w.startswith('-'):
+                    continue
+            clean_w = w.strip("'\"")
+            if clean_w:
+                targets.append((clean_w, f"{base} target"))
 
     elif base == 'tee':
+        is_append = any(
+            w == '--append' or (w.startswith('-') and not w.startswith('--') and 'a' in w[1:])
+            for w in words[1:]
+        )
+        reason_label = "tee append target" if is_append else "tee overwrite target"
+        after_dd = False
         for w in words[1:]:
-            if not w.startswith('-'):
-                targets.append((w.strip("'\""), "tee target"))
+            if not after_dd:
+                if w == '--':
+                    after_dd = True
+                    continue
+                if w.startswith('-'):
+                    continue
+            clean_w = w.strip("'\"")
+            if clean_w:
+                targets.append((clean_w, reason_label))
+
+    elif base == 'sponge':
+        is_append = any(
+            w == '--append' or (w.startswith('-') and not w.startswith('--') and 'a' in w[1:])
+            for w in words[1:]
+        )
+        reason_label = "sponge append target" if is_append else "sponge overwrite target"
+        after_dd = False
+        for w in words[1:]:
+            if not after_dd:
+                if w == '--':
+                    after_dd = True
+                    continue
+                if w.startswith('-'):
+                    continue
+            clean_w = w.strip("'\"")
+            if clean_w:
+                targets.append((clean_w, reason_label))
 
     elif base == 'sed':
         has_inplace = any(w.startswith('-i') or w == '-i' for w in words[1:])
@@ -1043,13 +1128,16 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
             for w in words[1:]:
                 if w.startswith('-'):
                     continue
-                if not passed_script and (w.startswith('s/') or w.startswith('y/') or w.startswith('d') or ';' in w):
+                clean_w = w.strip("'\"")
+                if not clean_w:
+                    continue
+                if not passed_script and (clean_w.startswith('s/') or clean_w.startswith('y/') or clean_w.startswith('d') or ';' in clean_w):
                     passed_script = True
                     continue
-                if not passed_script and ('s/' in w or 'g' in w):
+                if not passed_script and ('s/' in clean_w or 'g' in clean_w):
                     passed_script = True
                     continue
-                targets.append((w.strip("'\""), "sed inplace"))
+                targets.append((clean_w, "sed inplace"))
 
     elif base == 'perl':
         has_inplace = any('i' in w and w.startswith('-') for w in words[1:])
@@ -1177,16 +1265,28 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name}"
                 targets.append((resolved_target, label))
 
-        # Node fs single-target writes, deletes & mkdir (F27 & F28: only module/standalone calls)
+        # Node fs single-target writes (F27 & F28: only module/standalone calls)
         for call_args in _extract_module_call_arg_lists(
             combined_raw,
-            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|unlinkSync|rmSync|rm|rmdirSync|mkdirSync|truncateSync)\s*\(',
+            r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream)\s*\(',
             module_vars,
         ):
             if not call_args:
                 continue
             resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
             label = "node fs dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs write"
+            targets.append((resolved_target, label))
+
+        # Node fs single-target deletes, mkdir & truncate
+        for call_args in _extract_module_call_arg_lists(
+            combined_raw,
+            r'\b(?:unlinkSync|rmSync|rm|rmdirSync|mkdirSync|truncateSync)\s*\(',
+            module_vars,
+        ):
+            if not call_args:
+                continue
+            resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
+            label = "node fs dynamic delete" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs delete"
             targets.append((resolved_target, label))
 
         # Node fs callback/promise unlink/rmdir/mkdir (distinguished from Python os.unlink/rmdir/mkdir by default_join)

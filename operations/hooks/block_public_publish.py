@@ -1332,6 +1332,9 @@ def check_public_publish(tool_name: str, tool_input: dict, cwd: str = "") -> str
     if is_hook_2_1_disabled():
         return ""
 
+    effective_cwd = cwd or os.getcwd()
+    project_dir = office_root.resolve_project_root(effective_cwd)
+
     # 1. Non-Bash tools (Read, Edit, Write, MultiEdit, NotebookEdit, Grep, Glob) accessing Facebook token files
     if tool_name in ("Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob"):
         for s in extract_strings(tool_input):
@@ -1346,8 +1349,6 @@ def check_public_publish(tool_name: str, tool_input: dict, cwd: str = "") -> str
     if not raw_cmd or not raw_cmd.strip():
         return ""
 
-    effective_cwd = cwd or os.getcwd()
-    project_dir = office_root.find_office_root(effective_cwd)
     allowed_hosts = load_allowed_write_hosts(project_dir)
 
     return check_command_text(raw_cmd, effective_cwd, project_dir, allowed_hosts, depth=0)

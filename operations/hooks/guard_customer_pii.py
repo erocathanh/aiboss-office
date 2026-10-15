@@ -53,14 +53,96 @@ def is_dau_vao_path(path: str, cwd: str, project_dir: str, symlinks: dict = None
     return False
 
 
+DELETE_OR_EMPTY_REASONS = {
+    "rm target",
+    "git rm target",
+    "unlink target",
+    "rmdir target",
+    "truncate target",
+    "touch target",
+    "python os.unlink",
+    "python os.remove",
+    "python os.rmdir",
+    "python Path.unlink",
+    "python Path.rmdir",
+    "python Path.unlink delete",
+    "python Path.rmdir delete",
+    "python Path.unlink dynamic delete",
+    "python Path.rmdir dynamic delete",
+    "python Path.touch",
+    "python Path.mkdir",
+    "python delete target",
+    "python delete dynamic target",
+    "node fs delete",
+    "node fs dynamic delete",
+}
+
+
+def is_delete_or_empty_reason(reason: str) -> bool:
+    """Kiểm tra nhãn lý do có phải chỉ xoá, làm rỗng hay chạm tệp (không ghi nội dung khách) không (§6e)."""
+    return reason in DELETE_OR_EMPTY_REASONS
+
+
 def extract_bash_write_targets(command: str, cwd: str, project_dir: str):
-    """Trích xuất các file đích mà lệnh Bash sẽ ghi vào thông qua bộ phân tích bash_parser."""
+    """Trích xuất các file đích mà lệnh Bash sẽ ghi nội dung vào (bỏ qua đích chỉ xoá hay làm rỗng — §6e & §6f)."""
     targets = []
     commands, symlinks = bash_parser.parse_bash_script(command, cwd)
+    raw_targets = []
     for sc in commands:
-        sc_targets = bash_parser.extract_write_targets(sc, symlinks)
-        for target_path, _reason in sc_targets:
-            targets.append((target_path, sc.cwd, symlinks))
+        for target_path, reason in bash_parser.extract_write_targets(sc, symlinks):
+            raw_targets.append((target_path, reason, sc.cwd, symlinks))
+    if raw_targets:
+        for target_path, reason, t_cwd, t_sym in raw_targets:
+            if is_delete_or_empty_reason(reason):
+                continue
+            targets.append((target_path, t_cwd, t_sym))
+        return targets
+
+    # Fallback khi bash_parser không nhận diện được đích nào (§6f / v15)
+    sub_cmds = re.split(r'&&|\|\||;|(?<!>)\||\n', command)
+    current_cwd = cwd
+
+    for raw_cmd in sub_cmds:
+        cmd = raw_cmd.strip()
+        if not cmd:
+            continue
+
+        cd_match = re.match(r'cd\s+([^\s;&|]+)', cmd)
+        if cd_match:
+            new_dir = cd_match.group(1).strip('"\'')
+            current_cwd = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(new_dir)))
+            continue
+
+        redir_matches = re.finditer(r'(?:>>|>\||>)\s*([^\s;&|]+)', cmd)
+        for rm in redir_matches:
+            dest = rm.group(1).strip('"\'')
+            if dest in ('/dev/null', '&1', '&2') or dest.startswith('&'):
+                continue
+            targets.append((dest, current_cwd, symlinks))
+
+        tokens = cmd.split()
+        if not tokens:
+            continue
+        base_cmd = os.path.basename(tokens[0])
+
+        if base_cmd in ("tee", "sponge"):
+            for arg in tokens[1:]:
+                if not arg.startswith('-'):
+                    targets.append((arg.strip('"\''), current_cwd, symlinks))
+        elif base_cmd in ("cp", "ln", "rsync", "ditto", "install"):
+            non_flag_args = [a for a in tokens[1:] if not a.startswith('-')]
+            if len(non_flag_args) >= 2:
+                targets.append((non_flag_args[-1].strip('"\''), current_cwd, symlinks))
+        elif base_cmd == "mv":
+            non_flag_args = [a for a in tokens[1:] if not a.startswith('-')]
+            for arg in non_flag_args:
+                targets.append((arg.strip('"\''), current_cwd, symlinks))
+        elif base_cmd in ("sed", "perl"):
+            if "-i" in tokens:
+                for arg in tokens[1:]:
+                    if not arg.startswith('-') and not arg.startswith('s/') and not arg.startswith('e'):
+                        targets.append((arg.strip('"\''), current_cwd, symlinks))
+
     return targets
 
 
@@ -103,13 +185,13 @@ def extract_copy_operations(command: str, cwd: str):
             if src_dd and dst_dd:
                 ops.append(([src_dd], dst_dd, sc.cwd, symlinks))
 
-        # 3. Lệnh đọc tệp (cat, head, tail, sed, awk, grep, sort, uniq, cut, tr) kèm chuyển hướng > / >>
+        # 3. Lệnh đọc tệp (cat, head, tail, sed, awk, grep, sort, uniq, cut, tr) kèm chuyển hướng > / >> / >|
         elif base in ('cat', 'head', 'tail', 'sed', 'awk', 'grep', 'sort', 'uniq', 'cut', 'tr'):
             out_redirs = [
                 t.strip("'\"") for op, t in sc.redirections
-                if op in ('>', '>>', '1>', '1>>') and t.strip("'\"") not in ('/dev/null', '&1', '&2')
+                if re.match(r'^\d*(?:>>|>\||>)$', op) and t.strip("'\"") not in ('/dev/null', '&1', '&2') and not t.strip("'\"").startswith('&')
             ]
-            in_redirs = [t.strip("'\"") for op, t in sc.redirections if op in ('<', '0<')]
+            in_redirs = [t.strip("'\"") for op, t in sc.redirections if re.match(r'^\d*<$', op)]
             non_flags = [w.strip("'\"") for w in words[1:] if not w.startswith('-')]
             if base in ('sed', 'awk', 'grep', 'cut', 'tr') and non_flags:
                 non_flags = non_flags[1:]
@@ -177,7 +259,7 @@ def check_pii(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> s
     if tool_name in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
 
-        # Nếu đích ghi nằm hoàn toàn trong DAU-VAO thì không chặn PII thô ở đầu vào
+        # Nếu đích ghi nằm hoàn toàn trong DAU-VAO của gốc phiên (session root) thì không chặn PII thô ở đầu vào (§6b)
         if file_path and is_dau_vao_path(file_path, cwd, project_dir):
             return ""
 
@@ -198,11 +280,11 @@ def check_pii(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> s
         # Tìm các đích ghi của lệnh Bash
         targets = extract_bash_write_targets(cmd, cwd, project_dir)
 
-        # Nếu lệnh không có đích ghi (chỉ đọc như grep -c, git clone, ls, v.v.) thì cho qua
+        # Nếu lệnh không có đích ghi nội dung (chỉ đọc hoặc chỉ xoá tệp) thì cho qua
         if not targets:
             return ""
 
-        # Chỉ quét khi có ít nhất MỘT đích ghi nằm ngoài CAC-DU-AN/*/DAU-VAO/
+        # Chỉ quét khi có ít nhất MỘT đích ghi nằm ngoài CAC-DU-AN/*/DAU-VAO/ của gốc phiên
         has_target_outside_dau_vao = any(not is_dau_vao_path(t, t_cwd, project_dir, t_sym) for t, t_cwd, t_sym in targets)
         if not has_target_outside_dau_vao:
             return ""
@@ -236,7 +318,7 @@ def main():
         tool_name = data.get("tool_name", "")
         tool_input = data.get("tool_input", {})
         cwd = data.get("cwd", os.getcwd())
-        project_dir = office_root.find_root(cwd)
+        project_dir = office_root.resolve_project_root(cwd)
 
         violation = check_pii(tool_name, tool_input, cwd, project_dir)
         if violation:
@@ -256,4 +338,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

@@ -1,0 +1,17 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "MultiEdit",
+  "tool_input": {
+    "file_path": "projects/test-project/CHANNEL.md",
+    "edits": [
+      {
+        "old_string": "line 2\n",
+        "new_string": "line 2\nline 3\n"
+      },
+      {
+        "old_string": "line 3\n",
+        "new_string": "line 3\nline 4\n"
+      }
+    ]
+  }
+}

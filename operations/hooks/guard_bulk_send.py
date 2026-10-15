@@ -204,7 +204,7 @@ def extract_cd_target(sub_cmd: str, current_cwd: str) -> str:
 def is_exempt_repo_script(script_path: str, current_cwd: str) -> bool:
     """Kiểm tra tệp kịch bản có thuộc danh sách bộ test/bảo trì của chính kho không."""
     try:
-        root_dir = office_root.find_office_root(current_cwd)
+        root_dir = office_root.resolve_project_root(current_cwd)
         if not root_dir:
             return False
         for sp, rd in (
@@ -438,10 +438,7 @@ def should_block_bulk_send(tool_name: str, tool_input: dict, cwd: str = "") -> s
 def log_approval_request(tool_name: str, tool_input: dict, reason: str, cwd: str):
     """Ghi yêu cầu phê duyệt (đã chặn) vào operations/data/approvals/<YYYY-MM-DD>.jsonl (che PII)."""
     try:
-        try:
-            root = office_root.find_office_root(cwd)
-        except SystemExit:
-            root = os.environ.get("CLAUDE_PROJECT_DIR", cwd)
+        root = office_root.resolve_project_root(cwd)
 
         approvals_dir = os.path.join(root, "operations", "data", "approvals")
         os.makedirs(approvals_dir, exist_ok=True)
@@ -498,6 +495,7 @@ def main():
         tool_name = data.get("tool_name", "")
         tool_input = data.get("tool_input", {})
         cwd = data.get("cwd", os.getcwd())
+        office_root.resolve_project_root(cwd)
 
         block_reason = should_block_bulk_send(tool_name, tool_input, cwd)
         if block_reason:

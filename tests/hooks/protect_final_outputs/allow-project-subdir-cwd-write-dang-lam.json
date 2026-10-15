@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
+  "cwd": "projects/THU-SU-THAT",
+  "tool_input": {
+    "file_path": "wip/nhap-moi.md",
+    "content": "nhap"
+  }
+}

@@ -56,16 +56,27 @@ def is_broad_glob_root(path_str: str, base_cwd: str = "") -> bool:
 
 
 def extract_glob_pattern_root(pattern_str: str) -> str:
-    """Lấy phần tiền tố đường dẫn tĩnh trước ký tự đại diện đầu tiên (* ? [ {) trong pattern Glob."""
+    """Khi pattern của Glob là đường dẫn tuyệt đối hoặc bắt đầu bằng ~, trích xuất gốc thư mục tĩnh trước thành phần chứa ký tự đại diện."""
     if not pattern_str:
         return ""
     p = pattern_str.strip().strip("'\"")
-    if not p.startswith(("/", "~")):
+    if not (p.startswith("/") or p.startswith("~")):
         return ""
-    m = re.search(r'[*?\[{]', p)
-    prefix = p[:m.start()] if m else p
-    prefix = prefix.rstrip("/")
-    return prefix if prefix else "/"
+    expanded = os.path.expanduser(p)
+    if not expanded.startswith("/"):
+        return ""
+    parts = expanded.split("/")
+    static_parts = []
+    for part in parts[1:]:
+        if not part:
+            continue
+        if any(ch in part for ch in ("*", "?", "[", "{")):
+            break
+        static_parts.append(part)
+    if not static_parts:
+        return "/"
+    return "/" + "/".join(static_parts)
+
 
 def check_external_scan(tool_name: str, tool_input: dict, cwd: str) -> str:
     # 1. Kiểm tra lệnh Bash

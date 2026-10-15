@@ -33,14 +33,12 @@ def check_lock(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> 
     if tool_name in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if file_path:
-            rel_canon = bash_parser.canonical_path(file_path, cwd, project_dir)
-            rel_logic = bash_parser.logical_rel_path(file_path, cwd, project_dir)
-            for cand in (rel_canon, rel_logic):
+            for cand, _root in office_root.candidate_rel_paths_with_roots(file_path, cwd, project_dir):
                 if bash_parser.is_in_project_dau_vao(cand):
                     label = get_inputs_label(cand)
-                    return f"Thư mục {label} ({file_path}) là dữ liệu thô gốc, cấm máy can thiệp ghi/sửa. Người chủ tự chép dữ liệu vào bằng Finder."
+                    return f"Thư mục {label} ({file_path}) là dữ liệu thô gốc, không được phép can thiệp ghi/sửa. Người chủ tự chép dữ liệu vào bằng Finder."
                 if bash_parser.is_in_operations_data(cand):
-                    return f"Thư mục sổ vận hành operations/data ({file_path}) chỉ do hệ thống và hook ghi, cấm ghế tự ý ghi/sửa."
+                    return f"Thư mục sổ vận hành operations/data ({file_path}) chỉ do hệ thống và hook ghi, không cho phép ghế tự ý ghi/sửa."
 
     # 2. Lệnh Bash
     elif tool_name == "Bash":
@@ -53,16 +51,17 @@ def check_lock(tool_name: str, tool_input: dict, cwd: str, project_dir: str) -> 
         for sc in commands:
             targets = bash_parser.extract_write_targets(sc, symlinks)
             for target_path, reason in targets:
-                if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
+                if bash_parser.is_dynamic_write_target(target_path) and (
+                    bash_parser.is_cwd_inside_office(sc.cwd, project_dir)
+                    or office_root.find_nearest_office_root(sc.cwd, sc.cwd) is not None
+                ):
                     return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
-                rel_canon = bash_parser.canonical_path(target_path, sc.cwd, project_dir, symlinks)
-                rel_logic = bash_parser.logical_rel_path(target_path, sc.cwd, project_dir)
-                for cand in (rel_canon, rel_logic):
+                for cand, _root in office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, symlinks):
                     if bash_parser.is_in_project_dau_vao(cand):
                         label = get_inputs_label(cand)
-                        return f"Lệnh có đích ghi nhắm vào thư mục {label} ({target_path}) bị chặn. Dữ liệu thô chỉ được đọc, không được ghi đè hay sửa đổi bằng lệnh shell."
+                        return f"Lệnh có đích ghi hoặc xoá nhắm vào thư mục {label} ({target_path}) bị chặn. Dữ liệu thô chỉ được đọc, không được xoá, ghi đè hay sửa đổi bằng lệnh shell."
                     if bash_parser.is_in_operations_data(cand):
-                        return f"Lệnh có đích ghi nhắm vào thư mục sổ vận hành operations/data ({target_path}) bị chặn. Ghế không được tự ghi hoặc sửa sổ duyệt."
+                        return f"Lệnh có đích ghi hoặc xoá nhắm vào thư mục sổ vận hành operations/data ({target_path}) bị chặn. Ghế không được tự ghi, sửa hoặc xoá sổ duyệt."
 
     return ""
 
@@ -81,7 +80,7 @@ def main():
         tool_name = data.get("tool_name", "")
         tool_input = data.get("tool_input", {})
         cwd = data.get("cwd", os.getcwd())
-        project_dir = office_root.find_root(cwd)
+        project_dir = office_root.resolve_project_root(cwd)
 
         violation = check_lock(tool_name, tool_input, cwd, project_dir)
         if violation:

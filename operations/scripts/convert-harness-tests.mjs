@@ -33,6 +33,7 @@ const MAPPINGS = [
   { from: /BAN-MAU/g, to: 'templates' },
   { from: /nhat-ky\.md/g, to: 'CHANNEL.md' },
   { from: /BANG-DIEU-KHIEN\.md/g, to: 'PROGRESS.md' },
+  { from: /Gọi chị Lan 0912 345 678/g, to: 'Nguyen Van A 0900 000 000 nguyen.van.a@example.com' },
 ];
 
 let totalConverted = 0;

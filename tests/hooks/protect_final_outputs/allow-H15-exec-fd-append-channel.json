@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "exec 3>>projects/test-project/CHANNEL.md; echo x >&3"
+  }
+}

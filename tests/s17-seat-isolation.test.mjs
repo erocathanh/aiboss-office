@@ -1285,3 +1285,228 @@ test('H2: all 8 marketing seats embed packs/core/WORKING-RULES.md verbatim betwe
   }
 });
 
+test('H1, §6, §6b & H9 (H-v11 v02): hooks enforce session-root fail-closed via CLAUDE_PROJECT_DIR, union-lock nested office copies (§6b), exempt PII only under session root, block rm on inputs/operations-data, and fail positive control when disabled', () => {
+  const hookLockInputs = path.join(REPO_ROOT, 'operations', 'hooks', 'lock_raw_inputs.py');
+  const hookProtectOutputs = path.join(REPO_ROOT, 'operations', 'hooks', 'protect_final_outputs.py');
+  const hookGuardPii = path.join(REPO_ROOT, 'operations', 'hooks', 'guard_customer_pii.py');
+  const hookBulkSend = path.join(REPO_ROOT, 'operations', 'hooks', 'guard_bulk_send.py');
+  const hookPublicPublish = path.join(REPO_ROOT, 'operations', 'hooks', 'block_public_publish.py');
+
+  // Verify SAN-AN-TOAN-GHE.md §3.3 records H1b and H9 as open in running version and closed in H-v11 v02
+  const sanAnToan = fs.readFileSync(path.join(REPO_ROOT, 'operations', 'SAN-AN-TOAN-GHE.md'), 'utf8');
+  assert.ok(sanAnToan.includes('H1b (bản sao lồng)'), 'SAN-AN-TOAN-GHE.md §3.3 must document H1b');
+  assert.ok(sanAnToan.includes('H9 (`rm` trong `inputs/`)'), 'SAN-AN-TOAN-GHE.md §3.3 must document H9');
+
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'hv11-v02-h1-'));
+  try {
+    const outsideDir = path.join(tmpBase, 'outside-no-office');
+    const officeRoot = path.join(tmpBase, 'real-office');
+    const seatDir = path.join(officeRoot, 'departments', 'marketing', 'seats', 'content-writer');
+    const realProj = path.join(officeRoot, 'projects', 'THU-SU-THAT');
+    const nestedOffice = path.join(realProj, 'wip', 'nested-office');
+    const nestedProjWip = path.join(nestedOffice, 'projects', 'p', 'wip');
+
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.mkdirSync(path.join(officeRoot, 'config'), { recursive: true });
+    fs.writeFileSync(path.join(officeRoot, 'config', 'office.json'), '{"name":"real-office"}\n', 'utf8');
+    fs.mkdirSync(seatDir, { recursive: true });
+    fs.mkdirSync(path.join(realProj, 'inputs'), { recursive: true });
+    fs.mkdirSync(path.join(realProj, 'outputs'), { recursive: true });
+    fs.mkdirSync(path.join(realProj, 'wip'), { recursive: true });
+    fs.writeFileSync(path.join(realProj, 'inputs', 'a.md'), 'raw\n', 'utf8');
+    fs.writeFileSync(path.join(realProj, 'outputs', 'da-chot_final.md'), 'chot\n', 'utf8');
+
+    // Nested copy inside projects/THU-SU-THAT/wip/nested-office with its own config/office.json
+    fs.mkdirSync(path.join(nestedOffice, 'config'), { recursive: true });
+    fs.writeFileSync(path.join(nestedOffice, 'config', 'office.json'), '{"name":"nested-office"}\n', 'utf8');
+    fs.mkdirSync(path.join(nestedOffice, 'projects', 'x', 'inputs'), { recursive: true });
+    fs.mkdirSync(path.join(nestedOffice, 'projects', 'x', 'outputs'), { recursive: true });
+    fs.mkdirSync(path.join(nestedOffice, 'projects', 'x', 'wip'), { recursive: true });
+    fs.mkdirSync(nestedProjWip, { recursive: true });
+    fs.writeFileSync(path.join(nestedOffice, 'projects', 'x', 'outputs', 'x_final.md'), 'nested final\n', 'utf8');
+
+    const runHook = (hookPath, payload, cwd, claudeProjectDir, disabled = false) => {
+      const env = { ...process.env };
+      delete env.AIBOSS_OFFICE_ROOT;
+      delete env.OPC_ALLOW_NON_OFFICE_ROOT;
+      if (claudeProjectDir === null) {
+        delete env.CLAUDE_PROJECT_DIR;
+      } else {
+        env.CLAUDE_PROJECT_DIR = claudeProjectDir;
+      }
+      const bin = disabled ? '/usr/bin/true' : '/usr/bin/python3';
+      const args = disabled ? [] : [hookPath];
+      return spawnSync(bin, args, {
+        cwd,
+        env,
+        input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd, ...payload }),
+        encoding: 'utf8',
+      });
+    };
+
+    // Case A (H1 & §6): cwd outside + CLAUDE_PROJECT_DIR outside (no config/office.json) => exit 2 + stderr "không tìm thấy gốc office"
+    for (const hPath of [hookLockInputs, hookProtectOutputs, hookGuardPii, hookBulkSend, hookPublicPublish]) {
+      const r = runHook(
+        hPath,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `echo x > ${path.join(realProj, 'inputs', 'a.md')}` },
+        },
+        outsideDir,
+        outsideDir
+      );
+      assert.equal(r.status, 2, `H1 Case A (${path.basename(hPath)}): outside cwd + outside CLAUDE_PROJECT_DIR must exit 2`);
+      assert.ok(
+        r.stderr.includes('không tìm thấy gốc office'),
+        `H1 Case A (${path.basename(hPath)}): stderr must contain "không tìm thấy gốc office", got: ${r.stderr}`
+      );
+    }
+
+    // Case B (§6): cwd outside + CLAUDE_PROJECT_DIR = officeRoot, writing to real inputs/ => exit 2
+    {
+      const r = runHook(
+        hookLockInputs,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `echo x > ${path.join(realProj, 'inputs', 'a.md')}` },
+        },
+        outsideDir,
+        officeRoot
+      );
+      assert.equal(r.status, 2, 'H1 Case B: cwd outside + CLAUDE_PROJECT_DIR=officeRoot writing to inputs must exit 2');
+      assert.ok(r.stderr.includes('[opc-harness:lock_raw_inputs]'));
+    }
+
+    // Case C & C2 (§6): cwd in nested copy (projects/THU-SU-THAT/wip/nested-office), writing ../inputs/a.md of real project
+    // Both CLAUDE_PROJECT_DIR = officeRoot (Case C) and CLAUDE_PROJECT_DIR = seatDir (Case C2) must exit 2
+    for (const [label, projDir] of [
+      ['Case C (officeRoot)', officeRoot],
+      ['Case C2 (seatDir)', seatDir],
+    ]) {
+      const r = runHook(
+        hookLockInputs,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'echo x > ../../inputs/a.md' },
+        },
+        nestedOffice,
+        projDir
+      );
+      assert.equal(r.status, 2, `H1 ${label}: writing ../../inputs/a.md from nested office copy must exit 2`);
+      assert.ok(r.stderr.includes('[opc-harness:lock_raw_inputs]'));
+    }
+
+    // §6b Union Rule Controls:
+    // 1. cwd in nested copy, writing projects/x/inputs/a of nested copy => exit 2 (lock_raw_inputs)
+    {
+      const r = runHook(
+        hookLockInputs,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'echo x > projects/x/inputs/a.md' },
+        },
+        nestedOffice,
+        officeRoot
+      );
+      assert.equal(r.status, 2, '§6b: writing projects/x/inputs/a.md inside nested copy must exit 2');
+    }
+
+    // 2. cwd at real office root, writing to <nested>/projects/x/inputs/a by relative path => exit 2
+    {
+      const r = runHook(
+        hookLockInputs,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'echo x > projects/THU-SU-THAT/wip/nested-office/projects/x/inputs/a.md' },
+        },
+        officeRoot,
+        officeRoot
+      );
+      assert.equal(r.status, 2, '§6b: writing relative path into nested copy inputs/ from real root must exit 2');
+    }
+
+    // 3. cwd in nested copy, writing outputs/x_final.md of nested copy => exit 2 (protect_final_outputs)
+    {
+      const r = runHook(
+        hookProtectOutputs,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'echo x > projects/x/outputs/x_final.md' },
+        },
+        nestedOffice,
+        officeRoot
+      );
+      assert.equal(r.status, 2, '§6b: overwriting projects/x/outputs/x_final.md inside nested copy must exit 2');
+    }
+
+    // 4. Negative control (§6 & §6b): cwd in nested copy, writing projects/x/wip/x.md => exit 0
+    for (const hPath of [hookLockInputs, hookProtectOutputs]) {
+      const r = runHook(
+        hPath,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'echo x > projects/x/wip/x.md' },
+        },
+        nestedOffice,
+        officeRoot
+      );
+      assert.equal(r.status, 0, `§6b allow (${path.basename(hPath)}): writing wip/x.md in nested copy must exit 0`);
+    }
+
+    // 5. §6b PII exemption rule: writing PII into inputs/ of nested copy => guard_customer_pii BLOCKS (2)
+    {
+      const r = runHook(
+        hookGuardPii,
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: path.join(nestedOffice, 'projects', 'x', 'inputs', 'khach.md'),
+            content: 'Nguyen Van A 0900 000 000',
+          },
+        },
+        nestedOffice,
+        officeRoot
+      );
+      assert.equal(r.status, 2, '§6b PII: writing PII into nested copy inputs/ must NOT be exempted (exit 2)');
+    }
+
+    // 6. §6b PII exemption rule: writing PII into inputs/ of real project (session root) => guard_customer_pii ALLOWS (0)
+    {
+      const r = runHook(
+        hookGuardPii,
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: path.join(realProj, 'inputs', 'khach.md'),
+            content: 'Nguyen Van A 0900 000 000',
+          },
+        },
+        officeRoot,
+        officeRoot
+      );
+      assert.equal(r.status, 0, '§6b PII: writing PII into real project inputs/ under session root must be exempted (exit 0)');
+    }
+
+    // 7. Positive control (H1 & §6): when hook is disabled (/usr/bin/true), the block assertion fails (status is 0 instead of 2)
+    {
+      const rDisabled = runHook(
+        hookLockInputs,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'echo x > ../../inputs/a.md' },
+        },
+        nestedOffice,
+        officeRoot,
+        true
+      );
+      assert.notEqual(rDisabled.status, 2, 'H1 positive control: when hook is disabled, exit code must not be 2');
+      assert.throws(() => {
+        assert.equal(rDisabled.status, 2, 'Expected block exit 2');
+      }, /Expected block exit 2/);
+    }
+  } finally {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  }
+});
+
+

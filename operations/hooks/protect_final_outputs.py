@@ -19,31 +19,48 @@ import office_root
 
 HOOK_NAME = "protect_final_outputs"
 
-def get_sample_dir_label(rel_path: str) -> str:
+def get_sample_labels(rel_path: str):
     parts = [p for p in rel_path.replace('\\', '/').split('/') if p and p != '.']
-    if len(parts) >= 2 and parts[1].lower() == layout.SAMPLE_GROUND_TRUTH_DIR.lower():
-        return f"{layout.PROJECTS_DIR}/{layout.SAMPLE_GROUND_TRUTH_DIR}"
-    return f"{layout.OPC_PROJECTS_DIR}/{layout.OPC_SAMPLE_GROUND_TRUTH_DIR}"
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}", parts[1]
+    return f"{layout.OPC_PROJECTS_DIR}/{layout.OPC_SAMPLE_GROUND_TRUTH_DIR}", layout.OPC_SAMPLE_GROUND_TRUTH_DIR
 
 
-def project_has_outputs_or_final(rel_path: str, project_dir: str) -> bool:
-    """Kiểm tra xem đường dẫn có phải là thư mục dự án (CAC-DU-AN/X hoặc projects/X) hoặc gốc dự án chứa DAU-RA/outputs/_final không."""
+def get_outputs_labels(rel_path: str):
     parts = [p for p in rel_path.replace('\\', '/').split('/') if p and p != '.']
-    if not parts or not layout.is_projects_root(parts[0]):
+    is_en = len(parts) >= 1 and parts[0].lower() == layout.PROJECTS_DIR.lower()
+    if len(parts) >= 3 and layout.is_outputs_dir(parts[2]):
+        out_label = parts[2]
+    else:
+        out_label = layout.OUTPUTS_DIR if is_en else layout.OPC_OUTPUTS_DIR
+    wip_label = f"{layout.WIP_DIR}/" if is_en else f"{layout.OPC_WIP_DIR}/"
+    return out_label, wip_label
+
+
+def get_journal_label(file_path: str, rel_path: str) -> str:
+    base = os.path.basename(file_path)
+    if layout.is_channel_file(base):
+        return base
+    rel_base = os.path.basename(rel_path)
+    if layout.is_channel_file(rel_base):
+        return rel_base
+    return layout.OPC_CHANNEL_FILE
+
+
+def project_has_outputs_or_final(proj_abs: str) -> bool:
+    """Kiểm tra thư mục dự án có chứa ngăn kết quả (DAU-RA/outputs ở mọi tầng) hoặc tệp _final không (H5)."""
+    if not os.path.isdir(proj_abs):
         return False
-    if len(parts) == 1:
+    try:
+        for _root_dir, dirs, files in os.walk(proj_abs):
+            for d in dirs:
+                if layout.is_outputs_dir(d):
+                    return True
+            for f in files:
+                if layout.has_final_suffix(f):
+                    return True
+    except Exception:
         return True
-    if len(parts) == 2:
-        proj_abs = os.path.join(project_dir, parts[0], parts[1])
-        for out_name in (layout.OUTPUTS_DIR, layout.OPC_OUTPUTS_DIR):
-            out_dir = os.path.join(proj_abs, out_name)
-            if os.path.isdir(out_dir):
-                return True
-        if os.path.isdir(proj_abs):
-            for root_d, _, files in os.walk(proj_abs):
-                for fn in files:
-                    if layout.FINAL_SUFFIX.lower() in fn.lower():
-                        return True
     return False
 
 
@@ -54,49 +71,50 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
         if not file_path:
             return ""
 
-        rel = bash_parser.canonical_path(file_path, cwd, project_dir)
-        rel_logic = bash_parser.logical_rel_path(file_path, cwd, project_dir)
+        cands_with_roots = office_root.candidate_rel_paths_with_roots(file_path, cwd, project_dir)
 
         # Rào 1: Bảo vệ toàn bộ dự án mẫu DU-AN-MAU-SU-THAT / _sample-ground-truth (read-only)
-        for cand in (rel, rel_logic):
+        for cand, _r_dir in cands_with_roots:
             if bash_parser.is_in_du_an_mau(cand):
-                label = get_sample_dir_label(cand)
-                return f"Thư mục {label} là dữ liệu mẫu quy chuẩn, cấm ghi sửa hay xoá."
+                sample_full, _ = get_sample_labels(cand)
+                return f"Thư mục {sample_full} là dữ liệu mẫu quy chuẩn, không được ghi sửa hay xoá."
 
-        # Rào 2: Bảo vệ DAU-RA và tệp _final
-        if bash_parser.is_dau_ra_or_final(rel) or bash_parser.is_dau_ra_or_final(rel_logic):
-            if tool_name in ("Edit", "MultiEdit", "NotebookEdit"):
-                return f"Tệp đã chốt ({os.path.basename(file_path)}) trong DAU-RA không được phép sửa. Hãy tạo bản nháp mới trong DANG-LAM/."
-            if tool_name == "Write":
-                # Giải symlink tĩnh để kiểm tra tệp đích thực sự
-                abs_path = os.path.normpath(os.path.join(cwd, os.path.expanduser(file_path)))
-                real_path = os.path.realpath(abs_path)
-                if os.path.exists(real_path):
-                    return f"Tệp ({os.path.basename(file_path)}) đã tồn tại trong DAU-RA hoặc là bản chốt, cấm ghi đè. Hãy thêm hậu tố _2 hoặc tạo bản nháp mới."
+        # Rào 2: Bảo vệ DAU-RA / outputs và tệp _final (H4b: chặn cả symlink đứt đích bằng lexists)
+        for cand, _r_dir in cands_with_roots:
+            if bash_parser.is_dau_ra_or_final(cand):
+                out_label, wip_label = get_outputs_labels(cand)
+                if tool_name in ("Edit", "MultiEdit", "NotebookEdit"):
+                    return f"Tệp đã chốt ({os.path.basename(file_path)}) trong {out_label} không được phép sửa. Hãy tạo bản nháp mới trong {wip_label}."
+                if tool_name == "Write":
+                    abs_path = os.path.normpath(os.path.join(cwd, os.path.expanduser(file_path)))
+                    real_path = os.path.realpath(abs_path)
+                    if os.path.exists(real_path) or os.path.lexists(abs_path):
+                        return f"Tệp ({os.path.basename(file_path)}) đã tồn tại trong {out_label} hoặc là bản chốt, không được ghi đè. Hãy thêm hậu tố _2 hoặc tạo bản nháp mới."
 
-        # Rào 3: Bảo vệ tệp nhật ký (chỉ cho phép nối thêm / append-only)
+        # Rào 3: Bảo vệ tệp nhật ký (chỉ cho phép nối thêm vào đúng cuối tệp / append-only — H3)
         abs_path = os.path.normpath(os.path.join(cwd, os.path.expanduser(file_path)))
         real_path = os.path.realpath(abs_path)
         is_journal = (
-            layout.is_channel_file(os.path.basename(file_path)) or
-            layout.is_channel_file(os.path.basename(rel)) or
-            layout.is_channel_file(os.path.basename(rel_logic)) or
-            layout.is_channel_file(os.path.basename(real_path)) or
-            "journal-link" in file_path
+            layout.is_channel_file(os.path.basename(file_path))
+            or layout.is_channel_file(os.path.basename(real_path))
+            or any(layout.is_channel_file(os.path.basename(c)) for c, _ in cands_with_roots)
+            or "journal-link" in file_path
         )
 
         if is_journal:
+            first_rel = cands_with_roots[0][0] if cands_with_roots else file_path
+            journal_label = get_journal_label(file_path, first_rel)
             if tool_name == "NotebookEdit":
-                return "Công cụ NotebookEdit không được phép sửa tệp nhật ký (nhat-ky.md / CHANNEL.md)."
+                return f"Công cụ NotebookEdit không được phép sửa tệp nhật ký ({journal_label})."
             target_read_path = real_path if os.path.exists(real_path) else abs_path
             if not os.path.exists(target_read_path) and "journal-link" in file_path:
-                cand = os.path.normpath(os.path.join(project_dir, "CAC-DU-AN", "THU-SU-THAT", "nhat-ky.md"))
-                if os.path.exists(cand):
-                    target_read_path = cand
+                cand_en = os.path.normpath(os.path.join(project_dir, layout.PROJECTS_DIR, "THU-SU-THAT", layout.CHANNEL_FILE))
+                if os.path.exists(cand_en):
+                    target_read_path = cand_en
                 else:
-                    cand_en = os.path.normpath(os.path.join(project_dir, layout.PROJECTS_DIR, "THU-SU-THAT", layout.CHANNEL_FILE))
-                    if os.path.exists(cand_en):
-                        target_read_path = cand_en
+                    cand_opc = os.path.normpath(os.path.join(project_dir, layout.OPC_PROJECTS_DIR, "THU-SU-THAT", layout.OPC_CHANNEL_FILE))
+                    if os.path.exists(cand_opc):
+                        target_read_path = cand_opc
 
             if tool_name == "Write":
                 if os.path.exists(target_read_path):
@@ -104,40 +122,42 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                         with open(target_read_path, "r", encoding="utf-8", errors="replace") as f:
                             old_content = f.read()
                     except Exception as e:
-                        return f"Không thể đọc tệp nhat-ky.md ({e}), chặn để bảo đảm an toàn."
+                        return f"Không thể đọc tệp {journal_label} ({e}), chặn để bảo đảm an toàn."
 
                     new_content = tool_input.get("content", "")
                     if not new_content.startswith(old_content):
-                        return "Ghi tệp nhat-ky.md phải bảo toàn nội dung cũ và chỉ nối thêm vào cuối (append-only)."
+                        return f"Ghi tệp {journal_label} phải bảo toàn nội dung cũ và chỉ nối thêm vào cuối (append-only)."
             elif tool_name == "Edit":
                 old_string = tool_input.get("old_string", "")
                 new_string = tool_input.get("new_string", "")
-                if not new_string.startswith(old_string):
-                    return "Sửa tệp nhat-ky.md phải bảo toàn đoạn cũ và chỉ thêm vào sau (append-only)."
+                if not old_string or not new_string.startswith(old_string):
+                    return f"Sửa tệp {journal_label} phải bảo toàn đoạn cũ và chỉ thêm vào sau (append-only)."
                 if os.path.exists(target_read_path):
                     try:
                         with open(target_read_path, "r", encoding="utf-8", errors="replace") as f:
                             old_content = f.read()
                     except Exception as e:
-                        return f"Không thể đọc tệp nhat-ky.md ({e}), chặn để bảo đảm an toàn."
-                    if old_content and not old_content.endswith(old_string) and not old_content.rstrip("\r\n").endswith(old_string.rstrip("\r\n")):
-                        return "Sửa tệp nhật ký chỉ được nối thêm vào đúng cuối tệp (append-only), cấm chèn vào giữa tệp."
+                        return f"Không thể đọc tệp {journal_label} ({e}), chặn để bảo đảm an toàn."
+                    if not old_content.endswith(old_string):
+                        return f"Sửa tệp {journal_label} chỉ được phép nối vào cuối tệp hiện có, không được chèn vào giữa (append-only)."
             elif tool_name == "MultiEdit":
                 edits = tool_input.get("edits", [])
-                old_content = ""
+                cur_content = None
                 if os.path.exists(target_read_path):
                     try:
                         with open(target_read_path, "r", encoding="utf-8", errors="replace") as f:
-                            old_content = f.read()
+                            cur_content = f.read()
                     except Exception as e:
-                        return f"Không thể đọc tệp nhat-ky.md ({e}), chặn để bảo đảm an toàn."
+                        return f"Không thể đọc tệp {journal_label} ({e}), chặn để bảo đảm an toàn."
                 for ed in edits:
                     old_string = ed.get("old_string", "")
                     new_string = ed.get("new_string", "")
-                    if not new_string.startswith(old_string):
-                        return "Sửa tệp nhat-ky.md phải bảo toàn đoạn cũ và chỉ thêm vào sau (append-only)."
-                    if old_content and not old_content.endswith(old_string) and not old_content.rstrip("\r\n").endswith(old_string.rstrip("\r\n")):
-                        return "Sửa tệp nhật ký chỉ được nối thêm vào đúng cuối tệp (append-only), cấm chèn vào giữa tệp."
+                    if not old_string or not new_string.startswith(old_string):
+                        return f"Sửa tệp {journal_label} phải bảo toàn đoạn cũ và chỉ thêm vào sau (append-only)."
+                    if cur_content is not None:
+                        if not cur_content.endswith(old_string):
+                            return f"Sửa tệp {journal_label} chỉ được phép nối vào cuối tệp hiện có, không được chèn vào giữa (append-only)."
+                        cur_content = cur_content[:-len(old_string)] + new_string
 
     # 2. Kiểm tra lệnh Bash
     elif tool_name == "Bash":
@@ -151,59 +171,78 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
             exe = sc.executable
             words = sc.words
 
-            # A. Kiểm tra xoá hoặc can thiệp vào DU-AN-MAU-SU-THAT / DAU-RA / _final / nhật ký
-            if exe == 'rm':
+            # A. Kiểm tra xoá hoặc can thiệp vào DU-AN-MAU-SU-THAT / _sample-ground-truth / DAU-RA / nhật ký
+            if exe in ('rm', 'unlink', 'rmdir'):
                 for w in words[1:]:
                     if w.startswith('-'):
                         continue
-                    rel_c = bash_parser.canonical_path(w, sc.cwd, project_dir, symlinks)
-                    rel_l = bash_parser.logical_rel_path(w, sc.cwd, project_dir)
-                    for rel in (rel_c, rel_l):
-                        if bash_parser.is_in_du_an_mau(rel):
-                            return "Hành vi xoá hoặc di chuyển thư mục mẫu DU-AN-MAU-SU-THAT bị chặn."
-                        if bash_parser.is_dau_ra_or_final(rel):
+                    cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, symlinks)
+                    for cand, r_dir in cands_w:
+                        if bash_parser.is_in_du_an_mau(cand):
+                            _, sample_short = get_sample_labels(cand)
+                            return f"Hành vi xoá hoặc di chuyển thư mục mẫu {sample_short} bị chặn."
+                        if bash_parser.is_dau_ra_or_final(cand):
                             return f"Hành vi xoá tệp hoặc thư mục đầu ra đã chốt ({w}) bị chặn."
-                        if layout.is_channel_file(os.path.basename(rel)):
+                        if layout.is_channel_file(os.path.basename(cand)):
                             return f"Hành vi xoá tệp nhật ký ({w}) bị chặn."
+                        parts = [p for p in cand.replace('\\', '/').split('/') if p and p != '.']
+                        if len(parts) == 1 and layout.is_projects_root(parts[0]):
+                            return f"Hành vi xoá toàn bộ thư mục gốc dự án ({parts[0]}) bị chặn để bảo vệ các đầu ra đã chốt."
+                        if len(parts) == 2 and layout.is_projects_root(parts[0]):
+                            real_r_dir = os.path.realpath(os.path.expanduser(r_dir))
+                            proj_abs = os.path.join(real_r_dir, parts[0], parts[1])
+                            if project_has_outputs_or_final(proj_abs):
+                                return f"Hành vi xoá thư mục dự án ({parts[0]}/{parts[1]}) đang có ngăn kết quả hoặc bản chốt bị chặn."
             elif exe == 'find':
                 has_delete = '-delete' in words or any(w in ('-exec', '-execdir') for w in words)
                 if has_delete:
                     for w in words[1:]:
                         if w.startswith('-'):
                             break
-                        rel_c = bash_parser.canonical_path(w, sc.cwd, project_dir, symlinks)
-                        rel_l = bash_parser.logical_rel_path(w, sc.cwd, project_dir)
-                        for rel in (rel_c, rel_l):
-                            if bash_parser.is_in_du_an_mau(rel):
-                                return "Hành vi xoá hoặc di chuyển thư mục mẫu DU-AN-MAU-SU-THAT bị chặn."
-                            if bash_parser.is_dau_ra_or_final(rel):
+                        cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, symlinks)
+                        for cand, _r_dir in cands_w:
+                            if bash_parser.is_in_du_an_mau(cand):
+                                _, sample_short = get_sample_labels(cand)
+                                return f"Hành vi xoá hoặc di chuyển thư mục mẫu {sample_short} bị chặn."
+                            if bash_parser.is_dau_ra_or_final(cand):
                                 return f"Hành vi xoá trong thư mục đầu ra đã chốt ({w}) bị chặn."
 
             # B. Kiểm tra tất cả write targets
             targets = bash_parser.extract_write_targets(sc, symlinks)
+            is_move_or_rm_cmd = (
+                exe in ('mv', 'rm', 'rmdir')
+                or (exe == 'git' and ('mv' in words or 'rm' in words))
+            )
+
             for target_path, reason in targets:
                 if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
                     return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
-                rel_canon = bash_parser.canonical_path(target_path, sc.cwd, project_dir, symlinks)
-                rel_logic = bash_parser.logical_rel_path(target_path, sc.cwd, project_dir)
 
-                # Rào 1: Ghi vào DU-AN-MAU-SU-THAT / _sample-ground-truth
-                for cand in (rel_canon, rel_logic):
+                cands_with_roots = office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, symlinks)
+
+                for cand, r_dir in cands_with_roots:
+                    # Rào 0 (H5): Dời hoặc xoá cả thư mục gốc dự án hoặc thư mục dự án có ngăn kết quả / bản chốt
+                    if is_move_or_rm_cmd or reason.startswith(('mv ', 'git mv ', 'rm ', 'git rm ', 'rmdir ')):
+                        parts = [p for p in cand.replace('\\', '/').split('/') if p and p != '.']
+                        if len(parts) == 1 and layout.is_projects_root(parts[0]):
+                            return f"Hành vi dời hoặc xoá toàn bộ thư mục gốc dự án ({parts[0]}) bị chặn để bảo vệ các đầu ra đã chốt."
+                        if len(parts) == 2 and layout.is_projects_root(parts[0]):
+                            real_r_dir = os.path.realpath(os.path.expanduser(r_dir))
+                            proj_abs = os.path.join(real_r_dir, parts[0], parts[1])
+                            if project_has_outputs_or_final(proj_abs):
+                                return f"Hành vi dời hoặc xoá thư mục dự án ({parts[0]}/{parts[1]}) đang có ngăn kết quả hoặc bản chốt bị chặn."
+
+                    # Rào 1: Ghi hoặc tạo liên kết vào DU-AN-MAU-SU-THAT / _sample-ground-truth
                     if bash_parser.is_in_du_an_mau(cand):
-                        label = get_sample_dir_label(cand)
-                        return f"Lệnh ghi/sửa vào {label} bị chặn. Thư mục mẫu chỉ được đọc."
+                        sample_full, _ = get_sample_labels(cand)
+                        return f"Lệnh ghi/sửa vào {sample_full} bị chặn. Thư mục mẫu chỉ được đọc."
 
-                # Rào 1b: Di chuyển/đổi tên cả thư mục dự án có chứa DAU-RA / outputs / _final
-                if "mv" in reason:
-                    for cand in (rel_canon, rel_logic):
-                        if project_has_outputs_or_final(cand, project_dir):
-                            return f"Lệnh di chuyển/đổi tên thư mục dự án có chứa đầu ra đã chốt ({target_path}) bị chặn."
-
-                # Rào 2: Ghi đè / xoá / đổi tên trong DAU-RA hoặc _final
-                for rel in (rel_canon, rel_logic):
-                    if bash_parser.is_dau_ra_or_final(rel):
+                    # Rào 2 (H4a, H4b): Ghi đè, xoá hoặc tạo liên kết vào DAU-RA / outputs hoặc _final
+                    if bash_parser.is_dau_ra_or_final(cand):
+                        out_label, _ = get_outputs_labels(cand)
                         abs_t = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(target_path)))
-                        if symlinks:
+                        rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, symlinks)
+                        if symlinks and cand == rel_canon_r:
                             for l_k, t_v in symlinks.items():
                                 abs_lk = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(l_k)))
                                 abs_tv = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(t_v)))
@@ -215,25 +254,60 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                     break
 
                         real_t = os.path.realpath(abs_t)
-                        is_destructive_op = any(
-                            k in reason for k in ("delete", "unlink", "rmdir", "rmtree", "rename source", "move/rename source", "Path.rename source", "Path.replace source", "ln hardlink")
+                        is_delete_or_link_op = (
+                            exe in ('unlink', 'rmdir', 'rm', 'ln')
+                            or reason.startswith(('rm ', 'git rm', 'unlink', 'rmdir', 'ln '))
+                            or any(
+                                k in reason
+                                for k in (
+                                    'delete',
+                                    'unlink',
+                                    'rmdir',
+                                    'shutil.',
+                                    'os.unlink',
+                                    'os.remove',
+                                    'os.rmdir',
+                                    'Path.unlink',
+                                    'Path.rmdir',
+                                    'rename source',
+                                    'move/rename source',
+                                    'Path.rename source',
+                                    'Path.replace source',
+                                    'ln hardlink',
+                                )
+                            )
                         )
-                        if os.path.exists(real_t) or os.path.islink(abs_t) or is_destructive_op:
-                            return f"Lệnh can thiệp lên tệp/thư mục đã chốt ({os.path.basename(target_path)}) trong DAU-RA bị chặn. Đầu ra đã chốt là bất biến."
+                        if is_delete_or_link_op or os.path.exists(real_t) or os.path.lexists(abs_t):
+                            return f"Lệnh ghi đè hoặc tạo liên kết lên tệp ({os.path.basename(target_path)}) trong {out_label} bị chặn. Đầu ra đã chốt là bất biến."
 
-                # Rào 3: Can thiệp sửa/ghi đè/xoá tệp nhật ký qua Bash (chỉ cho phép >> hoặc tee -a)
-                is_bash_journal = (
-                    layout.is_channel_file(os.path.basename(target_path)) or
-                    layout.is_channel_file(os.path.basename(rel_canon)) or
-                    layout.is_channel_file(os.path.basename(rel_logic))
-                )
-                if is_bash_journal:
-                    if reason in ("redirection >>", "redirection 1>>", "redirection 2>>"):
-                        continue
-                    if reason == "tee target" and any(w == '-a' or w == '--append' or (w.startswith('-') and not w.startswith('--') and 'a' in w) for w in words[1:]):
-                        continue
-                    return f"Lệnh ({reason}) can thiệp không phải nối thêm vào tệp nhật ký ({target_path}) bị chặn. Nhật ký chỉ cho phép nối thêm (>> hoặc tee -a)."
-
+                    # Rào 3: Bảo vệ tệp nhật ký (nhat-ky.md / CHANNEL.md) qua Bash — chỉ cho phép nối thêm (>>, exec N>>, tee -a, sponge -a)
+                    abs_j = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(target_path)))
+                    rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, symlinks)
+                    if symlinks and cand == rel_canon_r:
+                        for l_k, t_v in symlinks.items():
+                            abs_lk = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(l_k)))
+                            abs_tv = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(t_v)))
+                            if abs_j == abs_lk:
+                                abs_j = abs_tv
+                                break
+                            elif abs_j.startswith(abs_lk + '/'):
+                                abs_j = abs_tv + abs_j[len(abs_lk):]
+                                break
+                    real_j = os.path.realpath(abs_j)
+                    is_journal_target = (
+                        layout.is_channel_file(os.path.basename(target_path))
+                        or layout.is_channel_file(os.path.basename(cand))
+                        or layout.is_channel_file(os.path.basename(real_j))
+                        or "journal-link" in target_path
+                    )
+                    if is_journal_target:
+                        is_append_only = (
+                            bool(re.match(r'^redirection \d*>>$', reason))
+                            or reason in ("tee append target", "sponge append target")
+                        )
+                        if not is_append_only:
+                            journal_label = get_journal_label(target_path, cand)
+                            return f"Tệp nhật ký ({journal_label}) chỉ được phép nối thêm vào cuối (>>, exec N>>, tee -a hoặc sponge -a), không được xoá, dời hay ghi đè qua Bash."
 
     return ""
 
@@ -253,7 +327,7 @@ def main():
         tool_name = data.get("tool_name", "")
         tool_input = data.get("tool_input", {})
         cwd = data.get("cwd", os.getcwd())
-        project_dir = office_root.find_root(cwd)
+        project_dir = office_root.resolve_project_root(cwd)
 
         violation = check_protection(tool_name, tool_input, cwd, project_dir)
         if violation:
@@ -270,6 +344,8 @@ def main():
         sys.stderr.write(f"[opc-harness:{HOOK_NAME}] lỗi nội bộ hook: {e}, chặn cho chắc\n")
         sys.exit(2)
 
+
 if __name__ == "__main__":
     main()
+
 
