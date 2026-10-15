@@ -84,7 +84,10 @@ export async function POST(req: NextRequest) {
   try {
     than = await req.json();
   } catch {
-    return Response.json({ loi: 'Thân yêu cầu không phải JSON.' }, { status: 400 });
+    return Response.json(
+      { code: 'chat.invalidJson', text: 'Request body is not valid JSON.', loi: 'Request body is not valid JSON.' },
+      { status: 400 },
+    );
   }
 
   /**

@@ -28,14 +28,37 @@ import { dungMarkdown } from '@/lib/dung-markdown';
  *    Nhờ vậy BỎ được kiểu «đang chảy thì in thô» — thứ Owner vừa phàn nàn.
  */
 const BongBong = memo(function BongBong(
-  { chu, ranh, hienMau, loi, dangChay }:
-  { chu: string; ranh?: number[]; hienMau: boolean; loi?: boolean; dangChay: boolean },
+  { chu, ranh, hienMau, loi, dangChay, soLanLap, nhanLapAria }:
+  {
+    chu: string;
+    ranh?: number[];
+    hienMau: boolean;
+    loi?: boolean;
+    dangChay: boolean;
+    soLanLap?: number;
+    nhanLapAria?: string;
+  },
 ) {
-  const lop = `bong${loi ? ' loi' : ''}${dangChay ? ' dang-chay' : ''}`;
+  const coLap = Boolean(loi && soLanLap && soLanLap > 1);
+  const lop = `bong${loi ? ' loi' : ''}${dangChay ? ' dang-chay' : ''}${coLap ? ' co-lap' : ''}`;
   // ¶ bật ⇒ in thô có xuống dòng theo mẩu (⛔ markdown ⛔ không dựng được khi đã cắt dòng giữa câu)
   const thoTheoMau = useMemo(() => (hienMau ? chenRanh(chu, ranh) : ''), [hienMau, chu, ranh]);
   // Dựng markdown chỉ khi CHỮ đổi — tin cũ đứng yên thì ⛔ không tốn gì
   const html = useMemo(() => (hienMau ? '' : dungMarkdown(chu)), [hienMau, chu]);
+  if (coLap) {
+    return (
+      <div className={`${lop}${hienMau ? ' tho' : ''}`}>
+        {hienMau ? (
+          <div className="noi-dung-bong">{thoTheoMau}</div>
+        ) : (
+          <div className="noi-dung-bong" dangerouslySetInnerHTML={{ __html: html }} />
+        )}
+        <span className="nhan-lap-loi" aria-label={nhanLapAria} title={nhanLapAria}>
+          ×{soLanLap}
+        </span>
+      </div>
+    );
+  }
   if (hienMau) return <div className={`${lop} tho`}>{thoTheoMau}</div>;
   return <div className={lop} dangerouslySetInnerHTML={{ __html: html }} />;
 });

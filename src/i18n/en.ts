@@ -483,6 +483,111 @@ export const en = {
       quit: 'Quit AIBOSS Office',
     },
   },
+  system: {
+    repeatBadgeAria: 'Repeated {count} times consecutively',
+    run: {
+      failed: '⚠️ Run failed:\n\n`{detail}`',
+      failedNoDetail: '⚠️ Run failed without detailed output. Try sending again or open a new session.',
+      interruptedToolUse:
+        '⚠️ Previous session stopped mid-tool call (a `tool_use` block was left without `tool_result`, so Anthropic rejected it with 400).\n\n' +
+        'Click **New** in the top-right of this slot to start a clean session, then send again.',
+    },
+    process: {
+      exited: 'Claude process exited with code {exitCode}.',
+      signaled: 'Claude process was terminated by signal {signal}.',
+      spawnError: 'Failed to launch `claude`: {message}',
+      silenceTimeout:
+        '`claude` process produced no output for over {minutes} minutes — silence timeout exceeded ({minutes} min). Stopped automatically so the slot does not hang.',
+    },
+    auth: {
+      expired: 'Claude Code login expired on this Mac. Open Terminal, run `claude`, type `/login`, then send again.',
+      notAuthenticated: 'Claude Code is not signed in on this Mac. Open Terminal, run `claude`, sign in once, then return here.',
+    },
+    budget: {
+      capped:
+        '⚠️ Usage cap reached for {periodLabel} ({used}/{cap} turns). Increase `PHONGBAN_MUC_GIO` / `PHONGBAN_MUC_NGAY` or wait for the next window.',
+      periodHour: 'this hour',
+      periodDay: 'today',
+    },
+    slot: {
+      busyRejected:
+        'This slot is currently running another turn ({seatId}, pid {pid}, running for {seconds}s), so a new turn was not opened over it.\n\n' +
+        'The turn you just sent was given a stop signal and is closing — if it does not close within {forceKillSeconds}s it will be force-stopped. ' +
+        'The active turn remains intact and its Stop button still works — nothing is lost.\n\n' +
+        'Wait for it to finish, or click Stop on this slot and send again.',
+    },
+    chat: {
+      invalidJson: 'Request body is not valid JSON.',
+      missingSeat: 'Missing seat identifier.',
+      emptyPrompt: 'Prompt is empty.',
+      promptTooLong: 'Prompt exceeds {maxChars} characters.',
+      seatNotFound: 'Seat not found.',
+      seatBusyInApp:
+        'This seat is already running in the app (slot {slotId}, running for {seconds}s). Wait for it to finish, or click Stop on that slot and send again.',
+      sessionActiveElsewhere:
+        'This session was modified within the last {minutes} minutes without an active app process record. ' +
+        'It is likely running elsewhere (such as a terminal window). Attaching right now could corrupt the session transcript; please open a new session.',
+      ledgerInconsistent:
+        'Process ledger conflict on slot {slotId}: another slot also holds this handle (pid {pid}). Refusing to open a new turn until the conflict is resolved.',
+      slotBusy:
+        'Slot {slotId} is already running another turn ({seatId}, running for {seconds}s). Wait for it to finish, or click Stop on that slot and send again.',
+      slotOpening: 'Slot {slotId} is opening another turn right now. Please try again in a few seconds.',
+      missingTranscript:
+        'Could not read the previous session transcript (checked twice) — this turn opened a NEW SESSION. ' +
+        'The previous link is still preserved in the ledger: re-select the session to reconnect.',
+      unknownError: 'Unknown error.',
+    },
+    fork: {
+      seatNotFound: 'Seat not found.',
+      invalidSessionId: 'Invalid session ID.',
+      transcriptNotFound: 'No session transcript found matching ID {sessionPrefix}…',
+      ambiguousTranscript: '⚠️ This session ID exists in {count} different stores — cannot auto-select. Sources: {sources}',
+      noNewSessionId: 'Fork did not allocate a new session ID. The copy remains with the original ID and has not been separated yet.',
+      slotChanged: 'Fork created a new session, but the slot binding changed. Existing selection was not overwritten.',
+    },
+    wake: {
+      rateLimited:
+        'Wake rate limit exceeded ({maxPerMin} wakes per minute across the server; used {used}/{maxPerMin}). ' +
+        'This cap prevents seat-to-seat wake loops. Wait {waitSec}s and try again.',
+      seatNotOpen:
+        'Seat "{seatId}" is not currently open in any slot (currently open: {openSlots}). Assign the seat to a slot in the UI and try again.',
+      noneOpen: 'none',
+      missingAckId: 'Missing `ma` — which wake item should be acknowledged?',
+    },
+    slotApi: {
+      invalidSlotId: 'Invalid slot ID.',
+      bindingChanged: 'Slot binding changed. Reload the slot state before writing.',
+      sessionNotOwned: 'Session does not belong to this seat.',
+      emptySessionPreserved: 'Refused to write an empty session ID over an active slot without explicit clear intent; existing link preserved.',
+    },
+    phienApi: {
+      readFailed: 'Could not read session store.',
+    },
+    sessionOwner: {
+      sameOriginRequired: 'Session attachment is only accepted from the application origin.',
+      invalidRequest: 'Invalid request.',
+      invalidParams: 'Invalid slot, seat, or session ID.',
+      slotBusy: 'Slot is currently running a turn. Wait for it to finish before attaching.',
+      bindingChanged: 'Slot binding changed. Close and reopen the session info modal before attaching.',
+      sessionNotFound: 'Session file not found in this seat directory.',
+      sessionActive:
+        'Slot or session shows signs of active execution; wait for the turn to finish and 5 minutes after the last write before retrying.',
+      confirmedButSlotChanged: 'Ownership confirmed, but the slot binding changed; reopen session info to verify.',
+      confirmedButSlotWriteFailed: 'Ownership confirmed, but updating the slot ledger failed. Reopen session info and try attaching again.',
+      confirmFailed: 'Could not record ownership confirmation. The ledger may be unreadable.',
+    },
+    rate: {
+      concurrencyCap: 'Server is currently running {active} turns simultaneously (cap {max}). Please wait a moment and send again.',
+      perMinuteCap: 'Rate limit exceeded ({maxPerMin} turns per minute). Wait {waitSec}s and send again.',
+    },
+    runner: {
+      slotBindFailed:
+        'Turn ran, but could not bind to slot "{slotId}" (slot out of range). Output remains saved in session transcript {sessionId}.',
+      terminalSkipped:
+        'skipped: terminal — seat {seatId} ({slotId}) is already running in Terminal (pid {pid}). ' +
+        'Skipping background turn to avoid duplicate execution. Your message remains saved in session {sessionId}.',
+    },
+  },
 } as const;
 
 export type Dictionary = typeof en;

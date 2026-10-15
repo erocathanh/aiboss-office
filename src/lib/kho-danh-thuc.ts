@@ -411,9 +411,18 @@ export function giuChoOBan(dsBan: string[], bayGio = Date.now()): number {
   return dem;
 }
 
+import { buildServerNotice, type ServerNoticeParams } from './server-notices';
+
 export type KetQuaXin =
   | { cho_qua: true; con_lai: number }
-  | { cho_qua: false; ly_do: string; cho_giay: number };
+  | {
+      cho_qua: false;
+      ly_do: string;
+      cho_giay: number;
+      code: string;
+      params: ServerNoticeParams;
+      text: string;
+    };
 
 /**
  * Xin một suất đánh thức. Chặn mức dùng ở ĐÂY, ⛔ không ở tầng trình duyệt —
@@ -431,14 +440,18 @@ export function xinLuot(): KetQuaXin {
     const somNhat = Math.min(...s.moc_goi);
     const choGiay = Math.max(1, Math.ceil((somNhat + 60_000 - bayGio) / 1000));
     ghi(s);
+    const notice = buildServerNotice('wake.rateLimited', {
+      maxPerMin: TRAN_MOI_PHUT,
+      used: s.moc_goi.length,
+      waitSec: choGiay,
+    });
     return {
       cho_qua: false,
-      ly_do:
-        `⛔ Quá ${TRAN_MOI_PHUT} lượt đánh thức mỗi phút cho CẢ máy chủ ` +
-        `(đã dùng ${s.moc_goi.length}/${TRAN_MOI_PHUT}). ` +
-        'Trần này chặn vòng lặp ghế-đánh-thức-ghế đốt tiền thật. ' +
-        `Chờ ${choGiay} giây rồi gọi lại.`,
+      ly_do: notice.text,
       cho_giay: choGiay,
+      code: notice.code,
+      params: notice.params ?? {},
+      text: notice.text,
     };
   }
 

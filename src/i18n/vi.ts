@@ -483,4 +483,109 @@ export const vi = {
       quit: 'Thoát AIBOSS Office',
     },
   },
+  system: {
+    repeatBadgeAria: 'Lặp lại {count} lần liên tiếp',
+    run: {
+      failed: '⚠️ Lượt chạy thất bại:\n\n`{detail}`',
+      failedNoDetail: '⚠️ Lượt chạy thất bại nhưng không có chi tiết. Thử gửi lại hoặc tạo phiên mới.',
+      interruptedToolUse:
+        '⚠️ Phiên cũ bị ngắt giữa lúc đang gọi công cụ (còn khối `tool_use` chưa có `tool_result`, nên Anthropic từ chối mã 400).\n\n' +
+        'Bấm **Mới** ở góc phải trên của ô này để mở phiên sạch rồi gửi lại.',
+    },
+    process: {
+      exited: 'Tiến trình claude thoát với mã {exitCode}.',
+      signaled: 'Tiến trình claude bị dừng bởi tín hiệu {signal}.',
+      spawnError: 'Không chạy được `claude`: {message}',
+      silenceTimeout:
+        'Tiến trình `claude` im lặng quá {minutes} phút — khoảng lặng đã quá ngưỡng ({minutes} phút). Tự dừng để không treo ô.',
+    },
+    auth: {
+      expired: 'Đăng nhập Claude Code trên máy này đã hết hạn. Mở Terminal, gõ `claude`, gõ `/login`, rồi gửi lại.',
+      notAuthenticated: 'Chưa đăng nhập Claude Code trên máy này. Mở Terminal, gõ `claude`, đăng nhập một lần rồi quay lại.',
+    },
+    budget: {
+      capped:
+        '⚠️ Đã chạm trần lượt gọi {periodLabel} ({used}/{cap}). Tăng `PHONGBAN_MUC_GIO` / `PHONGBAN_MUC_NGAY` hoặc chờ sang khung kế tiếp.',
+      periodHour: 'trong giờ này',
+      periodDay: 'trong ngày hôm nay',
+    },
+    slot: {
+      busyRejected:
+        'Ô này ĐANG CHẠY một lượt khác ({seatId}, pid {pid}, đã chạy {seconds} giây), nên tôi KHÔNG mở lượt mới đè lên nó.\n\n' +
+        'Lượt anh vừa gửi: tôi ĐÃ GỬI lệnh dừng cho nó và đang chờ nó đóng — nếu nó chưa đóng trong {forceKillSeconds} giây thì tôi ép. ' +
+        'Lượt ĐANG CHẠY thì **vẫn nguyên vẹn**, nút Dừng của nó vẫn dùng được — anh KHÔNG mất gì cả.\n\n' +
+        'Chờ nó xong, hoặc bấm Dừng ở ô này rồi gửi lại.',
+    },
+    chat: {
+      invalidJson: 'Thân yêu cầu không phải JSON.',
+      missingSeat: 'Thiếu nhân sự.',
+      emptyPrompt: 'Câu hỏi trống.',
+      promptTooLong: 'Câu hỏi dài quá {maxChars} ký tự.',
+      seatNotFound: 'Không có nhân sự này.',
+      seatBusyInApp:
+        'Ghế này ĐANG CHẠY DỞ ngay trong app (ô {slotId}, đã chạy {seconds} giây). Chờ nó xong, hoặc bấm nút Dừng ở ô đó rồi gửi lại.',
+      sessionActiveElsewhere:
+        'Phiên này vừa đổi trong {minutes} phút mà sổ tiến trình của app không có nó. ' +
+        'Nhiều khả năng nó đang chạy ở NƠI KHÁC (cửa sổ dòng lệnh chẳng hạn) — đây là SUY ĐOÁN, không phải điều app đo được. Nối vào lúc này sẽ hỏng bản ghi phiên; hãy mở phiên mới.',
+      ledgerInconsistent:
+        'Sổ tiến trình TỰ MÂU THUẪN ở ô {slotId}: có ô khác cũng giữ tay cầm này (pid {pid}). Đây là LỖI CỦA APP. Tôi KHÔNG mở lượt mới cho tới khi biết dòng nào đúng.',
+      slotBusy:
+        'Ô {slotId} ĐANG CHẠY một lượt khác ({seatId}, đã chạy {seconds} giây). Chờ nó xong, hoặc bấm Dừng ở ô đó rồi gửi lại.',
+      slotOpening: 'Ô {slotId} đang mở một lượt khác ngay lúc này. Thử lại sau vài giây.',
+      missingTranscript:
+        'Không đọc được bản ghi phiên cũ (đã đo 2 lần) — lượt này mở PHIÊN MỚI. ' +
+        'Liên kết cũ vẫn GIỮ trong sổ: bấm chọn lại phiên là nối về được.',
+      unknownError: 'Lỗi không rõ.',
+    },
+    fork: {
+      seatNotFound: 'Không có ghế này.',
+      invalidSessionId: 'Mã phiên không hợp lệ.',
+      transcriptNotFound: 'Không tìm thấy bản ghi nào mang mã {sessionPrefix}…',
+      ambiguousTranscript: '⚠️ Mã này tồn tại ở {count} kho khác nhau — không tự chọn được. Nguồn: {sources}',
+      noNewSessionId: 'Fork không cấp được mã mới. Bản chép vẫn còn — nhưng nó CÙNG mã với bản gốc, chưa tách được.',
+      slotChanged: 'Fork đã tạo phiên mới nhưng ô đã đổi. Không ghi đè lựa chọn mới.',
+    },
+    wake: {
+      rateLimited:
+        'Quá {maxPerMin} lượt đánh thức mỗi phút cho CẢ máy chủ (đã dùng {used}/{maxPerMin}). ' +
+        'Trần này chặn vòng lặp ghế-đánh-thức-ghế đốt tiền thật. Chờ {waitSec} giây rồi gọi lại.',
+      seatNotOpen:
+        'Ghế "{seatId}" hiện không mở ở ô nào (đang mở: {openSlots}). Vào giao diện gắn ghế vào một ô rồi gọi lại.',
+      noneOpen: 'trống',
+      missingAckId: 'Thiếu `ma` — xác nhận mẩu nào?',
+    },
+    slotApi: {
+      invalidSlotId: 'Mã ô không hợp lệ.',
+      bindingChanged: 'Liên kết ô đã đổi. Đọc lại ô trước khi ghi.',
+      sessionNotOwned: 'Phiên không thuộc nhân sự này.',
+      emptySessionPreserved: 'Xin ghi mã phiên rỗng lên ô đang có phiên mà không khai ý định xoá ⇒ giữ nguyên.',
+    },
+    phienApi: {
+      readFailed: 'Không đọc được kho phiên.',
+    },
+    sessionOwner: {
+      sameOriginRequired: 'Chỉ nhận thao tác nối từ chính trang ứng dụng.',
+      invalidRequest: 'Yêu cầu không hợp lệ.',
+      invalidParams: 'Ô, ghế hoặc mã phiên không hợp lệ.',
+      slotBusy: 'Ô đang mở lượt. Chờ lượt xong rồi nối.',
+      bindingChanged: 'Liên kết ô đã đổi. Đóng rồi mở lại thông tin trước khi nối.',
+      sessionNotFound: 'Không thấy phiên thật trong thư mục ghế này.',
+      sessionActive:
+        'Ô hoặc phiên có dấu hiệu đang chạy; chờ lượt xong và hết 5 phút từ lần ghi cuối rồi thử lại.',
+      confirmedButSlotChanged: 'Đã ghi xác nhận sở hữu nhưng liên kết ô đã đổi; mở lại thông tin để kiểm tra.',
+      confirmedButSlotWriteFailed: 'Đã ghi xác nhận sở hữu nhưng chưa ghi được sổ ô. Mở lại thông tin rồi thử nối lại.',
+      confirmFailed: 'Không ghi được xác nhận sở hữu. Sổ có thể lỗi hoặc không đọc được.',
+    },
+    rate: {
+      concurrencyCap: 'Máy chủ đang chạy {active} lượt cùng lúc (trần {max}). Chờ một chút rồi gửi lại.',
+      perMinuteCap: 'Quá {maxPerMin} lượt mỗi phút. Chờ {waitSec} giây rồi gửi lại.',
+    },
+    runner: {
+      slotBindFailed:
+        'Lượt CHẠY THẬT nhưng KHÔNG buộc được vào ô «{slotId}» (ô ngoài tầm). Chữ vẫn nằm trong bản ghi phiên {sessionId}, mở lại ghế là đọc được.',
+      terminalSkipped:
+        'skipped: terminal — ghế {seatId} ({slotId}) đang mở sẵn ở Terminal (pid {pid}). ' +
+        'Không chạy chồng lượt nền để tránh ghi đè. Chữ vẫn nằm trong bản ghi phiên {sessionId}, mở lại ghế là đọc được.',
+    },
+  },
 } as const;

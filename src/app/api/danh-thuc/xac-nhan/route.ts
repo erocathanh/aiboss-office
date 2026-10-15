@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { xacNhanDaGiao } from '@/lib/kho-danh-thuc';
+import { serverNoticeJson } from '@/lib/server-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,12 +23,12 @@ export async function POST(req: NextRequest) {
   try {
     than = await req.json();
   } catch {
-    return Response.json({ loi: 'Thân yêu cầu ⛔ phải JSON.' }, { status: 400 });
+    return serverNoticeJson(req, 'chat.invalidJson', undefined, 400);
   }
 
   const ma = typeof than.ma === 'string' ? than.ma.trim() : '';
   const maTrinhDuyet = typeof than.ma_trinh_duyet === 'string' ? than.ma_trinh_duyet.trim() : '';
-  if (!ma) return Response.json({ loi: 'Thiếu `ma` — xác nhận mẩu nào?' }, { status: 400 });
+  if (!ma) return serverNoticeJson(req, 'wake.missingAckId', undefined, 400);
 
   const kq = xacNhanDaGiao(ma, maTrinhDuyet);
   // ⚠️ Thất bại vẫn trả 200 kèm LÝ DO, ⛔ trả lỗi trần: trình duyệt ⛔ có gì để sửa,

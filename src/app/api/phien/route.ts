@@ -3,6 +3,7 @@ import { dsPhien, lichSuPhien, phienCoTienTrinhSong } from '@/lib/doc-phien';
 import { layO } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { readOwnership } from '@/lib/so-so-huu';
+import { serverNoticeJson } from '@/lib/server-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,8 +19,8 @@ export async function GET(req: NextRequest) {
   const maNhanSu = (q.get('ma_nhan_su') ?? '').trim();
   const maPhien = (q.get('ma_phien') ?? '').trim();
 
-  if (!maNhanSu) return Response.json({ loi: 'Thiếu nhân sự.' }, { status: 400 });
-  if (!timNhanSu(maNhanSu)) return Response.json({ loi: 'Không có nhân sự này.' }, { status: 404 });
+  if (!maNhanSu) return serverNoticeJson(req, 'chat.missingSeat', undefined, 400);
+  if (!timNhanSu(maNhanSu)) return serverNoticeJson(req, 'chat.seatNotFound', undefined, 404);
 
   try {
     if (maPhien) {
@@ -61,9 +62,9 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (e) {
-    return Response.json(
-      { loi: e instanceof Error ? e.message : 'Không đọc được kho phiên.' },
-      { status: 400 },
-    );
+    if (e instanceof Error && e.message) {
+      return Response.json({ loi: e.message, text: e.message }, { status: 400 });
+    }
+    return serverNoticeJson(req, 'phienApi.readFailed', undefined, 400);
   }
 }

@@ -69,6 +69,34 @@
   color: #ffd9d2;
 }
 
+.bong.co-lap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bong.co-lap .noi-dung-bong {
+  flex: 1;
+  min-width: 0;
+}
+
+.nhan-lap-loi {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: calc(11px * var(--ti-le-chu, 1));
+  font-weight: 750;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: #ffd9d2;
+  background: rgba(220, 90, 70, 0.34);
+  border: 1px solid rgba(255, 180, 165, 0.48);
+}
+
 /* Vạch trạng thái nhỏ dưới ô soạn */
 .vach-tt {
   flex: none;
