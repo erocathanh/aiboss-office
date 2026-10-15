@@ -170,13 +170,14 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
         for sc in commands:
             exe = sc.executable
             words = sc.words
+            sc_symlinks = getattr(sc, "symlinks", symlinks)
 
             # A. Kiểm tra xoá hoặc can thiệp vào DU-AN-MAU-SU-THAT / _sample-ground-truth / DAU-RA / nhật ký
             if exe in ('rm', 'unlink', 'rmdir'):
                 for w in words[1:]:
                     if w.startswith('-'):
                         continue
-                    cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, symlinks)
+                    cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, sc_symlinks)
                     for cand, r_dir in cands_w:
                         if bash_parser.is_in_du_an_mau(cand):
                             _, sample_short = get_sample_labels(cand)
@@ -199,7 +200,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                     for w in words[1:]:
                         if w.startswith('-'):
                             break
-                        cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, symlinks)
+                        cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, sc_symlinks)
                         for cand, _r_dir in cands_w:
                             if bash_parser.is_in_du_an_mau(cand):
                                 _, sample_short = get_sample_labels(cand)
@@ -208,7 +209,6 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                 return f"Hành vi xoá trong thư mục đầu ra đã chốt ({w}) bị chặn."
 
             # B. Kiểm tra tất cả write targets
-            sc_symlinks = getattr(sc, "symlinks", symlinks)
             targets = bash_parser.extract_write_targets(sc, sc_symlinks)
             is_move_or_rm_cmd = (
                 exe in ('mv', 'rm', 'rmdir')
@@ -285,9 +285,9 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
 
                     # Rào 3: Bảo vệ tệp nhật ký (nhat-ky.md / CHANNEL.md) qua Bash — chỉ cho phép nối thêm (>>, exec N>>, tee -a, sponge -a)
                     abs_j = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(target_path)))
-                    rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, symlinks)
-                    if symlinks and cand == rel_canon_r:
-                        for l_k, t_v in symlinks.items():
+                    rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, sc_symlinks)
+                    if sc_symlinks and cand == rel_canon_r:
+                        for l_k, t_v in sc_symlinks.items():
                             abs_lk = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(l_k)))
                             abs_tv = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(t_v)))
                             if abs_j == abs_lk:

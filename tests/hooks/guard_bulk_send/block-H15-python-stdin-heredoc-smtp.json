@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 - <<EOF\nimport smtplib\nsmtplib.SMTP('localhost', 2525).sendmail('a@example.com', 'b@example.com', 'msg')\nEOF"
+  }
+}

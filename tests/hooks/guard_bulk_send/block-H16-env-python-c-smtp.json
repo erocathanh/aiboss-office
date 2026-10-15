@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "env PYTHONIOENCODING=utf8 python3 -c 'import smtplib; smtplib.SMTP(\"localhost\", 2525)'"
+  }
+}

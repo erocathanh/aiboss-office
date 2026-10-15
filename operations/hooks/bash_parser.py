@@ -106,12 +106,34 @@ class SimpleCommand:
                 continue
             elif base_w == 'env':
                 w_idx += 1
-                env_flags_with_val = {'-u', '-C', '-S', '--unset', '--chdir', '--split-string'}
+                env_flags_with_val = {'-u', '-C', '--unset', '--chdir'}
                 while w_idx < len(remaining_tokens):
                     cur = remaining_tokens[w_idx]
                     if cur == '--':
                         w_idx += 1
                         break
+                    if cur in ('-S', '--split-string') and w_idx + 1 < len(remaining_tokens):
+                        try:
+                            split_toks = shlex.split(remaining_tokens[w_idx + 1])
+                        except Exception:
+                            split_toks = remaining_tokens[w_idx + 1].strip().split()
+                        remaining_tokens = remaining_tokens[:w_idx] + split_toks + remaining_tokens[w_idx + 2:]
+                        continue
+                    if cur.startswith('-S') and len(cur) > 2:
+                        try:
+                            split_toks = shlex.split(cur[2:])
+                        except Exception:
+                            split_toks = cur[2:].strip().split()
+                        remaining_tokens = remaining_tokens[:w_idx] + split_toks + remaining_tokens[w_idx + 1:]
+                        continue
+                    if cur.startswith('--split-string='):
+                        val_s = cur.split('=', 1)[1]
+                        try:
+                            split_toks = shlex.split(val_s)
+                        except Exception:
+                            split_toks = val_s.strip().split()
+                        remaining_tokens = remaining_tokens[:w_idx] + split_toks + remaining_tokens[w_idx + 1:]
+                        continue
                     if cur in env_flags_with_val:
                         w_idx += 2
                         continue
@@ -769,21 +791,41 @@ def parse_bash_script(
                         base_s = os.path.basename(src_target.rstrip('/'))
                         if base_s:
                             link_pairs.append((src_target, os.path.join(target_dir, base_s)))
-                elif len(non_flags) >= 2:
+                elif len(non_flags) == 2:
                     src_target = non_flags[0]
                     link_name = non_flags[1]
                     link_pairs.append((src_target, link_name))
+                elif len(non_flags) > 2:
+                    dest_dir = non_flags[-1]
+                    for src_target in non_flags[:-1]:
+                        base_s = os.path.basename(src_target.rstrip('/'))
+                        if base_s:
+                            link_pairs.append((src_target, os.path.join(dest_dir, base_s)))
                 else:
                     src_target = non_flags[0]
                     link_name = os.path.basename(src_target.rstrip('/'))
                     if link_name:
                         link_pairs.append((src_target, link_name))
 
+                protected_dir_segs = {
+                    'inputs', 'dau-vao', 'outputs', 'dau-ra', 'references', 'tham-khao',
+                    'templates', 'ban-mau', '_sample-ground-truth', 'du-an-mau-su-that',
+                    'operations', 'projects', 'cac-du-an',
+                }
                 for src_target, link_name in link_pairs:
                     abs_link = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(link_name)))
                     link_dir = os.path.dirname(abs_link)
                     if not os.path.isabs(src_target):
-                        abs_src = os.path.normpath(os.path.join(link_dir, os.path.expanduser(src_target)))
+                        src_segs = [seg.lower() for seg in src_target.replace('\\', '/').split('/') if seg and seg != '.']
+                        if (
+                            not src_target.startswith(('./', '../'))
+                            and link_dir != current_cwd
+                            and src_segs
+                            and src_segs[0] in protected_dir_segs
+                        ):
+                            abs_src = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(src_target)))
+                        else:
+                            abs_src = os.path.normpath(os.path.join(link_dir, os.path.expanduser(src_target)))
                     else:
                         abs_src = os.path.normpath(os.path.expanduser(src_target))
                     symlinks[abs_link] = abs_src
@@ -2490,9 +2532,22 @@ def _extract_chained_call_arg_lists(
 
 HEREDOC_OPEN_REGEX = re.compile(r'(?<!<)<<(?!<)(-?)\s*([\'"]?)([A-Za-z0-9_]+)\2')
 
-SCRIPT_RUNNERS = {'python', 'python3', 'node', 'bash', 'sh', 'zsh', 'ruby', 'perl', 'osascript', 'source', '.'}
+SCRIPT_RUNNERS = {
+    'python', 'python2', 'python3', 'py',
+    'node', 'nodejs', 'deno', 'bun',
+    'bash', 'sh', 'zsh', 'ksh', 'dash',
+    'ruby', 'perl', 'php', 'osascript',
+    'source', '.', 'eval', 'exec',
+}
 SCRIPT_EXTENSIONS = ('.py', '.sh', '.js', '.mjs')
 EXEMPT_PRINT_COMMANDS = {'echo', 'printf', 'grep', 'rg', 'cat', 'sed', 'awk', 'head', 'tail', 'less'}
+DOCUMENT_HEREDOC_COMMANDS = {
+    'cat', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack',
+    'awk', 'gawk', 'mawk', 'nawk', 'sed', 'gsed',
+    'sort', 'uniq', 'wc', 'head', 'tail', 'tee',
+    'less', 'more', 'jq', 'diff', 'tr', 'cut',
+    'printf', 'echo', 'true', 'false', ':',
+}
 
 
 def split_shell_tokens(sub_cmd: str) -> List[str]:
@@ -2552,9 +2607,53 @@ def extract_heredoc_file_write_target(header_line: str) -> str:
     return ""
 
 
+def is_heredoc_header_executed(header_line: str) -> bool:
+    """H15 (v04): Kiểm tra dòng mở heredoc có đổ stdin vào trình thông dịch (python*, node, deno, bun,
+    perl, ruby, php, osascript, bash/sh/zsh kể cả `python3 -` và `sh -s`), `source`/`eval`, hoặc client mạng/SMTP
+    không. Nếu heredoc chỉ đổ vào lệnh đọc/tài liệu (`cat`, `grep`, `awk`, `sed`, `sort`, `uniq`, `wc`, `head`,
+    `tail`, `tee`, `less`, `jq`, `diff`, `tr`, `cut`, `printf`, `echo`), trả về False.
+    """
+    if extract_heredoc_file_write_target(header_line):
+        return False
+
+    segments = re.split(r'&&|\|\||;', header_line)
+    hd_seg = ""
+    for seg in segments:
+        if HEREDOC_OPEN_REGEX.search(seg):
+            hd_seg = seg.strip()
+            break
+    if not hd_seg:
+        return False
+
+    without_hd = HEREDOC_OPEN_REGEX.sub("", hd_seg).strip()
+    pipe_stages = [p.strip() for p in without_hd.split("|") if p.strip()]
+    if not pipe_stages:
+        return False
+
+    for stage in pipe_stages:
+        exe = ""
+        try:
+            sc = SimpleCommand(stage, "")
+            exe = sc.executable
+        except Exception:
+            toks = split_shell_tokens(stage)
+            idx = 0
+            while idx < len(toks) and '=' in toks[idx] and not toks[idx].startswith('-'):
+                idx += 1
+            if idx < len(toks):
+                exe = os.path.basename(toks[idx].strip('\'"')).lower()
+        if not exe:
+            continue
+        if exe in DOCUMENT_HEREDOC_COMMANDS:
+            continue
+        return True
+
+    return False
+
+
 def split_heredocs(raw_cmd: str) -> Tuple[str, Dict[str, str]]:
-    """Tách thân các heredoc ghi vào tệp khỏi chuỗi lệnh chính.
-    Trả về (cmd_without_file_heredoc_bodies, heredoc_written_files).
+    """Tách thân các heredoc ghi vào tệp hoặc heredoc tài liệu khỏi chuỗi lệnh chính.
+    Trả về (cmd_without_doc_heredoc_bodies, heredoc_written_files).
     Các heredoc chảy thẳng vào shell/trình thông dịch giữ nguyên trong chuỗi lệnh.
     """
     cmd_active, heredoc_written_files, _ = split_heredocs_detailed(raw_cmd)
@@ -2562,8 +2661,10 @@ def split_heredocs(raw_cmd: str) -> Tuple[str, Dict[str, str]]:
 
 
 def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str]]:
-    """Tách heredoc chi tiết:
-    Trả về (cmd_without_file_heredoc_bodies, heredoc_written_files, active_heredoc_bodies).
+    """Tách heredoc chi tiết (H15):
+    Trả về (cmd_without_doc_heredoc_bodies, heredoc_written_files, active_heredoc_bodies).
+    Thân heredoc chỉ được giữ trong `active_lines` và `active_heredoc_bodies` khi lệnh nhận heredoc
+    thật sự là trình thông dịch / lệnh thực thi (`is_heredoc_header_executed(line)` là True).
     """
     lines = raw_cmd.splitlines()
     active_lines: List[str] = []
@@ -2574,6 +2675,7 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
     hd_delim = ""
     hd_strip_tabs = False
     hd_target_file = ""
+    hd_is_executed = False
     hd_body_lines: List[str] = []
 
     for line in lines:
@@ -2589,13 +2691,14 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
                     base_key = os.path.basename(clean_key)
                     if base_key:
                         heredoc_written_files[base_key] = body_text
-                else:
+                elif hd_is_executed:
                     active_lines.extend(hd_body_lines)
                     active_lines.append(line)
                     active_heredoc_bodies.append(body_text)
                 in_hd = False
                 hd_delim = ""
                 hd_target_file = ""
+                hd_is_executed = False
                 hd_body_lines = []
             else:
                 hd_body_lines.append(line)
@@ -2606,12 +2709,13 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
                 hd_strip_tabs = (m.group(1) == "-")
                 hd_delim = m.group(3)
                 hd_target_file = extract_heredoc_file_write_target(line)
+                hd_is_executed = is_heredoc_header_executed(line)
                 hd_body_lines = []
                 active_lines.append(line)
             else:
                 active_lines.append(line)
 
-    if in_hd and hd_body_lines:
+    if in_hd and hd_body_lines and hd_is_executed and not hd_target_file:
         active_lines.extend(hd_body_lines)
         active_heredoc_bodies.append("\n".join(hd_body_lines))
 
@@ -2619,31 +2723,41 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
 
 
 def get_executed_script_arg(sub_cmd: str) -> str:
-    """Nếu sub_cmd chạy một tệp kịch bản (qua bash/sh/zsh/python/python3/node/ruby/perl/osascript/source/. hoặc ./f),
-    trả về đối số đường dẫn kịch bản; ngược lại trả về chuỗi rỗng.
+    """Nếu sub_cmd chạy một tệp kịch bản (qua bash/sh/zsh/python/python3/node/deno/bun/ruby/perl/php/osascript/source/. hoặc ./f,
+    kể cả khi bọc qua env/nohup/timeout/caffeinate/sudo/command), trả về đối số đường dẫn kịch bản; ngược lại trả về chuỗi rỗng.
     """
-    tokens = split_shell_tokens(sub_cmd)
-    if not tokens:
+    try:
+        sc = SimpleCommand(sub_cmd, "")
+        tokens = sc.words
+        first_token = sc.raw_executable.strip('\'"')
+        base_cmd = sc.executable
+    except Exception:
+        raw_tokens = split_shell_tokens(sub_cmd)
+        if not raw_tokens:
+            return ""
+        idx = 0
+        while idx < len(raw_tokens) and '=' in raw_tokens[idx] and not raw_tokens[idx].startswith('-'):
+            idx += 1
+        if idx >= len(raw_tokens):
+            return ""
+        tokens = raw_tokens[idx:]
+        first_token = tokens[0].strip('\'"')
+        base_cmd = os.path.basename(first_token).lower()
+
+    if not tokens or not base_cmd:
         return ""
 
-    idx = 0
-    while idx < len(tokens) and '=' in tokens[idx] and not tokens[idx].startswith('-'):
-        idx += 1
-    if idx >= len(tokens):
-        return ""
-
-    first_token = tokens[idx].strip('\'"')
-    base_cmd = os.path.basename(first_token)
-
-    if base_cmd in EXEMPT_PRINT_COMMANDS:
+    if base_cmd in EXEMPT_PRINT_COMMANDS or base_cmd in DOCUMENT_HEREDOC_COMMANDS:
         return ""
 
     script_arg = ""
-    if base_cmd in SCRIPT_RUNNERS:
-        i = idx + 1
+    if base_cmd in SCRIPT_RUNNERS or base_cmd.startswith(('python2.', 'python3.')):
+        i = 1
         while i < len(tokens):
             arg = tokens[i].strip('\'"')
-            if arg in ('-c', '-lc', '-e'):
+            if arg in ('-c', '-lc', '-ec', '-e', '--eval', '-p', '--print', '-r', '-m'):
+                return ""
+            if base_cmd in ('sh', 'bash', 'zsh', 'ksh', 'dash') and arg.startswith('-') and 'c' in arg:
                 return ""
             if arg.startswith('-'):
                 i += 1
@@ -2671,19 +2785,34 @@ def find_heredoc_body_for_script(script_arg: str, heredoc_written_files: Optiona
 
 def extract_executed_heredocs(raw_cmd: str) -> List[str]:
     """Trả về danh sách các thân heredoc cần kiểm tra như mã/lệnh thực thi:
-    1) Heredoc chảy thẳng vào shell hoặc trình thông dịch (không phải cat > f / cat >> f / tee f);
-    2) Heredoc ghi vào tệp f mà tệp f được chạy ở lệnh con sau trong cùng chuỗi lệnh.
+    1) Heredoc chảy thẳng vào trình thông dịch (`python*`, `node`, `deno`, `bun`, `perl`, `ruby`, `php`,
+       `osascript`, `bash`/`sh`/`zsh` kể cả `python3 -` và `sh -s`, `source`/`eval`, hoặc ống `| bash`);
+    2) Heredoc ghi vào tệp f mà tệp f được chạy ở lệnh con sau trong cùng chuỗi lệnh («ghi rồi chạy»).
+    Heredoc đổ vào `cat`/`grep`/`awk`/`sed`/`sort`/`uniq`/`wc`/`head`/`tail`/`tee` (không chạy lại)/`less`/`jq`/`diff`/`tr`/`cut`/`printf`/`echo`
+    được coi là tài liệu và không trả về ở đây (H15).
     """
     cmd_active, heredoc_written_files, active_heredoc_bodies = split_heredocs_detailed(raw_cmd)
     result = list(active_heredoc_bodies)
     if heredoc_written_files:
+        seen_scripts = set()
         cmd_joined = re.sub(r'\\\s*\n', ' ', cmd_active)
+        sub_candidates: List[str] = []
+        try:
+            parsed_cmds, _ = parse_bash_script(cmd_joined, "")
+            for sc in parsed_cmds:
+                if sc.words:
+                    sub_candidates.append(" ".join(sc.words))
+                elif sc.raw_str:
+                    sub_candidates.append(sc.raw_str)
+        except Exception:
+            pass
         for raw_sub in re.split(r'&&|\|\||;|\||\n', cmd_joined):
-            sub = raw_sub.strip()
-            if not sub:
-                continue
+            if raw_sub.strip():
+                sub_candidates.append(raw_sub.strip())
+        for sub in sub_candidates:
             script_arg = get_executed_script_arg(sub)
-            if script_arg:
+            if script_arg and script_arg not in seen_scripts:
+                seen_scripts.add(script_arg)
                 hd_body = find_heredoc_body_for_script(script_arg, heredoc_written_files)
                 if hd_body:
                     result.append(hd_body)

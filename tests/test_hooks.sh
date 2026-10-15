@@ -431,6 +431,13 @@ POS_CONTROL_CASES=(
     "protect_final_outputs:block-H12-ln-t-outputs.json"
     "protect_final_outputs:block-cp-hardlink-from-dau-ra-vi.json"
     "protect_final_outputs:block-ln-single-operand-in-dau-ra-vi.json"
+    "guard_bulk_send:block-H15-python-stdin-heredoc-smtp.json"
+    "guard_bulk_send:block-H15-write-then-run.json"
+    "guard_bulk_send:block-H16-python-c-leading-statement-smtp.json"
+    "guard_bulk_send:block-H16-python-c-import-os-then-smtplib.json"
+    "guard_bulk_send:block-H16-node-e-leading-statement-nodemailer.json"
+    "guard_bulk_send:block-H16-env-python-c-smtp.json"
+    "protect_final_outputs:block-H17-rm-symlink-repointed-later.json"
 )
 
 saved_total=$TOTAL

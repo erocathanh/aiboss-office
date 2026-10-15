@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "tee projects/THU-SU-THAT/wip/note.md <<'EOF'\nimport smtplib\nsmtplib.SMTP('localhost', 2525)\nEOF"
+  }
+}
