@@ -355,13 +355,13 @@
   padding: 9px 14px; border-radius: 10px;
   border: 1px solid rgba(200, 148, 37, .45);
   background: #102a43; color: #f3e9d2;
-  font-size: 13px; line-height: 1.45; text-align: center;
+  font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; text-align: center;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .42);
 }
 
 /* ⚠️ Báo Owner khi app đọc hụt một khúc — im lặng khuyết tệ hơn báo lỗi. */
 .moc-ngay.canh-hut{
-  color:#e8b339; font-size:12.5px; line-height:1.5;
+  color:#e8b339; font-size:calc(12.5px * var(--text-scale, 1)); line-height:1.5;
   padding:6px 12px; max-width:52ch; text-align:center; opacity:.95;
 }
 
@@ -393,7 +393,7 @@
   padding: 8px 14px;
   background: #3a2a08; color: var(--vang-sang);
   border-bottom: 1px solid #6b4f11;
-  font-size: 13px; line-height: 1.45; text-align: center;
+  font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; text-align: center;
 }
 .bang-ma-cu b { color: #ffd873; }
 
@@ -403,7 +403,7 @@
   min-height: 32px; padding: 0 14px;
   border: 1px solid #b98a1c; border-radius: 8px;
   background: var(--vang-sang); color: #241a02;
-  font-size: 13px; font-weight: 700; cursor: pointer;
+  font-size: calc(13px * var(--text-scale, 1)); font-weight: 700; cursor: pointer;
 }
 .bang-ma-cu .nut-tai-lai:hover { background: #ffd873; }
 .bang-ma-cu .nut-tai-lai:active { background: #d8ae4e; }
@@ -445,7 +445,7 @@ body { padding-top: var(--cao-bang); }
 
 /* 🗣 Ô nhập CÂU DẶN ĐẦU sau khi fork — nằm dưới nút fork, chiếm trọn hàng.
    Cỡ chữ ≥16px: dưới mức đó iOS TỰ PHÓNG TO trang khi bấm vào ô, đẩy nút Gửi khỏi màn. */
-.o-cau-dau { width: 100%; margin-top: 6px; font-size: 16px; }
+.o-cau-dau { width: 100%; margin-top: 6px; font-size: max(16px, calc(16px * var(--text-scale, 1))); }
 
 /* ==========================================================================
    AIBOSS Office Phase 2 UI Styles - English & Marketing MVP
@@ -692,6 +692,12 @@ body { padding-top: var(--cao-bang); }
    TEXT SIZE SCALING (Medium = 1.0, Large = 1.25)
    ═══════════════════════════════════════════════════════════════════ */
 :root {
+  --text-scale: 1.25;
+  --ti-le-chu: 1.25;
+}
+
+html[data-text-size="medium"],
+html[data-co-chu="vua"] {
   --text-scale: 1;
   --ti-le-chu: 1;
 }
@@ -715,8 +721,13 @@ html[data-co-chu="lon"] {
 .gio {
   font-size: calc(10px * var(--text-scale, 1)) !important;
 }
-.soan textarea {
+.soan textarea,
+.o-dan,
+.o-cau-dau {
   font-size: max(16px, calc(16px * var(--text-scale, 1))) !important;
+}
+.lien-ket {
+  font-size: calc(12px * var(--text-scale, 1));
 }
 .ds-nhanh .mon b {
   font-size: calc(12.5px * var(--text-scale, 1)) !important;
@@ -733,6 +744,21 @@ html[data-co-chu="lon"] {
 .moc-ngay {
   font-size: calc(10.5px * var(--text-scale, 1)) !important;
 }
+.dinh-ho-so h1 {
+  font-size: calc(21px * var(--text-scale, 1));
+}
+table.bang {
+  font-size: calc(13px * var(--text-scale, 1));
+}
+table.bang th {
+  font-size: calc(12.5px * var(--text-scale, 1));
+}
+table.bang td.ma {
+  font-size: calc(12.5px * var(--text-scale, 1));
+}
+.ghi-chu {
+  font-size: calc(12.5px * var(--text-scale, 1));
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    SETTINGS PAGE STYLES
@@ -748,21 +774,23 @@ html[data-co-chu="lon"] {
 }
 
 .settings-header {
-  height: 52px;
-  padding: 0 20px;
+  min-height: 52px;
+  padding: 8px 20px;
   border-bottom: 1px solid var(--vien);
   background: rgba(10, 25, 41, 0.85);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   flex: none;
 }
 
 .settings-header-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .settings-back-btn {
@@ -774,8 +802,10 @@ html[data-co-chu="lon"] {
   background: rgba(250, 247, 240, 0.05);
   border: 1px solid var(--vien-2);
   color: var(--kem-mo);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.15s ease;
 }
 
@@ -788,10 +818,11 @@ html[data-co-chu="lon"] {
 .settings-title-group {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .settings-title {
-  font-size: 16px;
+  font-size: calc(16px * var(--text-scale, 1));
   font-weight: 700;
   color: var(--kem);
   margin: 0;
@@ -799,7 +830,7 @@ html[data-co-chu="lon"] {
 }
 
 .settings-subtitle {
-  font-size: 11px;
+  font-size: calc(11px * var(--text-scale, 1));
   color: var(--kem-mo-2);
 }
 
@@ -811,6 +842,8 @@ html[data-co-chu="lon"] {
   border: 1px solid rgba(200, 148, 37, 0.35);
   color: var(--vang-sang);
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .settings-content {
@@ -840,7 +873,7 @@ html[data-co-chu="lon"] {
 }
 
 .settings-banner-text {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   line-height: 1.5;
   display: flex;
   flex-direction: column;
@@ -855,7 +888,7 @@ html[data-co-chu="lon"] {
   background: rgba(250, 247, 240, 0.08);
   padding: 1px 5px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale, 1));
   color: var(--vang-sang);
 }
 
@@ -891,14 +924,14 @@ html[data-co-chu="lon"] {
 }
 
 .settings-card-header h2 {
-  font-size: 15px;
+  font-size: calc(15px * var(--text-scale, 1));
   font-weight: 650;
   color: var(--kem);
   margin: 0;
 }
 
 .settings-card-subtitle {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale, 1));
   color: var(--kem-mo-2);
   margin: 4px 0 0;
   line-height: 1.4;
@@ -926,7 +959,7 @@ html[data-co-chu="lon"] {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
 }
 
 .settings-label {
@@ -945,7 +978,7 @@ html[data-co-chu="lon"] {
   background: rgba(250, 247, 240, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale, 1));
   color: var(--vang-sang);
   font-family: ui-monospace, monospace;
 }
@@ -961,7 +994,7 @@ html[data-co-chu="lon"] {
 
 .settings-dim {
   color: var(--kem-mo-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale, 1));
   font-weight: 400;
 }
 
@@ -1013,7 +1046,7 @@ html[data-co-chu="lon"] {
 }
 
 .settings-gate-label {
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   font-weight: 600;
   color: var(--kem);
 }
@@ -1029,7 +1062,7 @@ html[data-co-chu="lon"] {
 }
 
 .settings-gate-desc {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale, 1));
   color: var(--kem-mo-2);
   margin: 0;
   line-height: 1.4;
@@ -1050,6 +1083,7 @@ html[data-co-chu="lon"] {
 
 .text-size-options {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1062,7 +1096,7 @@ html[data-co-chu="lon"] {
   background: rgba(250, 247, 240, 0.05);
   border: 1px solid var(--vien-2);
   color: var(--kem-mo);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   font-weight: 550;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -1108,7 +1142,7 @@ html[data-co-chu="lon"] {
     grid-template-columns: 1fr;
   }
   .settings-header {
-    padding: 0 14px;
+    padding: 8px 14px;
   }
   .settings-content {
     padding: 16px 14px 32px;
@@ -1232,7 +1266,7 @@ html[data-co-chu="lon"] {
 .cost-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale, 1));
   text-align: left;
 }
 
@@ -1279,7 +1313,7 @@ html[data-co-chu="lon"] {
 }
 
 .unpriced-notice {
-  font-size: 12px;
+  font-size: calc(12px * var(--text-scale, 1));
   margin-top: 8px;
   padding: 8px 12px;
   border-radius: 6px;

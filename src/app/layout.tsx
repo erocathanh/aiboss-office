@@ -15,7 +15,14 @@ export const viewport: Viewport = {
 
 export default function BoCucGoc({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var v=localStorage.getItem('aiboss-office.text-size');var s=v==='medium'?'medium':'large';document.documentElement.setAttribute('data-text-size',s);document.documentElement.setAttribute('data-co-chu',s==='large'?'lon':'vua');}catch(e){document.documentElement.setAttribute('data-text-size','large');document.documentElement.setAttribute('data-co-chu','lon');}`,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

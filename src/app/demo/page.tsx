@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SAU_O, MUC_CHIA_O, CHU_KY_GIONG } from '@/lib/demo-man-hinh';
+import { readTextSize, applyTextSize, syncTextSizeOnStorageEvent } from '@/components/office/text-size';
 
 /**
  * MÀN DEMO — dựng để CHỤP MÀN HÌNH đưa vào slide.
@@ -22,6 +23,15 @@ export default function ManDemo() {
   const [boCuc, setBoCuc] = useState<number>(6);
   const hien = SAU_O.slice(0, boCuc);
 
+  useEffect(() => {
+    applyTextSize(readTextSize());
+    const handleStorage = (e: StorageEvent) => {
+      syncTextSizeOnStorageEvent(e);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   return (
     <main className="khu-demo">
       {/* Chỉ thêm mức 6 — mau09.css mới có bc-1/2/4. ⛔ đụng tệp đó, viết riêng ở đây. */}
@@ -39,11 +49,11 @@ export default function ManDemo() {
         .khu-demo .bang-tin{gap:7px}
         .khu-demo .ket-qua{flex:none;padding:9px 12px;border-top:1px solid rgba(255,255,255,.08);
           display:flex;flex-direction:column;gap:3px}
-        .khu-demo .ket-qua a{display:inline-block;font-size:12.5px;font-weight:700;
+        .khu-demo .ket-qua a{display:inline-block;font-size:calc(12.5px * var(--text-scale, 1));font-weight:700;
           padding:7px 12px;border-radius:9px;text-decoration:none;
           border:1px solid rgba(230,177,69,.55);color:#e6b145}
-        .khu-demo .ket-qua small{opacity:.6;font-size:11px}
-        .khu-demo .ky-giong{flex:none;padding:0 12px 9px;font-size:11px;opacity:.65}
+        .khu-demo .ket-qua small{opacity:.6;font-size:calc(11px * var(--text-scale, 1))}
+        .khu-demo .ky-giong{flex:none;padding:0 12px 9px;font-size:calc(11px * var(--text-scale, 1));opacity:.65}
       ` }} />
 
       <div className="thanh-tren">

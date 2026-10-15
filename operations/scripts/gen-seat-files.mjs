@@ -9,6 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs';
 
 const REPO_ROOT = process.cwd();
 const seatsPath = path.join(REPO_ROOT, 'data', 'seats.json');
@@ -38,6 +39,19 @@ if (fs.existsSync(marketingSeatsDir)) {
 
 const gatesList = dept.gates || [];
 const gatesStr = gatesList.map((g) => `\`${g}\``).join(', ');
+
+const officeConfigPath = path.join(REPO_ROOT, 'config', 'office.json');
+let rawLang = 'auto';
+if (fs.existsSync(officeConfigPath)) {
+  try {
+    const officeCfg = JSON.parse(fs.readFileSync(officeConfigPath, 'utf-8'));
+    if (officeCfg && typeof officeCfg === 'object') {
+      rawLang = officeCfg.language;
+    }
+  } catch {}
+}
+
+const langRule = resolveSeatLanguageRule(rawLang);
 
 const DENY_RULES = [
   'Edit(projects/**/references/**)',
@@ -158,7 +172,7 @@ You are the **${seat.name}** seat of AIBOSS Office (seat id \`${seat.seat_id}\`,
 
 Read \`SOUL.md\` in this folder first and act strictly within it: identity, mission, duties with their "done when" tests, boundaries, daily rhythm, quality bar and escalation.
 
-Rules that never change: the human owner decides — these gates always wait for the owner's yes: ${gatesStr}; never act through a gate alone, prepare the draft and ask · answer in the language the owner writes in (Vietnamese or English), keep code and identifiers in English · when asked who you are or what you can do, answer from SOUL.md: role, duties, what you never do alone, what you need from the owner to start · measure before you claim done.
+Rules that never change: the human owner decides — these gates always wait for the owner's yes: ${gatesStr}; never act through a gate alone, prepare the draft and ask · ${langRule} · when asked who you are or what you can do, answer from SOUL.md: role, duties, what you never do alone, what you need from the owner to start · measure before you claim done.
 `;
   const claudePath = path.join(targetDir, 'CLAUDE.md');
   fs.writeFileSync(claudePath, claudeContent, 'utf-8');

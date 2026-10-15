@@ -38,6 +38,8 @@ export interface OfficeConfig {
     days: number[];
   };
   ui_language: string;
+  /** Agent response language preference ('auto' | 'vi' | 'en'). Default is 'auto'. */
+  language?: string;
   progress_marks: number[];
   response_time_working_hours: {
     incident: number;
@@ -214,3 +216,25 @@ export function getOfficeConfig(): OfficeConfig {
   }
   return OFFICE_CONFIG;
 }
+
+/**
+ * Normalizes a raw language value into 'vi', 'en', or 'auto' (default).
+ * Non-string or unrecognized values safely fall back to 'auto'.
+ */
+export function normalizeAgentLanguage(language: unknown): 'auto' | 'vi' | 'en' {
+  if (typeof language !== 'string') return 'auto';
+  const normalized = language.trim().toLowerCase();
+  if (normalized === 'vi') return 'vi';
+  if (normalized === 'en') return 'en';
+  return 'auto';
+}
+
+/**
+ * Resolves the configured agent response language preference.
+ * Returns 'vi', 'en', or 'auto' (default).
+ */
+export function getAgentLanguage(config?: OfficeConfig): 'auto' | 'vi' | 'en' {
+  const cfg = config ?? getOfficeConfig();
+  return normalizeAgentLanguage(cfg?.language);
+}
+
