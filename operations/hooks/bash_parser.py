@@ -60,10 +60,10 @@ class SimpleCommand:
         idx = 0
         while idx < len(tokens):
             tok = tokens[idx]
-            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=.*$', tok) and not self.executable:
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\+?=.*$', tok, re.DOTALL) and not self.executable:
                 if '=' in tok:
                     k, v = tok.split('=', 1)
-                    self.env_vars[k] = v
+                    self.env_vars[k.rstrip('+')] = v
                 idx += 1
             else:
                 break
@@ -138,6 +138,10 @@ class SimpleCommand:
                         w_idx += 2
                         continue
                     if cur.startswith('-') or ('=' in cur and not cur.startswith('=')):
+                        if '=' in cur and not cur.startswith('-'):
+                            ek, ev = cur.split('=', 1)
+                            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*\+?$', ek):
+                                self.env_vars[ek.rstrip('+')] = ev
                         w_idx += 1
                     else:
                         break
@@ -500,7 +504,7 @@ def split_compound_commands(full_cmd: str) -> List[Tuple[str, Optional[str], Lis
                     while hd_idx < length and not chars[hd_idx].isspace() and chars[hd_idx] not in (';', '&', '|'):
                         delim_chars.append(chars[hd_idx])
                         hd_idx += 1
-                    raw_delim = ''.join(delim_chars).strip("'\"")
+                    raw_delim = ''.join(delim_chars).strip("'\"\\")
                     if raw_delim:
                         heredoc_delim = raw_delim
                         heredoc_lines = []
@@ -644,7 +648,7 @@ def extract_substitutions_safe(cmd_str: str) -> List[str]:
                         j += 1
                         continue
                     if not s_single and not s_double:
-                        if c == '$' and j + 1 < length and chars[j+1] == '(':
+                        if c == '(':
                             depth += 1
                         elif c == ')':
                             depth -= 1
@@ -682,6 +686,106 @@ def extract_substitutions_safe(cmd_str: str) -> List[str]:
                 subs.append(''.join(sub_chars))
                 i = j
                 continue
+
+        i += 1
+
+    return subs
+
+
+def extract_heredoc_substitutions(body_text: str) -> List[str]:
+    """H20 (v05): Trích xuất các command substitutions `$(...)` và `` `...` `` bên trong
+    thân heredoc có nhãn KHÔNG bọc nháy (`<<EOF`, `<<-EOF`).
+    Trong thân heredoc không nháy của bash, dấu nháy đơn `'...'` và nháy kép `"..."` ở mức ngoài
+    không chặn mở rộng `$(...)` hay `` `...` ``; chỉ có `\\$` và `` \\` `` mới thoát ký tự mở rộng.
+    """
+    subs: List[str] = []
+    chars = list(body_text)
+    length = len(chars)
+    i = 0
+    escaped = False
+
+    while i < length:
+        ch = chars[i]
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        if ch == '\\':
+            escaped = True
+            i += 1
+            continue
+
+        if ch == '$' and i + 1 < length and chars[i + 1] == '(':
+            depth = 1
+            sub_chars: List[str] = []
+            j = i + 2
+            s_single = False
+            s_double = False
+            s_esc = False
+            while j < length:
+                c = chars[j]
+                if s_esc:
+                    sub_chars.append(c)
+                    s_esc = False
+                    j += 1
+                    continue
+                if c == '\\' and not s_single:
+                    s_esc = True
+                    sub_chars.append(c)
+                    j += 1
+                    continue
+                if c == "'" and not s_double:
+                    s_single = not s_single
+                    sub_chars.append(c)
+                    j += 1
+                    continue
+                if c == '"' and not s_single:
+                    s_double = not s_double
+                    sub_chars.append(c)
+                    j += 1
+                    continue
+                if not s_single and not s_double:
+                    if c == '(':
+                        depth += 1
+                    elif c == ')':
+                        depth -= 1
+                        if depth == 0:
+                            j += 1
+                            break
+                sub_chars.append(c)
+                j += 1
+            sub_cmd = ''.join(sub_chars).strip()
+            if sub_cmd:
+                subs.append(sub_cmd)
+            i = j
+            continue
+
+        if ch == '`':
+            sub_chars = []
+            j = i + 1
+            b_esc = False
+            while j < length:
+                c = chars[j]
+                if b_esc:
+                    sub_chars.append(c)
+                    b_esc = False
+                    j += 1
+                    continue
+                if c == '\\':
+                    b_esc = True
+                    sub_chars.append(c)
+                    j += 1
+                    continue
+                if c == '`':
+                    j += 1
+                    break
+                sub_chars.append(c)
+                j += 1
+            sub_cmd = ''.join(sub_chars).strip()
+            if sub_cmd:
+                subs.append(sub_cmd)
+            i = j
+            continue
 
         i += 1
 
@@ -735,6 +839,16 @@ def parse_bash_script(
                 nested_list, nested_links = parse_bash_script(hd_body, current_cwd, symlinks)
                 commands.extend(nested_list)
                 symlinks.update(nested_links)
+        elif cmd.heredoc_bodies:
+            # H20 (v05): Heredoc tài liệu/ghi tệp có nhãn KHÔNG bọc nháy (`<<EOF`, `<<-EOF`)
+            # vẫn được shell mở rộng `$(...)` và `` `...` `` bên trong thân heredoc trước khi truyền stdin.
+            m_hd = HEREDOC_OPEN_REGEX.search(clean_seg)
+            if m_hd and not (m_hd.group(2) or m_hd.group(4)):
+                for hd_body in cmd.heredoc_bodies:
+                    for hd_sub in extract_heredoc_substitutions(hd_body):
+                        sub_list, sub_links = parse_bash_script(hd_sub, current_cwd, symlinks)
+                        commands.extend(sub_list)
+                        symlinks.update(sub_links)
 
         # Xử lý `cd`: bỏ qua các cờ -P, -L, --
         if cmd.executable == 'cd' and cmd.words:
@@ -807,25 +921,13 @@ def parse_bash_script(
                     if link_name:
                         link_pairs.append((src_target, link_name))
 
-                protected_dir_segs = {
-                    'inputs', 'dau-vao', 'outputs', 'dau-ra', 'references', 'tham-khao',
-                    'templates', 'ban-mau', '_sample-ground-truth', 'du-an-mau-su-that',
-                    'operations', 'projects', 'cac-du-an',
-                }
+                # H21 (v05): Chuẩn POSIX `ln -s <target> <link>` luôn giải <target> tương đối
+                # theo `dirname(<link>)` (`link_dir`), không có ngoại lệ theo tên thư mục.
                 for src_target, link_name in link_pairs:
                     abs_link = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(link_name)))
                     link_dir = os.path.dirname(abs_link)
                     if not os.path.isabs(src_target):
-                        src_segs = [seg.lower() for seg in src_target.replace('\\', '/').split('/') if seg and seg != '.']
-                        if (
-                            not src_target.startswith(('./', '../'))
-                            and link_dir != current_cwd
-                            and src_segs
-                            and src_segs[0] in protected_dir_segs
-                        ):
-                            abs_src = os.path.normpath(os.path.join(current_cwd, os.path.expanduser(src_target)))
-                        else:
-                            abs_src = os.path.normpath(os.path.join(link_dir, os.path.expanduser(src_target)))
+                        abs_src = os.path.normpath(os.path.join(link_dir, os.path.expanduser(src_target)))
                     else:
                         abs_src = os.path.normpath(os.path.expanduser(src_target))
                     symlinks[abs_link] = abs_src
@@ -2530,7 +2632,7 @@ def _extract_chained_call_arg_lists(
 # HÀM DÙNG CHUNG NHẬN DIỆN HEREDOC GHI TỆP VÀ NGOẠI LỆ «GHI RỒI CHẠY» (v10/v11)
 # ==============================================================================
 
-HEREDOC_OPEN_REGEX = re.compile(r'(?<!<)<<(?!<)(-?)\s*([\'"]?)([A-Za-z0-9_]+)\2')
+HEREDOC_OPEN_REGEX = re.compile(r'(?<!<)<<(?!<)(-?)\s*(?:([\'"])([A-Za-z0-9_]+)\2|(\\?)([A-Za-z0-9_]+))')
 
 SCRIPT_RUNNERS = {
     'python', 'python2', 'python3', 'py',
@@ -2661,10 +2763,13 @@ def split_heredocs(raw_cmd: str) -> Tuple[str, Dict[str, str]]:
 
 
 def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str]]:
-    """Tách heredoc chi tiết (H15):
+    """Tách heredoc chi tiết (H15 & H20):
     Trả về (cmd_without_doc_heredoc_bodies, heredoc_written_files, active_heredoc_bodies).
     Thân heredoc chỉ được giữ trong `active_lines` và `active_heredoc_bodies` khi lệnh nhận heredoc
     thật sự là trình thông dịch / lệnh thực thi (`is_heredoc_header_executed(line)` là True).
+    Với heredoc tài liệu/ghi tệp có nhãn KHÔNG bọc nháy (`<<EOF`, `<<-EOF`), các command substitutions
+    `$(...)` và `` `...` `` trong thân heredoc vẫn được trích ra và giữ trong `active_lines` vì shell
+    thực thi chúng trước khi cấp dữ liệu cho lệnh (H20).
     """
     lines = raw_cmd.splitlines()
     active_lines: List[str] = []
@@ -2673,6 +2778,7 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
 
     in_hd = False
     hd_delim = ""
+    hd_is_quoted = False
     hd_strip_tabs = False
     hd_target_file = ""
     hd_is_executed = False
@@ -2691,12 +2797,20 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
                     base_key = os.path.basename(clean_key)
                     if base_key:
                         heredoc_written_files[base_key] = body_text
+                    active_lines.append(line)
+                    if not hd_is_quoted:
+                        active_lines.extend(extract_heredoc_substitutions(body_text))
                 elif hd_is_executed:
                     active_lines.extend(hd_body_lines)
                     active_lines.append(line)
                     active_heredoc_bodies.append(body_text)
+                else:
+                    active_lines.append(line)
+                    if not hd_is_quoted:
+                        active_lines.extend(extract_heredoc_substitutions(body_text))
                 in_hd = False
                 hd_delim = ""
+                hd_is_quoted = False
                 hd_target_file = ""
                 hd_is_executed = False
                 hd_body_lines = []
@@ -2707,7 +2821,8 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
             if m:
                 in_hd = True
                 hd_strip_tabs = (m.group(1) == "-")
-                hd_delim = m.group(3)
+                hd_delim = m.group(3) or m.group(5)
+                hd_is_quoted = bool(m.group(2) or m.group(4))
                 hd_target_file = extract_heredoc_file_write_target(line)
                 hd_is_executed = is_heredoc_header_executed(line)
                 hd_body_lines = []
@@ -2715,9 +2830,13 @@ def split_heredocs_detailed(raw_cmd: str) -> Tuple[str, Dict[str, str], List[str
             else:
                 active_lines.append(line)
 
-    if in_hd and hd_body_lines and hd_is_executed and not hd_target_file:
-        active_lines.extend(hd_body_lines)
-        active_heredoc_bodies.append("\n".join(hd_body_lines))
+    if in_hd and hd_body_lines:
+        body_text = "\n".join(hd_body_lines)
+        if hd_is_executed and not hd_target_file:
+            active_lines.extend(hd_body_lines)
+            active_heredoc_bodies.append(body_text)
+        elif not hd_is_quoted:
+            active_lines.extend(extract_heredoc_substitutions(body_text))
 
     return "\n".join(active_lines), heredoc_written_files, active_heredoc_bodies
 

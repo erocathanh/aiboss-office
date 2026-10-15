@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "A='import smtplib; smtplib.SMTP(\"localhost\",2525).sendmail(\"a\",\"b\",\"m\")'; B=$(cat x); python3 -c \"$B\""
+  }
+}

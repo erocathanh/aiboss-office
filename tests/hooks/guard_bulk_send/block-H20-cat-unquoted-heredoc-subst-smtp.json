@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat <<EOF\n$(python3 -c 'import smtplib; smtplib.SMTP(\"localhost\",2525).sendmail(\"a\",\"b\",\"m\")')\nEOF"
+  }
+}

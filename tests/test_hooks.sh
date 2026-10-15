@@ -438,6 +438,10 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-H16-node-e-leading-statement-nodemailer.json"
     "guard_bulk_send:block-H16-env-python-c-smtp.json"
     "protect_final_outputs:block-H17-rm-symlink-repointed-later.json"
+    "guard_bulk_send:block-H19-python-c-var-smtp.json"
+    "guard_bulk_send:block-H19-node-e-var-nodemailer.json"
+    "guard_bulk_send:block-H19-unresolved-var-with-smtp-assign-in-chain.json"
+    "guard_bulk_send:block-H20-cat-unquoted-heredoc-subst-smtp.json"
 )
 
 saved_total=$TOTAL
