@@ -91,6 +91,22 @@ Bảng dưới đây ghi nhận các dạng lệnh vượt ngoài khả năng ph
 - Trước khi cài cho khách thật: mở lại vòng soi đầy đủ (mức 3, anh Thanh quyết). Luật hội tụ chỉ áp cho bản nội bộ.
 
 
+### 3.4. Tồn dư MỞ sau Hermes H-v11 vòng 2 (v02 9433055 gộp 15/10/2026) — chờ lô H-v11 v03
+
+> Quyết định gộp: `SO-QUYET-DINH-TU-CHU.md` nhà hồ sơ aiboss-office hàng 06:0x 15/10/2026 (cùng nếp hội tụ hàng 02:1x): so với bản đang chạy a72a789, v02 đóng gốc-theo-phiên (H1, bản sao lồng), `rm` mọi dạng, ba cách ghi lạ, sync hai chiều, Glob/ln/journal/mv; bốn P1 còn lại là dạng hẹp hoặc hỏi oan hẹp. Hermes vòng 2 (phiên 20261015_030802_13a561) nêu bằng truy vết tĩnh; PM chạy sống cả bốn trên hook v02 (`DANG-LAM/NOP/hv11-pm-do_20261015/v02/`, GHI-CHU 06:0x). Đề đóng: `de-bai/DE-H-v11-v03-dong-H10-H14_v01_20261015.md` (hạn 12:00 15/10).
+
+| Mã | Mức · nhóm | Lệnh mẫu / điều kiện | v02 (9433055) | a72a789 (bản trước) | Hướng đóng (v03) |
+|---|---|---|---|---|---|
+| H10 | P1 (a) · H6 chưa đóng hết | `HARNESS-MANIFEST.md` cột MD5 nguồn của một hàng trống hoặc không phải 32 hex | `sync-harness.sh --check` gán «tệp riêng Office», bỏ chiều nguồn, vẫn báo «khớp 100%» (đo: đổi hash `remind_cross_check.py` thành `zzzz…` ⇒ exit 0) | --check cũ không kiểm chiều nguồn ở mọi hàng (hở hơn) | 12 tệp có nguồn bắt buộc: hash nguồn thiếu/sai định dạng ⇒ FAIL; tệp riêng Office khai báo tường minh |
+| H11 | P1 (a) · H9 | `git -C projects/<p> rm inputs/raw.md` (cwd = gốc office) | LỌT rc 0 (`-C` bị bỏ qua, pathspec phân giải theo cwd); `git rm projects/<p>/inputs/raw.md` chặn | mọi `git rm` đều lọt | tính ngữ cảnh `-C` (nhiều lần) cho đích `git rm`/`git mv`; giữ `--cached`. Upstream b3cfaf5 cũng mắc (đã báo opc) |
+| H12 | P1 (a) · H4 | cwd = `projects/<p>/outputs`; `ln ../wip/a.md` hoặc `ln -s /tmp/report.txt` (một toán hạng) | LỌT rc 0 (parser chỉ xử lý `ln` ≥2 toán hạng); hai toán hạng chặn | mọi `ln` vào outputs có đích chưa tồn tại đều lọt | đích ngầm = cwd/basename(nguồn); `-t <dir>`; nhiều nguồn. Upstream cũng mắc (đã báo opc) |
+| H13 | P1 (b) · hỏi oan mới | `grep -n 'smtplib.SMTP' operations/hooks/guard_bulk_send.py` · `echo 'smtplib.SMTP' > projects/<p>/wip/note.md` | CHẶN OAN rc 2 (`SMTP_PATTERN` áp lên mọi subcommand); `grep smtplib`, `rg smtp`, `grep 'SMTP('` qua | qua | chỉ coi là SMTP khi lệnh thực thi mã hoặc gọi client thật; chuỗi trong đối số in/đọc/tìm thì qua; compound có gửi thật vẫn chặn |
+| H14 | P2 · H7 | manifest lệch mã ở 6 chỗ (ngưỡng 1024*1024, thứ tự ưu tiên gốc, tên hàm `find_nearest_office_root`, biến `AIBOSS_ALLOW_OPC_ROOT_FALLBACK`, reason `sponge overwrite target`, phạm vi 16 ca ask→block) | sổ sai, mã đúng | — | sửa sổ theo mã |
+
+- Lô v03 cũng phải thêm vào thước v13 bản office hai hàng `git -C … rm` và `ln` một toán hạng, và vào `POS_CONTROL_CASES` các ca block mới.
+- Trước khi cài cho khách thật: mở lại vòng soi đầy đủ (mức 3, anh Thanh quyết).
+
+
 ## 4. Tiêu Chí Phân Loại Lỗi và Gộp Nhánh (Merge Criteria)
 
 Từ phiên bản S17d/S17e/S17f/S17g/S17h, mọi kết quả rà soát an toàn (bao gồm các vòng soi của Hermes và kiểm thử nội bộ) áp dụng bộ tiêu chí phân loại thống nhất sau:
