@@ -19,7 +19,7 @@ export default function BoCucGoc({ children }: { children: React.ReactNode }) {
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var v=localStorage.getItem('aiboss-office.text-size');var s=v==='medium'?'medium':'large';document.documentElement.setAttribute('data-text-size',s);document.documentElement.setAttribute('data-co-chu',s==='large'?'lon':'vua');}catch(e){document.documentElement.setAttribute('data-text-size','large');document.documentElement.setAttribute('data-co-chu','lon');}`,
+            __html: `try{var v=localStorage.getItem('aiboss-office.text-size');var s=v==='medium'?'medium':'large';document.documentElement.setAttribute('data-text-size',s);document.documentElement.setAttribute('data-co-chu',s==='large'?'lon':'vua');}catch(e){document.documentElement.setAttribute('data-text-size','large');document.documentElement.setAttribute('data-co-chu','lon');}try{var l=localStorage.getItem('aiboss-office.ui-language');if(l!=='en'&&l!=='vi'){var nav=(typeof navigator!=='undefined'&&navigator.language)?navigator.language:'';l=nav.toLowerCase().indexOf('vi')===0?'vi':'en';}document.documentElement.setAttribute('data-ui-lang',l);document.documentElement.lang=l;}catch(e){}`,
           }}
         />
       </head>

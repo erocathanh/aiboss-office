@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { CurrencyDollar, ShieldWarning } from '@phosphor-icons/react';
 import { formatNanodollars } from '@/lib/money-format';
 import type { BudgetStatus } from '@/lib/budget-ledger';
+import { useT } from '@/i18n';
 
 export interface BudgetSettingsCardProps {
   initialOfficeStatus?: BudgetStatus | null;
@@ -14,6 +15,7 @@ export function BudgetSettingsCard({
   initialOfficeStatus,
   initialSeatStatuses,
 }: BudgetSettingsCardProps = {}) {
+  const { t } = useT();
   const [officeStatus, setOfficeStatus] = useState<BudgetStatus | null>(initialOfficeStatus ?? null);
   const [seatStatuses, setSeatStatuses] = useState<BudgetStatus[]>(initialSeatStatuses ?? []);
   const [loading, setLoading] = useState(!initialOfficeStatus);
@@ -56,7 +58,7 @@ export function BudgetSettingsCard({
     }
 
     loadBudget();
-  }, []);
+  }, [initialOfficeStatus]);
 
   if (loading || !officeStatus) {
     return (
@@ -64,11 +66,11 @@ export function BudgetSettingsCard({
         <div className="settings-card-header">
           <div className="settings-card-title">
             <CurrencyDollar size={20} weight="bold" className="settings-card-icon" />
-            Budget Today
+            {t('settings.budget.title')}
           </div>
         </div>
         <div style={{ padding: '16px', color: '#94a3b8', fontSize: 'calc(13px * var(--text-scale, 1))' }}>
-          Loading budget status...
+          {t('settings.budget.loading')}
         </div>
       </section>
     );
@@ -79,11 +81,9 @@ export function BudgetSettingsCard({
       <div className="settings-card-header">
         <div className="settings-card-title">
           <CurrencyDollar size={20} weight="bold" className="settings-card-icon" />
-          Budget Today
+          {t('settings.budget.title')}
         </div>
-        <div className="settings-card-subtitle">
-          Real-time daily budget caps, pre-dispatch holds, and spent tracking
-        </div>
+        <div className="settings-card-subtitle">{t('settings.budget.subtitle')}</div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '14px' }}>
@@ -107,19 +107,22 @@ export function BudgetSettingsCard({
         >
           <div>
             <div style={{ fontSize: 'calc(13px * var(--text-scale, 1))', fontWeight: 600, color: '#f1f5f9' }}>
-              Office Total Capacity
+              {t('settings.budget.officeTotalCapacity')}
             </div>
             <div style={{ fontSize: 'calc(12px * var(--text-scale, 1))', color: '#94a3b8', marginTop: '2px' }}>
-              Spent: {formatNanodollars(officeStatus.spentNanodollars)} · Held:{' '}
-              {formatNanodollars(officeStatus.heldNanodollars)}
+              {t('settings.budget.spentLabel', { amount: formatNanodollars(officeStatus.spentNanodollars) })} ·{' '}
+              {t('settings.budget.heldLabel', { amount: formatNanodollars(officeStatus.heldNanodollars) })}
               {officeStatus.unpricedRuns > 0 &&
-                ` · Pending: ${formatNanodollars(officeStatus.unpricedEstimateNanodollars)}`}
-              {' · Cap: '}
-              {officeStatus.state === 'config_error'
-                ? 'Configuration error'
-                : officeStatus.capNanodollars
-                ? formatNanodollars(officeStatus.capNanodollars)
-                : 'No cap set'}
+                ` · ${t('settings.budget.pendingLabel', { amount: formatNanodollars(officeStatus.unpricedEstimateNanodollars) })}`}
+              {' · '}
+              {t('settings.budget.capLabel', {
+                amount:
+                  officeStatus.state === 'config_error'
+                    ? t('settings.budget.configError')
+                    : officeStatus.capNanodollars
+                    ? formatNanodollars(officeStatus.capNanodollars)
+                    : t('settings.budget.noCapSet'),
+              })}
             </div>
           </div>
           <div>
@@ -138,7 +141,7 @@ export function BudgetSettingsCard({
                   border: '1px solid rgba(239, 68, 68, 0.4)',
                 }}
               >
-                <ShieldWarning size={14} weight="bold" /> Configuration error
+                <ShieldWarning size={14} weight="bold" /> {t('settings.budget.configError')}
               </span>
             ) : officeStatus.state === 'exceeded' ? (
               <span
@@ -155,7 +158,7 @@ export function BudgetSettingsCard({
                   border: '1px solid rgba(239, 68, 68, 0.4)',
                 }}
               >
-                <ShieldWarning size={14} weight="bold" /> Office Cap Exceeded
+                <ShieldWarning size={14} weight="bold" /> {t('settings.budget.officeCapExceeded')}
               </span>
             ) : officeStatus.capNanodollars === null ? (
               <span
@@ -168,7 +171,7 @@ export function BudgetSettingsCard({
                   color: '#94a3b8',
                 }}
               >
-                No cap set
+                {t('settings.budget.noCapSet')}
               </span>
             ) : (
               <span
@@ -181,7 +184,9 @@ export function BudgetSettingsCard({
                   color: '#86efac',
                 }}
               >
-                Remaining: {formatNanodollars(officeStatus.remainingNanodollars ?? '0')}
+                {t('settings.budget.remainingLabel', {
+                  amount: formatNanodollars(officeStatus.remainingNanodollars ?? '0'),
+                })}
               </span>
             )}
           </div>
@@ -195,7 +200,6 @@ export function BudgetSettingsCard({
             const isWarning = st.state === 'warning';
             const isUnlimited = st.capNanodollars === null && !isConfigError;
 
-            // Total committed matches API: spent + held + unpricedEstimate
             const committedBig = BigInt(
               st.committedNanodollars ??
                 (
@@ -259,7 +263,7 @@ export function BudgetSettingsCard({
                           border: '1px solid rgba(239, 68, 68, 0.4)',
                         }}
                       >
-                        CONFIGURATION ERROR
+                        {t('settings.budget.badgeConfigError')}
                       </span>
                     )}
                     {isExceeded && !isConfigError && (
@@ -273,7 +277,7 @@ export function BudgetSettingsCard({
                           color: '#ffffff',
                         }}
                       >
-                        EXCEEDED
+                        {t('settings.budget.badgeExceeded')}
                       </span>
                     )}
                     {isWarning && !isConfigError && (
@@ -288,7 +292,7 @@ export function BudgetSettingsCard({
                           border: '1px solid rgba(234, 179, 8, 0.4)',
                         }}
                       >
-                        WARNING (&gt;80%)
+                        {t('settings.budget.badgeWarning')}
                       </span>
                     )}
                   </div>
@@ -300,22 +304,35 @@ export function BudgetSettingsCard({
                       fontFamily: 'monospace',
                     }}
                   >
-                    <span>Spent: {formatNanodollars(st.spentNanodollars)}</span>
+                    <span>
+                      {t('settings.budget.spentLabel', { amount: formatNanodollars(st.spentNanodollars) })}
+                    </span>
                     <span style={{ margin: '0 6px' }}>·</span>
-                    <span>Held: {formatNanodollars(st.heldNanodollars)}</span>
+                    <span>
+                      {t('settings.budget.heldLabel', { amount: formatNanodollars(st.heldNanodollars) })}
+                    </span>
                     {st.unpricedRuns > 0 && (
                       <>
                         <span style={{ margin: '0 6px' }}>·</span>
-                        <span>Pending: {formatNanodollars(st.unpricedEstimateNanodollars)}</span>
+                        <span>
+                          {t('settings.budget.pendingLabel', {
+                            amount: formatNanodollars(st.unpricedEstimateNanodollars),
+                          })}
+                        </span>
                       </>
                     )}
                     <span style={{ margin: '0 6px' }}>/</span>
-                    <span style={{ fontWeight: 600, color: (isExceeded || isConfigError) ? '#ef4444' : '#f8fafc' }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        color: (isExceeded || isConfigError) ? '#ef4444' : '#f8fafc',
+                      }}
+                    >
                       {isConfigError
-                        ? 'Configuration error'
+                        ? t('settings.budget.configError')
                         : st.capNanodollars
                         ? formatNanodollars(st.capNanodollars)
-                        : 'No cap set'}
+                        : t('settings.budget.noCapSet')}
                     </span>
                   </div>
                 </div>
@@ -332,7 +349,7 @@ export function BudgetSettingsCard({
                 >
                   <div
                     style={{
-                      width: isUnlimited ? '0%' : (isConfigError ? '100%' : `${percent}%`),
+                      width: isUnlimited ? '0%' : isConfigError ? '100%' : `${percent}%`,
                       height: '100%',
                       borderRadius: '3px',
                       background: (isExceeded || isConfigError)

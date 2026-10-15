@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Desktop } from '@phosphor-icons/react';
+import { useT } from '@/i18n';
 
 interface DesktopState {
   detected: boolean;
@@ -11,6 +12,7 @@ interface DesktopState {
 }
 
 export function DesktopSettingsCard() {
+  const { t } = useT();
   const [state, setState] = useState<DesktopState>({
     detected: false,
     startAtLogin: false,
@@ -20,7 +22,6 @@ export function DesktopSettingsCard() {
     let isMounted = true;
 
     async function checkDesktop() {
-      // 1. Direct Electron bridge check
       const electronBridge = (window as unknown as {
         aibossDesktop?: {
           isElectron?: boolean;
@@ -57,7 +58,6 @@ export function DesktopSettingsCard() {
         return;
       }
 
-      // 2. Fallback to API route if backend provides /api/desktop/status
       try {
         const res = await fetch('/api/desktop/status');
         if (res.ok) {
@@ -96,15 +96,13 @@ export function DesktopSettingsCard() {
       <div className="settings-card-header">
         <Desktop size={20} weight="bold" className="settings-card-icon" />
         <div>
-          <h2>Desktop</h2>
-          <p className="settings-card-subtitle">
-            Native desktop shell, system tray, and OS sleep prevention status.
-          </p>
+          <h2>{t('settings.desktop.title')}</h2>
+          <p className="settings-card-subtitle">{t('settings.desktop.subtitle')}</p>
         </div>
       </div>
       <div className="settings-card-body">
         <div className="settings-row">
-          <span className="settings-label">Desktop shell</span>
+          <span className="settings-label">{t('settings.desktop.shellLabel')}</span>
           <span className="settings-value">
             {state.detected ? (
               <span
@@ -115,7 +113,7 @@ export function DesktopSettingsCard() {
                   borderColor: 'rgba(34, 197, 94, 0.3)',
                 }}
               >
-                running
+                {t('settings.desktop.statusRunning')}
               </span>
             ) : (
               <span
@@ -126,27 +124,31 @@ export function DesktopSettingsCard() {
                   borderColor: 'rgba(148, 163, 184, 0.3)',
                 }}
               >
-                not detected
+                {t('settings.desktop.statusNotDetected')}
               </span>
             )}
           </span>
         </div>
 
         <div className="settings-row">
-          <span className="settings-label">Start at login</span>
+          <span className="settings-label">{t('settings.desktop.startAtLoginLabel')}</span>
           <span className="settings-value">
             {state.detected ? (
-              <code>{state.startAtLogin ? 'on' : 'off'}</code>
+              <code>
+                {state.startAtLogin ? t('settings.desktop.stateOn') : t('settings.desktop.stateOff')}
+              </code>
             ) : (
-              <span className="settings-dim">not detected</span>
+              <span className="settings-dim">{t('settings.desktop.statusNotDetected')}</span>
             )}
           </span>
         </div>
 
         <div className="settings-row">
-          <span className="settings-label">Mode</span>
+          <span className="settings-label">{t('settings.desktop.modeLabel')}</span>
           <span className="settings-value settings-dim">
-            {state.detected ? 'Single instance · Tray active' : 'Browser session'}
+            {state.detected
+              ? t('settings.desktop.modeDesktop')
+              : t('settings.desktop.modeBrowser')}
           </span>
         </div>
       </div>
