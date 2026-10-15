@@ -417,6 +417,7 @@ export function buildClaudeSeatEnv(
   }
 
   const baseRoot = safeRealpath(repoRoot ?? sourceEnv.AIBOSS_OFFICE_ROOT ?? findOfficeRootFromDir());
+  const opsDataRoot = safeRealpath(path.join(baseRoot, 'operations', 'data'));
 
   for (const [key, val] of Object.entries(sourceEnv)) {
     if (val === undefined) continue;
@@ -425,7 +426,7 @@ export function buildClaudeSeatEnv(
       const trimmed = String(val).trim();
       if (!trimmed) continue;
       const realCandidate = safeRealpath(path.resolve(baseRoot, trimmed));
-      const rel = path.relative(baseRoot, realCandidate);
+      const rel = path.relative(opsDataRoot, realCandidate);
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
         continue;
       }

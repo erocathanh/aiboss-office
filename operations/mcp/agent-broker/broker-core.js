@@ -30,7 +30,8 @@ function safeRealpathNearest(targetPath) {
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT_RAW = path.resolve(MODULE_DIR, '../../..');
 export const REPO_ROOT_REAL = safeRealpathNearest(REPO_ROOT_RAW);
-export const DEFAULT_REPO_MAILBOX_DIR = path.join(REPO_ROOT_REAL, 'operations', 'data', 'mailbox');
+export const OPS_DATA_ROOT_REAL = safeRealpathNearest(path.join(REPO_ROOT_REAL, 'operations', 'data'));
+export const DEFAULT_REPO_MAILBOX_DIR = path.join(OPS_DATA_ROOT_REAL, 'mailbox');
 
 export const MA_LOI = {
   THIEU_THAM_SO: 'THIEU_THAM_SO',
@@ -50,25 +51,27 @@ export class BrokerError extends Error {
 
 export function isPathInsideRepo(candidatePath, repoRoot = REPO_ROOT_REAL) {
   const realRepo = safeRealpathNearest(repoRoot);
+  const opsDataRoot = safeRealpathNearest(path.join(realRepo, 'operations', 'data'));
   const resolvedCandidate = path.resolve(realRepo, candidatePath);
   const realCandidate = safeRealpathNearest(resolvedCandidate);
-  const rel = path.relative(realRepo, realCandidate);
+  const rel = path.relative(opsDataRoot, realCandidate);
   return Boolean(rel && !rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 export function resolveSafeMailboxDir(rawEnv = process.env.MCP_HOP_THU_DIR, repoRoot = REPO_ROOT_REAL) {
   const realRepo = safeRealpathNearest(repoRoot);
-  const defaultDir = path.join(realRepo, 'operations', 'data', 'mailbox');
+  const opsDataRoot = safeRealpathNearest(path.join(realRepo, 'operations', 'data'));
+  const defaultDir = path.join(opsDataRoot, 'mailbox');
   if (!rawEnv || typeof rawEnv !== 'string' || !rawEnv.trim()) {
     return defaultDir;
   }
   const trimmed = rawEnv.trim();
   const resolvedCandidate = path.resolve(realRepo, trimmed);
   const realCandidate = safeRealpathNearest(resolvedCandidate);
-  const rel = path.relative(realRepo, realCandidate);
+  const rel = path.relative(opsDataRoot, realCandidate);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
     console.error(
-      `[agent-broker-mcp] CẢNH BÁO: MCP_HOP_THU_DIR nằm ngoài kho (${trimmed}), bỏ qua và dùng hộp thư mặc định trong kho.`
+      `[agent-broker-mcp] CẢNH BÁO: MCP_HOP_THU_DIR phải nằm trong operations/data/ (${trimmed}), bỏ qua và dùng hộp thư mặc định.`
     );
     return defaultDir;
   }
@@ -82,15 +85,23 @@ export function layThuMucHopThu() {
 }
 
 export function damBaoThuMuc(dir) {
+  const realBefore = safeRealpathNearest(dir);
+  const relBefore = path.relative(OPS_DATA_ROOT_REAL, realBefore);
+  if (!relBefore || relBefore.startsWith('..') || path.isAbsolute(relBefore)) {
+    throw new BrokerError(
+      MA_LOI.THAM_SO_KHONG_HOP_LE,
+      'Thư mục hộp thư phải nằm trong operations/data/ của kho AIBOSS Office'
+    );
+  }
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   const realDir = safeRealpathNearest(dir);
-  const rel = path.relative(REPO_ROOT_REAL, realDir);
+  const rel = path.relative(OPS_DATA_ROOT_REAL, realDir);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new BrokerError(
       MA_LOI.THAM_SO_KHONG_HOP_LE,
-      'Thư mục hộp thư nằm ngoài phạm vi kho AIBOSS Office'
+      'Thư mục hộp thư phải nằm trong operations/data/ của kho AIBOSS Office'
     );
   }
 }
@@ -176,7 +187,7 @@ export function kiemTraNoiDung(val) {
       `Tham số 'noi_dung' vượt quá trần 32 KB (${TRAN_BYTES_NOI_DUNG} bytes)`
     );
   }
-  return val.trim();
+  return val;
 }
 
 export function lamSachMotDongMd(str) {
