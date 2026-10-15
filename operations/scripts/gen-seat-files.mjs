@@ -70,22 +70,22 @@ export function buildRepoRootDenyRules(repoRoot) {
   ];
 }
 
-export function buildMcpJson(mcpList, anchorRoot = process.cwd()) {
-  const realAnchorRoot = resolveAnchorRealRoot(anchorRoot);
-  const defaultBrokerScript = path.join(realAnchorRoot, 'operations', 'mcp', 'agent-broker', 'index.js');
-  const defaultMailboxDir = path.join(realAnchorRoot, 'operations', 'data', 'mailbox');
+const FORBIDDEN_MCP_ABSOLUTE_PREFIXES = ['/Users/', '/private/', '/tmp/'];
 
+export function hasForbiddenAbsolutePathInMcpJson(rawContent) {
+  if (typeof rawContent !== 'string') return true;
+  for (const prefix of FORBIDDEN_MCP_ABSOLUTE_PREFIXES) {
+    if (rawContent.includes(prefix)) return true;
+  }
+  return false;
+}
+
+export function buildMcpJson(mcpList, _anchorRoot) {
   const knownMcpServers = {
     'agent-broker': {
       type: 'stdio',
-      command: 'sh',
-      args: [
-        '-c',
-        `exec node "\${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-${defaultBrokerScript}}"`,
-      ],
-      env: {
-        MCP_HOP_THU_DIR: defaultMailboxDir,
-      },
+      command: 'node',
+      args: ['../../../../operations/mcp/agent-broker/index.js'],
     },
   };
 
@@ -226,7 +226,9 @@ function buildSettingsJson(hooksBasePath, baseDenyRules, seatPermissions = null)
 
 function writeOrCheckFile(filePath, expectedContent, checkOnly, mismatchedFiles) {
   const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null;
-  if (existing !== expectedContent) {
+  const isMcpFile = path.basename(filePath) === '.mcp.json';
+  const hasForbiddenMcpAbs = isMcpFile && (existing === null || hasForbiddenAbsolutePathInMcpJson(existing));
+  if (existing !== expectedContent || hasForbiddenMcpAbs) {
     mismatchedFiles.push(filePath);
     if (!checkOnly) {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });

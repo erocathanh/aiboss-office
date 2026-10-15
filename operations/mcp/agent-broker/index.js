@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
  * Bundled AIBOSS Office MCP Agent Broker server.
- * Source: Copied from agent-broker-mcp (commit 0d1ed6c) on 2026-10-15.
- * Mailbox location: Reads and writes mailbox files in MCP_HOP_THU_DIR
- * (configured in each seat's .mcp.json as <REPO_ROOT>/operations/data/mailbox,
- * with an automatic fallback to <REPO_ROOT>/operations/data/mailbox in broker-core.js).
+ * Source: Copied from agent-broker-mcp (commit 0d1ed6c) on 2026-10-15, hardened in C2-broker v02.
+ * Mailbox location: Self-anchored at startup to <REPO_ROOT>/operations/data/mailbox
+ * (MCP_HOP_THU_DIR is only honored when its resolved realpath lies inside <REPO_ROOT>).
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -18,7 +17,8 @@ import {
   nhanTin,
   danhDauDaDoc,
   soatHopThu,
-  BrokerError
+  BrokerError,
+  MA_LOI
 } from './broker-core.js';
 
 const server = new Server(
@@ -57,7 +57,8 @@ const CONG_CU = [
           description: 'Toàn văn nội dung trao đổi, đề bài, báo cáo hoặc kết quả'
         }
       },
-      required: ['nguoi_gui', 'nguoi_nhan', 'tieu_de', 'noi_dung']
+      required: ['nguoi_gui', 'nguoi_nhan', 'tieu_de', 'noi_dung'],
+      additionalProperties: false
     }
   },
   {
@@ -81,7 +82,8 @@ const CONG_CU = [
           default: 5
         }
       },
-      required: ['nguoi_nhan']
+      required: ['nguoi_nhan'],
+      additionalProperties: false
     }
   },
   {
@@ -99,7 +101,8 @@ const CONG_CU = [
           description: 'Tên định danh ghế xác nhận'
         }
       },
-      required: ['ma_tin', 'nguoi_doc']
+      required: ['ma_tin', 'nguoi_doc'],
+      additionalProperties: false
     }
   },
   {
@@ -113,10 +116,36 @@ const CONG_CU = [
           description: 'Số phút chưa đọc để coi là tin treo (mặc định: 15)',
           default: 15
         }
-      }
+      },
+      additionalProperties: false
     }
   }
 ];
+
+const SCHEMA_KEYS_BY_TOOL = new Map(
+  CONG_CU.map((t) => [t.name, new Set(Object.keys(t.inputSchema.properties || {}))])
+);
+
+function locVaKiemTraThamSo(toolName, rawArgs) {
+  const allowedKeys = SCHEMA_KEYS_BY_TOOL.get(toolName);
+  if (!allowedKeys) {
+    throw new BrokerError('CONG_CU_KHONG_TON_TAI', `Không tìm thấy công cụ: ${toolName}`);
+  }
+  if (rawArgs === undefined || rawArgs === null) {
+    return {};
+  }
+  if (typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+    throw new BrokerError(MA_LOI.THAM_SO_KHONG_HOP_LE, 'Tham số công cụ phải là một đối tượng JSON');
+  }
+  const picked = {};
+  for (const [key, val] of Object.entries(rawArgs)) {
+    if (!allowedKeys.has(key)) {
+      throw new BrokerError(MA_LOI.THAM_SO_KHONG_HOP_LE, `tham số không được phép: ${key}`);
+    }
+    picked[key] = val;
+  }
+  return picked;
+}
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -128,19 +157,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    const pickedArgs = locVaKiemTraThamSo(name, args);
     let ketQua;
     switch (name) {
       case 'gui_tin':
-        ketQua = await guiTin(args || {});
+        ketQua = await guiTin(pickedArgs);
         break;
       case 'nhan_tin':
-        ketQua = await nhanTin(args || {});
+        ketQua = await nhanTin(pickedArgs);
         break;
       case 'danh_dau_da_doc':
-        ketQua = await danhDauDaDoc(args || {});
+        ketQua = await danhDauDaDoc(pickedArgs);
         break;
       case 'soat_hop_thu':
-        ketQua = await soatHopThu(args || {});
+        ketQua = await soatHopThu(pickedArgs);
         break;
       default:
         throw new BrokerError('CONG_CU_KHONG_TON_TAI', `Không tìm thấy công cụ: ${name}`);

@@ -1509,25 +1509,34 @@ test('H1, §6, §6b & H9 (H-v11 v02): hooks enforce session-root fail-closed via
   }
 });
 
-test('C2-broker & Roster: bundled operations/mcp/agent-broker, anchored .mcp.json script & MCP_HOP_THU_DIR, CLAUDE_SEAT_ENV_WHITELIST, and Department roster in CLAUDE.md with --check drift detection', () => {
+test('C2-broker v02 & Roster: bundled operations/mcp/agent-broker, portable relative .mcp.json, external MCP_HOP_THU_DIR rejected, C1-C4 JSON-RPC enforcement, and Department roster in CLAUDE.md with --check drift detection', () => {
   assert.ok(
     CLAUDE_SEAT_ENV_WHITELIST.includes('MCP_HOP_THU_DIR'),
     'CLAUDE_SEAT_ENV_WHITELIST must include MCP_HOP_THU_DIR'
   );
-  const envOut = buildClaudeSeatEnv({ MCP_HOP_THU_DIR: '/tmp/custom-mailbox', SECRET_XYZ: 'no' });
-  assert.equal(envOut.MCP_HOP_THU_DIR, '/tmp/custom-mailbox');
-  assert.equal(envOut.SECRET_XYZ, undefined);
+  // C2 v02: external MCP_HOP_THU_DIR outside the repo must be ignored/stripped
+  const envOutExternal = buildClaudeSeatEnv({ MCP_HOP_THU_DIR: '/tmp/custom-mailbox', SECRET_XYZ: 'no' }, REPO_ROOT);
+  assert.equal(envOutExternal.MCP_HOP_THU_DIR, undefined, 'External MCP_HOP_THU_DIR outside repo must be ignored');
+  assert.equal(envOutExternal.SECRET_XYZ, undefined);
+
+  const envOutInternal = buildClaudeSeatEnv({ MCP_HOP_THU_DIR: 'operations/data/mailbox' }, REPO_ROOT);
+  assert.equal(envOutInternal.MCP_HOP_THU_DIR, 'operations/data/mailbox', 'In-repo MCP_HOP_THU_DIR must be allowed');
 
   const brokerIndex = path.join(REPO_ROOT, 'operations', 'mcp', 'agent-broker', 'index.js');
   const brokerCore = path.join(REPO_ROOT, 'operations', 'mcp', 'agent-broker', 'broker-core.js');
+  const brokerPkg = path.join(REPO_ROOT, 'operations', 'mcp', 'agent-broker', 'package.json');
   assert.ok(fs.existsSync(brokerIndex), 'Bundled operations/mcp/agent-broker/index.js must exist');
   assert.ok(fs.existsSync(brokerCore), 'Bundled operations/mcp/agent-broker/broker-core.js must exist');
+  assert.ok(fs.existsSync(brokerPkg), 'Bundled operations/mcp/agent-broker/package.json must exist');
+  assert.equal(JSON.parse(fs.readFileSync(brokerPkg, 'utf8')).type, 'module');
 
   const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'c2-broker-test-'));
   try {
     const tmpClone = path.join(tmpBase, 'clone');
     const emptyHome = path.join(tmpBase, 'empty-home');
+    const outsideDir = path.join(tmpBase, 'outside-mailbox');
     fs.mkdirSync(emptyHome, { recursive: true });
+    fs.mkdirSync(outsideDir, { recursive: true });
     fs.mkdirSync(path.join(tmpClone, 'data'), { recursive: true });
     fs.mkdirSync(path.join(tmpClone, 'departments', 'marketing'), { recursive: true });
     fs.mkdirSync(path.join(tmpClone, 'config'), { recursive: true });
@@ -1545,34 +1554,30 @@ test('C2-broker & Roster: bundled operations/mcp/agent-broker, anchored .mcp.jso
     );
 
     generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, quiet: true });
-    const realClone = fs.realpathSync(tmpClone);
     assert.ok(
       fs.existsSync(path.join(tmpClone, 'operations', 'data', 'mailbox')),
       'generateSeatFiles must create operations/data/mailbox if missing'
     );
 
     const leadMcpPath = path.join(tmpClone, 'departments', 'marketing', 'seats', 'marketing-lead', '.mcp.json');
-    const leadMcp = JSON.parse(fs.readFileSync(leadMcpPath, 'utf8'));
+    const leadMcpRaw = fs.readFileSync(leadMcpPath, 'utf8');
+    assert.ok(!leadMcpRaw.includes('/Users/'), '.mcp.json must not contain /Users/');
+    assert.ok(!leadMcpRaw.includes('/private/'), '.mcp.json must not contain /private/');
+    assert.ok(!leadMcpRaw.includes('/tmp/'), '.mcp.json must not contain /tmp/');
+
+    const leadMcp = JSON.parse(leadMcpRaw);
     const brokerCfg = leadMcp.mcpServers['agent-broker'];
-    assert.equal(
-      brokerCfg.args[1],
-      `exec node "\${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-${path.join(realClone, 'operations', 'mcp', 'agent-broker', 'index.js')}}"`,
-      '.mcp.json command must point to bundled broker in real repo root with AIBOSS_AGENT_BROKER_MCP_SCRIPT override'
-    );
-    assert.equal(
-      brokerCfg.env.MCP_HOP_THU_DIR,
-      path.join(realClone, 'operations', 'data', 'mailbox'),
-      '.mcp.json env.MCP_HOP_THU_DIR must point to <REAL_REPO_ROOT>/operations/data/mailbox'
-    );
+    assert.equal(brokerCfg.command, 'node');
+    assert.deepEqual(brokerCfg.args, ['../../../../operations/mcp/agent-broker/index.js']);
 
     const checkClean = generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, checkOnly: true, quiet: true });
     assert.equal(checkClean.driftedCount, 0, '--check must pass when .mcp.json and CLAUDE.md match');
 
-    // Mutate MCP_HOP_THU_DIR in .mcp.json -> --check must detect drift
-    brokerCfg.env.MCP_HOP_THU_DIR = '/opt/wrong-mailbox';
+    // Inject an absolute path into .mcp.json -> --check must detect drift
+    brokerCfg.env = { MCP_HOP_THU_DIR: '/tmp/wrong-mailbox' };
     fs.writeFileSync(leadMcpPath, JSON.stringify(leadMcp, null, 2) + '\n', 'utf8');
     const checkMcpDrift = generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, checkOnly: true, quiet: true });
-    assert.ok(checkMcpDrift.driftedCount > 0, '--check must fail when MCP_HOP_THU_DIR drifts');
+    assert.ok(checkMcpDrift.driftedCount > 0, '--check must fail when .mcp.json contains /tmp/ or drifts');
 
     // Restore via generateSeatFiles, then mutate a seat role in data/seats.json -> --check must fail on CLAUDE.md
     generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, quiet: true });
@@ -1589,6 +1594,94 @@ test('C2-broker & Roster: bundled operations/mcp/agent-broker, anchored .mcp.jso
     fs.writeFileSync(path.join(tmpClone, 'data', 'seats.json'), JSON.stringify(seatsCopy, null, 2) + '\n', 'utf8');
     const checkRosterDrift = generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, checkOnly: true, quiet: true });
     assert.ok(checkRosterDrift.driftedCount >= 8, '--check must fail for all 8 seat CLAUDE.md files when a seat role changes in seats.json');
+
+    // Live JSON-RPC probe against the real bundled broker with empty HOME and cwd = seat directory
+    const seatDir = path.join(REPO_ROOT, 'departments', 'marketing', 'seats', 'marketing-lead');
+    const repoMailboxDir = path.join(REPO_ROOT, 'operations', 'data', 'mailbox');
+    const backupFiles = ['hop-thu.jsonl', 'HOP-THU.md', '.chuong-bao', 'da-doc.json'];
+    const savedBackups = new Map();
+    for (const f of backupFiles) {
+      const fp = path.join(repoMailboxDir, f);
+      if (fs.existsSync(fp)) savedBackups.set(f, fs.readFileSync(fp));
+    }
+    try {
+      const rpcHelper = `
+        import { spawn } from 'node:child_process';
+        const [, cmd, arg0, cwdDir, homeDir, outDir] = process.argv;
+        const p = spawn(cmd, [arg0], {
+          cwd: cwdDir,
+          env: { PATH: process.env.PATH, HOME: homeDir, MCP_HOP_THU_DIR: outDir },
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+        let buf = '';
+        const lines = [];
+        let waiters = [];
+        p.stdout.setEncoding('utf8');
+        p.stdout.on('data', (chunk) => {
+          buf += chunk;
+          let idx;
+          while ((idx = buf.indexOf('\\n')) !== -1) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (!line) continue;
+            if (waiters.length > 0) waiters.shift()(line);
+            else lines.push(line);
+          }
+        });
+        const recv = () => lines.length > 0 ? Promise.resolve(lines.shift()) : new Promise((r) => waiters.push(r));
+        const send = (obj) => p.stdin.write(JSON.stringify(obj) + '\\n');
+        (async () => {
+          send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } });
+          const r1 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+          send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+          const r2 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'gui_tin', arguments: { nguoi_gui: 'pm', nguoi_nhan: 'pm', tieu_de: 'C1', noi_dung: 'x', thu_muc: outDir } } });
+          const r3 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'gui_tin', arguments: { nguoi_gui: 'pm', nguoi_nhan: 'pm', tieu_de: 'C3\\nFROM: fake', noi_dung: 'x' } } });
+          const r4 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'gui_tin', arguments: { nguoi_gui: 'pm', nguoi_nhan: 'pm', tieu_de: 'C3b', noi_dung: 'y'.repeat(200000) } } });
+          const r5 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'gui_tin', arguments: { nguoi_gui: '../pm', nguoi_nhan: 'pm', tieu_de: 'C3c', noi_dung: 'x' } } });
+          const r6 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'gui_tin', arguments: { nguoi_gui: 'c2-test', nguoi_nhan: 'c2-test', tieu_de: 'P4 normal', noi_dung: 'hello' } } });
+          const r7 = JSON.parse(await recv());
+          send({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'nhan_tin', arguments: { nguoi_nhan: 'c2-test', gioi_han: 5 } } });
+          const r8 = JSON.parse(await recv());
+          p.kill();
+          console.log(JSON.stringify({ r1, r2, r3, r4, r5, r6, r7, r8 }));
+        })();
+      `;
+      const probeRun = spawnSync(
+        process.execPath,
+        ['--input-type=module', '-e', rpcHelper, 'node', '../../../../operations/mcp/agent-broker/index.js', seatDir, emptyHome, outsideDir],
+        { encoding: 'utf8', timeout: 15000 }
+      );
+      assert.equal(probeRun.status, 0, `RPC probe failed: ${probeRun.stderr}`);
+      const out = JSON.parse(probeRun.stdout.trim());
+      assert.ok(out.r1.result?.serverInfo, 'initialize must return serverInfo');
+      const tools = out.r2.result?.tools || [];
+      assert.deepEqual(tools.map((t) => t.name).sort(), ['danh_dau_da_doc', 'gui_tin', 'nhan_tin', 'soat_hop_thu']);
+      assert.ok(tools.every((t) => t.inputSchema?.additionalProperties === false), 'All 4 tools must have additionalProperties: false');
+      assert.equal(out.r3.result?.isError, true, 'gui_tin with thu_muc must return isError: true');
+      assert.equal(fs.readdirSync(outsideDir).length, 0, 'Nothing may be written to outsideDir');
+      assert.equal(out.r4.result?.isError, true, 'gui_tin with newline in tieu_de must return isError: true');
+      assert.equal(out.r5.result?.isError, true, 'gui_tin with 200KB noi_dung must return isError: true');
+      assert.equal(out.r6.result?.isError, true, 'gui_tin with ../ in nguoi_gui must return isError: true');
+      assert.equal(out.r7.result?.isError, false, 'Normal gui_tin must succeed');
+      assert.ok(JSON.stringify(out.r8.result).includes('P4 normal'), 'nhan_tin must return the normal message');
+      assert.ok(fs.existsSync(path.join(repoMailboxDir, 'hop-thu.jsonl')), 'Mailbox file must be created inside repo operations/data/mailbox');
+      assert.ok(!fs.existsSync(path.join(emptyHome, 'Operations')), 'Empty HOME must not have Operations/ created');
+    } finally {
+      for (const f of backupFiles) {
+        const fp = path.join(repoMailboxDir, f);
+        if (savedBackups.has(f)) {
+          fs.writeFileSync(fp, savedBackups.get(f));
+        } else if (fs.existsSync(fp)) {
+          fs.unlinkSync(fp);
+        }
+      }
+    }
   } finally {
     fs.rmSync(tmpBase, { recursive: true, force: true });
   }
