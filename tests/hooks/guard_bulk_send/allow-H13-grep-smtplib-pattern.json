@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "grep -n 'smtplib.SMTP' operations/hooks/guard_bulk_send.py"
+  }
+}

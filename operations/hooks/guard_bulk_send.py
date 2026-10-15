@@ -22,6 +22,8 @@ Cập nhật theo BỔ SUNG-01, PHA H1 v02, OPC v07, v09 và v10:
 - Chặn thật: ghi sổ duyệt với PII đã che -> stderr lý do -> sys.exit(2).
 """
 
+from __future__ import annotations
+
 import sys
 import os
 import json
@@ -59,9 +61,9 @@ BULK_SEND_ENDPOINTS = [
     re.compile(r'api\.sendgrid\.com', re.IGNORECASE),
 ]
 
-# Mẫu SMTP cần chặn duyệt (trong Python chỉ chặn khi thật sự import/dùng smtplib)
+# Mẫu SMTP cần chặn duyệt (trong Python/Node chỉ chặn khi thật sự import/dùng smtplib/nodemailer, hoặc gọi client thật)
 SMTP_PATTERN = re.compile(
-    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|smtps?://|--mail-rcpt\b|\bsendmail\b)',
+    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|\bnodemailer\b|\bcreateTransport\b|smtps?://|--mail-rcpt\b|\bsendmail\b|\bmsmtp\b|\bswaks\b)',
     re.IGNORECASE,
 )
 
@@ -103,14 +105,145 @@ CURL_DELETE_FLAG_PATTERNS = [
 # Kiểm tra MCP gửi tin/nội dung
 MCP_SEND_PATTERN = re.compile(r'mcp__.*(?:send|broadcast|reply|forward|post_message|publish)', re.IGNORECASE)
 
-# Các trình chạy script và đuôi tệp script
-SCRIPT_RUNNERS = {'python', 'python3', 'node', 'bash', 'sh', 'zsh'}
+# Các trình chạy script, client gửi thật và lệnh chỉ in/đọc/tìm tài liệu
+SCRIPT_RUNNERS = {
+    'python', 'python2', 'python3', 'py',
+    'node', 'nodejs', 'deno', 'bun',
+    'ruby', 'perl', 'php',
+    'bash', 'sh', 'zsh', 'ksh', 'dash',
+    'eval', 'exec', 'osascript', 'xargs', 'source', '.',
+}
+INLINE_CODE_RUNNERS = {
+    'python', 'python2', 'python3', 'py',
+    'node', 'nodejs', 'deno', 'bun',
+    'ruby', 'perl', 'php', 'osascript',
+    'bash', 'sh', 'zsh', 'ksh', 'dash',
+}
+SMTP_CLIENT_BINARIES = {'sendmail', 'msmtp', 'swaks', 'curl', 'wget', 'nc', 'ncat', 'netcat', 'openssl', 'telnet', 'mail', 'mailx', 'mutt'}
+COMMAND_WRAPPERS = {'env', 'sudo', 'command', 'nohup', 'nice', 'time', 'caffeinate', 'timeout'}
 SCRIPT_EXTENSIONS = ('.py', '.sh', '.js', '.mjs')
-EXEMPT_PRINT_COMMANDS = {'echo', 'printf', 'grep', 'rg', 'cat', 'sed', 'awk', 'head', 'tail', 'less'}
+EXEMPT_PRINT_COMMANDS = {
+    'echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack',
+    'cat', 'sed', 'gsed', 'awk', 'gawk', 'mawk', 'nawk',
+    'head', 'tail', 'less', 'more', 'wc', 'sort', 'uniq',
+    'tr', 'cut', 'tee', 'jq', 'diff', 'true', 'false', ':',
+}
 
 
 def split_tokens(sub_cmd: str) -> list[str]:
     return bash_parser.split_shell_tokens(sub_cmd)
+
+
+def parse_simple_command_safe(sub_cmd: str, cwd: str = ""):
+    try:
+        return bash_parser.SimpleCommand(sub_cmd, cwd)
+    except Exception:
+        return None
+
+
+def extract_subcommand_executable(sub_cmd: str) -> tuple[str, str]:
+    """Trích xuất (first_token, base_cmd) của subcommand sau khi bỏ qua phép gán VAR=val và wrapper (qua SimpleCommand)."""
+    sc = parse_simple_command_safe(sub_cmd)
+    if sc and sc.executable:
+        return sc.raw_executable.strip('\'"'), sc.executable
+    tokens = split_tokens(sub_cmd)
+    if not tokens:
+        return "", ""
+    idx = 0
+    while idx < len(tokens):
+        tok = tokens[idx].strip('\'"')
+        if '=' in tok and not tok.startswith('-'):
+            idx += 1
+            continue
+        base = os.path.basename(tok).lower()
+        if base in COMMAND_WRAPPERS:
+            idx += 1
+            while idx < len(tokens) and tokens[idx].strip('\'"').startswith('-'):
+                idx += 1
+            continue
+        return tok, base
+    return "", ""
+
+
+def extract_inline_code_args(sc: bash_parser.SimpleCommand) -> list[str]:
+    """H16a (v04): Với runner (`python*`, `node`, `deno`, `bun`, `perl`, `ruby`, `php`, `osascript`, `bash`/`sh`/`zsh`),
+    lấy toàn bộ chuỗi mã của `-c` / `-e` / `-E` / `--eval` / `-p` / `--print` / `-r` từ `sc.words` đã tách nháy
+    (một đối số nguyên vẹn, không tách bên trong bằng regex).
+    """
+    exe = sc.executable
+    if not (exe in INLINE_CODE_RUNNERS or exe.startswith(('python2.', 'python3.'))):
+        return []
+    codes: list[str] = []
+    words = sc.words
+    i = 1
+    while i < len(words):
+        w = words[i]
+        if w in ('-c', '-e', '-E', '--eval', '-p', '--print', '-r') and i + 1 < len(words):
+            codes.append(words[i + 1])
+            i += 2
+            continue
+        if exe.startswith(('python', 'py')) and w.startswith('-') and not w.startswith('--') and w.endswith('c') and len(w) > 2 and i + 1 < len(words):
+            codes.append(words[i + 1])
+            i += 2
+            continue
+        if exe in ('sh', 'bash', 'zsh', 'ksh', 'dash') and w.startswith('-') and not w.startswith('--') and 'c' in w and i + 1 < len(words):
+            codes.append(words[i + 1])
+            i += 2
+            continue
+        if w.startswith(('-c', '-e', '-r')) and not w.startswith('--') and len(w) > 2:
+            codes.append(w[2:])
+            i += 1
+            continue
+        if w.startswith(('--eval=', '--print=')):
+            codes.append(w.split('=', 1)[1])
+            i += 1
+            continue
+        i += 1
+    return codes
+
+
+def is_code_or_smtp_runner(sub_cmd: str) -> bool:
+    """Kiểm tra subcommand có phải là trình thông dịch mã, chạy script, hoặc gọi client mạng/SMTP thật không."""
+    sc = parse_simple_command_safe(sub_cmd)
+    if sc and sc.via_xargs and not sc.executable:
+        return True
+    first_tok, base_cmd = extract_subcommand_executable(sub_cmd)
+    if not base_cmd:
+        return False
+    if base_cmd in EXEMPT_PRINT_COMMANDS:
+        return False
+    if (
+        base_cmd in SCRIPT_RUNNERS
+        or base_cmd.startswith(('python2.', 'python3.'))
+        or base_cmd in SMTP_CLIENT_BINARIES
+        or first_tok.startswith(('./', '../'))
+        or any(first_tok.endswith(ext) or base_cmd.endswith(ext) for ext in SCRIPT_EXTENSIONS)
+        or (sc is not None and sc.via_xargs)
+    ):
+        return True
+    if base_cmd == 'git' and re.search(r'\bsend-email\b', sub_cmd):
+        return True
+    return False
+
+
+def split_clauses_and_pipelines_safe(cmd_str: str) -> list[list[str]]:
+    """H16a (v04): Tách chuỗi lệnh thành các pipeline (mỗi pipeline là danh sách các lệnh con nối qua |)
+    bằng `bash_parser.split_compound_commands` tôn trọng dấu nháy đơn/kép và escape.
+    """
+    segments = bash_parser.split_compound_commands(cmd_str)
+    pipelines: list[list[str]] = []
+    cur_pipe: list[str] = []
+    for seg_text, op, _hd in segments:
+        s = seg_text.strip()
+        if s:
+            cur_pipe.append(s)
+        if op not in ('|', '|&'):
+            if cur_pipe:
+                pipelines.append(cur_pipe)
+                cur_pipe = []
+    if cur_pipe:
+        pipelines.append(cur_pipe)
+    return pipelines
 
 
 def has_curl_post_flags(cmd: str) -> bool:
@@ -131,6 +264,9 @@ def has_curl_delete_flags(cmd: str) -> bool:
 
 def is_curl_command(sub_cmd: str) -> bool:
     """Kiểm tra lệnh con có bắt đầu bằng curl không."""
+    sc = parse_simple_command_safe(sub_cmd)
+    if sc and sc.executable == "curl":
+        return True
     tokens = sub_cmd.strip().split()
     if not tokens:
         return False
@@ -140,7 +276,8 @@ def is_curl_command(sub_cmd: str) -> bool:
 
 def has_curl_variable_url(sub_cmd: str) -> bool:
     """Kiểm tra lệnh curl có địa chỉ đích mở đầu bằng biến ($X, ${X}/...) không."""
-    tokens = split_tokens(sub_cmd)
+    sc = parse_simple_command_safe(sub_cmd)
+    tokens = sc.words if (sc and sc.words) else split_tokens(sub_cmd)
     if not tokens:
         return False
 
@@ -188,16 +325,20 @@ def split_heredocs(raw_cmd: str):
 
 def extract_cd_target(sub_cmd: str, current_cwd: str) -> str:
     """Nếu sub_cmd là lệnh cd <dir>, trả về thư mục mới; ngược lại trả về current_cwd."""
-    tokens = split_tokens(sub_cmd)
+    sc = parse_simple_command_safe(sub_cmd, current_cwd)
+    tokens = sc.words if (sc and sc.words) else split_tokens(sub_cmd)
     if not tokens:
         return current_cwd
     if tokens[0].strip('\'"') == 'cd' and len(tokens) >= 2:
-        target = tokens[1].strip('\'"')
-        if target and target != '-':
-            expanded = os.path.expanduser(target)
-            if os.path.isabs(expanded):
-                return os.path.normpath(expanded)
-            return os.path.normpath(os.path.join(current_cwd, expanded))
+        for w in tokens[1:]:
+            clean_w = w.strip('\'"')
+            if clean_w in ('-P', '-L', '--'):
+                continue
+            if not clean_w.startswith('-') and clean_w != '-':
+                expanded = os.path.expanduser(clean_w)
+                if os.path.isabs(expanded):
+                    return os.path.normpath(expanded)
+                return os.path.normpath(os.path.join(current_cwd, expanded))
     return current_cwd
 
 
@@ -272,7 +413,8 @@ def check_script_dong_y(sub_cmd: str) -> bool:
     """Kiểm tra lệnh con chạy script có cờ gửi thật --dong-y không."""
     if not re.search(r'(?:^|[\s\'"])--dong-y(?:$|[\s\'"])', sub_cmd):
         return False
-    tokens = split_tokens(sub_cmd)
+    sc = parse_simple_command_safe(sub_cmd)
+    tokens = sc.words if (sc and sc.words) else split_tokens(sub_cmd)
     if not tokens:
         return False
 
@@ -283,13 +425,14 @@ def check_script_dong_y(sub_cmd: str) -> bool:
         return False
 
     first_token = tokens[idx].strip('\'"')
-    base_cmd = os.path.basename(first_token)
+    base_cmd = os.path.basename(first_token).lower()
 
     if base_cmd in EXEMPT_PRINT_COMMANDS:
         return False
 
     is_script = (
         base_cmd in SCRIPT_RUNNERS
+        or base_cmd.startswith(('python2.', 'python3.'))
         or any(first_token.endswith(ext) for ext in SCRIPT_EXTENSIONS)
         or any(base_cmd.endswith(ext) for ext in SCRIPT_EXTENSIONS)
     )
@@ -300,7 +443,7 @@ def check_script_dong_y(sub_cmd: str) -> bool:
         clean_arg = arg.strip('\'"')
         if clean_arg == '--dong-y':
             return True
-        if tokens[i - 1] in ('-c', '-lc') and check_script_dong_y(arg):
+        if tokens[i - 1] in ('-c', '-lc', '-ec') and check_script_dong_y(arg):
             return True
     return False
 
@@ -333,7 +476,135 @@ def extract_target_host(tool_name: str, tool_input: dict) -> str:
     return "local"
 
 
-def should_block_bulk_send(tool_name: str, tool_input: dict, cwd: str = "") -> str:
+SHELL_VAR_REF_RE = re.compile(r'\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)([^}]*)\})')
+
+
+def has_bulk_send_signal(text: str) -> bool:
+    """Kiểm tra nhanh chuỗi có chứa mẫu SMTP hoặc BULK_SEND_ENDPOINTS không."""
+    if not text:
+        return False
+    if SMTP_PATTERN.search(text):
+        return True
+    for endpoint in BULK_SEND_ENDPOINTS:
+        if endpoint.search(text):
+            return True
+    return False
+
+
+def expand_shell_vars_in_text(
+    text: str,
+    static_vars: dict[str, str],
+    unresolved_vars: set[str],
+) -> tuple[str, bool]:
+    """H19 (v05): Mở rộng `$NAME` và `${NAME}` bằng bảng biến tĩnh `static_vars`.
+    Trả về `(expanded_text, has_unresolved_var)`.
+    """
+    if not text or '$' not in text:
+        return text, False
+
+    has_unresolved = False
+
+    def _repl(m: re.Match) -> str:
+        nonlocal has_unresolved
+        var_name = m.group(1) or m.group(2) or ""
+        modifier = m.group(3) or ""
+        if not var_name:
+            return m.group(0)
+        if var_name in unresolved_vars or var_name not in static_vars:
+            has_unresolved = True
+            return m.group(0)
+        val = static_vars[var_name]
+        if modifier:
+            has_unresolved = True
+            return f"{val} {modifier}"
+        return val
+
+    expanded = SHELL_VAR_REF_RE.sub(_repl, text)
+    if '$(' in expanded or '`' in expanded:
+        has_unresolved = True
+    return expanded, has_unresolved
+
+
+def update_shell_var_bindings(
+    sub_cmd: str,
+    sc: bash_parser.SimpleCommand | None,
+    static_vars: dict[str, str],
+    unresolved_vars: set[str],
+) -> bool:
+    """H19 (v05): Cập nhật bảng gán biến tĩnh `static_vars` và tập biến động `unresolved_vars`
+    từ subcommand `sub_cmd` (gồm gán thuần `NAME=...`, gán đầu lệnh `NAME=... cmd`, và
+    `export`/`local`/`declare`/`typeset`/`readonly`/`read`).
+    Trả về True nếu vế phải gán biến chứa mẫu gửi/SMTP.
+    """
+    found_signal = False
+    sub_has_cmd_subst = bool(bash_parser.extract_substitutions_safe(sub_cmd))
+
+    raw_assignments: list[tuple[str, bool, str]] = []
+    try:
+        tokens, _ = bash_parser.tokenize_command(sub_cmd)
+    except Exception:
+        tokens = []
+
+    while tokens and tokens[0].lower() in ('then', 'do', 'else', 'elif', 'fi', 'done', 'time'):
+        tokens = tokens[1:]
+
+    idx = 0
+    while idx < len(tokens):
+        tok = tokens[idx]
+        m_assign = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)$', tok, re.DOTALL)
+        if m_assign:
+            raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', m_assign.group(3)))
+            idx += 1
+        else:
+            break
+
+    if sc is not None and sc.executable in ('export', 'local', 'declare', 'typeset', 'readonly'):
+        for w in sc.words[1:]:
+            if w.startswith(('-', '+')):
+                continue
+            m_assign = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)$', w, re.DOTALL)
+            if m_assign:
+                raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', m_assign.group(3)))
+    elif sc is not None and sc.executable == 'read':
+        for w in sc.words[1:]:
+            if w.startswith('-'):
+                continue
+            clean_w = w.strip('\'"')
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', clean_w):
+                unresolved_vars.add(clean_w)
+                static_vars.pop(clean_w, None)
+
+    for var_name, is_append, rhs in raw_assignments:
+        if has_bulk_send_signal(rhs):
+            found_signal = True
+        expanded_rhs, rhs_unresolved = expand_shell_vars_in_text(rhs, static_vars, unresolved_vars)
+        if has_bulk_send_signal(expanded_rhs):
+            found_signal = True
+        is_dynamic = rhs_unresolved or (sub_has_cmd_subst and ('$ (' in rhs or '$(' in rhs or '`' in rhs))
+        if is_dynamic:
+            unresolved_vars.add(var_name)
+            static_vars.pop(var_name, None)
+        else:
+            if is_append:
+                if var_name in unresolved_vars:
+                    static_vars.pop(var_name, None)
+                else:
+                    static_vars[var_name] = static_vars.get(var_name, "") + expanded_rhs
+            else:
+                unresolved_vars.discard(var_name)
+                static_vars[var_name] = expanded_rhs
+
+    return found_signal
+
+
+def should_block_bulk_send(
+    tool_name: str,
+    tool_input: dict,
+    cwd: str = "",
+    _inherited_static_vars: dict[str, str] | None = None,
+    _inherited_unresolved_vars: set[str] | None = None,
+    _inherited_bulk_signal: bool = False,
+) -> str:
     # 1. Kiểm tra công cụ MCP
     if tool_name.startswith("mcp__") or tool_name.startswith("mcp_"):
         if MCP_SEND_PATTERN.search(tool_name):
@@ -347,10 +618,10 @@ def should_block_bulk_send(tool_name: str, tool_input: dict, cwd: str = "") -> s
 
         base_cwd = cwd or os.getcwd()
 
-        # Tách thân các heredoc chỉ ghi vào tệp (cat > f <<X, cat >> f <<X, tee f <<X)
+        # Tách thân các heredoc chỉ ghi vào tệp hoặc heredoc tài liệu (H15 & H20)
         cmd_active, heredoc_written_files = split_heredocs(raw_cmd)
 
-        # Gộp các dòng nối bằng '\' ở cuối dòng trước khi xét
+        # Gộp các dòng nối bằng \'\' ở cuối dòng trước khi xét
         cmd_joined = re.sub(r'\\\s*\n', ' ', cmd_active)
 
         # 2a. Kiểm tra curl có dùng -K hoặc --config không
@@ -377,60 +648,176 @@ def should_block_bulk_send(tool_name: str, tool_input: dict, cwd: str = "") -> s
             if ("batch=" in cmd_joined or "relative_url" in cmd_joined) and any(ep in cmd_joined for ep in ('messages', 'feed', 'comments', 'photos')):
                 return "Phát hiện batch request gửi dữ liệu qua graph.facebook.com. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-        # Tách lệnh con ở && || ; | và ở chỗ xuống dòng; xét TỪNG lệnh con
-        sub_cmds = re.split(r'&&|\|\||;|\||\n', cmd_joined)
-        cur_cwd = base_cwd
-
-        for raw_sub in sub_cmds:
-            sub = raw_sub.strip()
-            if not sub:
-                continue
-
-            # Cập nhật cur_cwd nếu là lệnh cd
-            new_cwd = extract_cd_target(sub, cur_cwd)
-            if new_cwd != cur_cwd:
-                cur_cwd = new_cwd
-                continue
-
-            # (a) Cờ --dong-y khi chạy script
-            if check_script_dong_y(sub):
-                return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
-
-            # (b) Kiểm tra SMTP
-            if SMTP_PATTERN.search(sub):
+        # 2e. Kiểm tra thân heredoc thực thi (chảy vào python/node/sh hoặc ghi-rồi-chạy — H15)
+        for hd_body in bash_parser.extract_executed_heredocs(raw_cmd):
+            if SMTP_PATTERN.search(hd_body):
                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
-
-            sub_is_curl = is_curl_command(sub)
-
-            if sub_is_curl:
-                # Kiểm tra curl DELETE tới graph.facebook.com
-                if "graph.facebook.com" in sub and has_curl_delete_flags(sub):
-                    return "Phát hiện lệnh curl DELETE tới graph.facebook.com xoá dữ liệu. Lệnh bị chặn và cần chủ trực tiếp duyệt."
-
-                # Kiểm tra curl có cờ gửi dữ liệu mà địa chỉ đích mở đầu bằng biến ($X, ${X}/...)
-                if has_curl_post_flags(sub) and has_curl_variable_url(sub):
-                    return "Phát hiện lệnh curl gửi dữ liệu tới địa chỉ mở đầu bằng biến môi trường/shell. Lệnh bị chặn và cần chủ trực tiếp duyệt."
-
-                # Miễn trừ /conversations: CHỈ áp khi lệnh con là curl, không có cờ POST hay data, và không có endpoint gửi/đăng
-                if "graph.facebook.com" in sub and "conversations" in sub:
-                    if not has_curl_post_flags(sub) and not any(ep in sub for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
-                        continue
-
-            # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin không
             for endpoint in BULK_SEND_ENDPOINTS:
-                if endpoint.search(sub):
-                    if sub_is_curl:
-                        # Với curl, chỉ chặn khi có cờ POST / data / upload
-                        if has_curl_post_flags(sub):
-                            return "Phát hiện lệnh POST gửi tin nhắn/email ra dịch vụ bên ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt."
-                    else:
-                        # Với công cụ khác (wget, http, python, node, v.v.), có endpoint gửi là chặn
-                        return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                if endpoint.search(hd_body):
+                    return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-            # (c) Kiểm tra chạy tệp kịch bản trong dự án (< 1 MB hoặc vừa ghi từ heredoc)
-            script_reason = check_script_file_bulk_send(sub, cur_cwd, heredoc_written_files)
-            if script_reason:
-                return script_reason
+        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a & H19)
+        pipelines = split_clauses_and_pipelines_safe(cmd_joined)
+        cur_cwd = base_cwd
+        static_vars: dict[str, str] = dict(_inherited_static_vars) if _inherited_static_vars else {}
+        unresolved_vars: set[str] = set(_inherited_unresolved_vars) if _inherited_unresolved_vars else set()
+        chain_has_bulk_send_signal: bool = bool(_inherited_bulk_signal) or has_bulk_send_signal(cmd_joined)
+
+        for pipe_subs in pipelines:
+            pipeline_has_runner = any(is_code_or_smtp_runner(ps) for ps in pipe_subs)
+
+            for sub in pipe_subs:
+                # Kiểm tra command substitution $(...) hoặc `...` ngoài nháy đơn
+                for subst_cmd in bash_parser.extract_substitutions_safe(sub):
+                    subst_reason = should_block_bulk_send(
+                        "Bash",
+                        {"command": subst_cmd},
+                        cur_cwd,
+                        static_vars,
+                        unresolved_vars,
+                        chain_has_bulk_send_signal,
+                    )
+                    if subst_reason:
+                        return subst_reason
+
+                # Kiểm tra subshell ( ... )
+                if sub.startswith('(') and sub.endswith(')'):
+                    inner_reason = should_block_bulk_send(
+                        "Bash",
+                        {"command": sub[1:-1].strip()},
+                        cur_cwd,
+                        static_vars,
+                        unresolved_vars,
+                        chain_has_bulk_send_signal,
+                    )
+                    if inner_reason:
+                        return inner_reason
+                    continue
+
+                # Cập nhật cur_cwd nếu là lệnh cd
+                new_cwd = extract_cd_target(sub, cur_cwd)
+                if new_cwd != cur_cwd:
+                    cur_cwd = new_cwd
+                    continue
+
+                sc = parse_simple_command_safe(sub, cur_cwd)
+
+                # H19 (v05): Cập nhật bảng gán biến shell tĩnh/động trước khi xét runner
+                if update_shell_var_bindings(sub, sc, static_vars, unresolved_vars):
+                    chain_has_bulk_send_signal = True
+
+                # Bóc wrapper shell (bash -c, sh -c, zsh -c, eval) tới lệnh bên trong (H16a & H19)
+                if sc and sc.executable in ('sh', 'bash', 'zsh', 'ksh', 'dash') and len(sc.words) > 1:
+                    handled_shell_c = False
+                    for c_idx, w in enumerate(sc.words[1:], start=1):
+                        if w.startswith('-') and not w.startswith('--') and 'c' in w and c_idx + 1 < len(sc.words):
+                            nested_script = sc.words[c_idx + 1]
+                            expanded_nested, nested_unresolved = expand_shell_vars_in_text(
+                                nested_script, static_vars, unresolved_vars
+                            )
+                            if nested_unresolved and chain_has_bulk_send_signal:
+                                return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                            try:
+                                inner_reason = should_block_bulk_send(
+                                    "Bash",
+                                    {"command": expanded_nested},
+                                    cur_cwd,
+                                    static_vars,
+                                    unresolved_vars,
+                                    chain_has_bulk_send_signal,
+                                )
+                                if inner_reason:
+                                    return inner_reason
+                                handled_shell_c = True
+                            except Exception:
+                                pass
+                            break
+                    if handled_shell_c:
+                        continue
+                elif sc and sc.executable == 'eval' and len(sc.words) > 1:
+                    nested_script = " ".join(sc.words[1:])
+                    expanded_nested, nested_unresolved = expand_shell_vars_in_text(
+                        nested_script, static_vars, unresolved_vars
+                    )
+                    if nested_unresolved and chain_has_bulk_send_signal:
+                        return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                    try:
+                        inner_reason = should_block_bulk_send(
+                            "Bash",
+                            {"command": expanded_nested},
+                            cur_cwd,
+                            static_vars,
+                            unresolved_vars,
+                            chain_has_bulk_send_signal,
+                        )
+                        if inner_reason:
+                            return inner_reason
+                        continue
+                    except Exception:
+                        pass
+
+                # (a) Cờ --dong-y khi chạy script
+                if check_script_dong_y(sub):
+                    return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                # (b1) Với runner có cờ mã nội tuyến (-c/-e/--eval/-p/--print/-r), mở rộng biến shell tĩnh (H19) và quét mẫu SMTP/nodemailer + endpoint trên TOÀN BỘ chuỗi đối số mã (H16a)
+                if sc is not None:
+                    for code_arg in extract_inline_code_args(sc):
+                        expanded_code, code_unresolved = expand_shell_vars_in_text(
+                            code_arg, static_vars, unresolved_vars
+                        )
+                        for candidate_code in (code_arg, expanded_code):
+                            if SMTP_PATTERN.search(candidate_code):
+                                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                            for endpoint in BULK_SEND_ENDPOINTS:
+                                if endpoint.search(candidate_code):
+                                    return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                        if code_unresolved and chain_has_bulk_send_signal:
+                            return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                # (b2) Kiểm tra SMTP trên argv / subcommand (H13, H16a & H19: chỉ chặn khi thực thi mã/script/heredoc chạy hoặc gọi client thật; miễn lệnh chỉ in/đọc/tìm tài liệu)
+                sc_joined_words = " ".join(sc.words) if (sc and sc.words) else sub
+                expanded_words, words_unresolved = expand_shell_vars_in_text(
+                    sc_joined_words, static_vars, unresolved_vars
+                )
+                if SMTP_PATTERN.search(sc_joined_words) or SMTP_PATTERN.search(sub) or SMTP_PATTERN.search(expanded_words):
+                    _, sub_base = extract_subcommand_executable(sub)
+                    if sub_base in EXEMPT_PRINT_COMMANDS and not pipeline_has_runner:
+                        pass
+                    elif is_code_or_smtp_runner(sub) or pipeline_has_runner:
+                        return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                sub_is_curl = is_curl_command(sub)
+
+                if sub_is_curl:
+                    # Kiểm tra curl DELETE tới graph.facebook.com
+                    if "graph.facebook.com" in sub and has_curl_delete_flags(sub):
+                        return "Phát hiện lệnh curl DELETE tới graph.facebook.com xoá dữ liệu. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                    # Kiểm tra curl có cờ gửi dữ liệu mà địa chỉ đích mở đầu bằng biến ($X, ${X}/...)
+                    if has_curl_post_flags(sub) and has_curl_variable_url(sub):
+                        return "Phát hiện lệnh curl gửi dữ liệu tới địa chỉ mở đầu bằng biến môi trường/shell. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                    # Miễn trừ /conversations: CHỈ áp khi lệnh con là curl, không có cờ POST hay data, và không có endpoint gửi/đăng
+                    if "graph.facebook.com" in sub and "conversations" in sub:
+                        if not has_curl_post_flags(sub) and not any(ep in sub for ep in ('/messages', 'me/messages', '/feed', '/comments', '/photos')):
+                            continue
+
+                # Kiểm tra xem lệnh con có nhắm vào các endpoint gửi tin không
+                for endpoint in BULK_SEND_ENDPOINTS:
+                    if endpoint.search(sc_joined_words) or endpoint.search(sub) or endpoint.search(expanded_words):
+                        if sub_is_curl:
+                            # Với curl, chỉ chặn khi có cờ POST / data / upload
+                            if has_curl_post_flags(sub):
+                                return "Phát hiện lệnh POST gửi tin nhắn/email ra dịch vụ bên ngoài. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                        elif not (sc and sc.executable in EXEMPT_PRINT_COMMANDS and not pipeline_has_runner):
+                            # Với công cụ khác (wget, http, python, node, v.v.), có endpoint gửi là chặn
+                            return f"Phát hiện lệnh kết nối gửi tin/email ra dịch vụ bên ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+
+                # (c) Kiểm tra chạy tệp kịch bản trong dự án (< 1 MB hoặc vừa ghi từ heredoc)
+                script_reason = check_script_file_bulk_send(sub, cur_cwd, heredoc_written_files)
+                if script_reason:
+                    return script_reason
 
     return ""
 

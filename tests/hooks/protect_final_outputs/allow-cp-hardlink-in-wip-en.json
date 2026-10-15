@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cp -l projects/test-project/wip/a.md projects/test-project/wip/a-link.md"
+  }
+}

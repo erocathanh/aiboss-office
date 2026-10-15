@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "cwd": "projects/THU-SU-THAT",
+  "tool_input": {
+    "command": "ln -s ../outputs/x.md wip/l.md; rm wip/l.md; ln -s a.md wip/l.md"
+  }
+}

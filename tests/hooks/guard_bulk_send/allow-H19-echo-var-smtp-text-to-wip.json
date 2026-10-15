@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "NOTE='smtplib.SMTP la gi'; echo \"$NOTE\" > projects/THU-SU-THAT/wip/n.md"
+  }
+}

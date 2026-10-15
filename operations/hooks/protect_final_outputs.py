@@ -170,13 +170,14 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
         for sc in commands:
             exe = sc.executable
             words = sc.words
+            sc_symlinks = getattr(sc, "symlinks", symlinks)
 
             # A. Kiểm tra xoá hoặc can thiệp vào DU-AN-MAU-SU-THAT / _sample-ground-truth / DAU-RA / nhật ký
             if exe in ('rm', 'unlink', 'rmdir'):
                 for w in words[1:]:
                     if w.startswith('-'):
                         continue
-                    cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, symlinks)
+                    cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, sc_symlinks)
                     for cand, r_dir in cands_w:
                         if bash_parser.is_in_du_an_mau(cand):
                             _, sample_short = get_sample_labels(cand)
@@ -199,7 +200,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                     for w in words[1:]:
                         if w.startswith('-'):
                             break
-                        cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, symlinks)
+                        cands_w = office_root.candidate_rel_paths_with_roots(w, sc.cwd, project_dir, sc_symlinks)
                         for cand, _r_dir in cands_w:
                             if bash_parser.is_in_du_an_mau(cand):
                                 _, sample_short = get_sample_labels(cand)
@@ -208,7 +209,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                 return f"Hành vi xoá trong thư mục đầu ra đã chốt ({w}) bị chặn."
 
             # B. Kiểm tra tất cả write targets
-            targets = bash_parser.extract_write_targets(sc, symlinks)
+            targets = bash_parser.extract_write_targets(sc, sc_symlinks)
             is_move_or_rm_cmd = (
                 exe in ('mv', 'rm', 'rmdir')
                 or (exe == 'git' and ('mv' in words or 'rm' in words))
@@ -218,7 +219,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                 if bash_parser.is_dynamic_write_target(target_path) and bash_parser.is_cwd_inside_office(sc.cwd, project_dir):
                     return f"Lệnh ghi ({reason}) có đích là biến hoặc biểu thức động ({target_path}) nên đích không đọc được tĩnh; chặn fail-closed trong kho văn phòng."
 
-                cands_with_roots = office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, symlinks)
+                cands_with_roots = office_root.candidate_rel_paths_with_roots(target_path, sc.cwd, project_dir, sc_symlinks)
 
                 for cand, r_dir in cands_with_roots:
                     # Rào 0 (H5): Dời hoặc xoá cả thư mục gốc dự án hoặc thư mục dự án có ngăn kết quả / bản chốt
@@ -241,9 +242,9 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                     if bash_parser.is_dau_ra_or_final(cand):
                         out_label, _ = get_outputs_labels(cand)
                         abs_t = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(target_path)))
-                        rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, symlinks)
-                        if symlinks and cand == rel_canon_r:
-                            for l_k, t_v in symlinks.items():
+                        rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, sc_symlinks)
+                        if sc_symlinks and cand == rel_canon_r:
+                            for l_k, t_v in sc_symlinks.items():
                                 abs_lk = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(l_k)))
                                 abs_tv = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(t_v)))
                                 if abs_t == abs_lk:
@@ -256,7 +257,8 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                         real_t = os.path.realpath(abs_t)
                         is_delete_or_link_op = (
                             exe in ('unlink', 'rmdir', 'rm', 'ln')
-                            or reason.startswith(('rm ', 'git rm', 'unlink', 'rmdir', 'ln '))
+                            or reason.startswith(('rm ', 'git rm', 'git mv', 'git checkout', 'git restore', 'unlink', 'rmdir', 'ln '))
+                            or reason == 'cp hardlink source'
                             or any(
                                 k in reason
                                 for k in (
@@ -274,6 +276,7 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
                                     'Path.rename source',
                                     'Path.replace source',
                                     'ln hardlink',
+                                    'cp hardlink',
                                 )
                             )
                         )
@@ -282,9 +285,9 @@ def check_protection(tool_name: str, tool_input: dict, cwd: str, project_dir: st
 
                     # Rào 3: Bảo vệ tệp nhật ký (nhat-ky.md / CHANNEL.md) qua Bash — chỉ cho phép nối thêm (>>, exec N>>, tee -a, sponge -a)
                     abs_j = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(target_path)))
-                    rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, symlinks)
-                    if symlinks and cand == rel_canon_r:
-                        for l_k, t_v in symlinks.items():
+                    rel_canon_r = bash_parser.canonical_path(target_path, sc.cwd, r_dir, sc_symlinks)
+                    if sc_symlinks and cand == rel_canon_r:
+                        for l_k, t_v in sc_symlinks.items():
                             abs_lk = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(l_k)))
                             abs_tv = os.path.normpath(os.path.join(sc.cwd, os.path.expanduser(t_v)))
                             if abs_j == abs_lk:

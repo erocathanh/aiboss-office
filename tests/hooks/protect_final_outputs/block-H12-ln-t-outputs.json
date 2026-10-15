@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "ln -t projects/THU-SU-THAT/outputs projects/THU-SU-THAT/wip/a.md"
+  }
+}

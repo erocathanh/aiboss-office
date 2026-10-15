@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "CODE='x=1; print(x)'; python3 -c \"$CODE\""
+  }
+}

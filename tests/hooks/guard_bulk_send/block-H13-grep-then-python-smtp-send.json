@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "grep -n 'smtplib' operations/hooks/guard_bulk_send.py; python3 -c \"import smtplib; s=smtplib.SMTP('smtp.gmail.com',587)\""
+  }
+}
