@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"let links=new Map(); links=new Map([['https://example.net/x', 1]]); links.delete('https://example.net/x')\""}}

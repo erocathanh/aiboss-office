@@ -448,7 +448,7 @@ def _extract_data_and_http_vars(
         )
         kind = "http" if is_http else ("collection" if is_collection else "other")
         seen_kinds.setdefault(vname, []).append(kind)
-        if seen_kinds[vname] == ["collection"]:
+        if seen_kinds[vname] and all(k == "collection" for k in seen_kinds[vname]):
             data_vars.add(vname)
         else:
             data_vars.discard(vname)

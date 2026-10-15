@@ -1580,6 +1580,22 @@ def resolve_script_path_expr(
             return f"$DYNAMIC_WRITE:{s}"
         return os.path.normpath(os.path.join(*resolved_slash)).replace('\\', '/')
 
+    # S17i (F42 & F43): Resolve str(inner) and 1-arg Path.replace(dst) / Path.rename(dst) chains
+    m_str_call = re.match(r"^str\s*\(", s)
+    if m_str_call:
+        str_args, str_close = _scan_balanced_paren_args(s, m_str_call.end())
+        if str_args is not None and len(str_args) == 1 and str_close == len(s) - 1:
+            return resolve_script_path_expr(str_args[0], var_env=var_env, default_join_style=default_join_style)
+
+    m_move_tail = re.search(r"\.\s*(?:replace|rename)\s*\(", s)
+    if m_move_tail:
+        mv_args, mv_close = _scan_balanced_paren_args(s, m_move_tail.end())
+        if mv_args is not None and len(mv_args) == 1 and mv_close == len(s) - 1:
+            recv_part = s[:m_move_tail.start()].strip()
+            resolved_recv = resolve_script_path_expr(recv_part, var_env=var_env, default_join_style="python")
+            if not resolved_recv.startswith("$DYNAMIC_WRITE:"):
+                return resolve_script_path_expr(mv_args[0], var_env=var_env, default_join_style="python")
+
     # F20a: Check pathlib.Path(...) constructor (with optional .joinpath(...) chain)
     m_path = _PATHLIB_CTOR_PREFIX_RE.match(s)
     if m_path:
@@ -1758,11 +1774,12 @@ def _extract_simple_var_env(
     """
     env: Dict[str, str] = {}
     counts: Dict[str, int] = {}
-    for var_name, rhs, _c_start, c_end in _iter_top_level_assignments_with_pos(text):
+    for var_name, rhs, c_start, c_end in _iter_top_level_assignments_with_pos(text):
         if call_pos is not None and c_end > call_pos:
             continue
         counts[var_name] = counts.get(var_name, 0) + 1
-        if counts[var_name] > 1:
+        has_branch_before = bool(re.search(r"\b(?:if|elif|else|try|except)\b[^;#\n]*:", text[:c_start]))
+        if has_branch_before and counts[var_name] > 1:
             env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
         else:
             env[var_name] = resolve_script_path_expr(rhs, var_env=env, default_join_style=default_join_style)
@@ -2017,11 +2034,11 @@ def _is_module_receiver_expr(recv_expr: str, module_vars: Optional[set] = None) 
 
 
 _PATH_RETURNING_CHAIN_TAIL_RE = re.compile(
-    r'^(?:\s*\.\s*(?:parent|with_name\s*\([^()]*\)|with_suffix\s*\([^()]*\)|with_stem\s*\([^()]*\)|resolve\s*\([^()]*\)|absolute\s*\([^()]*\)|expanduser\s*\([^()]*\)|joinpath\s*\([^()]*\)))*\s*$'
+    r'^(?:\s*\.\s*(?:parent|with_name\s*\([^()]*\)|with_suffix\s*\([^()]*\)|with_stem\s*\([^()]*\)|resolve\s*\([^()]*\)|absolute\s*\([^()]*\)|expanduser\s*\([^()]*\)|joinpath\s*\([^()]*\)|replace\s*\([^()]*\)|rename\s*\([^()]*\)))*\s*$'
 )
 
 _STR_RETURNING_TAIL_RE = re.compile(
-    r'(?:\.\s*(?:name|stem|suffix)\s*$|\.\s*(?:as_posix|as_uri|strip|lstrip|rstrip|lower|upper|title|capitalize|casefold|swapcase|replace|format|join|decode|read_text)\s*\([^()]*\)\s*$)'
+    r'(?:\.\s*(?:name|stem|suffix)\s*$|\.\s*(?:as_posix|as_uri|strip|lstrip|rstrip|lower|upper|title|capitalize|casefold|swapcase|format|join|decode|read_text)\s*\([^()]*\)\s*$)'
 )
 
 
@@ -2030,14 +2047,17 @@ def _is_provably_str_receiver_expr(
     str_vars: Optional[set] = None,
 ) -> bool:
     """
-    S17h (Principle 1 & F37): Return True ONLY when `recv_expr` is provably a `str` at the call site:
+    S17h (Principle 1 & F37) & S17i (F42, F43): Return True ONLY when `recv_expr` is provably a `str` at the call site:
     - String literal (`'a b'`, `"abc"`), optionally chained with string methods (`'a b'.strip()`),
     - `str(...)` call (`str(p)`),
-    - String-returning attribute or method on Path/str (`.name`, `.stem`, `.suffix`, `.as_posix()`, `.as_uri()`, `.strip()`, `.replace()`, `.read_text()`),
-    - Variable in `str_vars` whose active binding before `call_pos` is provably `str`.
+    - String-returning attribute or method on Path/str (`.name`, `.stem`, `.suffix`, `.as_posix()`, `.as_uri()`, `.strip()`, `.read_text()`),
+    - Variable in `str_vars` whose active binding before `call_pos` is provably `str`,
+    - `.replace(...)` call ONLY when its receiver is itself provably `str` (since `Path.replace` returns `Path`).
     """
     s = _strip_outer_parens(recv_expr)
     if not s:
+        return False
+    if ' if ' in s and ' else ' in s:
         return False
     svars = str_vars if str_vars is not None else set()
     if s in svars:
@@ -2048,6 +2068,9 @@ def _is_provably_str_receiver_expr(
         return True
     if re.match(r'^str\s*\(', s):
         return True
+    m_rep = re.search(r'\.\s*replace\s*\([^()]*\)\s*$', s)
+    if m_rep:
+        return _is_provably_str_receiver_expr(s[:m_rep.start()], svars)
     if _STR_RETURNING_TAIL_RE.search(s):
         return True
     return False
@@ -2137,7 +2160,7 @@ def _extract_receiver_type_vars_at_pos(
             continue
         path_classes.add(m.group(1) + '.Path')
 
-    for var_name, raw_rhs, _c_start, c_end in _iter_top_level_assignments_with_pos(text):
+    for var_name, raw_rhs, c_start, c_end in _iter_top_level_assignments_with_pos(text):
         if call_pos is not None and c_end > call_pos:
             continue
         rhs = _strip_outer_parens(raw_rhs.strip())
@@ -2149,17 +2172,21 @@ def _extract_receiver_type_vars_at_pos(
             kind = 'other'
         kinds = seen_kinds.setdefault(var_name, set())
         kinds.add(kind)
-        if len(kinds) > 1:
+        has_branch_before = bool(re.search(r'\b(?:if|elif|else|try|except)\b[^;#\n]*:', text[:c_start]))
+        if has_branch_before and len(kinds) > 1:
             ambig_vars.add(var_name)
             path_vars.discard(var_name)
             str_vars.discard(var_name)
         elif kind == 'path':
             path_vars.add(var_name)
             str_vars.discard(var_name)
+            ambig_vars.discard(var_name)
         elif kind == 'str':
             str_vars.add(var_name)
             path_vars.discard(var_name)
+            ambig_vars.discard(var_name)
         else:
+            ambig_vars.add(var_name)
             path_vars.discard(var_name)
             str_vars.discard(var_name)
 

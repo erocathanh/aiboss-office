@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"const links=new Set(['https://example.net/x']); links.delete('https://example.net/x')\""}}

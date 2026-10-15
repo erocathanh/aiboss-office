@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"require('axios').delete('https://example.net/x')\""}}
