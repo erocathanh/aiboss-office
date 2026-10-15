@@ -252,8 +252,13 @@ test('main.cjs initializes menu from app.getLocale() and rebuilds app menu, tray
   assert.equal(quitCalls, 0, 'App must not quit or restart on language change');
 });
 
-test('main.cjs handles Electron login event for loopback Basic Auth from process.env with single-retry guard', () => {
+function createLoginHarness(
+  envOverride = { PHONGBAN_USER: 'test-user', PHONGBAN_PASS: 'test-pass' },
+  clockRef = { now: 1_700_000_000_000 },
+) {
+  const code = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
   const appListeners = new Map();
+  const logs = [];
   const mockApp = {
     requestSingleInstanceLock: () => true,
     getLocale: () => 'en-GB',
@@ -265,7 +270,15 @@ test('main.cjs handles Electron login event for loopback Basic Auth from process
     },
   };
 
-  const code = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
+  const FakeDate = class extends Date {
+    constructor(...args) {
+      super(...(args.length ? args : [clockRef.now]));
+    }
+    static now() {
+      return clockRef.now;
+    }
+  };
+
   vm.runInNewContext(code, {
     require: (name) => {
       if (name === 'electron') {
@@ -276,7 +289,9 @@ test('main.cjs handles Electron login event for loopback Basic Auth from process
           ipcMain: { handle: () => {} },
         };
       }
-      if (name === './config.cjs') return { resolvePort: () => 4330 };
+      if (name === './config.cjs') {
+        return { resolvePort: () => 4330, APP_BASIC_REALM: 'aiboss-office' };
+      }
       if (name === './server-manager.cjs') {
         return { ensureServerReady: async () => ({ ok: true }), stopSpawnedServer: () => {}, probeServer: async () => true };
       }
@@ -296,13 +311,17 @@ test('main.cjs handles Electron login event for loopback Basic Auth from process
       return require(name);
     },
     __dirname,
+    Date: FakeDate,
     process: {
       ...process,
       argv: ['node', 'main.cjs'],
-      env: { PHONGBAN_USER: 'test-user', PHONGBAN_PASS: 'test-pass' },
+      env: envOverride,
       versions: { electron: '44.7.0', node: process.versions.node },
     },
-    console,
+    console: {
+      ...console,
+      log: (...args) => logs.push(args.join(' ')),
+    },
     setInterval: () => 0,
     clearInterval: () => {},
     setTimeout: () => 0,
@@ -311,42 +330,196 @@ test('main.cjs handles Electron login event for loopback Basic Auth from process
   const loginHandler = appListeners.get('login');
   assert.equal(typeof loginHandler, 'function', 'app.on("login") must be registered');
 
-  // 1. Non-loopback host is ignored
-  let cbCalls = [];
-  let prevented = false;
-  loginHandler(
-    { preventDefault: () => { prevented = true; } },
-    {},
-    { url: 'https://example.com/api/approvals/123/decision' },
-    { host: 'example.com' },
-    (...args) => cbCalls.push(args),
-  );
-  assert.equal(prevented, false);
-  assert.equal(cbCalls.length, 0);
+  function fire(url, authInfo) {
+    const cbCalls = [];
+    let prevented = false;
+    loginHandler(
+      { preventDefault: () => { prevented = true; } },
+      {},
+      { url },
+      authInfo,
+      (...args) => cbCalls.push(args),
+    );
+    return { cbCalls, prevented };
+  }
 
-  // 2. Loopback 127.0.0.1 first attempt supplies credentials
-  cbCalls = [];
-  prevented = false;
-  loginHandler(
-    { preventDefault: () => { prevented = true; } },
-    {},
-    { url: 'http://127.0.0.1:4330/api/approvals/123/decision' },
-    { host: '127.0.0.1' },
-    (...args) => cbCalls.push(args),
-  );
-  assert.equal(prevented, true);
-  assert.deepEqual(cbCalls, [['test-user', 'test-pass']]);
+  return { fire, logs, clockRef };
+}
 
-  // 3. Second consecutive attempt for same URL triggers retry guard (cancels instead of infinite loop)
-  cbCalls = [];
-  prevented = false;
-  loginHandler(
-    { preventDefault: () => { prevented = true; } },
-    {},
-    { url: 'http://127.0.0.1:4330/api/approvals/123/decision' },
-    { host: '127.0.0.1' },
-    (...args) => cbCalls.push(args),
-  );
-  assert.equal(prevented, false);
-  assert.deepEqual(cbCalls, [[]]);
+test('F39 (i): login handler ignores challenge when PHONGBAN_* env vars are absent', () => {
+  const { fire } = createLoginHarness({});
+  const res = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, false);
+  assert.equal(res.cbCalls.length, 0);
+});
+
+test('F39 (ii): login handler ignores loopback challenge when port !== targetPort', () => {
+  const { fire } = createLoginHarness();
+  const res = fire('http://127.0.0.1:4319/api/o', {
+    host: '127.0.0.1',
+    port: 4319,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, false);
+  assert.equal(res.cbCalls.length, 0);
+});
+
+test('F39 (iii): login handler ignores challenge when realm !== aiboss-office', () => {
+  const { fire } = createLoginHarness();
+  const res = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'phong-ban-ai',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, false);
+  assert.equal(res.cbCalls.length, 0);
+});
+
+test('F39 (iv): login handler ignores challenge when isProxy === true', () => {
+  const { fire } = createLoginHarness();
+  const res = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: true,
+  });
+  assert.equal(res.prevented, false);
+  assert.equal(res.cbCalls.length, 0);
+});
+
+test('F39 (v): login handler ignores challenge when scheme is digest', () => {
+  const { fire } = createLoginHarness();
+  const res = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'digest',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, false);
+  assert.equal(res.cbCalls.length, 0);
+});
+
+test('F39 (vi): login handler ignores challenge when host is non-loopback or authInfo fields are missing', () => {
+  const { fire } = createLoginHarness();
+  const resExternal = fire('https://example.com/api/approvals/1/decision', {
+    host: 'example.com',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(resExternal.prevented, false);
+  assert.equal(resExternal.cbCalls.length, 0);
+
+  const resIncomplete = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+  });
+  assert.equal(resIncomplete.prevented, false);
+  assert.equal(resIncomplete.cbCalls.length, 0);
+});
+
+test('F39 (vii): positive control — exact target 1st attempt supplies PHONGBAN_USER and PHONGBAN_PASS', () => {
+  const { fire } = createLoginHarness();
+  const res = fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, true);
+  assert.deepEqual(res.cbCalls, [['test-user', 'test-pass']]);
+});
+
+test('F39 (viii): 2nd attempt on same host:port:realm key cancels via callback() and logs without secrets', () => {
+  const { fire, logs } = createLoginHarness();
+  fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  const res2 = fire('http://127.0.0.1:4330/api/approvals/2/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res2.prevented, false);
+  assert.deepEqual(res2.cbCalls, [[]]);
+  const blockLog = logs.find((l) => l.includes('app Basic Auth rejected'));
+  assert.ok(blockLog);
+  assert.equal(blockLog.includes('test-pass'), false);
+});
+
+test('F39 (ix): 3rd attempt within 60s cooldown window remains blocked and cancels via callback()', () => {
+  const clock = { now: 1_700_000_000_000 };
+  const { fire } = createLoginHarness({ PHONGBAN_USER: 'test-user', PHONGBAN_PASS: 'test-pass' }, clock);
+  fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  clock.now += 15_000;
+  const res3 = fire('http://127.0.0.1:4330/api/approvals/3/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res3.prevented, false);
+  assert.deepEqual(res3.cbCalls, [[]]);
+});
+
+test('F39 (x): after 60s cooldown window elapses, login handler unblocks and supplies credentials again', () => {
+  const clock = { now: 1_700_000_000_000 };
+  const { fire } = createLoginHarness({ PHONGBAN_USER: 'test-user', PHONGBAN_PASS: 'test-pass' }, clock);
+  fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  fire('http://127.0.0.1:4330/api/approvals/1/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  clock.now += 60_000;
+  const resAfter = fire('http://127.0.0.1:4330/api/approvals/4/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(resAfter.prevented, true);
+  assert.deepEqual(resAfter.cbCalls, [['test-user', 'test-pass']]);
 });
