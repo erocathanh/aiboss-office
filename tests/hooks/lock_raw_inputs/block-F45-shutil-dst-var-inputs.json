@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 -c \"import shutil; src='projects/THU-SU-THAT/wip/a.md'; dst='projects/THU-SU-THAT/inputs/b.md'; shutil.copy(src,dst); dst='projects/THU-SU-THAT/wip/c.md'; shutil.copy(src,dst)\""}}

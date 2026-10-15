@@ -543,7 +543,35 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
         if url_expr is None:
             url_expr = call_args[0].strip()
         if is_http_recv or (url_expr and _looks_like_url_arg_expr(url_expr, str_env)):
-            url_exprs.append(url_expr or None)
+            resolved_url = str_env.get(url_expr, url_expr) if (url_expr and str_env) else url_expr
+            url_exprs.append(resolved_url or None)
+
+    # 1b. F47 (S17j): Standalone calls to destructured or aliased HTTP write methods
+    #     (e.g. `const {delete: del} = axios; del(url)` or `const {post} = require('axios'); post(url)`)
+    for m_fn_call in re.finditer(r"(?<![.\w$])([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", text):
+        fn_name = m_fn_call.group(1)
+        if fn_name in ("if", "for", "while", "switch", "catch", "function", "return", "require", "import", "fetch", "axios", "Request", "urlopen", "URL"):
+            continue
+        call_pos = m_fn_call.start()
+        _dvars, hvars = _extract_data_and_http_vars(text, call_pos)
+        is_write_fn = False
+        for vname, rhs, _cs, ce in bash_parser._iter_top_level_assignments_with_pos(text):
+            if ce > call_pos or vname != fn_name:
+                continue
+            m_prop = re.match(r"^(.+)\.\s*(post|put|delete|patch|request)$", rhs.strip())
+            if m_prop and _is_http_client_receiver(m_prop.group(1), hvars):
+                is_write_fn = True
+            else:
+                is_write_fn = False
+        if is_write_fn:
+            str_env = _extract_str_var_env_at_pos(text, call_pos)
+            call_args, _ = bash_parser._scan_balanced_paren_args(text, m_fn_call.end())
+            if not call_args:
+                url_exprs.append(None)
+            else:
+                u_arg = call_args[0].strip()
+                resolved_u = str_env.get(u_arg, u_arg) if str_env else u_arg
+                url_exprs.append(resolved_u or None)
 
     # 2. F26 & F31: `.request(...)` on ANY receiver expression (requests, httpx, urllib3.PoolManager(),
     #    http.client.HTTPSConnection(host), axios, undici, http/https)

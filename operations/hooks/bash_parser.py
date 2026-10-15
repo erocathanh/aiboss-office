@@ -1195,15 +1195,17 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join)
         module_vars = _extract_module_vars(combined_raw)
 
-        for call_args in _extract_module_call_arg_lists(combined_raw, r'\bopen\s*\(', module_vars):
+        # F45 (S17j): Resolve both open mode and path variables at each call site (call_pos)
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(combined_raw, r'\bopen\s*\('):
             if not call_args:
                 continue
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join, call_pos=call_pos)
             path_expr = call_args[0]
             mode_expr = _extract_open_mode_expr(call_args[1:])
             if mode_expr is not None:
-                resolved_mode = resolve_script_path_expr(mode_expr, var_env=var_env, default_join_style=default_join)
+                resolved_mode = resolve_script_path_expr(mode_expr, var_env=call_var_env, default_join_style=default_join)
                 if resolved_mode.startswith('$DYNAMIC_WRITE:') or re.match(r'^(?:[wax]|[rwax]\+|[rwax]b?\+|[bt]?[wax])', resolved_mode):
-                    resolved_target = resolve_script_path_expr(path_expr, var_env=var_env, default_join_style=default_join)
+                    resolved_target = resolve_script_path_expr(path_expr, var_env=call_var_env, default_join_style=default_join)
                     label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
                     targets.append((resolved_target, label))
 
@@ -1265,138 +1267,138 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name}"
                 targets.append((resolved_target, label))
 
-        # Node fs single-target writes (F27 & F28: only module/standalone calls)
-        for call_args in _extract_module_call_arg_lists(
+        # Node fs single-target writes (F27, F28 & F45: resolve bindings at call_pos)
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream)\s*\(',
-            module_vars,
         ):
             if not call_args:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='node', call_pos=call_pos)
+            resolved_target = resolve_script_path_expr(call_args[0], var_env=call_var_env, default_join_style='node')
             label = "node fs dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs write"
             targets.append((resolved_target, label))
 
         # Node fs single-target deletes, mkdir & truncate
-        for call_args in _extract_module_call_arg_lists(
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:unlinkSync|rmSync|rm|rmdirSync|mkdirSync|truncateSync)\s*\(',
-            module_vars,
         ):
             if not call_args:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='node', call_pos=call_pos)
+            resolved_target = resolve_script_path_expr(call_args[0], var_env=call_var_env, default_join_style='node')
             label = "node fs dynamic delete" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs delete"
             targets.append((resolved_target, label))
 
         # Node fs callback/promise unlink/rmdir/mkdir (distinguished from Python os.unlink/rmdir/mkdir by default_join)
         if base == 'node' or 'fs.' in combined_raw or "require('fs" in combined_raw or 'require("fs' in combined_raw or "require('node:fs" in combined_raw or 'require("node:fs' in combined_raw:
-            for call_args in _extract_module_call_arg_lists(
+            for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
                 combined_raw,
                 r'\b(?:unlink|rmdir|mkdir|truncate)\s*\(',
-                module_vars,
             ):
                 if not call_args:
                     continue
-                resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='node')
+                call_var_env = _extract_simple_var_env(combined_raw, default_join_style='node', call_pos=call_pos)
+                resolved_target = resolve_script_path_expr(call_args[0], var_env=call_var_env, default_join_style='node')
                 label = "node fs dynamic delete" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs delete"
                 targets.append((resolved_target, label))
 
         # Node fs copy & link/symlink (destination is arg[1])
-        for call_args in _extract_module_call_arg_lists(
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:copyFileSync|cpSync|copyFile|cp|linkSync|symlinkSync)\s*\(',
-            module_vars,
         ):
             if len(call_args) < 2:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='node')
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='node', call_pos=call_pos)
+            resolved_target = resolve_script_path_expr(call_args[1], var_env=call_var_env, default_join_style='node')
             label = "node fs dynamic copy/link" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs copy/link"
             targets.append((resolved_target, label))
 
         if base == 'node' or 'fs.' in combined_raw or "require('fs" in combined_raw or 'require("fs' in combined_raw or "require('node:fs" in combined_raw or 'require("node:fs' in combined_raw:
-            for call_args in _extract_module_call_arg_lists(
+            for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
                 combined_raw,
                 r'\b(?:link|symlink)\s*\(',
-                module_vars,
             ):
                 if len(call_args) < 2:
                     continue
-                resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='node')
+                call_var_env = _extract_simple_var_env(combined_raw, default_join_style='node', call_pos=call_pos)
+                resolved_target = resolve_script_path_expr(call_args[1], var_env=call_var_env, default_join_style='node')
                 label = "node fs dynamic link" if resolved_target.startswith('$DYNAMIC_WRITE:') else "node fs link"
                 targets.append((resolved_target, label))
 
-        # F20b: Node fs rename / renameSync — check BOTH source (arg[0]) and destination (arg[1])
-        for call_args in _extract_module_call_arg_lists(
+        # F20b & F45: Node fs rename / renameSync — check BOTH source (arg[0]) and destination (arg[1]) at call_pos
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:renameSync|rename)\s*\(',
-            module_vars,
         ):
             if len(call_args) < 2:
                 continue
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='node', call_pos=call_pos)
             for idx_arg, role in ((0, "source"), (1, "destination")):
-                resolved_target = resolve_script_path_expr(call_args[idx_arg], var_env=var_env, default_join_style='node')
+                resolved_target = resolve_script_path_expr(call_args[idx_arg], var_env=call_var_env, default_join_style='node')
                 label = f"node fs dynamic rename {role}" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"node fs rename {role}"
                 targets.append((resolved_target, label))
 
-        # F27a: Python shutil.copy / copy2 / copyfile / copytree (destination is arg[1])
-        for call_args in _extract_module_call_arg_lists(
+        # F27a & F45: Python shutil.copy / copy2 / copyfile / copytree (destination is arg[1]) at call_pos
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:shutil\.)?(?:copy|copy2|copyfile|copytree)\s*\(',
-            module_vars,
         ):
             if len(call_args) < 2:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='python')
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='python', call_pos=call_pos)
+            resolved_target = resolve_script_path_expr(call_args[1], var_env=call_var_env, default_join_style='python')
             label = "python shutil dynamic copy" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python shutil copy"
             targets.append((resolved_target, label))
 
-        # F27b: Python os.link / os.symlink (destination is arg[1])
-        for call_args in _extract_module_call_arg_lists(
+        # F27b & F45: Python os.link / os.symlink (destination is arg[1]) at call_pos
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:os\.)?(?:link|symlink)\s*\(',
-            module_vars,
         ):
             if len(call_args) < 2:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[1], var_env=var_env, default_join_style='python')
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='python', call_pos=call_pos)
+            resolved_target = resolve_script_path_expr(call_args[1], var_env=call_var_env, default_join_style='python')
             label = "python os.link dynamic destination" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python os.link destination"
             targets.append((resolved_target, label))
 
-        # F20b: Python shutil.move, os.rename, os.replace — check BOTH source (arg[0]) and destination (arg[1])
-        for call_args in _extract_module_call_arg_lists(
+        # F20b & F45: Python shutil.move, os.rename, os.replace — check BOTH source (arg[0]) and destination (arg[1]) at call_pos
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:shutil\.move|os\.(?:replace|rename)|replace)\s*\(',
-            module_vars,
         ):
             if len(call_args) < 2:
                 continue
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='python', call_pos=call_pos)
             for idx_arg, role in ((0, "source"), (1, "destination")):
-                resolved_target = resolve_script_path_expr(call_args[idx_arg], var_env=var_env, default_join_style='python')
+                resolved_target = resolve_script_path_expr(call_args[idx_arg], var_env=call_var_env, default_join_style='python')
                 label = f"python move/rename dynamic {role}" if resolved_target.startswith('$DYNAMIC_WRITE:') else f"python move/rename {role}"
                 targets.append((resolved_target, label))
 
-        # F27 & F28: Python os.remove, os.unlink, os.rmdir, os.removedirs, os.mkdir, os.makedirs, shutil.rmtree (single target arg[0])
-        for call_args in _extract_module_call_arg_lists(
+        # F27, F28 & F45: Python os.remove, os.unlink, os.rmdir, os.removedirs, os.mkdir, os.makedirs, shutil.rmtree (single target arg[0]) at call_pos
+        for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
             combined_raw,
             r'\b(?:os\.(?:remove|unlink|rmdir|removedirs|mkdir|makedirs|truncate)|shutil\.rmtree|remove|removedirs|makedirs|rmtree)\s*\(',
-            module_vars,
         ):
             if not call_args:
                 continue
-            resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='python')
+            call_var_env = _extract_simple_var_env(combined_raw, default_join_style='python', call_pos=call_pos)
+            resolved_target = resolve_script_path_expr(call_args[0], var_env=call_var_env, default_join_style='python')
             label = "python delete dynamic target" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python delete target"
             targets.append((resolved_target, label))
 
         if base != 'node':
-            for call_args in _extract_module_call_arg_lists(
+            for call_args, call_pos in _extract_module_call_arg_lists_with_pos(
                 combined_raw,
                 r'\b(?:unlink|rmdir|mkdir)\s*\(',
-                module_vars,
             ):
                 if not call_args:
                     continue
-                resolved_target = resolve_script_path_expr(call_args[0], var_env=var_env, default_join_style='python')
+                call_var_env = _extract_simple_var_env(combined_raw, default_join_style='python', call_pos=call_pos)
+                resolved_target = resolve_script_path_expr(call_args[0], var_env=call_var_env, default_join_style='python')
                 label = "python delete dynamic target" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python delete target"
                 targets.append((resolved_target, label))
 
@@ -1718,11 +1720,14 @@ def _split_top_level_plus(expr: str) -> List[str]:
 
 def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int, int]]:
     """
-    S17h (Principle 3): Yield (var_name, rhs, start_pos, end_pos) in appearance order for top-level
-    assignments across `;` and newline-separated statements, including JS comma-separated declarations
-    like `const fs=require('fs'),p=require('path')`.
+    S17h (Principle 3) & S17j (F45, F47): Yield (var_name, rhs, start_pos, end_pos) in appearance order for
+    top-level assignments across `;` and newline-separated statements, including JS comma-separated declarations
+    (`const fs=require('fs'),p=require('path')`) and JS object destructuring
+    (`const {client,url}={client:require('axios'),url:'https://...'}` or `const {delete: del, post}=axios`).
     """
-    assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$', re.DOTALL)
+    assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\+?=)(?![=~>])(.+)$', re.DOTALL)
+    destruct_re = re.compile(r'^(?:(?:const|let|var)\s+)?\{([^{}]+)\}\s*=(?![=~>])(.+)$', re.DOTALL)
+    ident_re = re.compile(r'^[A-Za-z_$][A-Za-z0-9_$]*$')
     out: List[Tuple[str, str, int, int]] = []
     for m_stmt in re.finditer(r'[^;\n]+', text):
         raw_stmt = m_stmt.group(0)
@@ -1733,19 +1738,12 @@ def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int,
             continue
         s_clean = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
         clauses = [c.strip() for c in _split_top_level_op(s_clean, ',') if c.strip()]
-        if len(clauses) > 1 and all(assign_re.match(c) for c in clauses):
+        if len(clauses) > 1 and all(assign_re.match(c) or destruct_re.match(c) for c in clauses):
             target_clauses = clauses
         else:
             target_clauses = [s_clean]
         offset_cursor = stmt_start
         for clause in target_clauses:
-            m = assign_re.match(clause)
-            if not m:
-                continue
-            var_name = m.group(1)
-            rhs = m.group(2).strip()
-            if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
-                continue
             rel_idx = raw_stmt.find(clause, max(0, offset_cursor - stmt_start))
             if rel_idx >= 0:
                 c_start = stmt_start + rel_idx
@@ -1754,6 +1752,54 @@ def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int,
             else:
                 c_start = stmt_start
                 c_end = stmt_end
+
+            m_dest = destruct_re.match(clause)
+            if m_dest:
+                lhs_inner = m_dest.group(1).strip()
+                rhs_raw = _strip_outer_parens(m_dest.group(2).strip())
+                rhs_map: Dict[str, str] = {}
+                is_obj_rhs = rhs_raw.startswith('{') and rhs_raw.endswith('}')
+                if is_obj_rhs:
+                    for prop in _split_top_level_op(rhs_raw[1:-1], ','):
+                        p_str = prop.strip()
+                        if not p_str:
+                            continue
+                        colon_parts = _split_top_level_op(p_str, ':')
+                        if len(colon_parts) >= 2:
+                            pk = colon_parts[0].strip().strip("'\"")
+                            pv = ":".join(colon_parts[1:]).strip()
+                        else:
+                            pk = p_str.strip("'\"")
+                            pv = p_str
+                        if pk:
+                            rhs_map[pk] = pv
+                for item in _split_top_level_op(lhs_inner, ','):
+                    it_s = _split_top_level_op(item.strip(), '=')[0].strip()
+                    if not it_s:
+                        continue
+                    if ':' in it_s:
+                        prop_k, local_v = [x.strip() for x in it_s.split(':', 1)]
+                    else:
+                        prop_k = local_v = it_s
+                    prop_k = prop_k.strip("'\"")
+                    if not ident_re.match(local_v) or not ident_re.match(prop_k):
+                        continue
+                    if is_obj_rhs and prop_k in rhs_map:
+                        out.append((local_v, rhs_map[prop_k], c_start, c_end))
+                    else:
+                        out.append((local_v, f"{rhs_raw}.{prop_k}", c_start, c_end))
+                continue
+
+            m = assign_re.match(clause)
+            if not m:
+                continue
+            var_name = m.group(1)
+            op_tok = m.group(2)
+            rhs = m.group(3).strip()
+            if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
+                continue
+            if op_tok == '+=':
+                rhs = f"{var_name} + ({rhs})"
             out.append((var_name, rhs, c_start, c_end))
     return out
 
@@ -1768,9 +1814,13 @@ def _extract_simple_var_env(
     call_pos: Optional[int] = None,
 ) -> Dict[str, str]:
     """
-    Extract simple variable assignments (e.g. `p = Path(root) / 'projects' / ...` or `p = Path('wip') / 'a.md'`)
-    active BEFORE `call_pos` (Principle 3: reassignments AFTER `call_pos` do not affect `call_pos`).
-    Variables assigned multiple times before `call_pos` become $DYNAMIC_WRITE.
+    F43 (S17i) & F45 (S17j): Extract simple variable assignments active BEFORE `call_pos`
+    (Principle 3: reassignments AFTER `call_pos` do not affect `call_pos`).
+    - When `call_pos` is provided (`call_pos is not None`), sequential reassignments before `call_pos`
+      update `env[var_name]` to the most recent binding at `call_pos`, unless preceded by a
+      conditional/exception branch (`if`/`elif`/`else`/`try`/`except`), which marks `$DYNAMIC_WRITE`.
+    - When `call_pos is None` (whole-command fallback), any variable assigned more than once
+      conservatively becomes `$DYNAMIC_WRITE:<var_name>` (fail-closed).
     """
     env: Dict[str, str] = {}
     counts: Dict[str, int] = {}
@@ -1779,7 +1829,7 @@ def _extract_simple_var_env(
             continue
         counts[var_name] = counts.get(var_name, 0) + 1
         has_branch_before = bool(re.search(r"\b(?:if|elif|else|try|except)\b[^;#\n]*:", text[:c_start]))
-        if has_branch_before and counts[var_name] > 1:
+        if (call_pos is None or has_branch_before) and counts[var_name] > 1:
             env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
         else:
             env[var_name] = resolve_script_path_expr(rhs, var_env=env, default_join_style=default_join_style)
@@ -2252,29 +2302,40 @@ def _args_look_like_file_path_move(
     return any(_expr_looks_like_file_path_arg(arg, var_env) for arg in method_args[:2])
 
 
+def _extract_module_call_arg_lists_with_pos(
+    text: str,
+    prefix_pattern: str,
+    module_vars: Optional[set] = None,
+) -> List[Tuple[List[str], int]]:
+    """
+    F28 (S17f) & F45 (S17j): Extract `(args, call_pos)` for module/standalone function calls.
+    If the matched call is preceded by `.` (a method call), only accept it if the receiver before `.`
+    is a module/namespace receiver (`_is_module_receiver_expr`) evaluated at `call_pos`, skipping
+    pathlib Path instance calls.
+    """
+    results: List[Tuple[List[str], int]] = []
+    for m in re.finditer(prefix_pattern, text):
+        call_pos = m.start()
+        j = call_pos - 1
+        while j >= 0 and text[j] in (' ', '\t'):
+            j -= 1
+        if j >= 0 and text[j] == '.':
+            recv_expr = _extract_receiver_before_dot(text, j)
+            active_mods = module_vars if module_vars is not None else _extract_module_vars(text, call_pos=call_pos)
+            if not _is_module_receiver_expr(recv_expr, active_mods):
+                continue
+        args, _ = _scan_balanced_paren_args(text, m.end())
+        if args is not None:
+            results.append((args, call_pos))
+    return results
+
+
 def _extract_module_call_arg_lists(
     text: str,
     prefix_pattern: str,
     module_vars: Optional[set] = None,
 ) -> List[List[str]]:
-    """
-    F28 (S17f): Extract argument lists for module/standalone function calls.
-    If the matched call is preceded by `.` (a method call), only accept it if the receiver before `.`
-    is a module/namespace receiver (`_is_module_receiver_expr`), skipping pathlib Path instance calls.
-    """
-    results: List[List[str]] = []
-    for m in re.finditer(prefix_pattern, text):
-        j = m.start() - 1
-        while j >= 0 and text[j] in (' ', '\t'):
-            j -= 1
-        if j >= 0 and text[j] == '.':
-            recv_expr = _extract_receiver_before_dot(text, j)
-            if not _is_module_receiver_expr(recv_expr, module_vars):
-                continue
-        args, _ = _scan_balanced_paren_args(text, m.end())
-        if args is not None:
-            results.append(args)
-    return results
+    return [args for args, _ in _extract_module_call_arg_lists_with_pos(text, prefix_pattern, module_vars)]
 
 
 

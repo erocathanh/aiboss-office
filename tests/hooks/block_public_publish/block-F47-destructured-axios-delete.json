@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"const axios=require('axios'); const {delete: del, post} = axios; del('https://example.net/api/item')\""}}

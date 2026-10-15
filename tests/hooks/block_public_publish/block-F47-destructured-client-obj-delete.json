@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"const {client, url} = {client: require('axios'), url: 'https://example.net/api/item'}; client.delete(url)\""}}
