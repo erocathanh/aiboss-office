@@ -151,6 +151,14 @@ if (!gotTheLock) {
     return null;
   }
 
+  function normalizeLoopbackHost(rawHost) {
+    const h = String(rawHost || '').trim().toLowerCase();
+    if (h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]') {
+      return '127.0.0.1';
+    }
+    return null;
+  }
+
   function registerInstanceHeaderListener() {
     if (
       !session ||
@@ -164,7 +172,8 @@ if (!gotTheLock) {
       try {
         if (details && details.statusCode === 401 && typeof details.url === 'string') {
           const parsedUrl = new URL(details.url);
-          const h = (parsedUrl.hostname || '').toLowerCase();
+          const rawHost = (parsedUrl.hostname || '').toLowerCase();
+          const h = normalizeLoopbackHost(rawHost) || rawHost;
           const p = parsedUrl.port
             ? Number.parseInt(parsedUrl.port, 10)
             : parsedUrl.protocol === 'https:'
@@ -198,9 +207,12 @@ if (!gotTheLock) {
     if (details && details.responseHeaders && typeof details.responseHeaders === 'object') {
       return extractHeaderCaseInsensitive(details.responseHeaders, 'x-aiboss-instance');
     }
-    const keyWithRealm = `${host}:${port}:${realm}`;
-    const keyHostPort = `${host}:${port}`;
+    const canonicalHost = normalizeLoopbackHost(host) || host;
+    const keyWithRealm = `${canonicalHost}:${port}:${realm}`;
+    const keyHostPort = `${canonicalHost}:${port}`;
     const entry = recentInstanceProofHeaders.get(keyWithRealm) || recentInstanceProofHeaders.get(keyHostPort);
+    recentInstanceProofHeaders.delete(keyWithRealm);
+    recentInstanceProofHeaders.delete(keyHostPort);
     if (entry && nowMs <= entry.expiresAt && typeof entry.value === 'string') {
       return entry.value;
     }
@@ -211,11 +223,15 @@ if (!gotTheLock) {
     if (typeof headerValue !== 'string' || !/^v1\.[0-9a-f]{64}$/i.test(headerValue.trim())) {
       return false;
     }
+    const canonicalHost = normalizeLoopbackHost(host);
+    if (!canonicalHost) {
+      return false;
+    }
     const expected =
       'v1.' +
       crypto
         .createHmac('sha256', nonce)
-        .update(`${host}:${port}:${realm}`, 'utf8')
+        .update(`${canonicalHost}:${port}:${realm}`, 'utf8')
         .digest('hex');
     const actualBuf = Buffer.from(headerValue.trim().toLowerCase(), 'utf8');
     const expectedBuf = Buffer.from(expected.toLowerCase(), 'utf8');

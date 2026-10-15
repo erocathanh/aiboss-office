@@ -4159,6 +4159,74 @@ approval_check.main()
         'X-AIBOSS-Instance header on 401 must match HMAC computed from instance-4330.json'
       );
 
+      // 44a-f42: Request with strange/forged Host header (127.0.0.1:4342) NEVER creates instance-4342.json and signs ONLY for real listener port 4330
+      const reqForgedHost401 = new NextRequest(`http://127.0.0.1:4342/api/approvals/${c44ReqId}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:4342',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved', note: 'F42 forged Host check' }),
+      });
+      const resForgedHost401 = await postDecisionRoute(reqForgedHost401, {
+        params: Promise.resolve({ requestId: c44ReqId }),
+      });
+      assert.equal(resForgedHost401.status, 401);
+      assert.equal(
+        fs.existsSync(path.join(c44ConfigDir, 'instance-4342.json')),
+        false,
+        'F42: server must NEVER create instance-4342.json from request Host header'
+      );
+      const forgedRespProof = resForgedHost401.headers.get('x-aiboss-instance');
+      if (forgedRespProof) {
+        const wrongPortProof =
+          'v1.' +
+          crypto
+            .createHmac('sha256', nonceJson44.nonce)
+            .update('127.0.0.1:4342:aiboss-office', 'utf8')
+            .digest('hex');
+        assert.notEqual(
+          forgedRespProof,
+          wrongPortProof,
+          'F42: server must NEVER sign X-AIBOSS-Instance for caller-supplied Host port 4342'
+        );
+        assert.equal(
+          forgedRespProof,
+          expectedProof44,
+          'F42: proof (if present) must be signed strictly for real listener port 4330'
+        );
+      }
+
+      // 44a-f45: Pre-existing 0755 config dir is tightened to 0700; unwritable config dir fails closed (401 without proof, never 500)
+      const c44BroadDir = path.join(testDataDir, 'f45-broad-dir');
+      fs.mkdirSync(c44BroadDir, { recursive: true, mode: 0o755 });
+      fs.chmodSync(c44BroadDir, 0o755);
+      process.env.AIBOSS_CONFIG_DIR = c44BroadDir;
+      const resBroad = await postDecisionRoute(req401, {
+        params: Promise.resolve({ requestId: c44ReqId }),
+      });
+      assert.equal(resBroad.status, 401);
+      assert.equal(
+        fs.statSync(c44BroadDir).mode & 0o777,
+        0o700,
+        'F45: pre-existing 0755 config dir must be tightened to 0700'
+      );
+
+      const c44BlockedFile = path.join(testDataDir, 'f45-not-a-dir');
+      fs.writeFileSync(c44BlockedFile, 'block', 'utf8');
+      process.env.AIBOSS_CONFIG_DIR = path.join(c44BlockedFile, 'subdir');
+      const resUnwritable = await postDecisionRoute(req401, {
+        params: Promise.resolve({ requestId: c44ReqId }),
+      });
+      assert.equal(resUnwritable.status, 401, 'F45: nonce init failure must still return 401 Basic (never 500)');
+      assert.equal(resUnwritable.headers.get('www-authenticate'), 'Basic realm="aiboss-office"');
+      assert.equal(
+        resUnwritable.headers.get('x-aiboss-instance'),
+        null,
+        'F45: 401 response must omit X-AIBOSS-Instance when nonce file cannot be written'
+      );
+      process.env.AIBOSS_CONFIG_DIR = c44ConfigDir;
+
       // 44b: 200 response with valid Basic Auth does NOT include X-AIBOSS-Instance
       const basicAuth44 = 'Basic ' + Buffer.from('f40-owner:f40-secret-pass', 'utf8').toString('base64');
       const req200 = new NextRequest(`http://127.0.0.1:4330/api/approvals/${c44ReqId}/decision`, {

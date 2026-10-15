@@ -142,17 +142,19 @@ export async function POST(
   const auth = resolveDecisionActor(req);
   if (!auth.allowed || !auth.by) {
     const status = auth.status || 401;
+    let headers: Record<string, string> | undefined;
+    if (status === 401) {
+      headers = { 'WWW-Authenticate': 'Basic realm="aiboss-office"' };
+      const instanceProof = buildInstanceProofHeader('aiboss-office');
+      if (instanceProof) {
+        headers['X-AIBOSS-Instance'] = instanceProof;
+      }
+    }
     return NextResponse.json(
       { error: 'unauthorized', message: auth.message || 'Authentication required.' },
       {
         status,
-        headers:
-          status === 401
-            ? {
-                'WWW-Authenticate': 'Basic realm="aiboss-office"',
-                'X-AIBOSS-Instance': buildInstanceProofHeader(req, 'aiboss-office'),
-              }
-            : undefined,
+        headers,
       }
     );
   }

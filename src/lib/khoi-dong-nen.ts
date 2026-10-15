@@ -114,6 +114,10 @@ export function batMotLan(): void {
   setImmediate(async () => {
     try {
       initInstanceNonce();
+    } catch {
+      console.error('[instance-nonce] Startup initialization failed; continuing runner startup');
+    }
+    try {
       if (process.env.CHAY_NEN === '1') {
         console.warn('[chay-nen] CHAY_NEN ignored: office-runner is the single engine');
       }

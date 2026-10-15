@@ -865,3 +865,137 @@ test('F40 (e): 401 with valid X-AIBOSS-Instance remains blocked during 60s F38 c
   assert.equal(res3.prevented, false);
   assert.deepEqual(res3.cbCalls, [[]]);
 });
+
+test('F42 (f): 401 with X-AIBOSS-Instance signed for a different port (4341 !== authInfo.port 4330) cancels via callback() without sending credentials', () => {
+  const { fire, logs, defaultNonce } = createLoginHarness({
+    PHONGBAN_USER: 'owner-u',
+    PHONGBAN_PASS: 'owner-p',
+  });
+  const proofForOtherPort = computeTestInstanceProof(defaultNonce, '127.0.0.1', 4341, 'aiboss-office');
+  const res = fire(
+    'http://127.0.0.1:4330/api/approvals/req-f/decision',
+    {
+      host: '127.0.0.1',
+      port: 4330,
+      realm: 'aiboss-office',
+      scheme: 'basic',
+      isProxy: false,
+    },
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-f/decision',
+      responseHeaders: { 'X-AIBOSS-Instance': proofForOtherPort },
+    },
+  );
+  assert.equal(res.prevented, false);
+  assert.deepEqual(res.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
+  assert.equal(
+    logs.some((l) => l.includes(defaultNonce) || l.includes(proofForOtherPort) || l.includes('owner-p')),
+    false,
+  );
+});
+
+test('F42 (g): proxy forward mock (proxy on 4330 relays 401 proof signed by real server on 4341) cancels via callback() without sending credentials', () => {
+  // Case g1: real server on 4341 only wrote instance-4341.json (no instance-4330.json exists)
+  const h1 = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+    { skipNonceFile: true, triggerWhenReady: true },
+  );
+  const serverNonce = '1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff';
+  fs.writeFileSync(
+    path.join(h1.tempConfigDir, 'instance-4341.json'),
+    JSON.stringify({ port: 4341, nonce: serverNonce, startedAt: '2026-10-16T00:00:00.000Z' }),
+    { encoding: 'utf8', mode: 0o600 },
+  );
+  const relayedProofFrom4341 = computeTestInstanceProof(serverNonce, '127.0.0.1', 4341, 'aiboss-office');
+  const hook1 = h1.getHeadersReceivedHook();
+  hook1(
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-g1/decision',
+      statusCode: 401,
+      responseHeaders: {
+        'WWW-Authenticate': ['Basic realm="aiboss-office"'],
+        'X-AIBOSS-Instance': [relayedProofFrom4341],
+      },
+    },
+    () => {},
+  );
+  const resG1 = h1.fire(
+    'http://127.0.0.1:4330/api/approvals/req-g1/decision',
+    { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+    { url: 'http://127.0.0.1:4330/api/approvals/req-g1/decision' },
+  );
+  assert.equal(resG1.prevented, false);
+  assert.deepEqual(resG1.cbCalls, [[]]);
+
+  // Case g2: even if instance-4330.json exists, relayed proof from 4341 fails HMAC verification on port 4330
+  const h2 = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+    { nonce: serverNonce, triggerWhenReady: true },
+  );
+  const hook2 = h2.getHeadersReceivedHook();
+  hook2(
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-g2/decision',
+      statusCode: 401,
+      responseHeaders: {
+        'WWW-Authenticate': ['Basic realm="aiboss-office"'],
+        'X-AIBOSS-Instance': [relayedProofFrom4341],
+      },
+    },
+    () => {},
+  );
+  const resG2 = h2.fire(
+    'http://127.0.0.1:4330/api/approvals/req-g2/decision',
+    { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+    { url: 'http://127.0.0.1:4330/api/approvals/req-g2/decision' },
+  );
+  assert.equal(resG2.prevented, false);
+  assert.deepEqual(resG2.cbCalls, [[]]);
+  assert.ok(h2.logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
+});
+
+test('F42 (h): replaying old proof after instance-4330.json rotates on server restart cancels via callback() without sending credentials', () => {
+  const clock = { now: 1_700_000_000_000 };
+  const oldNonce = 'aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111';
+  const newNonce = 'bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222';
+  const { fire, tempConfigDir, logs } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    clock,
+    { nonce: oldNonce },
+  );
+  const oldProof = computeTestInstanceProof(oldNonce, '127.0.0.1', 4330, 'aiboss-office');
+
+  // Server restarts and writes a new nonce to instance-4330.json with updated mtime
+  const nonceFile = path.join(tempConfigDir, 'instance-4330.json');
+  fs.writeFileSync(
+    nonceFile,
+    JSON.stringify({
+      port: 4330,
+      nonce: newNonce,
+      startedAt: '2026-10-16T00:05:00.000Z',
+    }),
+    { encoding: 'utf8', mode: 0o600 },
+  );
+  const futureTime = new Date(Date.now() + 10_000);
+  fs.utimesSync(nonceFile, futureTime, futureTime);
+
+  // Replaying oldProof against rotated instance-4330.json must fail-closed
+  const resReplay = fire(
+    'http://127.0.0.1:4330/api/approvals/req-h/decision',
+    { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-h/decision',
+      responseHeaders: { 'X-AIBOSS-Instance': oldProof },
+    },
+  );
+  assert.equal(resReplay.prevented, false);
+  assert.deepEqual(resReplay.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
+  assert.equal(
+    logs.some((l) => l.includes(oldNonce) || l.includes(newNonce) || l.includes(oldProof) || l.includes('owner-p')),
+    false,
+  );
+});
