@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"const fs=require('fs'); let p='wip/a'; if(false){ p='wip/b'; } fs.writeFileSync(p,'x')\""}}

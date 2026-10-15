@@ -1750,10 +1750,9 @@ def _split_top_level_plus(expr: str) -> List[str]:
 
 def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int, int]]:
     """
-    S17h (Principle 3) & S17j (F45, F47): Yield (var_name, rhs, start_pos, end_pos) in appearance order for
-    top-level assignments across `;` and newline-separated statements, including JS comma-separated declarations
-    (`const fs=require('fs'),p=require('path')`) and JS object destructuring
-    (`const {client,url}={client:require('axios'),url:'https://...'}` or `const {delete: del, post}=axios`).
+    S17h (Principle 3), S17j (F45, F47) & S17l (F51): Yield (var_name, rhs, start_pos, end_pos) in appearance order for
+    top-level assignments across `;` and newline-separated statements, including JS comma-separated declarations,
+    flat object destructuring (`const {client,url}=...`, `const {delete: del, post}=axios`), and JS/Python branches/loops.
     """
     assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\+?=)(?![=~>])(.+)$', re.DOTALL)
     destruct_re = re.compile(r'^(?:(?:const|let|var)\s+)?\{([^{}]+)\}\s*=(?![=~>])(.+)$', re.DOTALL)
@@ -1767,9 +1766,9 @@ def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int,
         if not s:
             continue
         s_clean = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
-        # Strip leading JS block/loop openers (e.g. `for(...){ p='...'`, `i++){ p='...'`, `while(...){ p='...'`, `{ p='...'`)
+        # Strip leading JS block/loop/conditional openers (both braced `{` and braceless `if(flag) p=...`, `case x: p=...`)
         s_clean = re.sub(
-            r'^(?:(?:(?:for\s*(?:await\s*)?\([^()]*\)|while\s*\([^()]*\)|do|if\s*\([^()]*\)|else\s+if\s*\([^()]*\)|else|try|catch\s*(?:\([^()]*\))?|finally|[^={}]+?\))\s*\{+\s*)|\{+\s*)+',
+            r'^(?:(?:(?:for\s*(?:await\s*)?\([^()]*\)|while\s*\([^()]*\)|do\b|if\s*\([^()]*\)|else\s+if\s*\([^()]*\)|else\b(?!\s*:)|switch\s*\([^()]*\)|case\s+[^:]+:|default\s*:|try\b(?!\s*:)|catch\s*(?:\([^()]*\))?|finally\b(?!\s*:))\s*\{*\s*)|(?:[^={}]+?\)\s*\{+\s*)|\{+\s*)+',
             '',
             s_clean,
         ).strip()
@@ -1787,11 +1786,34 @@ def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int,
                 s_clean = s_clean[:-1].rstrip()
         if not s_clean:
             continue
+
         clauses = [c.strip() for c in _split_top_level_op(s_clean, ',') if c.strip()]
-        if len(clauses) > 1 and all(assign_re.match(c) or destruct_re.match(c) for c in clauses):
-            target_clauses = clauses
+        if len(clauses) > 1 and all(assign_re.match(_strip_outer_parens(c)) or destruct_re.match(_strip_outer_parens(c)) for c in clauses):
+            target_clauses = [_strip_outer_parens(c) for c in clauses]
+        elif not assign_re.match(_strip_outer_parens(s_clean)) and not destruct_re.match(_strip_outer_parens(s_clean)):
+            # F51: Extract embedded assignments inside short-circuit `cond && (p = ...)` / `cond || (p = ...)` or ternary `cond ? (p = a) : (p = b)`
+            sub_exprs: List[str] = [s_clean]
+            for op in ('&&', '||', '?', ':'):
+                next_subs: List[str] = []
+                for sub in sub_exprs:
+                    unwrapped = _strip_outer_parens(sub.strip())
+                    if assign_re.match(unwrapped) or destruct_re.match(unwrapped):
+                        next_subs.append(unwrapped)
+                    else:
+                        next_subs.extend(_split_top_level_op(unwrapped, op))
+                sub_exprs = next_subs
+            target_clauses = []
+            for sub in sub_exprs:
+                unwrapped = _strip_outer_parens(sub.strip())
+                for c in _split_top_level_op(unwrapped, ','):
+                    cu = _strip_outer_parens(c.strip())
+                    if assign_re.match(cu) or destruct_re.match(cu):
+                        target_clauses.append(cu)
+            if not target_clauses:
+                target_clauses = [_strip_outer_parens(s_clean)]
         else:
-            target_clauses = [s_clean]
+            target_clauses = [_strip_outer_parens(s_clean)]
+
         offset_cursor = stmt_start
         for clause in target_clauses:
             rel_idx = raw_stmt.find(clause, max(0, offset_cursor - stmt_start))
@@ -1891,18 +1913,110 @@ def _find_top_level_colon(line_str: str, start_idx: int) -> int:
     return -1
 
 
-def _find_enclosing_loops(
+def _advance_js_single_stmt_end(text: str, start_idx: int) -> int:
+    """
+    S17l (F53): Given `start_idx` right after a braceless JS control header (`for (...)`, `while (...)`, `if (...)`, `else`),
+    advance past any chained braceless JS control headers (`if (...)`, `else if (...)`, `else`, `for (...)`, `while (...)`,
+    `with (...)`, `switch (...)`) across newlines until the leaf `{ ... }` block or terminating `;` / `\n`.
+    """
+    cur_k = start_idx
+    n = len(text)
+    while cur_k < n:
+        while cur_k < n and text[cur_k] in (' ', '\t', '\r', '\n'):
+            cur_k += 1
+        if cur_k >= n:
+            return n
+        m_hdr = re.match(r'^(?:if|else\s+if|for\s*(?:await\s*)?|while|with|switch)\s*\(', text[cur_k:])
+        if m_hdr:
+            after_p = cur_k + m_hdr.end()
+            _, close_p = _scan_balanced_paren_args(text, after_p)
+            if close_p < n:
+                after_close = close_p + 1
+                while after_close < n and text[after_close] in (' ', '\t'):
+                    after_close += 1
+                if after_close < n and text[after_close] == ':':
+                    break
+                cur_k = close_p + 1
+                continue
+        m_else = re.match(r'^(?:else|do)\b(?!\s*:)', text[cur_k:])
+        if m_else:
+            cur_k += m_else.end()
+            continue
+        break
+    while cur_k < n and text[cur_k] in (' ', '\t', '\r', '\n'):
+        cur_k += 1
+    if cur_k < n and text[cur_k] == '{':
+        _, close_b = _scan_balanced_paren_args(text, cur_k + 1)
+        return close_b
+    nl_idx = text.find('\n', cur_k)
+    semi_idx = text.find(';', cur_k)
+    end_cands = [idx for idx in (nl_idx, semi_idx) if idx >= 0]
+    return min(end_cands) if end_cands else n
+
+
+def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
+    """
+    S17l (F51): Return True if the assignment at `[c_start, c_end]` is inside or guarded by a
+    conditional/exception branch in Python (`if`/`elif`/`else`/`try`/`except`/`finally`) or JS
+    (`if`/`else if`/`else`/`switch`/`case`/`try`/`catch`/`finally`, braced or braceless, or
+    short-circuit `&&`/`||` / ternary `? :`).
+    """
+    # 1. Same-statement / same-line prefix before `c_start`
+    last_semi = text.rfind(';', 0, c_start)
+    last_nl = text.rfind('\n', 0, c_start)
+    stmt_bound = max(last_semi, last_nl) + 1
+    stmt_prefix = text[stmt_bound:c_start]
+    if re.search(
+        r'\b(?:if|elif|else|switch|case|default|try|catch|except|finally)\b|&&|\|\||\?',
+        stmt_prefix,
+    ):
+        return True
+    if last_nl + 1 < stmt_bound:
+        line_prefix = text[last_nl + 1 : c_start]
+        if re.search(r'\b(?:if|elif|else|try|except|finally)\b[^#\n]*:', line_prefix):
+            return True
+
+    # 2. Enclosing JS braced or braceless `if (...)`, `else if (...)`, `switch (...)`, `catch (...)`
+    for m_js in re.finditer(r'\b(if|else\s+if|switch|catch)\s*\(', text):
+        h_start = m_js.start()
+        if h_start > c_start:
+            break
+        _, close_p = _scan_balanced_paren_args(text, m_js.end())
+        if close_p >= len(text):
+            continue
+        k = close_p + 1
+        while k < len(text) and text[k] in (' ', '\t'):
+            k += 1
+        if k < len(text) and text[k] == ':':
+            continue
+        b_end = _advance_js_single_stmt_end(text, close_p + 1)
+        if h_start <= c_start and c_end <= b_end:
+            return True
+
+    # 3. Enclosing JS `else`, `try`, `finally`, or bare `catch` (braced or braceless)
+    for m_kw in re.finditer(r'\b(else|try|finally|catch)\b(?!\s*(?:if\b|\(|:))', text):
+        h_start = m_kw.start()
+        if h_start > c_start:
+            break
+        b_end = _advance_js_single_stmt_end(text, m_kw.end())
+        if h_start <= c_start and c_end <= b_end:
+            return True
+
+    # 4. Enclosing Python `if`/`elif`/`else`/`try`/`except`/`finally` block (multi-line indented or single-line)
+    if re.search(r'\b(?:if|elif|else|try|except|finally)\b[^;#\n]*:', text[:c_start]):
+        return True
+
+    return False
+
+
+def _find_all_loops(
     text: str,
-    call_pos: int,
 ) -> List[Tuple[int, int, int, Optional[str], Optional[str], str]]:
     """
-    S17k (F48 — Option A): Find all loop constructs (`for`, `while`, `do`) in `text` whose body
-    encloses `call_pos`.
-    Note: Text order equals execution order ONLY when the code segment is linear; inside a loop body,
-    assignments appearing textually after `call_pos` take effect BEFORE `call_pos` on the next iteration.
+    S17k (F48 — Option A) & S17l (F53): Find all loop constructs (`for`, `while`, `do`) in `text`.
     Returns list of `(header_start, body_start, body_end, iter_var, iter_expr, loop_kind)`.
     """
-    enclosing: List[Tuple[int, int, int, Optional[str], Optional[str], str]] = []
+    loops: List[Tuple[int, int, int, Optional[str], Optional[str], str]] = []
 
     # 1. JS / C-style `for (...)`, `while (...)`, and `do { ... }` loops
     for m in re.finditer(r'\b(for|while)\s*(?:await\s*)?\(', text):
@@ -1915,11 +2029,8 @@ def _find_enclosing_loops(
         k = close_paren_idx + 1
         while k < len(text) and text[k] in (' ', '\t'):
             k += 1
-        # If followed by ':', this is a parenthesized Python `while (cond):` or `for (a, b) in ...:`
         if k < len(text) and text[k] == ':':
             continue
-        while k < len(text) and text[k] in (' ', '\t', '\r', '\n'):
-            k += 1
         header_inner = text[open_paren_after:close_paren_idx].strip()
         iter_var: Optional[str] = None
         iter_expr: Optional[str] = None
@@ -1934,26 +2045,16 @@ def _find_enclosing_loops(
                 iter_var = m_of.group(1)
                 iter_expr = m_of.group(3).strip() if m_of.group(2) == 'of' else None
                 loop_kind = 'js_for_of' if m_of.group(2) == 'of' else 'js_for_in'
-        if k < len(text) and text[k] == '{':
-            _, close_brace_idx = _scan_balanced_paren_args(text, k + 1)
-            body_start = open_paren_after
-            body_end = close_brace_idx
-        else:
-            body_start = open_paren_after
-            nl_idx = text.find('\n', k)
-            semi_idx = text.find(';', k)
-            end_cands = [idx for idx in (nl_idx, semi_idx) if idx >= 0]
-            body_end = min(end_cands) if end_cands else len(text)
-        if body_start <= call_pos <= body_end:
-            enclosing.append((h_start, body_start, body_end, iter_var, iter_expr, loop_kind))
+        body_start = open_paren_after
+        body_end = _advance_js_single_stmt_end(text, close_paren_idx + 1)
+        loops.append((h_start, body_start, body_end, iter_var, iter_expr, loop_kind))
 
     for m_do in re.finditer(r'\bdo\s*\{', text):
         h_start = m_do.start()
         body_start = m_do.end() - 1
         _, close_brace_idx = _scan_balanced_paren_args(text, m_do.end())
         body_end = close_brace_idx
-        if body_start <= call_pos <= body_end:
-            enclosing.append((h_start, body_start, body_end, None, None, 'js_do'))
+        loops.append((h_start, body_start, body_end, None, None, 'js_do'))
 
     # 2. Python `for <var> in <expr>:` and `while <cond>:` loops (multi-line indented or single-line suite)
     line_spans: List[Tuple[int, int, str]] = []
@@ -2004,10 +2105,22 @@ def _find_enclosing_loops(
                         body_end = j_end
                     else:
                         break
-            if body_start <= call_pos <= body_end:
-                enclosing.append((h_start, body_start, body_end, iter_var, iter_expr, loop_kind))
+            loops.append((h_start, body_start, body_end, iter_var, iter_expr, loop_kind))
 
-    return enclosing
+    return loops
+
+
+def _find_enclosing_loops(
+    text: str,
+    call_pos: int,
+) -> List[Tuple[int, int, int, Optional[str], Optional[str], str]]:
+    """
+    S17k (F48 — Option A) & S17l (F53): Find all loop constructs (`for`, `while`, `do`) in `text` whose body
+    encloses `call_pos`.
+    Note: Text order equals execution order ONLY when the code segment is linear; inside a loop body,
+    assignments appearing textually after `call_pos` take effect BEFORE `call_pos` on the next iteration.
+    """
+    return [lp for lp in _find_all_loops(text) if lp[1] <= call_pos <= lp[2]]
 
 
 def _extract_iterable_path_candidates(
@@ -2052,7 +2165,33 @@ def _resolve_expr_with_multi_env(
     multi_env: Dict[str, List[str]],
     default_join_style: str = "auto",
 ) -> List[str]:
-    """Resolve `expr` against every combination of candidate bindings in `multi_env` for variables referenced in `expr`."""
+    """
+    Resolve `expr` against every combination of candidate bindings in `multi_env` for variables referenced in `expr`,
+    including JS ternary `cond ? a : b` and Python conditional expression `a if cond else b` (S17l F51).
+    """
+    s = _strip_outer_parens(expr.strip())
+    q_parts = _split_top_level_op(s, '?')
+    if len(q_parts) == 2:
+        c_parts = _split_top_level_op(q_parts[1], ':')
+        if len(c_parts) >= 2:
+            b1 = c_parts[0].strip()
+            b2 = ':'.join(c_parts[1:]).strip()
+            res: List[str] = []
+            for branch_expr in (b1, b2):
+                for r in _resolve_expr_with_multi_env(branch_expr, multi_env, default_join_style=default_join_style):
+                    if r not in res:
+                        res.append(r)
+            return res
+
+    m_py_tern = re.match(r'^(.+?)\s+\bif\b\s+.+?\s+\belse\b\s+(.+)$', s, re.DOTALL)
+    if m_py_tern:
+        res_py: List[str] = []
+        for branch_expr in (m_py_tern.group(1).strip(), m_py_tern.group(2).strip()):
+            for r in _resolve_expr_with_multi_env(branch_expr, multi_env, default_join_style=default_join_style):
+                if r not in res_py:
+                    res_py.append(r)
+        return res_py
+
     referenced_vars = [
         v for v in multi_env
         if multi_env[v] and re.search(rf'\b{re.escape(v)}\b', expr)
@@ -2093,17 +2232,11 @@ def _extract_simple_var_env(
     call_pos: Optional[int] = None,
 ) -> Dict[str, str]:
     """
-    F43 (S17i), F45 (S17j) & F48 (S17k): Extract simple variable assignments active BEFORE `call_pos`
+    F43 (S17i), F45 (S17j), F48 (S17k) & F51 (S17l): Extract simple variable assignments active BEFORE `call_pos`
     (Principle 3: reassignments AFTER `call_pos` do not affect `call_pos` in linear code).
     IMPORTANT: Text order equals execution order ONLY when the code segment is linear. Inside a loop body
     (`for`/`while`/`do`), assignments appearing textually after `call_pos` take effect before `call_pos`
-    on the next iteration — use `_resolve_script_path_expr_candidates` to evaluate the union of all
-    bindings in the enclosing loop body plus loop iterator values.
-    - When `call_pos` is provided (`call_pos is not None`), sequential reassignments before `call_pos`
-      update `env[var_name]` to the most recent binding at `call_pos`, unless preceded by a
-      conditional/exception branch (`if`/`elif`/`else`/`try`/`except`), which marks `$DYNAMIC_WRITE`.
-    - When `call_pos is None` (whole-command fallback), any variable assigned more than once
-      conservatively becomes `$DYNAMIC_WRITE:<var_name>` (fail-closed).
+    on the next iteration — use `_resolve_script_path_expr_candidates` to evaluate reaching bindings.
     """
     env: Dict[str, str] = {}
     counts: Dict[str, int] = {}
@@ -2111,8 +2244,10 @@ def _extract_simple_var_env(
         if call_pos is not None and c_end > call_pos:
             continue
         counts[var_name] = counts.get(var_name, 0) + 1
-        has_branch_before = bool(re.search(r"\b(?:if|elif|else|try|except)\b[^;#\n]*:", text[:c_start]))
-        if (call_pos is None or has_branch_before) and counts[var_name] > 1:
+        is_cond = _is_assignment_conditional(text, c_start, c_end)
+        if (call_pos is None or is_cond) and counts[var_name] > 1:
+            env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
+        elif is_cond and counts[var_name] == 1:
             env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
         else:
             env[var_name] = resolve_script_path_expr(rhs, var_env=env, default_join_style=default_join_style)
@@ -2125,32 +2260,74 @@ def _extract_simple_var_multi_env(
     call_pos: Optional[int] = None,
 ) -> Dict[str, List[str]]:
     """
-    S17k (F48 — Option A): Compute candidate bindings for each variable at `call_pos`.
-    - In linear code (when `call_pos` is not inside any `for`/`while`/`do` loop), each variable maps to
-      its single active binding at `call_pos` from `_extract_simple_var_env`.
-    - When `call_pos` is inside a loop body, text order does NOT equal execution order across iterations:
-      any assignment to a variable anywhere inside the enclosing loop body (before or after `call_pos`)
-      and any loop iterator values (`for p in [...]`, `for (const p of [...])`) are unioned with the
-      pre-loop binding so that protected targets reached on subsequent iterations are always surfaced,
-      while loops whose bindings are all static and outside protected areas (e.g. `wip/a`, `wip/b`) pass.
+    S17k (F48 — Option A) & S17l (F51, F52, F52c, F53): Compute reaching candidate bindings for each variable at `call_pos`.
+    - Conditional assignments (`if`/`elif`/`else`/`switch`/`try`/`catch`/`finally` in Python or JS, braced or braceless,
+      ternary `? :`, or short-circuit `&&`/`||`) NEVER overwrite prior bindings: they union their candidate values with
+      the pre-branch candidate values (closing F51 while allowing wip-only branches like F51e).
+    - Unconditional assignments outside non-enclosing loops replace the variable's candidate list at that program point,
+      so dead pre-loop or post-call bindings that are unconditionally overwritten before `call_pos` on every iteration
+      are killed (closing F52 and F52c while keeping F48 8/8).
     """
     if call_pos is None:
         base_env = _extract_simple_var_env(text, default_join_style=default_join_style, call_pos=None)
         return {k: [v] for k, v in base_env.items()}
 
-    enclosing_loops = _find_enclosing_loops(text, call_pos)
+    all_loops = _find_all_loops(text)
+    enclosing_loops = [lp for lp in all_loops if lp[1] <= call_pos <= lp[2]]
+    all_assigns = _iter_top_level_assignments_with_pos(text)
+
+    def _apply_assignment(
+        m_env: Dict[str, List[str]],
+        var_name: str,
+        rhs: str,
+        c_start: int,
+        c_end: int,
+        force_union: bool = False,
+    ) -> None:
+        is_cond = force_union or _is_assignment_conditional(text, c_start, c_end)
+        for lp in all_loops:
+            if lp[1] <= c_start and c_end <= lp[2] and not (lp[1] <= call_pos <= lp[2]):
+                is_cond = True
+                break
+        is_self_ref = bool(re.search(rf'\b{re.escape(var_name)}\b', rhs))
+        if is_self_ref and var_name not in m_env:
+            m_env[var_name] = [f"$DYNAMIC_WRITE:{var_name}"]
+        rhs_cands = _resolve_expr_with_multi_env(rhs, m_env, default_join_style=default_join_style)
+        if is_self_ref:
+            prev_vals = m_env.get(var_name, [])
+            if any(rc not in prev_vals for rc in rhs_cands):
+                dyn_m = f"$DYNAMIC_WRITE:{var_name}"
+                if dyn_m not in rhs_cands:
+                    rhs_cands = list(rhs_cands) + [dyn_m]
+        if is_cond:
+            if var_name not in m_env:
+                m_env[var_name] = [f"$DYNAMIC_WRITE:{var_name}"]
+            existing = m_env[var_name]
+            for rc in rhs_cands:
+                if rc not in existing:
+                    existing.append(rc)
+        else:
+            m_env[var_name] = list(rhs_cands)
+
     if not enclosing_loops:
-        base_env = _extract_simple_var_env(text, default_join_style=default_join_style, call_pos=call_pos)
-        return {k: [v] for k, v in base_env.items()}
+        multi_env: Dict[str, List[str]] = {}
+        for var_name, rhs, c_start, c_end in all_assigns:
+            if c_end > call_pos:
+                continue
+            _apply_assignment(multi_env, var_name, rhs, c_start, c_end)
+        return multi_env
 
     outer_h_start = min(lp[0] for lp in enclosing_loops)
     outer_b_end = max(lp[2] for lp in enclosing_loops)
-    env_before = _extract_simple_var_env(text, default_join_style=default_join_style, call_pos=outer_h_start)
 
-    multi_env: Dict[str, List[str]] = {k: [v] for k, v in env_before.items()}
-    cur_env: Dict[str, str] = dict(env_before)
-    bound_before_call: set = set(env_before.keys())
+    multi_env = {}
+    for var_name, rhs, c_start, c_end in all_assigns:
+        if c_end > outer_h_start:
+            continue
+        _apply_assignment(multi_env, var_name, rhs, c_start, c_end)
 
+    iter_vars_cands: Dict[str, List[str]] = {}
+    cur_env_for_iter = {k: vals[-1] for k, vals in multi_env.items() if vals}
     for _h_start, _b_start, _b_end, iter_var, iter_expr, _l_kind in enclosing_loops:
         if iter_var:
             for raw_v in iter_var.split(','):
@@ -2160,34 +2337,50 @@ def _extract_simple_var_multi_env(
                 if ',' in iter_var or iter_expr is None:
                     cands = [f"$DYNAMIC_WRITE:{v}"]
                 else:
-                    cands = _extract_iterable_path_candidates(iter_expr, cur_env, default_join_style, v)
-                multi_env[v] = list(cands)
+                    cands = _extract_iterable_path_candidates(iter_expr, cur_env_for_iter, default_join_style, v)
+                iter_vars_cands[v] = list(cands)
                 if cands:
-                    cur_env[v] = cands[-1]
-                bound_before_call.add(v)
+                    cur_env_for_iter[v] = cands[-1]
 
-    for var_name, rhs, c_start, c_end in _iter_top_level_assignments_with_pos(text):
-        if c_start < outer_h_start or c_end > outer_b_end:
-            continue
-        if c_end <= call_pos:
-            bound_before_call.add(var_name)
-        elif var_name not in bound_before_call:
-            multi_env.setdefault(var_name, []).append(f"$DYNAMIC_WRITE:{var_name}")
-        rhs_cands = _resolve_expr_with_multi_env(rhs, multi_env, default_join_style=default_join_style)
-        if (
-            re.search(rf'\b{re.escape(var_name)}\b', rhs)
-            and len(rhs_cands) == 1
-            and not rhs_cands[0].startswith('$DYNAMIC_WRITE:')
-            and cur_env.get(var_name) != rhs_cands[0]
-        ):
-            rhs_cands.append(f"$DYNAMIC_WRITE:{var_name}")
-        existing = multi_env.setdefault(var_name, [])
-        for rc in rhs_cands:
-            if rc not in existing:
-                existing.append(rc)
-            cur_env[var_name] = rc
+    pre_call_loop_assigns = [
+        a for a in all_assigns if outer_h_start <= a[2] and a[3] <= call_pos
+    ]
+    post_call_loop_assigns = [
+        a for a in all_assigns if a[2] > call_pos and a[3] <= outer_b_end
+    ]
 
-    return multi_env
+    reaching_at_call: Dict[str, List[str]] = {}
+    for _iteration in range(3):
+        # At the top of each iteration, loop iterator variables receive their iterable candidates
+        for iv, icands in iter_vars_cands.items():
+            existing_iv = multi_env.setdefault(iv, [])
+            for c in icands:
+                if c not in existing_iv:
+                    existing_iv.append(c)
+
+        # Execute statements in the loop body before `call_pos`
+        for var_name, rhs, c_start, c_end in pre_call_loop_assigns:
+            force_u = var_name in iter_vars_cands
+            _apply_assignment(multi_env, var_name, rhs, c_start, c_end, force_union=force_u)
+
+        # Record all candidate bindings that reach `call_pos` on this iteration
+        for k, vals in multi_env.items():
+            dest = reaching_at_call.setdefault(k, [])
+            for val in vals:
+                if val not in dest:
+                    dest.append(val)
+
+        if not post_call_loop_assigns:
+            break
+
+        # Execute statements in the loop body after `call_pos` before wrapping to the next iteration
+        for var_name, rhs, c_start, c_end in post_call_loop_assigns:
+            if _iteration == 0 and var_name not in multi_env:
+                multi_env[var_name] = [f"$DYNAMIC_WRITE:{var_name}"]
+            force_u = var_name in iter_vars_cands
+            _apply_assignment(multi_env, var_name, rhs, c_start, c_end, force_union=force_u)
+
+    return reaching_at_call
 
 
 def _resolve_script_path_expr_candidates(
@@ -2197,8 +2390,7 @@ def _resolve_script_path_expr_candidates(
     default_join_style: str = "auto",
 ) -> List[str]:
     """
-    S17k (F48 — Option A): Resolve `expr` at `call_pos` into all candidate target strings
-    (1 candidate in linear code; union of loop-body / iterator bindings when `call_pos` is inside a loop).
+    S17k (F48 — Option A) & S17l (F51, F52, F53): Resolve `expr` at `call_pos` into all reaching candidate target strings.
     """
     multi_env = _extract_simple_var_multi_env(text, default_join_style=default_join_style, call_pos=call_pos)
     cands = _resolve_expr_with_multi_env(expr, multi_env, default_join_style=default_join_style)
@@ -2595,7 +2787,7 @@ def _extract_receiver_type_vars_at_pos(
             kind = 'other'
         kinds = seen_kinds.setdefault(var_name, set())
         kinds.add(kind)
-        has_branch_before = bool(re.search(r'\b(?:if|elif|else|try|except)\b[^;#\n]*:', text[:c_start]))
+        has_branch_before = _is_assignment_conditional(text, c_start, c_end)
         in_enclosing_loop = outer_loop_start is not None and c_start >= outer_loop_start
         if (has_branch_before or in_enclosing_loop) and len(kinds) > 1:
             ambig_vars.add(var_name)
