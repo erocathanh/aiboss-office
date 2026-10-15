@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"const map=new Map([['k',1]]); map.delete('k')\""
+  }
+}

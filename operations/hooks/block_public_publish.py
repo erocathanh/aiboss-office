@@ -139,9 +139,18 @@ def is_curl_write(cmd: str) -> bool:
 
 def _is_non_readonly_method_spec(options_text: str) -> bool:
     """Return True if options_text specifies an HTTP method that is POST/PUT/DELETE/PATCH or non-literal/non-readonly."""
-    for m in re.finditer(r"\bmethod\s*[:=]\s*(['\"]?[A-Za-z0-9_$.]+['\"]?)", options_text, re.I):
+    for m in re.finditer(
+        r"(?:['\"`]\s*method\s*['\"`]|\bmethod)\s*[:=]\s*(['\"`]?[A-Za-z0-9_$.${}]+['\"`]?)",
+        options_text,
+        re.I,
+    ):
         raw_val = m.group(1).strip()
-        if not (len(raw_val) >= 2 and raw_val[0] == raw_val[-1] and raw_val[0] in ("'", '"')):
+        if not (
+            len(raw_val) >= 2
+            and raw_val[0] == raw_val[-1]
+            and raw_val[0] in ("'", '"', "`")
+            and "${" not in raw_val
+        ):
             return True
         val = raw_val[1:-1].strip().upper()
         if val not in ("GET", "HEAD", "OPTIONS"):
@@ -149,33 +158,153 @@ def _is_non_readonly_method_spec(options_text: str) -> bool:
     return False
 
 
+def _has_explicit_readonly_method(options_text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:['\"`]\s*method\s*['\"`]|\bmethod)\s*[:=]\s*['\"`](?:GET|HEAD|OPTIONS)['\"`]",
+            options_text,
+            re.I,
+        )
+    ) and not _is_non_readonly_method_spec(options_text)
+
+
 def _has_body_prop(options_text: str) -> bool:
     return bool(
-        re.search(r"\bbody\s*:", options_text)
+        re.search(r"(?:['\"`]\s*body\s*['\"`]|\bbody)\s*:", options_text)
         or re.search(r"\{\s*(?:[A-Za-z0-9_$]+\s*,\s*)*body\s*(?:,|\})", options_text)
     )
 
 
 def _has_body_or_data_prop(options_text: str) -> bool:
     return _has_body_prop(options_text) or bool(
-        re.search(r"\bdata\s*:", options_text)
+        re.search(r"(?:['\"`]\s*data\s*['\"`]|\bdata)\s*:", options_text)
         or re.search(r"\{\s*(?:[A-Za-z0-9_$]+\s*,\s*)*data\s*(?:,|\})", options_text)
     )
 
 
-def _extract_simple_obj_var_env(text: str) -> dict[str, str | None]:
+def _unwrap_inline_script_text(text: str) -> str:
+    """If `text` is a shell inline interpreter command (`node -e "..."`, `python3 -c '...'`), unwrap the outer shell quote."""
+    s = text.strip()
+    m = re.match(
+        r"^[\s\S]*?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+(['\"])([\s\S]*)\1\s*$",
+        s,
+    )
+    if m:
+        q = m.group(1)
+        body = m.group(2)
+        if q == '"':
+            body = body.replace('\\"', '"')
+        return body
+    return text
+
+
+def _split_top_level_statements_with_pos(text: str) -> list[tuple[str, int, int]]:
+    r"""Split text on top-level `;` or `\n` (where `()`, `[]`, `{}` depth is 0), returning (stmt, start_pos, end_pos)."""
+    stmts: list[tuple[str, int, int]] = []
+    quote: str | None = None
+    escape = False
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and quote is not None:
+            escape = True
+            continue
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+            continue
+        if ch in ("(", "[", "{"):
+            depth += 1
+            continue
+        if ch in (")", "]", "}"):
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and ch in (";", "\n"):
+            seg = text[start:i].strip()
+            if seg:
+                stmts.append((seg, start, i))
+            start = i + 1
+    tail = text[start:].strip()
+    if tail:
+        stmts.append((tail, start, len(text)))
+    return stmts
+
+
+def _extract_shadowed_or_mutated_vars(text: str) -> set[str]:
     """
-    F26 (S17f): Extract one-step object/dict literal variable assignments (`const options = {...}`, `cfg = {...}`)
-    within the same command text. Variables assigned multiple times, assigned non-object expressions, or containing
-    spread `...` map to None (unresolvable -> fail-closed when passed as request options/config).
+    F32b (S17g): Collect variable names that are function/arrow/lambda/catch parameters,
+    mutated via property/index assignment (`opts.method = ...`, `Object.assign(opts, ...)`),
+    or assigned more than once across the entire command text (including inside inner blocks/functions).
     """
-    env: dict[str, str | None] = {}
+    shadowed: set[str] = set()
+    param_lists: list[str] = []
+    for m in re.finditer(r"\bfunction(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)", text):
+        param_lists.append(m.group(1))
+    for m in re.finditer(r"\(([^()]*)\)\s*=>", text):
+        param_lists.append(m.group(1))
+    for m in re.finditer(r"\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=>", text):
+        shadowed.add(m.group(1))
+    for m in re.finditer(r"\bdef\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^)]*)\)", text):
+        param_lists.append(m.group(1))
+    for m in re.finditer(r"\blambda\b([^:]*):", text):
+        param_lists.append(m.group(1))
+    for m in re.finditer(r"\bcatch\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)", text):
+        shadowed.add(m.group(1))
+
+    for plist in param_lists:
+        for ident in re.findall(r"\b([A-Za-z_$][A-Za-z0-9_$]*)\b", plist):
+            if ident not in ("function", "const", "let", "var", "async", "await"):
+                shadowed.add(ident)
+
+    # Property / index mutation or Object.assign on an object variable
+    for m in re.finditer(
+        r"\b([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\.\s*[A-Za-z_$][A-Za-z0-9_$]*|\[\s*[^\]]+\])\s*=(?![=~>])",
+        text,
+    ):
+        shadowed.add(m.group(1))
+    for m in re.finditer(r"\bObject\.assign\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\b", text):
+        shadowed.add(m.group(1))
+
+    # Count all variable declarations/assignments across all scopes
+    assign_counts: dict[str, int] = {}
+    for m in re.finditer(
+        r"(?:^|[;\n{(\s])(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])",
+        text,
+    ):
+        vname = m.group(1)
+        if vname in ("import", "from", "return", "if", "elif", "while", "for", "assert"):
+            continue
+        assign_counts[vname] = assign_counts.get(vname, 0) + 1
+    for vname, cnt in assign_counts.items():
+        if cnt > 1:
+            shadowed.add(vname)
+
+    return shadowed
+
+
+def _extract_simple_obj_var_env(text: str) -> dict[str, tuple[str, int] | None]:
+    """
+    F26 (S17f) & F32 (S17g): Extract top-level one-step object/dict literal variable assignments
+    (`const options = {...}`, `cfg = {...}`) that are unambiguous in scope.
+    Variables shadowed by function/arrow/lambda parameters, assigned multiple times, mutated,
+    assigned non-object expressions, or containing spread `...` map to None (unresolvable -> fail-closed).
+    """
+    text = _unwrap_inline_script_text(text)
+    env: dict[str, tuple[str, int] | None] = {}
+    shadowed = _extract_shadowed_or_mutated_vars(text)
     counts: dict[str, int] = {}
-    for stmt in re.split(r"[;\n]+", text):
+    for idx, (stmt, stmt_start, stmt_end) in enumerate(_split_top_level_statements_with_pos(text)):
         s = stmt.strip()
         if not s:
             continue
-        s = re.sub(r"^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+['\"]?", "", s).strip()
+        if idx == 0:
+            s = re.sub(r"^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+['\"]?", "", s).strip()
         m = re.match(r"^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$", s, re.DOTALL)
         if not m:
             continue
@@ -186,20 +315,28 @@ def _extract_simple_obj_var_env(text: str) -> dict[str, str | None]:
         if var_name in ("import", "from", "return", "if", "elif", "while", "for", "assert"):
             continue
         counts[var_name] = counts.get(var_name, 0) + 1
-        if counts[var_name] > 1:
+        if counts[var_name] > 1 or var_name in shadowed:
             env[var_name] = None
             continue
         if rhs.startswith("{") and rhs.endswith("}") and not re.search(r"\.\.\.\s*[A-Za-z_$(]", rhs):
-            env[var_name] = rhs
+            env[var_name] = (rhs, stmt_end)
         else:
             env[var_name] = None
+    for sh_name in shadowed:
+        if sh_name in env:
+            env[sh_name] = None
     return env
 
 
-def _resolve_options_literal(opt_expr: str, obj_env: dict[str, str | None]) -> str | None:
+def _resolve_options_literal(
+    opt_expr: str,
+    obj_env: dict[str, tuple[str, int] | None],
+    call_pos: int | None = None,
+) -> str | None:
     """
-    F26 (S17f): Resolve an options/config argument to a static `{...}` literal string,
-    or return None if it cannot be statically resolved (variable out of scope, spread, function call, etc.).
+    F26 (S17f) & F32 (S17g): Resolve an options/config argument to a static `{...}` literal string
+    when its binding at `call_pos` is unambiguous and unshadowed, or return None if it cannot be
+    statically resolved (shadowed by parameter, out of scope, spread, function call, etc.).
     """
     s = bash_parser._strip_outer_parens(opt_expr)
     if not s:
@@ -209,26 +346,148 @@ def _resolve_options_literal(opt_expr: str, obj_env: dict[str, str | None]) -> s
             return None
         return s
     if re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$", s):
-        return obj_env.get(s, None)
+        entry = obj_env.get(s, None)
+        if entry is None:
+            return None
+        if isinstance(entry, tuple):
+            lit_str, def_end = entry
+            if call_pos is not None and def_end > call_pos:
+                return None
+            return lit_str
+        return entry
     return None
+
+
+_KNOWN_DATA_COLLECTION_NAMES = {
+    "Set", "Map", "WeakSet", "WeakMap", "Headers", "URLSearchParams", "FormData",
+    "localStorage", "sessionStorage", "cookies", "searchParams", "headers", "Reflect",
+}
+
+_KNOWN_HTTP_CLIENT_NAMES = {
+    "axios", "got", "superagent", "undici", "ky", "request", "supertest",
+    "http", "https", "requests", "httpx", "urllib", "urllib3", "aiohttp",
+}
+
+_HTTP_LIB_IMPORT_RE = re.compile(
+    r"""(?:require|import)\s*\(\s*['"](?:node:)?(?:axios|got|superagent|undici|node-fetch|cross-fetch|isomorphic-fetch|https?|request|supertest|ky)['"]\s*\)""",
+    re.I,
+)
+
+
+def _extract_data_and_http_vars(text: str) -> tuple[set[str], set[str]]:
+    """
+    F35 (S17g): Track variables bound to data collections (`new Set(...)`, `new Map(...)`, `new Headers(...)`,
+    `new URLSearchParams(...)`) vs HTTP client libraries (`axios`, `got`, `superagent`, `undici`, `requests`, `httpx`, etc.).
+    """
+    data_vars: set[str] = set()
+    http_vars: set[str] = set()
+    for m in re.finditer(
+        r"(?:^|[;\n{(\s])(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])\s*([^;\n]+)",
+        text,
+    ):
+        vname = m.group(1)
+        rhs = bash_parser._strip_outer_parens(m.group(2).strip())
+        if re.match(
+            r"^(?:new\s+(?:Set|Map|WeakSet|WeakMap|Headers|URLSearchParams|FormData)\b|(?:localStorage|sessionStorage)\b|.*\.(?:headers|searchParams)\b)",
+            rhs,
+        ):
+            data_vars.add(vname)
+        elif (
+            rhs in _KNOWN_HTTP_CLIENT_NAMES
+            or any(rhs.startswith(h + ".") for h in _KNOWN_HTTP_CLIENT_NAMES)
+            or bool(_HTTP_LIB_IMPORT_RE.search(rhs))
+            or bool(
+                re.search(
+                    r"\b(?:PoolManager|HTTPS?Connection|Session|AsyncClient|Client)\s*\(",
+                    rhs,
+                )
+            )
+        ):
+            http_vars.add(vname)
+
+    for m in re.finditer(
+        r"\bimport\s+(?:requests|httpx|urllib3)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)",
+        text,
+    ):
+        http_vars.add(m.group(1))
+    for m in re.finditer(
+        r"\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s+from\s+['\"](?:node:)?(?:axios|got|superagent|undici|https?)['\"]",
+        text,
+    ):
+        http_vars.add(m.group(1))
+    return data_vars, http_vars
+
+
+def _is_data_collection_receiver(recv_expr: str, data_vars: set[str]) -> bool:
+    s = bash_parser._strip_outer_parens(recv_expr)
+    if not s:
+        return False
+    if s in data_vars or s in _KNOWN_DATA_COLLECTION_NAMES:
+        return True
+    if any(s.startswith(dv + ".") for dv in data_vars):
+        return True
+    if s.endswith((".headers", ".searchParams", ".cookies", ".dataset", ".classList")):
+        return True
+    if re.match(r"^new\s+(?:Set|Map|WeakSet|WeakMap|Headers|URLSearchParams|FormData)\s*\(", s):
+        return True
+    return False
+
+
+def _is_http_client_receiver(recv_expr: str, http_vars: set[str]) -> bool:
+    s = bash_parser._strip_outer_parens(recv_expr)
+    if not s:
+        return False
+    if s in http_vars or s in _KNOWN_HTTP_CLIENT_NAMES:
+        return True
+    if any(s.startswith(hv + ".") for hv in http_vars):
+        return True
+    if any(s.startswith(hn + ".") for hn in _KNOWN_HTTP_CLIENT_NAMES):
+        return True
+    if _HTTP_LIB_IMPORT_RE.search(s):
+        return True
+    if re.search(r"\b(?:PoolManager|HTTPS?Connection|Session|AsyncClient|Client)\s*\(", s):
+        return True
+    return False
+
+
+def _looks_like_url_arg_expr(arg_expr: str) -> bool:
+    s = bash_parser._strip_outer_parens(arg_expr.strip())
+    if not s:
+        return False
+    unquoted = s.strip("'\"`")
+    if unquoted.lower().startswith(("http://", "https://", "//")):
+        return True
+    if s.startswith(("new URL", "new Request")):
+        return True
+    if "http://" in s.lower() or "https://" in s.lower():
+        return True
+    return False
 
 
 def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
     """
-    F19b (S17e), F26 & F31 (S17f): Detect HTTP write calls in Python/JS using balanced parenthesis argument lists,
-    one-step options/config variable resolution (fail-closed when unresolvable), and arbitrary receiver expressions
-    for `.post`/`.put`/`.delete`/`.patch`/`.request` (e.g. `require('axios').post(...)`, `urllib3.PoolManager().request(...)`).
+    F19b (S17e), F26 & F31 (S17f), F32 & F35 (S17g): Detect HTTP write calls in Python/JS using balanced
+    parenthesis argument lists, scope-aware options/config variable resolution (fail-closed when unresolvable),
+    and HTTP-client vs data-collection receiver classification for `.post`/`.put`/`.delete`/`.patch`/`.request`.
     Returns a list of raw URL argument expressions (or None when an HTTP write call has no extractable URL arg).
     """
+    text = _unwrap_inline_script_text(text)
     url_exprs: list[str | None] = []
     obj_env = _extract_simple_obj_var_env(text)
+    data_vars, http_vars = _extract_data_and_http_vars(text)
 
-    # 1. F31: Explicit write verbs `.post(...)`, `.put(...)`, `.delete(...)`, `.patch(...)` on ANY receiver expression
-    for call_args in bash_parser._extract_call_arg_lists(
-        text, r"\.\s*(?:post|put|delete|patch)\s*\("
-    ):
+    # 1. F31 & F35: Write verbs `.post(...)`, `.put(...)`, `.delete(...)`, `.patch(...)`
+    #    Distinguish data-collection receivers (`Set`, `Map`, `Headers`, `URLSearchParams`, etc.)
+    #    from HTTP clients (`axios`, `got`, `superagent`, `undici`, `requests`, `httpx`, `require('axios')`, etc.).
+    for m_verb in re.finditer(r"\.\s*(post|put|delete|patch)\s*\(", text):
+        recv_expr = bash_parser._extract_receiver_before_dot(text, m_verb.start())
+        call_args, _ = bash_parser._scan_balanced_paren_args(text, m_verb.end())
+        if _is_data_collection_receiver(recv_expr, data_vars):
+            continue
+        is_http_recv = _is_http_client_receiver(recv_expr, http_vars)
         if not call_args:
-            url_exprs.append(None)
+            if is_http_recv:
+                url_exprs.append(None)
             continue
         url_expr = None
         for extra in call_args:
@@ -238,7 +497,8 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
                 break
         if url_expr is None:
             url_expr = call_args[0].strip()
-        url_exprs.append(url_expr or None)
+        if is_http_recv or (url_expr and _looks_like_url_arg_expr(url_expr)):
+            url_exprs.append(url_expr or None)
 
     # 2. F26 & F31: `.request(...)` on ANY receiver expression (requests, httpx, urllib3.PoolManager(),
     #    http.client.HTTPSConnection(host), axios, undici, http/https)
@@ -288,17 +548,20 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
                 and recv_expr not in ("http", "https")
             ):
                 continue
-            resolved_cfg = _resolve_options_literal(arg0, obj_env)
+            resolved_cfg = _resolve_options_literal(arg0, obj_env, m_req.start())
             if resolved_cfg is None:
                 url_exprs.append(None)
             else:
                 explicit_readonly = (
-                    bool(re.search(r"\bmethod\s*:\s*['\"](?:GET|HEAD|OPTIONS)['\"]", resolved_cfg, re.I))
+                    _has_explicit_readonly_method(resolved_cfg)
                     and not _has_body_or_data_prop(resolved_cfg)
                     and not bool(re.search(r"\.write\s*\(", text))
                 )
                 if not explicit_readonly:
-                    m_url = re.search(r"""\burl\s*:\s*(['"][^'"]+['"]|[^,}\s]+)""", resolved_cfg)
+                    m_url = re.search(
+                        r"""(?:['"`]\s*url\s*['"`]|\burl)\s*:\s*(['"][^'"]+['"]|[^,}\s]+)""",
+                        resolved_cfg,
+                    )
                     url_exprs.append(m_url.group(1).strip() if m_url else None)
             continue
 
@@ -334,7 +597,7 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
             opt_arg = call_args[1].strip()
             if opt_arg in ("undefined", "null", "{}") and not bool(re.search(r"\.write\s*\(", text)) and recv_expr not in ("http", "https"):
                 continue
-            resolved_opt = _resolve_options_literal(opt_arg, obj_env)
+            resolved_opt = _resolve_options_literal(opt_arg, obj_env, m_req.start())
             if resolved_opt is None:
                 url_exprs.append(arg0 or None)
             else:
@@ -343,17 +606,18 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
                     or _has_body_or_data_prop(resolved_opt)
                     or bool(re.search(r"\.write\s*\(", text))
                 )
-                is_http_req_without_readonly = recv_expr in ("http", "https") and not bool(
-                    re.search(r"\bmethod\s*:\s*['\"](?:GET|HEAD|OPTIONS)['\"]", resolved_opt, re.I)
+                is_http_req_without_readonly = recv_expr in ("http", "https") and not _has_explicit_readonly_method(
+                    resolved_opt
                 )
                 if has_write or is_http_req_without_readonly:
                     url_exprs.append(arg0 or None)
 
-    # 3. F26 & F31: fetch(resource, options?) and require('node-fetch')(resource, options?) / (await import('node-fetch')).default(...)
-    for call_args in bash_parser._extract_call_arg_lists(
-        text,
+    # 3. F26, F31 & F32: fetch(resource, options?) and require('node-fetch')(resource, options?) / (await import('node-fetch')).default(...)
+    for m_fetch in re.finditer(
         r"(?:\bfetch|require\s*\(\s*['\"](?:node-fetch|cross-fetch|isomorphic-fetch)['\"]\s*\)|\(\s*await\s+import\s*\(\s*['\"](?:node-fetch|cross-fetch|isomorphic-fetch)['\"]\s*\)\s*\)(?:\s*\.\s*default)?)\s*\(",
+        text,
     ):
+        call_args, _ = bash_parser._scan_balanced_paren_args(text, m_fetch.end())
         if not call_args:
             continue
         first_arg = call_args[0].strip()
@@ -371,7 +635,7 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
                 opt_s = opt_cand.strip()
                 if opt_s in ("undefined", "null", "{}"):
                     continue
-                resolved_opt = _resolve_options_literal(opt_s, obj_env)
+                resolved_opt = _resolve_options_literal(opt_s, obj_env, m_fetch.start())
                 if resolved_opt is None or _is_non_readonly_method_spec(resolved_opt) or _has_body_prop(resolved_opt):
                     url_exprs.append(req_url or None)
                     break
@@ -382,36 +646,40 @@ def _find_code_http_write_url_exprs(text: str) -> list[str | None]:
         opt_arg = call_args[1].strip()
         if opt_arg in ("undefined", "null", "{}"):
             continue
-        resolved_opt = _resolve_options_literal(opt_arg, obj_env)
+        resolved_opt = _resolve_options_literal(opt_arg, obj_env, m_fetch.start())
         if resolved_opt is None:
-            # F26: Options is an unresolvable variable/expression/spread -> fail-closed!
+            # F26 & F32: Options is an unresolvable or shadowed variable/expression/spread -> fail-closed!
             url_exprs.append(first_arg or None)
         elif _is_non_readonly_method_spec(resolved_opt) or _has_body_prop(resolved_opt):
             url_exprs.append(first_arg or None)
 
-    # 4. F26 & F31: axios(config_or_url, config?) / require('axios')(...) / (await import('axios')).default(...)
-    for call_args in bash_parser._extract_call_arg_lists(
-        text,
+    # 4. F26, F31 & F32: axios(config_or_url, config?) / require('axios')(...) / (await import('axios')).default(...)
+    for m_axios in re.finditer(
         r"(?:\baxios|require\s*\(\s*['\"]axios['\"]\s*\)|\(\s*await\s+import\s*\(\s*['\"]axios['\"]\s*\)\s*\)(?:\s*\.\s*default)?)\s*\(",
+        text,
     ):
+        call_args, _ = bash_parser._scan_balanced_paren_args(text, m_axios.end())
         if not call_args:
             continue
         if len(call_args) == 1:
             arg0 = call_args[0].strip()
             if _STRICT_STATIC_URL_LITERAL_RE.match(arg0):
                 continue
-            resolved_cfg = _resolve_options_literal(arg0, obj_env)
+            resolved_cfg = _resolve_options_literal(arg0, obj_env, m_axios.start())
             if resolved_cfg is None:
                 url_exprs.append(None)
             elif _is_non_readonly_method_spec(resolved_cfg) or _has_body_or_data_prop(resolved_cfg):
-                m_url = re.search(r"""\burl\s*:\s*(['"][^'"]+['"]|[^,}\s]+)""", resolved_cfg)
+                m_url = re.search(
+                    r"""(?:['"`]\s*url\s*['"`]|\burl)\s*:\s*(['"][^'"]+['"]|[^,}\s]+)""",
+                    resolved_cfg,
+                )
                 url_exprs.append(m_url.group(1).strip() if m_url else None)
         else:
             url_arg = call_args[0].strip()
             cfg_arg = call_args[1].strip()
             if cfg_arg in ("undefined", "null", "{}"):
                 continue
-            resolved_cfg = _resolve_options_literal(cfg_arg, obj_env)
+            resolved_cfg = _resolve_options_literal(cfg_arg, obj_env, m_axios.start())
             if resolved_cfg is None or _is_non_readonly_method_spec(resolved_cfg) or _has_body_or_data_prop(resolved_cfg):
                 url_exprs.append(url_arg or None)
 

@@ -847,7 +847,7 @@ test('F15 & Item 5: Hook 2.1 blocks xargs/wrapped HTTP writes & symlinked skill 
     'RR-02': ['caffeinate', 'script'],
     'RR-03': ['F27', 'F28', 'copytree', 'os.unlink', 'io.FileIO', 'shutil.move'],
     'RR-04': ['F26', 'F31', "require('axios')"],
-    'RR-05': ['F29', 'MAX_SCRIPT_DEPTH = 4', 'npm run', 'Không phân loại `P2` theo trình chạy'],
+    'RR-05': ['F29', 'MAX_SCRIPT_DEPTH = 4', 'npm run', 'Không phân loại `P2` theo trình chạy', 'STANDARD_SAFE_PACKAGE_SCRIPTS', 'npm run build'],
   };
 
   for (const [rrId, expectedPhrases] of Object.entries(rrExpectations)) {
@@ -1149,7 +1149,64 @@ test('F26, F27, F28, F29 & F31 (S17f): Hook 2.1 resolves options/config variable
     });
     assert.equal(r.status, 0, `F28 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
   }
+
+  // 6. F32 & F35 (S17g): Quoted keys, shadowed parameter opts, HTTP client .delete vs Set/Map/Headers .delete
+  for (const cmd of [
+    "node -e \"const opts={'method':'POST','body':'x'}; fetch('https://example.net/ingest',opts)\"",
+    "node -e \"const opts={method:'GET'}; function send(opts){return fetch('https://example.net/ingest',opts)}; send({method:'POST',body:'x'})\"",
+    "node -e \"require('axios').delete('https://example.net/x')\"",
+    "node -e \"const axios=require('axios'); const client=axios; client.delete(url)\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F32/F35 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:block_public_publish]'), `F32/F35 stderr prefix missing for "${cmd}"`);
+  }
+
+  for (const cmd of [
+    "node -e \"const opts={'method':'GET'}; fetch('https://example.com/api',opts)\"",
+    "node -e \"const seen=new Set(['x']); seen.delete('x'); console.log(seen.size)\"",
+    "node -e \"const map=new Map([['k',1]]); map.delete('k')\"",
+    "node -e \"const headers=new Headers(); headers.delete('x')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook21Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, `F32/F35 allow: "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+  }
+
+  // 7. F33 & F34 (S17g): Path instance bindings (path=Path(...), p=pathlib.Path(...), p.replace) vs str.replace
+  for (const cmd of [
+    "python3 -c \"from pathlib import Path; path=Path('projects/demo/inputs/a'); path.write_text('x')\"",
+    "python3 -c \"import pathlib; p=pathlib.Path('projects/demo/inputs/a'); p.write_text('x')\"",
+    "python3 -c \"from pathlib import Path; p=Path('projects/x/inputs/a'); p.replace('wip/a')\"",
+  ]) {
+    const r = spawnSync('/usr/bin/python3', [hook7Path], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 2, `F33/F34 block: "${cmd}" must exit 2, got ${r.status}`);
+    assert.ok(r.stderr.includes('[opc-harness:lock_raw_inputs]'), `F33/F34 stderr prefix missing for "${cmd}"`);
+  }
+
+  for (const cmd of [
+    "python3 -c \"text='a b'.strip(); print(text.replace(' ','-'))\"",
+    "python3 -c \"s='abc'; print(s.replace('a','b'))\"",
+    "python3 -c \"name=' a b '; print(name.strip().replace(' ','_'))\"",
+  ]) {
+    for (const hPath of [hook7Path, hook4Path]) {
+      const r = spawnSync('/usr/bin/python3', [hPath], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd }, cwd: REPO_ROOT }),
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, `F34 allow (${path.basename(hPath)}): "${cmd}" must exit 0, got ${r.status} (stderr: ${r.stderr})`);
+    }
+  }
 });
+
 
 
 

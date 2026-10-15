@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 bash_parser.py — Bộ phân tích cú pháp Bash dùng chung cho các hook của opc-business-harness.
 Tuân thủ tiêu chuẩn POSIX / Bash cơ bản, hỗ trợ:
 - Tách pipeline, compound commands (;, &&, ||, |, newline) an toàn, tôn trọng nháy và escape.
@@ -1008,6 +1008,7 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
         default_join = 'node' if base == 'node' else 'auto'
         var_env = _extract_simple_var_env(combined_raw, default_join_style=default_join)
         module_vars = _extract_module_vars(combined_raw)
+        path_vars = _extract_path_vars(combined_raw)
 
         for call_args in _extract_module_call_arg_lists(combined_raw, r'\bopen\s*\(', module_vars):
             if not call_args:
@@ -1021,10 +1022,11 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                     label = "python open dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python open write"
                     targets.append((resolved_target, label))
 
-        # F20a, F27 & F28: Receiver-based detection for pathlib methods (.write_text, .write_bytes, .open,
+        # F20a, F27, F28, F33 & F34: Receiver-based detection for pathlib methods (.write_text, .write_bytes, .open,
         # .unlink, .rmdir, .touch, .mkdir, .symlink_to, .hardlink_to, .rename, .replace).
-        # F28: Skip module receivers (os, fs, shutil, pathlib, io, require('fs'), etc.) so module APIs
-        # like os.unlink('wip/tmp') or fs.unlink('wip/tmp', cb) are never misclassified as pathlib receivers.
+        # F28 & F33: Skip true module receivers (os, fs, shutil, pathlib, io, require('fs'), etc.) while preserving
+        # constructor instances (path = Path(...), p = pathlib.Path(...)).
+        # F34: Only treat .rename(dst) / .replace(dst) as Path file moves when receiver has Path evidence.
         for recv_expr, method_name, method_args in _extract_method_calls_with_receiver(
             combined_raw,
             ('write_text', 'write_bytes', 'open', 'unlink', 'rmdir', 'touch', 'mkdir', 'symlink_to', 'hardlink_to', 'rename', 'replace'),
@@ -1045,7 +1047,9 @@ def extract_write_targets(cmd: SimpleCommand, symlinks_map: Optional[Dict[str, s
                 label = "python Path dynamic write" if resolved_target.startswith('$DYNAMIC_WRITE:') else "python Path.open"
                 targets.append((resolved_target, label))
             elif method_name in ('rename', 'replace'):
-                # F27c: pathlib p.rename(dst) / p.replace(dst) modifies BOTH source (receiver p) and destination (arg[0])
+                # F27c & F34: Only apply Path.rename(dst) / Path.replace(dst) when receiver is a Path expression/binding
+                if not _is_path_receiver_expr(recv_expr, path_vars):
+                    continue
                 resolved_src = resolve_script_path_expr(recv_expr, var_env=var_env, default_join_style='python')
                 src_label = f"python Path.{method_name} dynamic source" if resolved_src.startswith('$DYNAMIC_WRITE:') else f"python Path.{method_name} source"
                 targets.append((resolved_src, src_label))
@@ -1486,6 +1490,35 @@ def _split_top_level_plus(expr: str) -> List[str]:
     return _split_top_level_op(expr, '+')
 
 
+def _iter_top_level_assignments(text: str) -> List[Tuple[str, str]]:
+    """
+    Yield (var_name, rhs) for top-level assignments across `;` and newline-separated statements,
+    including JS comma-separated declarations like `const fs=require('fs'),p=require('path')`.
+    """
+    assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?![=~>])(.+)$')
+    out: List[Tuple[str, str]] = []
+    for stmt in re.split(r'[;\n]+', text):
+        s = stmt.strip()
+        if not s:
+            continue
+        s = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
+        clauses = [c.strip() for c in _split_top_level_op(s, ',') if c.strip()]
+        if len(clauses) > 1 and all(assign_re.match(c) for c in clauses):
+            target_clauses = clauses
+        else:
+            target_clauses = [s]
+        for clause in target_clauses:
+            m = assign_re.match(clause)
+            if not m:
+                continue
+            var_name = m.group(1)
+            rhs = m.group(2).strip()
+            if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
+                continue
+            out.append((var_name, rhs))
+    return out
+
+
 def _extract_simple_var_env(text: str, default_join_style: str = "auto") -> Dict[str, str]:
     """
     Extract simple variable assignments (e.g. `p = Path(root) / 'projects' / ...` or `p = Path('wip') / 'a.md'`)
@@ -1493,19 +1526,7 @@ def _extract_simple_var_env(text: str, default_join_style: str = "auto") -> Dict
     """
     env: Dict[str, str] = {}
     counts: Dict[str, int] = {}
-    for stmt in re.split(r'[;\n]+', text):
-        s = stmt.strip()
-        if not s:
-            continue
-        # Strip leading interpreter inline flag prefix (e.g. `python3 -c "` or `node -e "`)
-        s = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
-        m = re.match(r'^(?:(?:const|let|var)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(?![=~>])(.+)$', s)
-        if not m:
-            continue
-        var_name = m.group(1)
-        rhs = m.group(2).strip()
-        if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
-            continue
+    for var_name, rhs in _iter_top_level_assignments(text):
         counts[var_name] = counts.get(var_name, 0) + 1
         if counts[var_name] > 1:
             env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
@@ -1675,22 +1696,58 @@ def _extract_call_arg_lists(text: str, prefix_pattern: str) -> List[List[str]]:
 
 _KNOWN_MODULE_RECEIVERS = {
     'os', 'posix', 'nt', 'shutil', 'fs', 'fsp', 'fsPromises',
-    'path', 'posixpath', 'ntpath', 'pathlib', 'io', 'sys',
+    'posixpath', 'ntpath', 'pathlib', 'io', 'sys',
     'Path', 'PurePath', 'PosixPath', 'WindowsPath',
     'PurePosixPath', 'PureWindowsPath',
 }
 
 
 def _extract_module_vars(text: str) -> set:
-    """F28 (S17f): Identify module/namespace identifiers so module calls are not confused with pathlib receivers."""
+    """
+    F28 (S17f) & F33 (S17g): Identify module/namespace/class identifiers from real import/require/alias bindings
+    so module calls (os.unlink, fs.unlink) are not confused with pathlib receivers, while constructor instances
+    (path = Path(...), p = pathlib.Path(...)) are NEVER misclassified as modules.
+    """
     mods = set(_KNOWN_MODULE_RECEIVERS)
-    for m in re.finditer(r'\bimport\s+(?:os|posix|nt|shutil|pathlib|io)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)', text):
-        mods.add(m.group(1))
+
+    # Python imports: `import os`, `import os as my_os`, `from os import path`, `from os import path as osp`
     for m in re.finditer(
-        r'([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:require\s*\(\s*[\'"](?:node:)?(?:fs(?:/promises)?|path|os|child_process)[\'"]\s*\)(?:\s*\.\s*promises)?|(?:fs|os|shutil|pathlib)\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)',
+        r'\bimport\s+(?:os|posix|nt|shutil|pathlib|posixpath|ntpath|io|sys)(?:\.path)?(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?',
+        text,
+    ):
+        if m.group(1):
+            mods.add(m.group(1))
+    for m in re.finditer(
+        r'\bfrom\s+(?:os|posix|nt|pathlib)\s+import\s+((?:path|Path|PurePath|PosixPath|WindowsPath|PurePosixPath|PureWindowsPath)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?)',
+        text,
+    ):
+        spec = m.group(1).strip()
+        if ' as ' in spec:
+            mods.add(spec.split(' as ', 1)[1].strip())
+        else:
+            mods.add(spec)
+
+    # JS ES module imports: `import fs from 'fs'`, `import * as path from 'node:path'`
+    for m in re.finditer(
+        r'\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s+from\s+[\'"](?:node:)?(?:fs(?:/promises)?|path(?:/posix)?|os|child_process)[\'"]',
         text,
     ):
         mods.add(m.group(1))
+
+    # Inspect statement-level assignments: only bare module/namespace aliases (NO call parens!) count as modules;
+    # any variable assigned a constructor call `Path(...)` / `pathlib.Path(...)` or value is removed from `mods`.
+    for var_name, raw_rhs in _iter_top_level_assignments(text):
+        rhs = _strip_outer_parens(raw_rhs.strip()).rstrip("'\"").strip()
+        if re.match(
+            r'^require\s*\(\s*[\'"](?:node:)?(?:fs(?:/promises)?|path(?:/posix)?|os|child_process)[\'"]\s*\)(?:\s*\.\s*(?:promises|posix))?$',
+            rhs,
+        ):
+            mods.add(var_name)
+        elif re.match(r'^(?:fs|os|shutil|pathlib)\s*\.\s*[A-Za-z_][A-Za-z0-9_]*$', rhs):
+            mods.add(var_name)
+        else:
+            mods.discard(var_name)
+
     return mods
 
 
@@ -1699,16 +1756,79 @@ def _is_module_receiver_expr(recv_expr: str, module_vars: Optional[set] = None) 
     s = _strip_outer_parens(recv_expr)
     if not s:
         return True
-    mods = module_vars if module_vars is not None else _KNOWN_MODULE_RECEIVERS
-    if s in mods:
-        return True
-    if '(' not in s and any(s.startswith(m_name + '.') for m_name in mods):
-        return True
     if re.match(
-        r"^require\s*\(\s*['\"](?:node:)?(?:fs(?:/promises)?|path|os|child_process|shutil)['\"]\s*\)(?:\s*\.\s*promises)?$",
+        r"^require\s*\(\s*['\"](?:node:)?(?:fs(?:/promises)?|path(?:/posix)?|os|child_process|shutil)['\"]\s*\)(?:\s*\.\s*(?:promises|posix))?$",
         s,
     ):
         return True
+    if '(' in s or '/' in s:
+        return False
+    mods = module_vars if module_vars is not None else _KNOWN_MODULE_RECEIVERS
+    if s in mods:
+        return True
+    if any(s.startswith(m_name + '.') for m_name in mods):
+        return True
+    return False
+
+
+def _extract_path_vars(text: str) -> set:
+    """
+    F33 & F34 (S17g): Track variables bound to `pathlib.Path` instances (`Path(...)`, `pathlib.Path(...)`,
+    `p / 'sub'`, `p.parent`, `p.resolve()`, `p.joinpath(...)`, `p.with_name(...)`, `p.with_suffix(...)`).
+    """
+    path_vars: set = set()
+    path_classes = {'Path', 'PurePath', 'PosixPath', 'WindowsPath', 'PurePosixPath', 'PureWindowsPath'}
+    for m in re.finditer(
+        r'\bfrom\s+pathlib\s+import\s+(?:Path|PurePath|PosixPath|WindowsPath|PurePosixPath|PureWindowsPath)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)',
+        text,
+    ):
+        path_classes.add(m.group(1))
+    for m in re.finditer(
+        r'\bimport\s+pathlib\s+as\s+([A-Za-z_][A-Za-z0-9_]*)',
+        text,
+    ):
+        path_classes.add(m.group(1) + '.Path')
+
+    for var_name, raw_rhs in _iter_top_level_assignments(text):
+        rhs = _strip_outer_parens(raw_rhs.strip())
+        if _is_path_receiver_expr(rhs, path_vars, path_classes):
+            path_vars.add(var_name)
+        else:
+            path_vars.discard(var_name)
+    return path_vars
+
+
+def _is_path_receiver_expr(
+    recv_expr: str,
+    path_vars: Optional[set] = None,
+    path_classes: Optional[set] = None,
+) -> bool:
+    """
+    F34 (S17g): Return True if `recv_expr` has static evidence of being a `pathlib.Path` instance
+    (constructor call `Path(...)`/`pathlib.Path(...)`, `/` path join with a Path, or variable bound from Path).
+    """
+    s = _strip_outer_parens(recv_expr)
+    if not s:
+        return False
+    pvars = path_vars if path_vars is not None else set()
+    pclasses = path_classes if path_classes is not None else {
+        'Path', 'PurePath', 'PosixPath', 'WindowsPath', 'PurePosixPath', 'PureWindowsPath'
+    }
+    if s in pvars:
+        return True
+    if any(s.startswith(pv + '.') for pv in pvars):
+        return True
+    if _PATHLIB_CTOR_PREFIX_RE.match(s):
+        return True
+    if re.match(r'^(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?(?:Path|PosixPath|WindowsPath)\s*\.\s*(?:cwd|home)\s*\(', s):
+        return True
+    for cls_name in pclasses:
+        if re.match(rf'^{re.escape(cls_name)}\s*\(', s):
+            return True
+    slash_parts = _split_top_level_op(s, '/')
+    if len(slash_parts) > 1:
+        if any(_is_path_receiver_expr(part, pvars, pclasses) for part in slash_parts):
+            return True
     return False
 
 
