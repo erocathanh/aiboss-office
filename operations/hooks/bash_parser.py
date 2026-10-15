@@ -1748,9 +1748,61 @@ def _split_top_level_plus(expr: str) -> List[str]:
     return _split_top_level_op(expr, '+')
 
 
+def _expand_js_closed_block_substatements(
+    raw_stmt: str,
+    stmt_start: int,
+    stmt_end: int,
+) -> List[Tuple[str, int, int]]:
+    """
+    S17m (F56b): When a single `;`/`\\n`-delimited statement starts with one or more closed JS control
+    blocks (`if (...) { ... } let p = 'wip/a'`), split out both the inner `{ ... }` block bodies and
+    the trailing statement after the closing `}` with their exact character offsets in `text`.
+    """
+    pos = 0
+    n = len(raw_stmt)
+    m_cli = re.match(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', raw_stmt)
+    if m_cli:
+        pos = m_cli.end()
+    sub_stmts: List[Tuple[str, int, int]] = []
+    while pos < n:
+        while pos < n and raw_stmt[pos] in (' ', '\t', '\r'):
+            pos += 1
+        if pos >= n:
+            break
+        m_hdr = re.match(r'^(?:if|else\s+if|for\s*(?:await\s*)?|while|with|switch|catch)\s*\(', raw_stmt[pos:])
+        b_pos = -1
+        if m_hdr:
+            _, close_p = _scan_balanced_paren_args(raw_stmt, pos + m_hdr.end())
+            if close_p < n:
+                k = close_p + 1
+                while k < n and raw_stmt[k] in (' ', '\t', '\r'):
+                    k += 1
+                if k < n and raw_stmt[k] == '{':
+                    b_pos = k
+        else:
+            m_kw = re.match(r'^(?:else|try|finally|do|catch)\s*\{', raw_stmt[pos:])
+            if m_kw:
+                b_pos = pos + m_kw.end() - 1
+        if b_pos < 0:
+            break
+        _, close_b = _scan_balanced_paren_args(raw_stmt, b_pos + 1)
+        if close_b >= n:
+            break
+        inner_str = raw_stmt[b_pos + 1 : close_b]
+        if inner_str.strip():
+            sub_stmts.append((inner_str, stmt_start + b_pos + 1, stmt_start + close_b))
+        pos = close_b + 1
+    if not sub_stmts:
+        return [(raw_stmt, stmt_start, stmt_end)]
+    rem_str = raw_stmt[pos:]
+    if rem_str.strip():
+        sub_stmts.append((rem_str, stmt_start + pos, stmt_end))
+    return sub_stmts
+
+
 def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int, int]]:
     """
-    S17h (Principle 3), S17j (F45, F47) & S17l (F51): Yield (var_name, rhs, start_pos, end_pos) in appearance order for
+    S17h (Principle 3), S17j (F45, F47), S17l (F51) & S17m (F56b): Yield (var_name, rhs, start_pos, end_pos) in appearance order for
     top-level assignments across `;` and newline-separated statements, including JS comma-separated declarations,
     flat object destructuring (`const {client,url}=...`, `const {delete: del, post}=axios`), and JS/Python branches/loops.
     """
@@ -1759,120 +1811,120 @@ def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int,
     ident_re = re.compile(r'^[A-Za-z_$][A-Za-z0-9_$]*$')
     out: List[Tuple[str, str, int, int]] = []
     for m_stmt in re.finditer(r'[^;\n]+', text):
-        raw_stmt = m_stmt.group(0)
-        stmt_start = m_stmt.start()
-        stmt_end = m_stmt.end()
-        s = raw_stmt.strip()
-        if not s:
-            continue
-        s_clean = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
-        # Strip leading JS block/loop/conditional openers (both braced `{` and braceless `if(flag) p=...`, `case x: p=...`)
-        s_clean = re.sub(
-            r'^(?:(?:(?:for\s*(?:await\s*)?\([^()]*\)|while\s*\([^()]*\)|do\b|if\s*\([^()]*\)|else\s+if\s*\([^()]*\)|else\b(?!\s*:)|switch\s*\([^()]*\)|case\s+[^:]+:|default\s*:|try\b(?!\s*:)|catch\s*(?:\([^()]*\))?|finally\b(?!\s*:))\s*\{*\s*)|(?:[^={}]+?\)\s*\{+\s*)|\{+\s*)+',
-            '',
-            s_clean,
-        ).strip()
-        # Strip leading Python compound suite headers on single-line suites (`for _ in range(2): p='...'`)
-        s_clean = re.sub(
-            r'^(?:(?:async\s+)?(?:for|while|if|elif|else|try|except|finally|with)\b[^:\n]*:\s*)+',
-            '',
-            s_clean,
-        ).strip()
-        # Strip unmatched trailing closing braces `}` and outer CLI quote from the end of JS blocks
-        while s_clean.endswith(('}', '}"', "}'")) and s_clean.count('}') > s_clean.count('{'):
-            if s_clean.endswith(('}"', "}'")):
-                s_clean = s_clean[:-2].rstrip()
-            else:
-                s_clean = s_clean[:-1].rstrip()
-        if not s_clean:
-            continue
+        for raw_stmt, stmt_start, stmt_end in _expand_js_closed_block_substatements(
+            m_stmt.group(0), m_stmt.start(), m_stmt.end()
+        ):
+            s = raw_stmt.strip()
+            if not s:
+                continue
+            s_clean = re.sub(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', '', s).strip()
+            # Strip leading JS block/loop/conditional openers (both braced `{` and braceless `if(flag) p=...`, `case x: p=...`)
+            s_clean = re.sub(
+                r'^(?:(?:(?:for\s*(?:await\s*)?\([^()]*\)|while\s*\([^()]*\)|do\b|if\s*\([^()]*\)|else\s+if\s*\([^()]*\)|else\b(?!\s*:)|switch\s*\([^()]*\)|case\s+[^:]+:|default\s*:|try\b(?!\s*:)|catch\s*(?:\([^()]*\))?|finally\b(?!\s*:))\s*\{*\s*)|(?:[^={}]+?\)\s*\{+\s*)|\{+\s*)+',
+                '',
+                s_clean,
+            ).strip()
+            # Strip leading Python compound suite headers on single-line suites (`for _ in range(2): p='...'`)
+            s_clean = re.sub(
+                r'^(?:(?:async\s+)?(?:for|while|if|elif|else|try|except|finally|with)\b[^:\n]*:\s*)+',
+                '',
+                s_clean,
+            ).strip()
+            # Strip unmatched trailing closing braces `}` and outer CLI quote from the end of JS blocks
+            while s_clean.endswith(('}', '}"', "}'")) and s_clean.count('}') > s_clean.count('{'):
+                if s_clean.endswith(('}"', "}'")):
+                    s_clean = s_clean[:-2].rstrip()
+                else:
+                    s_clean = s_clean[:-1].rstrip()
+            if not s_clean:
+                continue
 
-        clauses = [c.strip() for c in _split_top_level_op(s_clean, ',') if c.strip()]
-        if len(clauses) > 1 and all(assign_re.match(_strip_outer_parens(c)) or destruct_re.match(_strip_outer_parens(c)) for c in clauses):
-            target_clauses = [_strip_outer_parens(c) for c in clauses]
-        elif not assign_re.match(_strip_outer_parens(s_clean)) and not destruct_re.match(_strip_outer_parens(s_clean)):
-            # F51: Extract embedded assignments inside short-circuit `cond && (p = ...)` / `cond || (p = ...)` or ternary `cond ? (p = a) : (p = b)`
-            sub_exprs: List[str] = [s_clean]
-            for op in ('&&', '||', '?', ':'):
-                next_subs: List[str] = []
+            clauses = [c.strip() for c in _split_top_level_op(s_clean, ',') if c.strip()]
+            if len(clauses) > 1 and all(assign_re.match(_strip_outer_parens(c)) or destruct_re.match(_strip_outer_parens(c)) for c in clauses):
+                target_clauses = [_strip_outer_parens(c) for c in clauses]
+            elif not assign_re.match(_strip_outer_parens(s_clean)) and not destruct_re.match(_strip_outer_parens(s_clean)):
+                # F51: Extract embedded assignments inside short-circuit `cond && (p = ...)` / `cond || (p = ...)` or ternary `cond ? (p = a) : (p = b)`
+                sub_exprs: List[str] = [s_clean]
+                for op in ('&&', '||', '?', ':'):
+                    next_subs: List[str] = []
+                    for sub in sub_exprs:
+                        unwrapped = _strip_outer_parens(sub.strip())
+                        if assign_re.match(unwrapped) or destruct_re.match(unwrapped):
+                            next_subs.append(unwrapped)
+                        else:
+                            next_subs.extend(_split_top_level_op(unwrapped, op))
+                    sub_exprs = next_subs
+                target_clauses = []
                 for sub in sub_exprs:
                     unwrapped = _strip_outer_parens(sub.strip())
-                    if assign_re.match(unwrapped) or destruct_re.match(unwrapped):
-                        next_subs.append(unwrapped)
-                    else:
-                        next_subs.extend(_split_top_level_op(unwrapped, op))
-                sub_exprs = next_subs
-            target_clauses = []
-            for sub in sub_exprs:
-                unwrapped = _strip_outer_parens(sub.strip())
-                for c in _split_top_level_op(unwrapped, ','):
-                    cu = _strip_outer_parens(c.strip())
-                    if assign_re.match(cu) or destruct_re.match(cu):
-                        target_clauses.append(cu)
-            if not target_clauses:
-                target_clauses = [_strip_outer_parens(s_clean)]
-        else:
-            target_clauses = [_strip_outer_parens(s_clean)]
-
-        offset_cursor = stmt_start
-        for clause in target_clauses:
-            rel_idx = raw_stmt.find(clause, max(0, offset_cursor - stmt_start))
-            if rel_idx >= 0:
-                c_start = stmt_start + rel_idx
-                c_end = c_start + len(clause)
-                offset_cursor = c_end
+                    for c in _split_top_level_op(unwrapped, ','):
+                        cu = _strip_outer_parens(c.strip())
+                        if assign_re.match(cu) or destruct_re.match(cu):
+                            target_clauses.append(cu)
+                if not target_clauses:
+                    target_clauses = [_strip_outer_parens(s_clean)]
             else:
-                c_start = stmt_start
-                c_end = stmt_end
+                target_clauses = [_strip_outer_parens(s_clean)]
 
-            m_dest = destruct_re.match(clause)
-            if m_dest:
-                lhs_inner = m_dest.group(1).strip()
-                rhs_raw = _strip_outer_parens(m_dest.group(2).strip())
-                rhs_map: Dict[str, str] = {}
-                is_obj_rhs = rhs_raw.startswith('{') and rhs_raw.endswith('}')
-                if is_obj_rhs:
-                    for prop in _split_top_level_op(rhs_raw[1:-1], ','):
-                        p_str = prop.strip()
-                        if not p_str:
+            offset_cursor = stmt_start
+            for clause in target_clauses:
+                rel_idx = raw_stmt.find(clause, max(0, offset_cursor - stmt_start))
+                if rel_idx >= 0:
+                    c_start = stmt_start + rel_idx
+                    c_end = c_start + len(clause)
+                    offset_cursor = c_end
+                else:
+                    c_start = stmt_start
+                    c_end = stmt_end
+
+                m_dest = destruct_re.match(clause)
+                if m_dest:
+                    lhs_inner = m_dest.group(1).strip()
+                    rhs_raw = _strip_outer_parens(m_dest.group(2).strip())
+                    rhs_map: Dict[str, str] = {}
+                    is_obj_rhs = rhs_raw.startswith('{') and rhs_raw.endswith('}')
+                    if is_obj_rhs:
+                        for prop in _split_top_level_op(rhs_raw[1:-1], ','):
+                            p_str = prop.strip()
+                            if not p_str:
+                                continue
+                            colon_parts = _split_top_level_op(p_str, ':')
+                            if len(colon_parts) >= 2:
+                                pk = colon_parts[0].strip().strip("'\"")
+                                pv = ":".join(colon_parts[1:]).strip()
+                            else:
+                                pk = p_str.strip("'\"")
+                                pv = p_str
+                            if pk:
+                                rhs_map[pk] = pv
+                    for item in _split_top_level_op(lhs_inner, ','):
+                        it_s = _split_top_level_op(item.strip(), '=')[0].strip()
+                        if not it_s:
                             continue
-                        colon_parts = _split_top_level_op(p_str, ':')
-                        if len(colon_parts) >= 2:
-                            pk = colon_parts[0].strip().strip("'\"")
-                            pv = ":".join(colon_parts[1:]).strip()
+                        if ':' in it_s:
+                            prop_k, local_v = [x.strip() for x in it_s.split(':', 1)]
                         else:
-                            pk = p_str.strip("'\"")
-                            pv = p_str
-                        if pk:
-                            rhs_map[pk] = pv
-                for item in _split_top_level_op(lhs_inner, ','):
-                    it_s = _split_top_level_op(item.strip(), '=')[0].strip()
-                    if not it_s:
-                        continue
-                    if ':' in it_s:
-                        prop_k, local_v = [x.strip() for x in it_s.split(':', 1)]
-                    else:
-                        prop_k = local_v = it_s
-                    prop_k = prop_k.strip("'\"")
-                    if not ident_re.match(local_v) or not ident_re.match(prop_k):
-                        continue
-                    if is_obj_rhs and prop_k in rhs_map:
-                        out.append((local_v, rhs_map[prop_k], c_start, c_end))
-                    else:
-                        out.append((local_v, f"{rhs_raw}.{prop_k}", c_start, c_end))
-                continue
+                            prop_k = local_v = it_s
+                        prop_k = prop_k.strip("'\"")
+                        if not ident_re.match(local_v) or not ident_re.match(prop_k):
+                            continue
+                        if is_obj_rhs and prop_k in rhs_map:
+                            out.append((local_v, rhs_map[prop_k], c_start, c_end))
+                        else:
+                            out.append((local_v, f"{rhs_raw}.{prop_k}", c_start, c_end))
+                    continue
 
-            m = assign_re.match(clause)
-            if not m:
-                continue
-            var_name = m.group(1)
-            op_tok = m.group(2)
-            rhs = m.group(3).strip()
-            if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
-                continue
-            if op_tok == '+=':
-                rhs = f"{var_name} + ({rhs})"
-            out.append((var_name, rhs, c_start, c_end))
+                m = assign_re.match(clause)
+                if not m:
+                    continue
+                var_name = m.group(1)
+                op_tok = m.group(2)
+                rhs = m.group(3).strip()
+                if var_name in ('import', 'from', 'return', 'if', 'elif', 'while', 'for', 'assert'):
+                    continue
+                if op_tok == '+=':
+                    rhs = f"{var_name} + ({rhs})"
+                out.append((var_name, rhs, c_start, c_end))
     return out
 
 
@@ -1915,9 +1967,10 @@ def _find_top_level_colon(line_str: str, start_idx: int) -> int:
 
 def _advance_js_single_stmt_end(text: str, start_idx: int) -> int:
     """
-    S17l (F53): Given `start_idx` right after a braceless JS control header (`for (...)`, `while (...)`, `if (...)`, `else`),
+    S17l (F53) & S17m (F57): Given `start_idx` right after a braceless JS control header (`for (...)`, `while (...)`, `if (...)`, `else`),
     advance past any chained braceless JS control headers (`if (...)`, `else if (...)`, `else`, `for (...)`, `while (...)`,
-    `with (...)`, `switch (...)`) across newlines until the leaf `{ ... }` block or terminating `;` / `\n`.
+    `with (...)`, `switch (...)`) across newlines until the leaf `{ ... }` block or top-level terminating `;` / `\\n`
+    (outside quotes and balanced parentheses/brackets).
     """
     cur_k = start_idx
     n = len(text)
@@ -1948,35 +2001,46 @@ def _advance_js_single_stmt_end(text: str, start_idx: int) -> int:
     if cur_k < n and text[cur_k] == '{':
         _, close_b = _scan_balanced_paren_args(text, cur_k + 1)
         return close_b
-    nl_idx = text.find('\n', cur_k)
-    semi_idx = text.find(';', cur_k)
-    end_cands = [idx for idx in (nl_idx, semi_idx) if idx >= 0]
-    return min(end_cands) if end_cands else n
+    quote: Optional[str] = None
+    escape = False
+    depth = 0
+    for idx in range(cur_k, n):
+        ch = text[idx]
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and quote is not None:
+            escape = True
+            continue
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch
+            continue
+        if ch in ('(', '[', '{'):
+            depth += 1
+            continue
+        if ch in (')', ']', '}'):
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and ch in (';', '\n'):
+            return idx
+    return n
 
 
 def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
     """
-    S17l (F51): Return True if the assignment at `[c_start, c_end]` is inside or guarded by a
-    conditional/exception branch in Python (`if`/`elif`/`else`/`try`/`except`/`finally`) or JS
-    (`if`/`else if`/`else`/`switch`/`case`/`try`/`catch`/`finally`, braced or braceless, or
-    short-circuit `&&`/`||` / ternary `? :`).
+    S17l (F51) & S17m (F56, F56b, F56c): Return True if the assignment at `[c_start, c_end]` is inside or
+    guarded by an active conditional/exception branch in Python (`if`/`elif`/`else`/`try`/`except`/`finally`
+    whose suite encloses `[c_start, c_end]` by indentation or single-line suite) or JS (`if`/`else if`/`else`/
+    `switch`/`case`/`try`/`catch`/`finally`, braced or braceless, or short-circuit `&&`/`||` / ternary `? :`).
+    Branches that have already closed before `c_start` do NOT mark subsequent independent assignments as conditional.
     """
-    # 1. Same-statement / same-line prefix before `c_start`
-    last_semi = text.rfind(';', 0, c_start)
-    last_nl = text.rfind('\n', 0, c_start)
-    stmt_bound = max(last_semi, last_nl) + 1
-    stmt_prefix = text[stmt_bound:c_start]
-    if re.search(
-        r'\b(?:if|elif|else|switch|case|default|try|catch|except|finally)\b|&&|\|\||\?',
-        stmt_prefix,
-    ):
-        return True
-    if last_nl + 1 < stmt_bound:
-        line_prefix = text[last_nl + 1 : c_start]
-        if re.search(r'\b(?:if|elif|else|try|except|finally)\b[^#\n]*:', line_prefix):
-            return True
+    closed_js_block_end = 0
 
-    # 2. Enclosing JS braced or braceless `if (...)`, `else if (...)`, `switch (...)`, `catch (...)`
+    # 1. Enclosing JS braced or braceless `if (...)`, `else if (...)`, `switch (...)`, `catch (...)`
     for m_js in re.finditer(r'\b(if|else\s+if|switch|catch)\s*\(', text):
         h_start = m_js.start()
         if h_start > c_start:
@@ -1992,8 +2056,10 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
         b_end = _advance_js_single_stmt_end(text, close_p + 1)
         if h_start <= c_start and c_end <= b_end:
             return True
+        if b_end < c_start:
+            closed_js_block_end = max(closed_js_block_end, b_end + 1)
 
-    # 3. Enclosing JS `else`, `try`, `finally`, or bare `catch` (braced or braceless)
+    # 2. Enclosing JS `else`, `try`, `finally`, or bare `catch` (braced or braceless)
     for m_kw in re.finditer(r'\b(else|try|finally|catch)\b(?!\s*(?:if\b|\(|:))', text):
         h_start = m_kw.start()
         if h_start > c_start:
@@ -2001,10 +2067,61 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
         b_end = _advance_js_single_stmt_end(text, m_kw.end())
         if h_start <= c_start and c_end <= b_end:
             return True
+        if b_end < c_start:
+            closed_js_block_end = max(closed_js_block_end, b_end + 1)
 
-    # 4. Enclosing Python `if`/`elif`/`else`/`try`/`except`/`finally` block (multi-line indented or single-line)
-    if re.search(r'\b(?:if|elif|else|try|except|finally)\b[^;#\n]*:', text[:c_start]):
+    # 3. Same-statement / same-line prefix before `c_start` (after any closed JS `{ ... }` block on the same line)
+    last_semi = text.rfind(';', 0, c_start)
+    last_nl = text.rfind('\n', 0, c_start)
+    stmt_bound = max(last_semi + 1, last_nl + 1, closed_js_block_end)
+    stmt_prefix = text[stmt_bound:c_start]
+    if re.search(
+        r'\b(?:if|elif|else|switch|case|default|try|catch|except|finally)\b|&&|\|\||\?',
+        stmt_prefix,
+    ):
         return True
+    line_bound = max(last_nl + 1, closed_js_block_end)
+    if line_bound < stmt_bound:
+        line_prefix = text[line_bound:c_start]
+        if re.search(r'\b(?:if|elif|else|try|except|finally)\b[^#\n]*:', line_prefix):
+            return True
+
+    # 4. Enclosing Python `if`/`elif`/`else`/`try`/`except`/`finally` block (multi-line indented or single-line suite)
+    line_spans: List[Tuple[int, int, str]] = []
+    pos = 0
+    for l_str in text.splitlines(keepends=True):
+        line_spans.append((pos, pos + len(l_str), l_str))
+        pos += len(l_str)
+
+    py_branch_prefix_re = re.compile(
+        r'(?:^|[;]|-[a-zA-Z]*c\s+[\'"]?|--eval\s+[\'"]?)(\s*)(if|elif|else|try|except|finally)\b'
+    )
+    for idx, (l_start, l_end, l_str) in enumerate(line_spans):
+        if l_start > c_start:
+            break
+        for m_py in py_branch_prefix_re.finditer(l_str):
+            colon_rel = _find_top_level_colon(l_str, m_py.end())
+            if colon_rel < 0:
+                continue
+            body_start = l_start + colon_rel + 1
+            rest_of_line = l_str[colon_rel + 1 :].strip()
+            if rest_of_line and not rest_of_line.startswith('#'):
+                body_end = l_end
+            else:
+                base_indent = len(m_py.group(1))
+                body_end = l_end
+                for j in range(idx + 1, len(line_spans)):
+                    _, j_end, j_str = line_spans[j]
+                    j_stripped = j_str.strip()
+                    if not j_stripped or j_stripped.startswith('#'):
+                        continue
+                    j_indent = len(j_str) - len(j_str.lstrip(' \t'))
+                    if j_indent > base_indent:
+                        body_end = j_end
+                    else:
+                        break
+            if body_start <= c_start and c_end <= body_end:
+                return True
 
     return False
 
@@ -2092,8 +2209,7 @@ def _find_all_loops(
             if rest_of_line and not rest_of_line.startswith('#'):
                 body_end = l_end
             else:
-                stripped_l = l_str.lstrip(' \t')
-                base_indent = len(l_str) - len(stripped_l)
+                base_indent = len(m_py.group(1))
                 body_end = l_end
                 for j in range(idx + 1, len(line_spans)):
                     _, j_end, j_str = line_spans[j]
@@ -2232,7 +2348,7 @@ def _extract_simple_var_env(
     call_pos: Optional[int] = None,
 ) -> Dict[str, str]:
     """
-    F43 (S17i), F45 (S17j), F48 (S17k) & F51 (S17l): Extract simple variable assignments active BEFORE `call_pos`
+    F43 (S17i), F45 (S17j), F48 (S17k), F51 (S17l) & F56 (S17m): Extract simple variable assignments active BEFORE `call_pos`
     (Principle 3: reassignments AFTER `call_pos` do not affect `call_pos` in linear code).
     IMPORTANT: Text order equals execution order ONLY when the code segment is linear. Inside a loop body
     (`for`/`while`/`do`), assignments appearing textually after `call_pos` take effect before `call_pos`
@@ -2260,20 +2376,26 @@ def _extract_simple_var_multi_env(
     call_pos: Optional[int] = None,
 ) -> Dict[str, List[str]]:
     """
-    S17k (F48 — Option A) & S17l (F51, F52, F52c, F53): Compute reaching candidate bindings for each variable at `call_pos`.
+    S17k (F48 — Option A), S17l (F51, F52, F52c, F53) & S17m (F55, F56): Compute reaching candidate bindings for each variable at `call_pos`.
     - Conditional assignments (`if`/`elif`/`else`/`switch`/`try`/`catch`/`finally` in Python or JS, braced or braceless,
       ternary `? :`, or short-circuit `&&`/`||`) NEVER overwrite prior bindings: they union their candidate values with
       the pre-branch candidate values (closing F51 while allowing wip-only branches like F51e).
-    - Unconditional assignments outside non-enclosing loops replace the variable's candidate list at that program point,
-      so dead pre-loop or post-call bindings that are unconditionally overwritten before `call_pos` on every iteration
-      are killed (closing F52 and F52c while keeping F48 8/8).
+    - Loop simulation runs per enclosing loop from outermost to innermost (2 outer passes x 3 inner passes):
+      the back-edge of an inner loop only re-executes assignments inside that inner loop's body, while assignments in an
+      outer loop before the inner loop only re-execute when wrapping around the outer loop's back-edge (closing F55a while
+      keeping F55d wip-only allowed).
+    - Any post-call assignment in a loop body preceded by `continue`/`break`/`return`/`throw`/`raise` after `call_pos`
+      may be skipped when the loop jumps early, so it unions its values with the prior bindings instead of overwriting (closing F55b/F55c).
     """
     if call_pos is None:
         base_env = _extract_simple_var_env(text, default_join_style=default_join_style, call_pos=None)
         return {k: [v] for k, v in base_env.items()}
 
     all_loops = _find_all_loops(text)
-    enclosing_loops = [lp for lp in all_loops if lp[1] <= call_pos <= lp[2]]
+    enclosing_loops = sorted(
+        [lp for lp in all_loops if lp[1] <= call_pos <= lp[2]],
+        key=lambda lp: (lp[0], -lp[2]),
+    )
     all_assigns = _iter_top_level_assignments_with_pos(text)
 
     def _apply_assignment(
@@ -2317,8 +2439,7 @@ def _extract_simple_var_multi_env(
             _apply_assignment(multi_env, var_name, rhs, c_start, c_end)
         return multi_env
 
-    outer_h_start = min(lp[0] for lp in enclosing_loops)
-    outer_b_end = max(lp[2] for lp in enclosing_loops)
+    outer_h_start = enclosing_loops[0][0]
 
     multi_env = {}
     for var_name, rhs, c_start, c_end in all_assigns:
@@ -2327,8 +2448,10 @@ def _extract_simple_var_multi_env(
         _apply_assignment(multi_env, var_name, rhs, c_start, c_end)
 
     iter_vars_cands: Dict[str, List[str]] = {}
+    level_iter_vars: List[Dict[str, List[str]]] = []
     cur_env_for_iter = {k: vals[-1] for k, vals in multi_env.items() if vals}
     for _h_start, _b_start, _b_end, iter_var, iter_expr, _l_kind in enclosing_loops:
+        lvl_map: Dict[str, List[str]] = {}
         if iter_var:
             for raw_v in iter_var.split(','):
                 v = raw_v.strip()
@@ -2339,47 +2462,61 @@ def _extract_simple_var_multi_env(
                 else:
                     cands = _extract_iterable_path_candidates(iter_expr, cur_env_for_iter, default_join_style, v)
                 iter_vars_cands[v] = list(cands)
+                lvl_map[v] = list(cands)
                 if cands:
                     cur_env_for_iter[v] = cands[-1]
-
-    pre_call_loop_assigns = [
-        a for a in all_assigns if outer_h_start <= a[2] and a[3] <= call_pos
-    ]
-    post_call_loop_assigns = [
-        a for a in all_assigns if a[2] > call_pos and a[3] <= outer_b_end
-    ]
+        level_iter_vars.append(lvl_map)
 
     reaching_at_call: Dict[str, List[str]] = {}
-    for _iteration in range(3):
-        # At the top of each iteration, loop iterator variables receive their iterable candidates
-        for iv, icands in iter_vars_cands.items():
-            existing_iv = multi_env.setdefault(iv, [])
-            for c in icands:
-                if c not in existing_iv:
-                    existing_iv.append(c)
+    num_levels = len(enclosing_loops)
+    jump_re = re.compile(r'\b(?:continue|break|return|throw|raise)\b')
 
-        # Execute statements in the loop body before `call_pos`
-        for var_name, rhs, c_start, c_end in pre_call_loop_assigns:
-            force_u = var_name in iter_vars_cands
-            _apply_assignment(multi_env, var_name, rhs, c_start, c_end, force_union=force_u)
+    def _simulate_loop_level(idx: int) -> None:
+        h_start, _b_start, b_end, _iter_var, _iter_expr, _l_kind = enclosing_loops[idx]
+        lvl_iters = level_iter_vars[idx]
+        is_innermost = idx == num_levels - 1
+        if is_innermost:
+            pre_assigns = [a for a in all_assigns if h_start <= a[2] and a[3] <= call_pos]
+            post_assigns = [a for a in all_assigns if call_pos < a[2] and a[3] <= b_end]
+            max_passes = 3
+        else:
+            child_h_start = enclosing_loops[idx + 1][0]
+            child_b_end = enclosing_loops[idx + 1][2]
+            pre_assigns = [a for a in all_assigns if h_start <= a[2] and a[3] <= child_h_start]
+            post_assigns = [a for a in all_assigns if child_b_end < a[2] and a[3] <= b_end]
+            max_passes = 2
 
-        # Record all candidate bindings that reach `call_pos` on this iteration
-        for k, vals in multi_env.items():
-            dest = reaching_at_call.setdefault(k, [])
-            for val in vals:
-                if val not in dest:
-                    dest.append(val)
+        for _pass in range(max_passes):
+            for iv, icands in lvl_iters.items():
+                existing_iv = multi_env.setdefault(iv, [])
+                for c in icands:
+                    if c not in existing_iv:
+                        existing_iv.append(c)
 
-        if not post_call_loop_assigns:
-            break
+            for var_name, rhs, c_start, c_end in pre_assigns:
+                force_u = var_name in iter_vars_cands
+                _apply_assignment(multi_env, var_name, rhs, c_start, c_end, force_union=force_u)
 
-        # Execute statements in the loop body after `call_pos` before wrapping to the next iteration
-        for var_name, rhs, c_start, c_end in post_call_loop_assigns:
-            if _iteration == 0 and var_name not in multi_env:
-                multi_env[var_name] = [f"$DYNAMIC_WRITE:{var_name}"]
-            force_u = var_name in iter_vars_cands
-            _apply_assignment(multi_env, var_name, rhs, c_start, c_end, force_union=force_u)
+            if is_innermost:
+                for k, vals in multi_env.items():
+                    dest = reaching_at_call.setdefault(k, [])
+                    for val in vals:
+                        if val not in dest:
+                            dest.append(val)
+            else:
+                _simulate_loop_level(idx + 1)
 
+            if is_innermost and not post_assigns:
+                break
+
+            for var_name, rhs, c_start, c_end in post_assigns:
+                if _pass == 0 and var_name not in multi_env:
+                    multi_env[var_name] = [f"$DYNAMIC_WRITE:{var_name}"]
+                has_jump_before = bool(jump_re.search(text[call_pos:c_start]))
+                force_u = (var_name in iter_vars_cands) or has_jump_before
+                _apply_assignment(multi_env, var_name, rhs, c_start, c_end, force_union=force_u)
+
+    _simulate_loop_level(0)
     return reaching_at_call
 
 

@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\nif True:\n    print('ready')\np = 'projects/THU-SU-THAT/wip/a.md'\nopen(p, 'w').write('x')\nPY"}}
