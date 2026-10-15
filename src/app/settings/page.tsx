@@ -13,8 +13,17 @@ import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
 import { CostSettingsCard } from '@/components/office/CostSettingsCard';
 import { BudgetSettingsCard } from '@/components/office/BudgetSettingsCard';
-import { ApprovalsSettingsCard } from '@/components/office/ApprovalsSettingsCard';
-import { getApprovals } from '@/lib/approvals-ledger';
+import {
+  ApprovalsSettingsCard,
+  type ApprovalLoadErrorCode,
+} from '@/components/office/ApprovalsSettingsCard';
+import {
+  ApprovalIoError,
+  ApprovalLedgerUnreadableError,
+  ApprovalLockTimeoutError,
+  getApprovals,
+  type ApprovalItem,
+} from '@/lib/approvals-ledger';
 import { getAgentLanguage } from '@/lib/office-config';
 
 export const dynamic = 'force-dynamic';
@@ -117,7 +126,25 @@ export default function SettingsPage() {
   const config = loadOfficeConfig();
   const effectiveLanguage = getAgentLanguage(config);
   const gates = loadMarketingGates();
-  const initialApprovals = getApprovals({ limit: 50 }).approvals;
+  let initialApprovals: ApprovalItem[] | undefined = undefined;
+  let initialApprovalsError: ApprovalLoadErrorCode | null = null;
+  try {
+    initialApprovals = getApprovals({ limit: 50 }).approvals;
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    if (err instanceof ApprovalLockTimeoutError || code === 'lock_timeout') {
+      initialApprovalsError = 'lock_timeout';
+    } else if (
+      err instanceof ApprovalLedgerUnreadableError ||
+      code === 'ledger_unreadable'
+    ) {
+      initialApprovalsError = 'ledger_unreadable';
+    } else if (err instanceof ApprovalIoError || code === 'io_error') {
+      initialApprovalsError = 'io_error';
+    } else {
+      initialApprovalsError = 'io_error';
+    }
+  }
 
   return (
     <div className="settings-page">
@@ -150,7 +177,10 @@ export default function SettingsPage() {
 
         <div className="settings-grid">
           {/* Card: Approvals Ledger & State Machine (A-4) */}
-          <ApprovalsSettingsCard initialApprovals={initialApprovals} />
+          <ApprovalsSettingsCard
+            initialApprovals={initialApprovals}
+            initialError={initialApprovalsError}
+          />
 
           {/* Card 1: Display & Typography (Client Preferences) */}
           <DisplaySettingsCard />
