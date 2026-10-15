@@ -151,7 +151,7 @@ export function SettingsPageClient({
                   <span className="settings-dim">{t('settings.schedule.days1To5')}</span>
                 </span>
               </div>
-              <div className="settings-row">
+              <div className="settings-row settings-row-ui-language">
                 <span className="settings-label">{t('settings.schedule.uiLanguageConfig')}</span>
                 <span className="settings-value">
                   <code>{lang}</code>{' '}
