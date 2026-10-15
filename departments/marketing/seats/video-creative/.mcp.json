@@ -5,8 +5,11 @@
       "command": "sh",
       "args": [
         "-c",
-        "exec node \"${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-$HOME/Development/agent-broker-mcp/index.js}\""
-      ]
+        "exec node \"${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-/Users/erocathanh/Projects/aiboss-office/operations/mcp/agent-broker/index.js}\""
+      ],
+      "env": {
+        "MCP_HOP_THU_DIR": "/Users/erocathanh/Projects/aiboss-office/operations/data/mailbox"
+      }
     }
   }
 }

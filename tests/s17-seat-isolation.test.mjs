@@ -1509,4 +1509,90 @@ test('H1, §6, §6b & H9 (H-v11 v02): hooks enforce session-root fail-closed via
   }
 });
 
+test('C2-broker & Roster: bundled operations/mcp/agent-broker, anchored .mcp.json script & MCP_HOP_THU_DIR, CLAUDE_SEAT_ENV_WHITELIST, and Department roster in CLAUDE.md with --check drift detection', () => {
+  assert.ok(
+    CLAUDE_SEAT_ENV_WHITELIST.includes('MCP_HOP_THU_DIR'),
+    'CLAUDE_SEAT_ENV_WHITELIST must include MCP_HOP_THU_DIR'
+  );
+  const envOut = buildClaudeSeatEnv({ MCP_HOP_THU_DIR: '/tmp/custom-mailbox', SECRET_XYZ: 'no' });
+  assert.equal(envOut.MCP_HOP_THU_DIR, '/tmp/custom-mailbox');
+  assert.equal(envOut.SECRET_XYZ, undefined);
+
+  const brokerIndex = path.join(REPO_ROOT, 'operations', 'mcp', 'agent-broker', 'index.js');
+  const brokerCore = path.join(REPO_ROOT, 'operations', 'mcp', 'agent-broker', 'broker-core.js');
+  assert.ok(fs.existsSync(brokerIndex), 'Bundled operations/mcp/agent-broker/index.js must exist');
+  assert.ok(fs.existsSync(brokerCore), 'Bundled operations/mcp/agent-broker/broker-core.js must exist');
+
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'c2-broker-test-'));
+  try {
+    const tmpClone = path.join(tmpBase, 'clone');
+    const emptyHome = path.join(tmpBase, 'empty-home');
+    fs.mkdirSync(emptyHome, { recursive: true });
+    fs.mkdirSync(path.join(tmpClone, 'data'), { recursive: true });
+    fs.mkdirSync(path.join(tmpClone, 'departments', 'marketing'), { recursive: true });
+    fs.mkdirSync(path.join(tmpClone, 'config'), { recursive: true });
+    fs.mkdirSync(path.join(tmpClone, 'packs', 'core'), { recursive: true });
+
+    fs.copyFileSync(path.join(REPO_ROOT, 'data', 'seats.json'), path.join(tmpClone, 'data', 'seats.json'));
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'departments', 'marketing', 'department.json'),
+      path.join(tmpClone, 'departments', 'marketing', 'department.json')
+    );
+    fs.copyFileSync(path.join(REPO_ROOT, 'config', 'office.json'), path.join(tmpClone, 'config', 'office.json'));
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'packs', 'core', 'WORKING-RULES.md'),
+      path.join(tmpClone, 'packs', 'core', 'WORKING-RULES.md')
+    );
+
+    generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, quiet: true });
+    const realClone = fs.realpathSync(tmpClone);
+    assert.ok(
+      fs.existsSync(path.join(tmpClone, 'operations', 'data', 'mailbox')),
+      'generateSeatFiles must create operations/data/mailbox if missing'
+    );
+
+    const leadMcpPath = path.join(tmpClone, 'departments', 'marketing', 'seats', 'marketing-lead', '.mcp.json');
+    const leadMcp = JSON.parse(fs.readFileSync(leadMcpPath, 'utf8'));
+    const brokerCfg = leadMcp.mcpServers['agent-broker'];
+    assert.equal(
+      brokerCfg.args[1],
+      `exec node "\${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-${path.join(realClone, 'operations', 'mcp', 'agent-broker', 'index.js')}}"`,
+      '.mcp.json command must point to bundled broker in real repo root with AIBOSS_AGENT_BROKER_MCP_SCRIPT override'
+    );
+    assert.equal(
+      brokerCfg.env.MCP_HOP_THU_DIR,
+      path.join(realClone, 'operations', 'data', 'mailbox'),
+      '.mcp.json env.MCP_HOP_THU_DIR must point to <REAL_REPO_ROOT>/operations/data/mailbox'
+    );
+
+    const checkClean = generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, checkOnly: true, quiet: true });
+    assert.equal(checkClean.driftedCount, 0, '--check must pass when .mcp.json and CLAUDE.md match');
+
+    // Mutate MCP_HOP_THU_DIR in .mcp.json -> --check must detect drift
+    brokerCfg.env.MCP_HOP_THU_DIR = '/opt/wrong-mailbox';
+    fs.writeFileSync(leadMcpPath, JSON.stringify(leadMcp, null, 2) + '\n', 'utf8');
+    const checkMcpDrift = generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, checkOnly: true, quiet: true });
+    assert.ok(checkMcpDrift.driftedCount > 0, '--check must fail when MCP_HOP_THU_DIR drifts');
+
+    // Restore via generateSeatFiles, then mutate a seat role in data/seats.json -> --check must fail on CLAUDE.md
+    generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, quiet: true });
+    const leadClaudePath = path.join(tmpClone, 'departments', 'marketing', 'seats', 'marketing-lead', 'CLAUDE.md');
+    const leadClaude = fs.readFileSync(leadClaudePath, 'utf8');
+    assert.ok(leadClaude.includes('## Department roster'), 'CLAUDE.md must embed ## Department roster');
+    assert.ok(leadClaude.includes('paid-media'), 'CLAUDE.md roster must include paid-media');
+    assert.ok(leadClaude.includes('social-community'), 'CLAUDE.md roster must include social-community');
+    assert.ok(leadClaude.includes('<!-- BEGIN department-roster md5:'), 'CLAUDE.md must have BEGIN department-roster md5 marker');
+    assert.ok(leadClaude.includes('<!-- END department-roster -->'), 'CLAUDE.md must have END department-roster marker');
+
+    const seatsCopy = JSON.parse(fs.readFileSync(path.join(tmpClone, 'data', 'seats.json'), 'utf8'));
+    seatsCopy[0].role = seatsCopy[0].role + ' (modified role test)';
+    fs.writeFileSync(path.join(tmpClone, 'data', 'seats.json'), JSON.stringify(seatsCopy, null, 2) + '\n', 'utf8');
+    const checkRosterDrift = generateSeatFiles({ repoRoot: tmpClone, anchorRoot: tmpClone, checkOnly: true, quiet: true });
+    assert.ok(checkRosterDrift.driftedCount >= 8, '--check must fail for all 8 seat CLAUDE.md files when a seat role changes in seats.json');
+  } finally {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  }
+});
+
+
 
