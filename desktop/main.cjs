@@ -2,8 +2,12 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { Buffer } = require('node:buffer');
+const { URL } = require('node:url');
 const http = require('node:http');
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session } = require('electron');
 
 // APP_BASIC_REALM must match the realm in src/app/api/approvals/[requestId]/decision/route.ts
 const { resolvePort, APP_BASIC_REALM } = require('./config.cjs');
@@ -69,12 +73,156 @@ if (!gotTheLock) {
     }
   }
 
-  // Handle HTTP Basic Auth challenges fail-closed for the exact local AIBOSS Office server only (F37, F38).
+  // Handle HTTP Basic Auth challenges fail-closed for the exact local AIBOSS Office server only (F37, F38, F40).
   // Policy for F38 retry lifecycle: keyed by `${host}:${port}:${realm}`; after 1 rejected attempt, keep blocking
   // (cancel via callback()) until a 60-second cooldown window elapses.
+  // Policy for F40 instance proof: 401 response must carry X-AIBOSS-Instance = v1.<HMAC-SHA256(nonce, host:port:realm)>
+  // matching ${AIBOSS_CONFIG_DIR:-~/.config/aiboss-office}/instance-${targetPort}.json.
   const LOGIN_RETRY_COOLDOWN_MS = 60 * 1000;
+  const INSTANCE_NONCE_CACHE_TTL_MS = 5 * 1000;
+  const INSTANCE_HEADER_TTL_MS = 5 * 1000;
   const loginAttemptState = new Map();
-  app.on('login', (event, _webContents, _details, authInfo, callback) => {
+  const recentInstanceProofHeaders = new Map();
+  let instanceNonceCache = {
+    filePath: '',
+    mtimeMs: -1,
+    expiresAt: 0,
+    nonce: null,
+  };
+
+  function resolveConfigDir() {
+    const envDir = process.env.AIBOSS_CONFIG_DIR;
+    if (typeof envDir === 'string' && envDir.trim().length > 0) {
+      return path.resolve(envDir.trim());
+    }
+    return path.join(os.homedir(), '.config', 'aiboss-office');
+  }
+
+  function readInstanceNonce(port, nowMs) {
+    const filePath = path.join(resolveConfigDir(), `instance-${port}.json`);
+    try {
+      const stat = fs.statSync(filePath);
+      if (
+        instanceNonceCache.filePath === filePath &&
+        instanceNonceCache.mtimeMs === stat.mtimeMs &&
+        nowMs < instanceNonceCache.expiresAt &&
+        typeof instanceNonceCache.nonce === 'string'
+      ) {
+        return instanceNonceCache.nonce;
+      }
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (
+        raw &&
+        typeof raw === 'object' &&
+        raw.port === port &&
+        typeof raw.nonce === 'string' &&
+        /^[0-9a-f]{64}$/i.test(raw.nonce)
+      ) {
+        instanceNonceCache = {
+          filePath,
+          mtimeMs: stat.mtimeMs,
+          expiresAt: nowMs + INSTANCE_NONCE_CACHE_TTL_MS,
+          nonce: raw.nonce,
+        };
+        return raw.nonce;
+      }
+    } catch {
+      // Missing or unreadable instance-<port>.json
+    }
+    instanceNonceCache = { filePath: '', mtimeMs: -1, expiresAt: 0, nonce: null };
+    return null;
+  }
+
+  function extractHeaderCaseInsensitive(headersObj, targetName) {
+    if (!headersObj || typeof headersObj !== 'object') {
+      return null;
+    }
+    const lowerTarget = targetName.toLowerCase();
+    for (const [k, v] of Object.entries(headersObj)) {
+      if (k.toLowerCase() === lowerTarget) {
+        if (Array.isArray(v)) {
+          return typeof v[0] === 'string' ? v[0].trim() : null;
+        }
+        if (typeof v === 'string') {
+          return v.trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  function registerInstanceHeaderListener() {
+    if (
+      !session ||
+      !session.defaultSession ||
+      !session.defaultSession.webRequest ||
+      typeof session.defaultSession.webRequest.onHeadersReceived !== 'function'
+    ) {
+      return;
+    }
+    session.defaultSession.webRequest.onHeadersReceived((details, responder) => {
+      try {
+        if (details && details.statusCode === 401 && typeof details.url === 'string') {
+          const parsedUrl = new URL(details.url);
+          const h = (parsedUrl.hostname || '').toLowerCase();
+          const p = parsedUrl.port
+            ? Number.parseInt(parsedUrl.port, 10)
+            : parsedUrl.protocol === 'https:'
+              ? 443
+              : 80;
+          const wwwAuth = extractHeaderCaseInsensitive(details.responseHeaders, 'www-authenticate') || '';
+          const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
+          const realm = realmMatch ? realmMatch[1] : APP_BASIC_REALM;
+          const instanceHeader = extractHeaderCaseInsensitive(details.responseHeaders, 'x-aiboss-instance');
+          const keyWithRealm = `${h}:${p}:${realm}`;
+          const keyHostPort = `${h}:${p}`;
+          const exp = Date.now() + INSTANCE_HEADER_TTL_MS;
+          if (instanceHeader) {
+            recentInstanceProofHeaders.set(keyWithRealm, { value: instanceHeader, expiresAt: exp });
+            recentInstanceProofHeaders.set(keyHostPort, { value: instanceHeader, expiresAt: exp });
+          } else {
+            recentInstanceProofHeaders.delete(keyWithRealm);
+            recentInstanceProofHeaders.delete(keyHostPort);
+          }
+        }
+      } catch {
+        // Ignore URL parse errors on non-standard schemes
+      }
+      if (typeof responder === 'function') {
+        responder({ cancel: false });
+      }
+    });
+  }
+
+  function resolveChallengeInstanceHeader(details, host, port, realm, nowMs) {
+    if (details && details.responseHeaders && typeof details.responseHeaders === 'object') {
+      return extractHeaderCaseInsensitive(details.responseHeaders, 'x-aiboss-instance');
+    }
+    const keyWithRealm = `${host}:${port}:${realm}`;
+    const keyHostPort = `${host}:${port}`;
+    const entry = recentInstanceProofHeaders.get(keyWithRealm) || recentInstanceProofHeaders.get(keyHostPort);
+    if (entry && nowMs <= entry.expiresAt && typeof entry.value === 'string') {
+      return entry.value;
+    }
+    return null;
+  }
+
+  function verifyInstanceHmacProof(nonce, host, port, realm, headerValue) {
+    if (typeof headerValue !== 'string' || !/^v1\.[0-9a-f]{64}$/i.test(headerValue.trim())) {
+      return false;
+    }
+    const expected =
+      'v1.' +
+      crypto
+        .createHmac('sha256', nonce)
+        .update(`${host}:${port}:${realm}`, 'utf8')
+        .digest('hex');
+    const actualBuf = Buffer.from(headerValue.trim().toLowerCase(), 'utf8');
+    const expectedBuf = Buffer.from(expected.toLowerCase(), 'utf8');
+    return actualBuf.length === expectedBuf.length && crypto.timingSafeEqual(actualBuf, expectedBuf);
+  }
+
+  app.on('login', (event, _webContents, details, authInfo, callback) => {
     const envUser = typeof process.env.PHONGBAN_USER === 'string' ? process.env.PHONGBAN_USER : '';
     const envPass = typeof process.env.PHONGBAN_PASS === 'string' ? process.env.PHONGBAN_PASS : '';
     if (!envUser || !envPass || typeof callback !== 'function') {
@@ -128,6 +276,33 @@ if (!gotTheLock) {
           `[AIBOSS Desktop] app Basic Auth rejected for ${key}; not retrying until ${new Date(state.blockedUntil).toISOString()} (60s cooldown)`,
         );
       }
+      callback();
+      return;
+    }
+
+    // 5. Instance nonce HMAC proof check (F40)
+    const instanceNonce = readInstanceNonce(targetPort, now);
+    if (!instanceNonce) {
+      console.log(
+        `[AIBOSS Desktop] WARNING: Basic Auth challenge for ${key} cancelled (missing or invalid instance-${targetPort}.json)`,
+      );
+      callback();
+      return;
+    }
+
+    const proofHeader = resolveChallengeInstanceHeader(details, host, port, authInfo.realm, now);
+    if (!proofHeader) {
+      console.log(
+        `[AIBOSS Desktop] WARNING: Basic Auth challenge for ${key} cancelled (missing X-AIBOSS-Instance header)`,
+      );
+      callback();
+      return;
+    }
+
+    if (!verifyInstanceHmacProof(instanceNonce, host, port, authInfo.realm, proofHeader)) {
+      console.log(
+        `[AIBOSS Desktop] WARNING: Basic Auth challenge for ${key} cancelled (X-AIBOSS-Instance HMAC mismatch)`,
+      );
       callback();
       return;
     }
@@ -328,6 +503,7 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(async () => {
+    registerInstanceHeaderListener();
     currentLanguage = resolveInitialLanguage();
     setupAppMenu(currentLanguage);
     const win = createMainWindow(currentLanguage);

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getIsRunnerStarting } from '@/lib/office-runner';
+import { buildInstanceProofHeader } from '@/lib/instance-nonce';
 import {
   ApprovalIoError,
   ApprovalLedgerUnreadableError,
@@ -147,7 +148,10 @@ export async function POST(
         status,
         headers:
           status === 401
-            ? { 'WWW-Authenticate': 'Basic realm="aiboss-office"' }
+            ? {
+                'WWW-Authenticate': 'Basic realm="aiboss-office"',
+                'X-AIBOSS-Instance': buildInstanceProofHeader(req, 'aiboss-office'),
+              }
             : undefined,
       }
     );

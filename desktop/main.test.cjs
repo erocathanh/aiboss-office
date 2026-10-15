@@ -3,6 +3,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const vm = require('node:vm');
 const path = require('node:path');
 const desktopI18n = require('./i18n.cjs');
@@ -252,19 +254,66 @@ test('main.cjs initializes menu from app.getLocale() and rebuilds app menu, tray
   assert.equal(quitCalls, 0, 'App must not quit or restart on language change');
 });
 
+const tempDirsToClean = [];
+process.on('exit', () => {
+  for (const d of tempDirsToClean) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+  }
+});
+
+function computeTestInstanceProof(nonce, host, port, realm) {
+  const h = String(host || '').trim().toLowerCase();
+  const digest = crypto.createHmac('sha256', nonce).update(`${h}:${port}:${realm}`, 'utf8').digest('hex');
+  return `v1.${digest}`;
+}
+
 function createLoginHarness(
   envOverride = { PHONGBAN_USER: 'test-user', PHONGBAN_PASS: 'test-pass' },
   clockRef = { now: 1_700_000_000_000 },
+  options = {},
 ) {
   const code = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
   const appListeners = new Map();
   const logs = [];
+  const tempConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiboss-f40-test-'));
+  tempDirsToClean.push(tempConfigDir);
+  const defaultNonce = options.nonce || 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  if (!options.skipNonceFile) {
+    fs.writeFileSync(
+      path.join(tempConfigDir, 'instance-4330.json'),
+      JSON.stringify({
+        port: 4330,
+        nonce: defaultNonce,
+        startedAt: '2026-10-15T12:00:00.000Z',
+      }),
+      { encoding: 'utf8', mode: 0o600 },
+    );
+  }
+
+  let headersReceivedHook = null;
+  const mockSession = {
+    defaultSession: {
+      webRequest: {
+        onHeadersReceived: (fn) => {
+          headersReceivedHook = fn;
+        },
+      },
+    },
+  };
+
   const mockApp = {
     requestSingleInstanceLock: () => true,
     getLocale: () => 'en-GB',
     getLoginItemSettings: () => ({ openAtLogin: false }),
     quit: () => {},
-    whenReady: () => new Promise(() => {}),
+    whenReady: () => ({
+      then: (cb) => {
+        if (options.triggerWhenReady) {
+          cb();
+        }
+        return Promise.resolve();
+      },
+    }),
     on: (evt, fn) => {
       appListeners.set(evt, fn);
     },
@@ -279,14 +328,26 @@ function createLoginHarness(
     }
   };
 
+  const mergedEnv = {
+    AIBOSS_CONFIG_DIR: tempConfigDir,
+    ...envOverride,
+  };
+
   vm.runInNewContext(code, {
     require: (name) => {
       if (name === 'electron') {
         return {
           app: mockApp,
-          BrowserWindow: class {},
+          BrowserWindow: class {
+            loadURL() {}
+            loadFile() {}
+            on() {}
+            isDestroyed() { return false; }
+            setTitle() {}
+          },
           Menu: { buildFromTemplate: () => ({}), setApplicationMenu: () => {} },
           ipcMain: { handle: () => {} },
+          session: mockSession,
         };
       }
       if (name === './config.cjs') {
@@ -315,7 +376,7 @@ function createLoginHarness(
     process: {
       ...process,
       argv: ['node', 'main.cjs'],
-      env: envOverride,
+      env: mergedEnv,
       versions: { electron: '44.7.0', node: process.versions.node },
     },
     console: {
@@ -330,20 +391,42 @@ function createLoginHarness(
   const loginHandler = appListeners.get('login');
   assert.equal(typeof loginHandler, 'function', 'app.on("login") must be registered');
 
-  function fire(url, authInfo) {
+  function fire(url, authInfo, detailsOverride) {
     const cbCalls = [];
     let prevented = false;
+    const defaultHeaders =
+      authInfo && typeof authInfo === 'object'
+        ? {
+            'X-AIBOSS-Instance': computeTestInstanceProof(
+              defaultNonce,
+              authInfo.host || '127.0.0.1',
+              authInfo.port || 4330,
+              authInfo.realm || 'aiboss-office',
+            ),
+          }
+        : undefined;
+    const details =
+      detailsOverride !== undefined
+        ? detailsOverride
+        : { url, responseHeaders: defaultHeaders };
     loginHandler(
       { preventDefault: () => { prevented = true; } },
       {},
-      { url },
+      details,
       authInfo,
       (...args) => cbCalls.push(args),
     );
     return { cbCalls, prevented };
   }
 
-  return { fire, logs, clockRef };
+  return {
+    fire,
+    logs,
+    clockRef,
+    tempConfigDir,
+    defaultNonce,
+    getHeadersReceivedHook: () => headersReceivedHook,
+  };
 }
 
 test('F39 (i): login handler ignores challenge when PHONGBAN_* env vars are absent', () => {
@@ -627,4 +710,158 @@ test('UI-2d B: desktop/i18n.cjs matches electron.menu.* and electron.tray.* in s
     0,
     `Two-source desktop i18n mismatch(es) detected:\n${mismatches.join('\n')}`,
   );
+});
+
+test('F40 (a): 401 with valid X-AIBOSS-Instance HMAC matching instance-4330.json supplies credentials once (both details.responseHeaders and webRequest.onHeadersReceived)', () => {
+  const { fire, defaultNonce, getHeadersReceivedHook, logs } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+    { triggerWhenReady: true },
+  );
+  const validProof = computeTestInstanceProof(defaultNonce, '127.0.0.1', 4330, 'aiboss-office');
+  const hook = getHeadersReceivedHook();
+  assert.equal(typeof hook, 'function', 'webRequest.onHeadersReceived must be registered');
+
+  let responderCalled = false;
+  hook(
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-1/decision',
+      statusCode: 401,
+      responseHeaders: {
+        'WWW-Authenticate': ['Basic realm="aiboss-office"'],
+        'X-AIBOSS-Instance': [validProof],
+      },
+    },
+    (resp) => {
+      responderCalled = resp && resp.cancel === false;
+    },
+  );
+  assert.equal(responderCalled, true);
+
+  // Fire login without details.responseHeaders so it resolves from the webRequest 5s cache
+  const res = fire(
+    'http://127.0.0.1:4330/api/approvals/req-1/decision',
+    {
+      host: '127.0.0.1',
+      port: 4330,
+      realm: 'aiboss-office',
+      scheme: 'basic',
+      isProxy: false,
+    },
+    { url: 'http://127.0.0.1:4330/api/approvals/req-1/decision' },
+  );
+  assert.equal(res.prevented, true);
+  assert.deepEqual(res.cbCalls, [['owner-u', 'owner-p']]);
+  assert.equal(logs.some((l) => l.includes(defaultNonce) || l.includes(validProof) || l.includes('owner-p')), false);
+});
+
+test('F40 (b): 401 when instance-4330.json is missing cancels via callback() without sending credentials', () => {
+  const { fire, logs, defaultNonce } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+    { skipNonceFile: true },
+  );
+  const res = fire('http://127.0.0.1:4330/api/approvals/req-2/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res.prevented, false);
+  assert.deepEqual(res.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('missing or invalid instance-4330.json')));
+  assert.equal(logs.some((l) => l.includes(defaultNonce) || l.includes('owner-p')), false);
+});
+
+test('F40 (c): 401 without X-AIBOSS-Instance header (rogue server on same port/realm) cancels via callback() without sending credentials', () => {
+  const { fire, logs, defaultNonce } = createLoginHarness({
+    PHONGBAN_USER: 'owner-u',
+    PHONGBAN_PASS: 'owner-p',
+  });
+  const res = fire(
+    'http://127.0.0.1:4330/api/approvals/req-3/decision',
+    {
+      host: '127.0.0.1',
+      port: 4330,
+      realm: 'aiboss-office',
+      scheme: 'basic',
+      isProxy: false,
+    },
+    { url: 'http://127.0.0.1:4330/api/approvals/req-3/decision', responseHeaders: {} },
+  );
+  assert.equal(res.prevented, false);
+  assert.deepEqual(res.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('missing X-AIBOSS-Instance header')));
+  assert.equal(logs.some((l) => l.includes(defaultNonce) || l.includes('owner-p')), false);
+});
+
+test('F40 (d): 401 with X-AIBOSS-Instance signed by a different nonce cancels via callback() without sending credentials', () => {
+  const { fire, logs, defaultNonce } = createLoginHarness({
+    PHONGBAN_USER: 'owner-u',
+    PHONGBAN_PASS: 'owner-p',
+  });
+  const rogueNonce = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+  const wrongProof = computeTestInstanceProof(rogueNonce, '127.0.0.1', 4330, 'aiboss-office');
+  const res = fire(
+    'http://127.0.0.1:4330/api/approvals/req-4/decision',
+    {
+      host: '127.0.0.1',
+      port: 4330,
+      realm: 'aiboss-office',
+      scheme: 'basic',
+      isProxy: false,
+    },
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-4/decision',
+      responseHeaders: { 'X-AIBOSS-Instance': wrongProof },
+    },
+  );
+  assert.equal(res.prevented, false);
+  assert.deepEqual(res.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
+  assert.equal(
+    logs.some((l) => l.includes(defaultNonce) || l.includes(rogueNonce) || l.includes(wrongProof) || l.includes('owner-p')),
+    false,
+  );
+});
+
+test('F40 (e): 401 with valid X-AIBOSS-Instance remains blocked during 60s F38 cooldown window after prior rejection', () => {
+  const clock = { now: 1_700_000_000_000 };
+  const { fire } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    clock,
+  );
+  const res1 = fire('http://127.0.0.1:4330/api/approvals/req-5/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res1.prevented, true);
+  assert.deepEqual(res1.cbCalls, [['owner-u', 'owner-p']]);
+
+  // 2nd challenge (rejected credentials) triggers 60s cooldown even though X-AIBOSS-Instance is valid
+  const res2 = fire('http://127.0.0.1:4330/api/approvals/req-5/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res2.prevented, false);
+  assert.deepEqual(res2.cbCalls, [[]]);
+
+  // 3rd challenge 20s later with valid X-AIBOSS-Instance is still blocked by 60s cooldown
+  clock.now += 20_000;
+  const res3 = fire('http://127.0.0.1:4330/api/approvals/req-5/decision', {
+    host: '127.0.0.1',
+    port: 4330,
+    realm: 'aiboss-office',
+    scheme: 'basic',
+    isProxy: false,
+  });
+  assert.equal(res3.prevented, false);
+  assert.deepEqual(res3.cbCalls, [[]]);
 });

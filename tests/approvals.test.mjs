@@ -14,6 +14,7 @@ const testDataDir = path.join(
   'aiboss-test-approvals-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
 );
 process.env.AIBOSS_DATA_DIR = testDataDir;
+process.env.AIBOSS_CONFIG_DIR = path.join(testDataDir, 'config');
 // F21 (v07): Create `.test-ledger` marker file in `<testDataDir>/approvals` so the
 // 4-condition test lock-bypass switch can only ever activate inside this isolated test ledger.
 const testApprovalsDir = path.join(testDataDir, 'approvals');
@@ -4084,7 +4085,141 @@ approval_check.main()
     }
     console.log('  [PASS] Case 43 (F34 + F33 P2 v10): /settings page error boundary isolates io_error, ledger_unreadable, and lock_timeout into approvals-error-card while keeping DisplaySettingsCard ("Text size") intact');
 
-    console.log('>>> ALL 43 A-4 v10 APPROVAL LEDGER TEST CASES PASSED <<<');
+
+    // Case 44 (F40 UI-2e): 401 decision response emits X-AIBOSS-Instance matching HMAC from instance-<port>.json; 200 and 503 responses do NOT include X-AIBOSS-Instance
+    const c44ConfigDir = path.join(testDataDir, 'f40-config-c44');
+    const prevConfigDir44 = process.env.AIBOSS_CONFIG_DIR;
+    const prevUser44 = process.env.PHONGBAN_USER;
+    const prevPass44 = process.env.PHONGBAN_PASS;
+    try {
+      process.env.AIBOSS_CONFIG_DIR = c44ConfigDir;
+      process.env.PHONGBAN_USER = 'f40-owner';
+      process.env.PHONGBAN_PASS = 'f40-secret-pass';
+
+      // Seed a fresh pending request for Case 44
+      const c44Ts = '2026-10-14T18:44:00Z';
+      const c44Seat = 'f40-seat';
+      const c44Tool = 'Bash';
+      const c44Sha = '4444444444444444444444444444444444444444444444444444444444444444';
+      const c44ReqId = computeRequestId(c44Ts, c44Seat, c44Tool, c44Sha);
+      fs.appendFileSync(
+        todayPath,
+        JSON.stringify({
+          ts: c44Ts,
+          seat: c44Seat,
+          tool: c44Tool,
+          host: 'api.example.com',
+          len: 64,
+          sha256: c44Sha,
+          head60: 'curl -X POST https://api.example.com/v1/test',
+          reason: 'external_host',
+        }) + '\n',
+        'utf-8'
+      );
+
+      // 44a: 401 response without Authorization header includes X-AIBOSS-Instance = v1.<64 hex>
+      const req401 = new NextRequest(`http://127.0.0.1:4330/api/approvals/${c44ReqId}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:4330',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved', note: 'F40 401 check' }),
+      });
+      const res401 = await postDecisionRoute(req401, {
+        params: Promise.resolve({ requestId: c44ReqId }),
+      });
+      assert.equal(res401.status, 401);
+      assert.equal(res401.headers.get('www-authenticate'), 'Basic realm="aiboss-office"');
+      const instanceHdr = res401.headers.get('x-aiboss-instance');
+      assert.ok(instanceHdr, '401 response must include X-AIBOSS-Instance header');
+      assert.match(instanceHdr, /^v1\.[0-9a-f]{64}$/, 'X-AIBOSS-Instance must match v1.<64 hex>');
+
+      const nonceFile44 = path.join(c44ConfigDir, 'instance-4330.json');
+      assert.ok(fs.existsSync(nonceFile44), 'instance-4330.json must be created in AIBOSS_CONFIG_DIR');
+      const dirMode44 = fs.statSync(c44ConfigDir).mode & 0o777;
+      const fileMode44 = fs.statSync(nonceFile44).mode & 0o777;
+      assert.equal(dirMode44, 0o700, 'AIBOSS_CONFIG_DIR mode must be 0700');
+      assert.equal(fileMode44, 0o600, 'instance-4330.json mode must be 0600');
+
+      const nonceJson44 = JSON.parse(fs.readFileSync(nonceFile44, 'utf-8'));
+      assert.equal(nonceJson44.port, 4330);
+      assert.match(nonceJson44.nonce, /^[0-9a-f]{64}$/);
+      assert.ok(typeof nonceJson44.startedAt === 'string' && nonceJson44.startedAt.length > 0);
+
+      const expectedProof44 =
+        'v1.' +
+        crypto
+          .createHmac('sha256', nonceJson44.nonce)
+          .update('127.0.0.1:4330:aiboss-office', 'utf8')
+          .digest('hex');
+      assert.equal(
+        instanceHdr,
+        expectedProof44,
+        'X-AIBOSS-Instance header on 401 must match HMAC computed from instance-4330.json'
+      );
+
+      // 44b: 200 response with valid Basic Auth does NOT include X-AIBOSS-Instance
+      const basicAuth44 = 'Basic ' + Buffer.from('f40-owner:f40-secret-pass', 'utf8').toString('base64');
+      const req200 = new NextRequest(`http://127.0.0.1:4330/api/approvals/${c44ReqId}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '127.0.0.1:4330',
+          authorization: basicAuth44,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved', note: 'F40 200 check' }),
+      });
+      const res200 = await postDecisionRoute(req200, {
+        params: Promise.resolve({ requestId: c44ReqId }),
+      });
+      assert.equal(res200.status, 200);
+      assert.equal(
+        res200.headers.get('x-aiboss-instance'),
+        null,
+        '200 response must NOT include X-AIBOSS-Instance header'
+      );
+
+      // 44c: 503 response (unconfigured auth from non-localhost) does NOT include X-AIBOSS-Instance
+      delete process.env.PHONGBAN_USER;
+      delete process.env.PHONGBAN_PASS;
+      const req503 = new NextRequest(`http://192.168.1.50:4330/api/approvals/${c44ReqId}/decision`, {
+        method: 'POST',
+        headers: {
+          host: '192.168.1.50:4330',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'approved' }),
+      });
+      const res503 = await postDecisionRoute(req503, {
+        params: Promise.resolve({ requestId: c44ReqId }),
+      });
+      assert.equal(res503.status, 503);
+      assert.equal(
+        res503.headers.get('x-aiboss-instance'),
+        null,
+        '503 response must NOT include X-AIBOSS-Instance header'
+      );
+    } finally {
+      if (prevConfigDir44 === undefined) {
+        delete process.env.AIBOSS_CONFIG_DIR;
+      } else {
+        process.env.AIBOSS_CONFIG_DIR = prevConfigDir44;
+      }
+      if (prevUser44 === undefined) {
+        delete process.env.PHONGBAN_USER;
+      } else {
+        process.env.PHONGBAN_USER = prevUser44;
+      }
+      if (prevPass44 === undefined) {
+        delete process.env.PHONGBAN_PASS;
+      } else {
+        process.env.PHONGBAN_PASS = prevPass44;
+      }
+    }
+    console.log('  [PASS] Case 44 (F40 UI-2e): 401 decision response emits X-AIBOSS-Instance = v1.<64 hex> matching instance-4330.json HMAC (0600/0700), while 200 and 503 responses omit X-AIBOSS-Instance');
+
+    console.log('>>> ALL 44 A-4 v10 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true });

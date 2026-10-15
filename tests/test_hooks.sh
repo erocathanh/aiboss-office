@@ -386,6 +386,8 @@ POS_CONTROL_CASES=(
     "block_secret_leak:block-bash-cat-prod-env.json"
     "block_secret_leak:block-bash-cat-mixedcase-env-local.json"
     "block_secret_leak:block-heredoc-interpreter-python-env.json"
+    "block_secret_leak:block-F40-read-instance-nonce.json"
+    "block_secret_leak:block-F40-python-open-instance-nonce.json"
     "block_external_scan:block-H2-glob-mid-root-wildcard.json"
     "block_external_scan:block-H2-glob-mid-users-wildcard.json"
     "protect_final_outputs:block-H3-multiedit-journal-non-sequential.json"
@@ -466,7 +468,7 @@ PASSED=$saved_passed
 FAILED=$saved_failed
 
 if [ "$pos_control_ok" -eq 1 ]; then
-    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm H-v11/F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm H-v11/F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F40/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
     FAILED=$((FAILED + 1))
 fi
