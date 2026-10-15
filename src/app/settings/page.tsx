@@ -13,7 +13,11 @@ import { DisplaySettingsCard } from '@/components/office/DisplaySettingsCard';
 import { DesktopSettingsCard } from '@/components/office/DesktopSettingsCard';
 import { CostSettingsCard } from '@/components/office/CostSettingsCard';
 import { BudgetSettingsCard } from '@/components/office/BudgetSettingsCard';
+import { ApprovalsSettingsCard } from '@/components/office/ApprovalsSettingsCard';
+import { getApprovals } from '@/lib/approvals-ledger';
 import { getAgentLanguage } from '@/lib/office-config';
+
+export const dynamic = 'force-dynamic';
 
 interface OfficeConfig {
   version: number;
@@ -113,6 +117,7 @@ export default function SettingsPage() {
   const config = loadOfficeConfig();
   const effectiveLanguage = getAgentLanguage(config);
   const gates = loadMarketingGates();
+  const initialApprovals = getApprovals({ limit: 50 }).approvals;
 
   return (
     <div className="settings-page">
@@ -144,6 +149,9 @@ export default function SettingsPage() {
         </div>
 
         <div className="settings-grid">
+          {/* Card: Approvals Ledger & State Machine (A-4) */}
+          <ApprovalsSettingsCard initialApprovals={initialApprovals} />
+
           {/* Card 1: Display & Typography (Client Preferences) */}
           <DisplaySettingsCard />
 
