@@ -137,3 +137,7 @@ Một phát hiện được xếp loại **P1 (chặn gộp)** khi và chỉ khi
 | F41 | P2 | `authInfo.port` là chuỗi hay mảng vẫn qua `Number()`; `APP_BASIC_REALM` có giá trị mặc định trùng trong destructuring ở main.cjs | hành vi đúng với Electron thật (port luôn số nguyên) nhưng không fail-closed về kiểu | UI-2d: chỉ nhận `typeof port === 'number'`; bỏ mặc định, thiếu hằng thì ném lỗi lúc nạp; hai ca test (chuỗi «4330» không cấp · thiếu hằng ném lỗi) |
 
 - Trước khi cài cho khách thật: đóng F40 (mức 3, anh Thanh quyết) và mở lại vòng soi đầy đủ.
+
+### 4.3. Lưu ý quyền riêng tư đối với tính năng Nhập giọng nói trên trình duyệt (Web Speech API — UI-3)
+- Khi người dùng bấm nút micro trên giao diện web (Chrome / Edge hỗ trợ `window.SpeechRecognition` hoặc `window.webkitSpeechRecognition`), luồng âm thanh từ micro được trình duyệt gửi trực tiếp tới dịch vụ nhận dạng giọng nói của nhà cung cấp trình duyệt (ví dụ: máy chủ nhận dạng của Google trên Chrome) để chuyển thành văn bản.
+- Ứng dụng AIBOSS Office **không** ghi âm ra đĩa và **không** gửi dữ liệu âm thanh lên máy chủ ứng dụng; chỉ phần văn bản sau khi người dùng bấm nút gửi (`↑`) mới đi vào phiên làm việc của ghế. Trong vỏ ứng dụng máy tính Electron (không có khoá dịch vụ nhận dạng giọng nói của Google), nút micro tự động ẩn.

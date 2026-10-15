@@ -10,8 +10,13 @@ import Link from 'next/link';
 import {
   NumberOne, Info, DotsThreeVertical, ClockCounterClockwise, TextAlignLeft, X,
   Stop, Plus, ClipboardText, ArrowLeft, CornersOut, CornersIn, Crown, List, ChatCircleDots,
-  CaretUp, CaretDown, ArrowsClockwise, GearSix,
+  CaretUp, CaretDown, ArrowsClockwise, GearSix, ArrowUp, Microphone,
 } from '@phosphor-icons/react/dist/ssr';
+import {
+  computeComposerMetrics,
+  insertTextAtCursor,
+  isSpeechRecognitionSupported,
+} from '@/lib/composer-utils';
 import { SO_O } from '@/lib/so-o';
 import type { PhongBan, NhanSu, TomTatPhien, Tin, OChat } from '@/components/ung-dung/kieu';
 import {
@@ -56,7 +61,7 @@ export default function UngDung({
   nhanSu: NhanSu[];
   tong: { nhan_su: number; phong_ban: number; truong_phong: number };
 }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   /* 👑 Ghế ghim (TỔNG GIÁM ĐỐC) — LUẬT CỨNG: ô 1 là nó, ở CẢ 3 chế độ. */
   const ongTrum = useMemo(() => nhanSu.find((n) => n.ghim) ?? null, [nhanSu]);
 
@@ -1810,11 +1815,225 @@ export default function UngDung({
   }, [toanMan]);
 
   const oGoRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
-  const tuCao = (el: HTMLTextAreaElement | null) => {
+  const tuCao = useCallback((el: HTMLTextAreaElement | null) => {
     if (!el) return;
+    const prevScrollTop = el.scrollTop;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 168)}px`;
-  };
+    const cs = typeof window !== 'undefined' ? window.getComputedStyle(el) : null;
+    const fontSizePx = cs ? parseFloat(cs.fontSize) || 16 : 16;
+    const rawLh = cs ? parseFloat(cs.lineHeight) : NaN;
+    const lineHeightPx = Number.isFinite(rawLh) ? rawLh : undefined;
+    const paddingTopPx = cs ? parseFloat(cs.paddingTop) || 0 : 0;
+    const paddingBottomPx = cs ? parseFloat(cs.paddingBottom) || 0 : 0;
+    const borderTopPx = cs ? parseFloat(cs.borderTopWidth) || 0 : 0;
+    const borderBottomPx = cs ? parseFloat(cs.borderBottomWidth) || 0 : 0;
+    const metrics = computeComposerMetrics({
+      scrollHeight: el.scrollHeight,
+      lineHeightPx,
+      fontSizePx,
+      paddingTopPx,
+      paddingBottomPx,
+      borderTopPx,
+      borderBottomPx,
+      maxLines: 10,
+    });
+    el.style.height = `${metrics.heightPx}px`;
+    el.style.overflowY = metrics.overflowY;
+    if (metrics.isCapped) {
+      const selEnd = typeof el.selectionEnd === 'number' ? el.selectionEnd : el.value.length;
+      if (selEnd >= el.value.length - 2) {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        el.scrollTop = prevScrollTop;
+        const lineIdx = Math.max(0, el.value.slice(0, selEnd).split('\n').length - 1);
+        const caretTop = paddingTopPx + lineIdx * metrics.lineHeightPx;
+        const caretBottom = caretTop + metrics.lineHeightPx;
+        const viewHeight = Math.max(metrics.lineHeightPx, metrics.heightPx - borderTopPx - borderBottomPx);
+        if (caretBottom > el.scrollTop + viewHeight - paddingBottomPx) {
+          el.scrollTop = caretBottom - viewHeight + paddingBottomPx;
+        } else if (caretTop < el.scrollTop + paddingTopPx) {
+          el.scrollTop = Math.max(0, caretTop - paddingTopPx);
+        }
+      }
+    }
+  }, []);
+
+  const dsSoanKey = dsO.map((o) => o.soan).join('\u0000');
+  dungTruocKhiVe(() => {
+    oGoRefs.current.forEach((el) => tuCao(el));
+  }, [dsSoanKey, boCuc, kieuHai, toanMan, tuCao]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const doLaiTatCa = () => {
+      oGoRefs.current.forEach((el) => tuCao(el));
+    };
+    window.addEventListener('resize', doLaiTatCa);
+    let obs: MutationObserver | null = null;
+    if (typeof MutationObserver !== 'undefined' && document.documentElement) {
+      obs = new MutationObserver(doLaiTatCa);
+      obs.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-text-size', 'data-co-chu'],
+      });
+    }
+    return () => {
+      window.removeEventListener('resize', doLaiTatCa);
+      obs?.disconnect();
+    };
+  }, [tuCao]);
+
+  const [moCongSoan, datMoCongSoan] = useState<number | null>(null);
+  const [hoTroMic, datHoTroMic] = useState(false);
+  const [dangNgheMic, datDangNgheMic] = useState<number | null>(null);
+  const [chuTamMic, datChuTamMic] = useState<Record<number, string>>({});
+  const [loiMic, datLoiMic] = useState<Record<number, string>>({});
+  const recRef = useRef<{ stop?: () => void; abort?: () => void } | null>(null);
+
+  useEffect(() => {
+    datHoTroMic(isSpeechRecognitionSupported());
+  }, []);
+
+  const dungMic = useCallback(() => {
+    try {
+      recRef.current?.stop?.();
+    } catch {}
+    recRef.current = null;
+    datDangNgheMic(null);
+    datChuTamMic({});
+  }, []);
+
+  const batTatMic = useCallback(
+    (slotIdx: number) => {
+      if (dangNgheMic === slotIdx) {
+        dungMic();
+        return;
+      }
+      if (dangNgheMic !== null) {
+        try {
+          recRef.current?.abort?.();
+        } catch {}
+        recRef.current = null;
+      }
+      datLoiMic((prev) => ({ ...prev, [slotIdx]: '' }));
+      datChuTamMic((prev) => ({ ...prev, [slotIdx]: '' }));
+
+      if (typeof window === 'undefined') return;
+      const win = window as unknown as {
+        SpeechRecognition?: new () => Record<string, unknown>;
+        webkitSpeechRecognition?: new () => Record<string, unknown>;
+      };
+      const SR = win.SpeechRecognition || win.webkitSpeechRecognition;
+      if (!SR) {
+        datLoiMic((prev) => ({ ...prev, [slotIdx]: 'home.composer.micUnsupported' }));
+        return;
+      }
+
+      const rec = new SR() as {
+        lang: string;
+        continuous: boolean;
+        interimResults: boolean;
+        onstart: (() => void) | null;
+        onresult: ((ev: { resultIndex?: number; results: ArrayLike<{ isFinal?: boolean; 0?: { transcript?: string } }> }) => void) | null;
+        onerror: ((ev: { error?: string }) => void) | null;
+        onend: (() => void) | null;
+        start: () => void;
+        stop: () => void;
+        abort: () => void;
+      };
+      recRef.current = rec;
+      rec.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
+      rec.continuous = true;
+      rec.interimResults = true;
+
+      rec.onstart = () => {
+        datDangNgheMic(slotIdx);
+      };
+
+      rec.onresult = (ev) => {
+        let finalChunk = '';
+        let interimChunk = '';
+        const startIdx = typeof ev.resultIndex === 'number' ? ev.resultIndex : 0;
+        for (let k = startIdx; k < ev.results.length; k++) {
+          const item = ev.results[k];
+          const text = item?.[0]?.transcript ?? '';
+          if (item?.isFinal) {
+            finalChunk += text;
+          } else {
+            interimChunk += text;
+          }
+        }
+        datChuTamMic((prev) => ({ ...prev, [slotIdx]: interimChunk.trim() }));
+        if (finalChunk.trim()) {
+          const el = oGoRefs.current[slotIdx];
+          const curVal = dsORef.current[slotIdx]?.soan ?? el?.value ?? '';
+          const selStart = el ? el.selectionStart : curVal.length;
+          const selEnd = el ? el.selectionEnd : selStart;
+          const inserted = insertTextAtCursor(curVal, finalChunk, selStart, selEnd);
+          capNhat(slotIdx, { soan: inserted.value });
+          setTimeout(() => {
+            const targetEl = oGoRefs.current[slotIdx];
+            if (targetEl) {
+              try {
+                targetEl.setSelectionRange(inserted.cursor, inserted.cursor);
+              } catch {}
+              tuCao(targetEl);
+            }
+          }, 0);
+        }
+      };
+
+      rec.onerror = (ev) => {
+        const code = ev?.error || '';
+        if (code === 'aborted') {
+          datDangNgheMic((cur) => (cur === slotIdx ? null : cur));
+          datChuTamMic((prev) => ({ ...prev, [slotIdx]: '' }));
+          return;
+        }
+        const errKey =
+          code === 'not-allowed' || code === 'service-not-allowed'
+            ? 'home.composer.micPermissionDenied'
+            : code === 'no-speech'
+              ? 'home.composer.micNoSpeech'
+              : 'home.composer.micNetworkError';
+        datLoiMic((prev) => ({ ...prev, [slotIdx]: errKey }));
+        datDangNgheMic((cur) => (cur === slotIdx ? null : cur));
+        datChuTamMic((prev) => ({ ...prev, [slotIdx]: '' }));
+      };
+
+      rec.onend = () => {
+        datDangNgheMic((cur) => (cur === slotIdx ? null : cur));
+        datChuTamMic((prev) => ({ ...prev, [slotIdx]: '' }));
+      };
+
+      try {
+        rec.start();
+        datDangNgheMic(slotIdx);
+      } catch {
+        datLoiMic((prev) => ({ ...prev, [slotIdx]: 'home.composer.micNetworkError' }));
+        datDangNgheMic(null);
+      }
+    },
+    [dangNgheMic, dungMic, lang, tuCao],
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (moCongSoan !== null) {
+        datMoCongSoan(null);
+      }
+      if (dangNgheMic !== null) {
+        dungMic();
+      }
+      datDsO((ds) =>
+        ds.some((o) => o.moMenu) ? ds.map((o) => (o.moMenu ? { ...o, moMenu: false } : o)) : ds,
+      );
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [moCongSoan, dangNgheMic, dungMic]);
 
   const guiRef = useRef(gui);
   guiRef.current = gui;
@@ -2524,7 +2743,6 @@ export default function UngDung({
                       >
                         <ArrowLeft size={17} weight={DAM_ICON} aria-hidden="true" />
                       </button>
-                      <div className="anh-o trong-o">—</div>
                       <div className="tt-o">
                         <b>{t('home.slot.emptySlotTitle')}</b>
                         <div className="ma-ky-thuat">{t('home.slot.noSeatSelected')}</div>
@@ -2543,23 +2761,22 @@ export default function UngDung({
                 ) : (
                   <>
                     <div className="de-o">
-                      <div className="anh-o">
-                        {o.ns.viet_tat}
-                        <span
-                          className={`den-o ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
-                          title={o.matKetNoi ? t('home.slot.statusConnectionLostTitle')
-                            : o.dangChay ? t('home.slot.statusRunningTitle')
-                            : o.phienHienTai ? t('home.slot.statusReadyTitle')
-                            : t('home.slot.statusIdleTitle')}
-                          aria-label={o.matKetNoi ? t('home.slot.statusConnectionLostAria') : o.dangChay ? t('home.slot.statusRunningAria') : o.phienHienTai ? t('home.slot.statusReadyAria') : t('home.slot.statusIdleAria')}
-                        />
-                      </div>
                       <div className="tt-o">
                         <b title={o.ns.nhan}>
-                          {i === 0 && <Crown size={14} weight={DAM_ICON} aria-label={t('home.slot.leadSeatAria')} className="vuong-mien" />}
-                          {o.ns.nhan}
+                          <span className="ten-ghe-de-o">{o.ns.nhan}</span>
+                          {i === 0 && <Crown size={13} weight={DAM_ICON} aria-label={t('home.slot.leadSeatAria')} className="vuong-mien vuong-mien-sau" />}
                         </b>
-                        <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
+                        <div className="ma-ky-thuat" title={o.ns.ten}>
+                          <span
+                            className={`den-o den-o-inline ${o.matKetNoi ? 'den-dut' : o.dangChay ? 'den-chay' : o.phienHienTai ? 'den-noi' : 'den-tat'}`}
+                            title={o.matKetNoi ? t('home.slot.statusConnectionLostTitle')
+                              : o.dangChay ? t('home.slot.statusRunningTitle')
+                              : o.phienHienTai ? t('home.slot.statusReadyTitle')
+                              : t('home.slot.statusIdleTitle')}
+                            aria-label={o.matKetNoi ? t('home.slot.statusConnectionLostAria') : o.dangChay ? t('home.slot.statusRunningAria') : o.phienHienTai ? t('home.slot.statusReadyAria') : t('home.slot.statusIdleAria')}
+                          />
+                          {o.ns.ten}
+                        </div>
                         {seatRunMap[o.ns.ten] && (() => {
                           const r = seatRunMap[o.ns.ten];
                           const statusLabel =
@@ -2769,8 +2986,9 @@ export default function UngDung({
                                 </svg>
                                 {t('home.slot.resumeInTerminalMenu')}
                               </button>
+                              <div className="vach-menu" />
                               <button
-                                className="muc-menu" type="button" role="menuitem"
+                                className={`muc-menu${i === 0 ? ' nguy' : ''}`} type="button" role="menuitem"
                                 onClick={() => { capNhat(i, { soan: '', moMenu: false }); }}
                               >
                                 <X size={15} weight={DAM_ICON} aria-hidden="true" />
@@ -3003,90 +3221,191 @@ export default function UngDung({
                         </div>
                       )}
 
-                      <div className="soan">
-                        <textarea
-                          ref={(el) => { oGoRefs.current[i] = el; }}
-                          value={o.soan}
-                          onChange={(e) => capNhat(i, { soan: e.target.value })}
-                          onInput={(e) => tuCao(e.currentTarget)}
-                          onKeyDown={(e) => {
-                            if (e.key !== 'Enter') return;
+                      <div className="soan soan-claude-mobile">
+                        <div className="vung-nhap-soan">
+                          <textarea
+                            ref={(el) => { oGoRefs.current[i] = el; }}
+                            value={o.soan}
+                            onChange={(e) => {
+                              capNhat(i, { soan: e.target.value });
+                              tuCao(e.currentTarget);
+                            }}
+                            onInput={(e) => tuCao(e.currentTarget)}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return;
+                              /**
+                               * 🇻🇳 BỘ GÕ TIẾNG VIỆT đang soạn dở ⇒ Enter là để CHỐT ÂM,
+                               * ⛔ KHÔNG phải để gửi. (Owner 20/08: dính MỖI câu lệnh.)
+                               *
+                               * Đường đi của lỗi khi ⛔ không chặn:
+                               *   âm cuối còn TRONG bộ gõ, ⛔ chưa vào state → Enter chốt âm
+                               *   → keydown mang isComposing=true → gui(i) đọc `o.soan` THIẾU âm cuối
+                               *   → GỬI CÂU CỤT → bộ gõ chốt xong, onChange đặt soan = âm còn sót
+                               *   → ô đang chạy ⇒ âm đó rơi vào HÀNG CHỜ ⇒ bị gửi LẦN HAI.
+                               *
+                               * ⚠️ PHẢI CÓ CẢ HAI VẾ: `isComposing` là chuẩn; `keyCode === 229`
+                               *    là đường lùi cho bộ gõ/trình duyệt cũ ⛔ không đặt isComposing.
+                               *    Thiếu một vế là còn máy dính.
+                               * 📌 Trả về TRƯỚC `preventDefault` — vì chặn mặc định lúc đang soạn
+                               *    còn cản luôn việc chốt âm ở một số trình duyệt.
+                               */
+                              if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing
+                                || e.keyCode === 229) return;
+                              // 📱 Máy cảm ứng: Enter là XUỐNG DÒNG. Gửi đã có nút Gửi ngay cạnh.
+                              if (camUng) return;
+                              // 💻 Máy có bàn phím rời: giữ nguyên nếp cũ — Enter gửi, Shift+Enter xuống dòng.
+                              if (e.shiftKey) return;
+                              e.preventDefault(); gui(i);
+                            }}
                             /**
-                             * 🇻🇳 BỘ GÕ TIẾNG VIỆT đang soạn dở ⇒ Enter là để CHỐT ÂM,
-                             * ⛔ KHÔNG phải để gửi. (Owner 20/08: dính MỖI câu lệnh.)
-                             *
-                             * Đường đi của lỗi khi ⛔ không chặn:
-                             *   âm cuối còn TRONG bộ gõ, ⛔ chưa vào state → Enter chốt âm
-                             *   → keydown mang isComposing=true → gui(i) đọc `o.soan` THIẾU âm cuối
-                             *   → GỬI CÂU CỤT → bộ gõ chốt xong, onChange đặt soan = âm còn sót
-                             *   → ô đang chạy ⇒ âm đó rơi vào HÀNG CHỜ ⇒ bị gửi LẦN HAI.
-                             *
-                             * ⚠️ PHẢI CÓ CẢ HAI VẾ: `isComposing` là chuẩn; `keyCode === 229`
-                             *    là đường lùi cho bộ gõ/trình duyệt cũ ⛔ không đặt isComposing.
-                             *    Thiếu một vế là còn máy dính.
-                             * 📌 Trả về TRƯỚC `preventDefault` — vì chặn mặc định lúc đang soạn
-                             *    còn cản luôn việc chốt âm ở một số trình duyệt.
+                             * 🔴 ⛔ ĐÃ BỎ `disabled={o.dangChay}` (17/08/2026).
+                             * Owner: *«trong lúc đọc câu trả lời, ⛔ không bấm vào ô để gõ được»*.
+                             * Khoá ô lúc ghế đang trả lời khiến HÀNG CHỜ vừa làm thành vô dụng —
+                             * ⛔ không gõ được thì lấy gì mà xếp hàng. Terminal cũng ⛔ không khoá bàn phím.
                              */
-                            if ((e.nativeEvent as unknown as { isComposing?: boolean }).isComposing
-                              || e.keyCode === 229) return;
-                            // 📱 Máy cảm ứng: Enter là XUỐNG DÒNG. Gửi đã có nút Gửi ngay cạnh.
-                            if (camUng) return;
-                            // 💻 Máy có bàn phím rời: giữ nguyên nếp cũ — Enter gửi, Shift+Enter xuống dòng.
-                            if (e.shiftKey) return;
-                            e.preventDefault(); gui(i);
-                          }}
-                          /**
-                           * 🔴 ⛔ ĐÃ BỎ `disabled={o.dangChay}` (17/08/2026).
-                           * Owner: *«trong lúc đọc câu trả lời, ⛔ không bấm vào ô để gõ được»*.
-                           * Khoá ô lúc ghế đang trả lời khiến HÀNG CHỜ vừa làm thành vô dụng —
-                           * ⛔ không gõ được thì lấy gì mà xếp hàng. Terminal cũng ⛔ không khoá bàn phím.
-                           */
-                          rows={1}
-                          /* Ô hẹp thì lời nhắc dài sẽ xuống dòng rồi bị cắt cụt — rút gọn. */
-                          placeholder={o.dangChay
-                            ? t('home.slot.placeholderResponding')
-                            : (camUng || manHep)
-                              ? t('home.slot.placeholderShort', { seat: o.ns ? o.ns.nhan : t('home.slot.placeholderDefaultSeat') })
-                              : t('home.slot.placeholderDesktop', { seat: o.ns ? o.ns.nhan : t('home.slot.placeholderDefaultSeat') })}
-                        />
-                        {/**
-                          * 🛑 NÚT DỪNG — Owner 18/08: «nút stop hiện ngay sau khi bấm nút gửi
-                          *    và nằm BÊN TRÁI NÚT GỬI lúc AI đang chạy».
-                          * 📌 Trước nó nằm trên thanh đề `.de-o`; đã GỠ HẲN khỏi đó — hai chỗ
-                          *    cùng một việc là chỗ để trạng thái lệch nhau mà ⛔ không ai thấy.
-                          * ⛔ TUYỆT ĐỐI KHÔNG `disabled` (khác nút Gửi): nó chỉ hiện lúc đang
-                          *    chạy, mà đang chạy thì LUÔN phải bấm được.
-                          * 📐 Lớp riêng `nut-dung-soan`, cao BẰNG nút Gửi (36px · bc-4 30px).
-                          *    ⛔ Đừng tái dùng `.nut-tron` — nó 30/26px, đo cho THANH ĐỀ,
-                          *    dùng ở đây là thấp hơn nút Gửi 6px (bc-1/2) và 4px (bc-4).
-                          * ♻️ Dùng lại `dungViec(i)` sẵn có, ⛔ không viết hàm mới.
-                          */}
-                        {o.dangChay && (
-                          <button
-                            className="nut-dung nut-dung-soan" type="button"
-                            onClick={() => dungViec(i)}
-                            title={t('home.slot.stopTaskTitle')}
-                            aria-label={t('home.slot.stopTaskAria')}
-                          >
-                            <Stop size={16} weight={DAM_ICON} aria-hidden="true" />
-                          </button>
-                        )}
-                        <button
-                          className="nut-clear-soan" type="button"
-                          onClick={() => capNhat(i, { soan: '' })}
-                          disabled={!o.soan.trim()}
-                          title={t('home.slot.clearInputTitle')}
-                        >
-                          {t('common.clear')}
-                        </button>
-                        <button
-                          className="nut-gui" type="button"
-                          onClick={() => gui(i)} disabled={!o.soan.trim()}
-                          title={o.dangChay ? t('home.slot.sendQueuedTitle') : t('home.slot.sendTitle')}
-                        >
-                          {t('common.send')}
-                        </button>
+                            rows={1}
+                            /* Ô hẹp thì lời nhắc dài sẽ xuống dòng rồi bị cắt cụt — rút gọn. */
+                            placeholder={o.dangChay
+                              ? t('home.slot.placeholderQueue')
+                              : (camUng || manHep)
+                                ? t('home.slot.placeholderShort', { seat: o.ns ? o.ns.nhan : t('home.slot.placeholderDefaultSeat') })
+                                : t('home.slot.placeholderDesktop', { seat: o.ns ? o.ns.nhan : t('home.slot.placeholderDefaultSeat') })}
+                          />
+                          {chuTamMic[i] && (
+                            <div className="chu-tam-mic" aria-live="polite">
+                              {chuTamMic[i]}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="thanh-cong-cu-soan">
+                          <div className="boc-cong-soan">
+                            <button
+                              className={`nut-cong-soan${moCongSoan === i ? ' bat' : ''}`}
+                              type="button"
+                              onClick={() => datMoCongSoan(moCongSoan === i ? null : i)}
+                              title={t('home.composer.more')}
+                              aria-label={t('home.composer.more')}
+                              aria-expanded={moCongSoan === i}
+                            >
+                              <Plus size={16} weight={DAM_ICON} aria-hidden="true" />
+                            </button>
+                            {moCongSoan === i && (
+                              <>
+                                <button
+                                  className="man-che"
+                                  type="button"
+                                  aria-label={t('home.slot.closeMenuAria')}
+                                  onClick={() => datMoCongSoan(null)}
+                                />
+                                <div className="bang-cong-soan menu-xo" role="menu">
+                                  <button
+                                    className="muc-menu"
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => {
+                                      datMoCongSoan(null);
+                                      void phienMoi(i);
+                                    }}
+                                  >
+                                    <Plus size={15} weight={DAM_ICON} aria-hidden="true" />
+                                    {t('home.composer.newSession')}
+                                  </button>
+                                  <button
+                                    className="muc-menu"
+                                    type="button"
+                                    role="menuitem"
+                                    disabled={!o.soan.trim()}
+                                    onClick={() => {
+                                      datMoCongSoan(null);
+                                      capNhat(i, { soan: '' });
+                                      setTimeout(() => tuCao(oGoRefs.current[i]), 0);
+                                    }}
+                                  >
+                                    <X size={15} weight={DAM_ICON} aria-hidden="true" />
+                                    {t('home.composer.clearInput')}
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          {o.ns && (() => {
+                            const modelName =
+                              (o.ns as unknown as { model?: string; mo_hinh?: string }).model ||
+                              (o.ns as unknown as { mo_hinh?: string }).mo_hinh ||
+                              t('home.composer.defaultModel');
+                            const fullChipLabel = t('home.composer.seatModelChip', {
+                              seat: o.ns.nhan,
+                              model: modelName,
+                            });
+                            return (
+                              <button
+                                className={`chip-mo-hinh${o.moHoSo ? ' bat' : ''}`}
+                                type="button"
+                                onClick={() => capNhat(i, { moHoSo: !o.moHoSo })}
+                                title={fullChipLabel}
+                                aria-label={fullChipLabel}
+                                aria-pressed={o.moHoSo}
+                              >
+                                <span className="chip-ten-ghe">{o.ns.nhan}</span>
+                                <span className="chip-mo-hinh-phu"> · {modelName}</span>
+                              </button>
+                            );
+                          })()}
+
+                          <div className="nhom-phai-soan">
+                            {hoTroMic && (
+                              <button
+                                className={`nut-mic-soan${dangNgheMic === i ? ' dang-nghe' : ''}`}
+                                type="button"
+                                onClick={() => batTatMic(i)}
+                                title={dangNgheMic === i ? t('home.composer.micStop') : t('home.composer.mic')}
+                                aria-label={dangNgheMic === i ? t('home.composer.micListening') : t('home.composer.mic')}
+                                aria-pressed={dangNgheMic === i}
+                              >
+                                <Microphone size={16} weight={dangNgheMic === i ? 'fill' : DAM_ICON} aria-hidden="true" />
+                                {dangNgheMic === i && <span className="cham-mic-nhay" aria-hidden="true" />}
+                              </button>
+                            )}
+
+                            {/**
+                              * 🛑 NÚT DỪNG & NÚT GỬI ↑ (UI-3 §1.B, §6.H, §7):
+                              * - Khi chưa chạy: nút Gửi hình tròn (ArrowUp) nằm ngoài cùng bên phải; mờ khi ô rỗng.
+                              * - Khi đang chạy: nút Dừng hình tròn có ô vuông sáng nằm ở vị trí ngoài cùng bên phải;
+                              *   khi ô có chữ thì nút ↑ hiện ngay bên trái nút Dừng để xếp vào hàng chờ.
+                              */}
+                            {(!o.dangChay || Boolean(o.soan.trim())) && (
+                              <button
+                                className="nut-gui nut-gui-tron"
+                                type="button"
+                                onClick={() => gui(i)}
+                                disabled={!o.soan.trim()}
+                                title={o.dangChay ? t('home.slot.sendQueuedTitle') : t('home.composer.send')}
+                                aria-label={t('home.composer.sendAria')}
+                              >
+                                <ArrowUp size={16} weight={DAM_ICON} aria-hidden="true" />
+                              </button>
+                            )}
+                            {o.dangChay && (
+                              <button
+                                className="nut-dung nut-dung-soan"
+                                type="button"
+                                onClick={() => dungViec(i)}
+                                title={t('home.slot.stopTaskTitle')}
+                                aria-label={t('home.slot.stopTaskAria')}
+                              >
+                                <Stop size={14} weight="fill" aria-hidden="true" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
+                      {loiMic[i] && (
+                        <div className="loi-mic-soan" role="alert">
+                          {t(loiMic[i])}
+                        </div>
+                      )}
 
                       {/**
                         * ℹ THẺ HỒ SƠ — thay cho vạch trạng thái cũ chạy suốt dưới ô chat.
