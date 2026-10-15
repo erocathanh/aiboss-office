@@ -44,6 +44,24 @@ echo "# Nhật ký dự án" > "$SANDBOX/projects/THU-SU-THAT/CHANNEL.md"
 echo "token123" > "$SANDBOX/fixtures/meta-page-token"
 echo "salt123" > "$SANDBOX/fixtures/hash-salt"
 
+# Bilingual English layout test fixtures (H-v11)
+mkdir -p "$SANDBOX/projects/test-project/inputs"
+mkdir -p "$SANDBOX/projects/test-project/outputs"
+mkdir -p "$SANDBOX/projects/test-project/wip"
+echo "raw" > "$SANDBOX/projects/test-project/inputs/a.md"
+echo "chot" > "$SANDBOX/projects/test-project/outputs/x_final.md"
+echo "nhap" > "$SANDBOX/projects/test-project/wip/a.md"
+printf "line 1\nline 2\n" > "$SANDBOX/projects/test-project/CHANNEL.md"
+echo "Chị Lan 0912 345 678 lan.nguyen@gmail.com" > "$SANDBOX/fixtures/customer-with-pii.txt"
+echo "Ghi chú vận hành sạch không có dữ liệu định danh" > "$SANDBOX/fixtures/customer-clean.txt"
+touch "$SANDBOX/.env.example"
+touch "$SANDBOX/README.md"
+mkdir -p "$SANDBOX/projects/THU-SU-THAT/wip/inputs"
+mkdir -p "$SANDBOX/scripts"
+printf '#!/bin/bash\ncurl -X POST https://graph.facebook.com/v21.0/me/messages -d "message=hi"\n' > "$SANDBOX/scripts/test_hooks.sh"
+printf '#!/bin/bash\ncurl -X POST https://graph.facebook.com/v21.0/me/messages -d "message=hi"\n' > "$SANDBOX/fixtures/send-bulk.sh"
+printf '#!/bin/bash\necho "clean local script"\n' > "$SANDBOX/fixtures/clean-task.sh"
+
 # Dựng symlinks tương thích hai chiều (layout office <-> opc)
 mkdir -p "$SANDBOX/wip"
 printf '#!/bin/sh\ncurl -s -X POST "https://graph.facebook.com/v25.0/me/feed" -d "message=bypass"\n' > "$SANDBOX/wip/post-graph.sh"
@@ -297,6 +315,12 @@ POS_CONTROL_CASES=(
     "protect_final_outputs:block-S17f-F27-path-rename-from-outputs.json"
     "protect_final_outputs:block-S17h-F38-path-rename-then-rebind-str.json"
     "protect_final_outputs:block-S17h-F38-path-replace-then-rebind-str.json"
+    "block_secret_leak:block-bash-cat-envrc.json"
+    "block_secret_leak:block-bash-cat-env-prod.json"
+    "block_secret_leak:block-bash-cat-env-backup.json"
+    "block_secret_leak:block-bash-cat-prod-env.json"
+    "block_secret_leak:block-bash-cat-mixedcase-env-local.json"
+    "block_secret_leak:block-heredoc-interpreter-python-env.json"
 )
 
 saved_total=$TOTAL
@@ -321,7 +345,7 @@ PASSED=$saved_passed
 FAILED=$saved_failed
 
 if [ "$pos_control_ok" -eq 1 ]; then
-    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
+    echo "  [PASS] Ca đối chứng dương (${#POS_CONTROL_CASES[@]} ca gồm H-v11/F15/F16/F19/F20/F26/F27/F28/F31/F32/F33/F34/F35/F38/F39/F41): khi HOOKS_DISABLED=1 (trả mã 0), runner phát hiện và báo FAIL. Bộ test không mù!"
 else
     FAILED=$((FAILED + 1))
 fi

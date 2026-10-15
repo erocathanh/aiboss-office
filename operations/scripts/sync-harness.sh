@@ -46,7 +46,7 @@ case "$ACTION" in
             source_commit="$(git -C "$SOURCE_REPO" rev-parse HEAD 2>/dev/null || echo "unknown")"
             source_commit_short="$(git -C "$SOURCE_REPO" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
             echo "Commit nguồn OPC: $source_commit_short ($source_commit)"
-            manifest_commit="$(grep -E "HEAD tại commit" "$MANIFEST_FILE" 2>/dev/null | grep -o -E '[0-9a-f]{7,40}' | head -1 || echo "5f2148a")"
+            manifest_commit="$(grep -E "Commit nguồn:|HEAD tại commit" "$MANIFEST_FILE" 2>/dev/null | grep -o -E '[0-9a-f]{7,40}' | head -1 || echo "253b8c4")"
             if [ "$source_commit_short" != "${manifest_commit:0:7}" ]; then
                 echo "[sync-harness: LƯU Ý] Kho nguồn OPC đã trôi ($source_commit_short != manifest $manifest_commit)"
             else

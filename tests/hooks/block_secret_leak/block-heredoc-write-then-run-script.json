@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cat > wip/run.sh <<'EOF'\ncat .env\nEOF\nbash wip/run.sh"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"import smtplib; s=smtplib.SMTP('smtp.gmail.com',587)\""
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cp fixtures/customer-with-pii.txt projects/THU-SU-THAT/wip/copied.txt"
+  }
+}

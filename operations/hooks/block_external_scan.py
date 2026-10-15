@@ -37,6 +37,36 @@ def is_broad_scan_path(path_str: str, base_cwd: str = "") -> bool:
         return True
     return False
 
+
+def is_broad_glob_root(path_str: str, base_cwd: str = "") -> bool:
+    """Kiểm tra thư mục gốc của Glob có quá rộng không (/, /Volumes, /Users hoặc $HOME)."""
+    if is_broad_scan_path(path_str, base_cwd):
+        return True
+    if not path_str:
+        return False
+    p = path_str.strip().strip("'\"")
+    if not p:
+        return False
+    expanded = os.path.expanduser(p)
+    norm = os.path.normpath(os.path.join(base_cwd, expanded)) if (not os.path.isabs(expanded) and base_cwd) else os.path.normpath(expanded)
+    home_norm = os.path.normpath(os.path.expanduser("~"))
+    if norm in ("/Users", home_norm):
+        return True
+    return False
+
+
+def extract_glob_pattern_root(pattern_str: str) -> str:
+    """Lấy phần tiền tố đường dẫn tĩnh trước ký tự đại diện đầu tiên (* ? [ {) trong pattern Glob."""
+    if not pattern_str:
+        return ""
+    p = pattern_str.strip().strip("'\"")
+    if not p.startswith(("/", "~")):
+        return ""
+    m = re.search(r'[*?\[{]', p)
+    prefix = p[:m.start()] if m else p
+    prefix = prefix.rstrip("/")
+    return prefix if prefix else "/"
+
 def check_external_scan(tool_name: str, tool_input: dict, cwd: str) -> str:
     # 1. Kiểm tra lệnh Bash
     if tool_name == "Bash":
@@ -130,12 +160,23 @@ def check_external_scan(tool_name: str, tool_input: dict, cwd: str) -> str:
                         return "Lệnh du quét dung lượng toàn bộ ổ đĩa (/) hoặc ổ gắn ngoài (/Volumes) bị chặn."
 
     # 2. Kiểm tra Grep / Glob
-    elif tool_name in ("Grep", "Glob"):
+    elif tool_name == "Grep":
         path = tool_input.get("path", "")
         if path and is_broad_scan_path(path, cwd):
             return f"Công cụ {tool_name} nhắm vào phạm vi quét rộng ({path}) bị chặn. Hãy quét trong phạm vi thư mục dự án."
 
+    elif tool_name == "Glob":
+        path = tool_input.get("path", "")
+        if path and is_broad_glob_root(path, cwd):
+            return f"Công cụ Glob nhắm vào phạm vi quét rộng ({path}) bị chặn. Hãy quét trong phạm vi thư mục dự án."
+        pattern = tool_input.get("pattern", "")
+        if pattern:
+            pat_root = extract_glob_pattern_root(pattern)
+            if pat_root and is_broad_glob_root(pat_root, cwd):
+                return f"Công cụ Glob có pattern quét diện rộng ({pattern}) bị chặn. Hãy giới hạn trong phạm vi thư mục dự án."
+
     return ""
+
 
 def main():
     try:
