@@ -24,10 +24,14 @@ import {
   syncUiLanguageOnStorageEvent,
   setCurrentUiLanguage,
   t,
+  formatLocalTimestamp,
 } from '../src/i18n/core.ts';
 import { UiLanguageProvider } from '../src/i18n/index.ts';
 import { ApprovalsSettingsCard } from '../src/components/office/ApprovalsSettingsCard.tsx';
 import { GET as getDesktopStatusRoute } from '../src/app/api/desktop/status/route.ts';
+import { POST as postDecisionRoute } from '../src/app/api/approvals/[requestId]/decision/route.ts';
+import { moTaHanFork } from '../src/lib/han-gio-fork.ts';
+import { NextRequest } from 'next/server';
 import { scanUiLiterals } from '../operations/scripts/check-i18n-literals.mjs';
 
 const require = createRequire(import.meta.url);
@@ -204,7 +208,7 @@ test('UI-2 Electron Menu & IPC: desktop menu template and window title rebuild w
   );
   assert.deepEqual(
     viTemplate.map((item) => item.label),
-    ['AIBOSS Office', 'Tệp', 'Chỉnh sửa', 'Hiển thị', 'Cửa sổ', 'Trợ giúp'],
+    ['AIBOSS Office', 'Tệp', 'Chỉnh sửa', 'Xem', 'Cửa sổ', 'Trợ giúp'],
   );
 
   assert.equal(desktopI18n.getWindowTitle('en'), 'AIBOSS Office — Autonomous Workspace');
@@ -334,10 +338,75 @@ test('UI-2 v02 V3 & V4: /api/desktop/status returns 200 and ApprovalsSettingsCar
         React.createElement(ApprovalsSettingsCard, { initialApprovals: [] }),
       ),
     );
-    assert.ok(htmlVi.includes('Phê duyệt thao tác'));
+    assert.ok(htmlVi.includes('Duyệt thao tác'));
     assert.ok(htmlVi.includes('Yêu cầu chờ duyệt (0)'));
     assert.ok(htmlVi.includes('Chưa có yêu cầu nào đang chờ duyệt.'));
     assert.ok(htmlVi.includes('Sổ đã quyết (0)'));
+  } finally {
+    setCurrentUiLanguage('en');
+  }
+});
+
+test('UI-2c: moTaHanFork(t), formatLocalTimestamp, Approvals actor/ttl formatting, and 401 WWW-Authenticate header', async () => {
+  try {
+    setCurrentUiLanguage('vi');
+    assert.equal(moTaHanFork(t), 'tối đa 3 phút');
+    setCurrentUiLanguage('en');
+    assert.equal(moTaHanFork(t), 'up to 3 minutes');
+
+    const viTime = formatLocalTimestamp('2026-10-12T18:10:00Z', 'vi', false);
+    const enTime = formatLocalTimestamp('2026-10-12T18:10:00Z', 'en', false);
+    assert.ok(viTime.includes('18:10') && viTime.includes('12/10/2026'), `Unexpected viTime: ${viTime}`);
+    assert.ok(enTime.includes('18:10') && enTime.includes('12/10/2026'), `Unexpected enTime: ${enTime}`);
+
+    const decidedSample = [
+      {
+        requestId: '1122334455667788',
+        ts: '2026-10-14T20:15:00.000Z',
+        seat: 'copywriter-seat',
+        tool: 'Bash',
+        host: 'api.example.com',
+        reason: 'external_post_send',
+        sha256: 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+        head60: 'curl -X POST https://api.example.com',
+        status: 'approved',
+        state: 'decided',
+        decidedBy: 'owner',
+        decidedAt: '2026-10-14T20:16:00.000Z',
+        expiresAt: '2026-10-14T21:15:00.000Z',
+      },
+    ];
+    const htmlViDecided = renderToStaticMarkup(
+      React.createElement(
+        UiLanguageProvider,
+        { initialLang: 'vi' },
+        React.createElement(ApprovalsSettingsCard, { initialApprovals: decidedSample }),
+      ),
+    );
+    assert.ok(htmlViDecided.includes('bởi Chủ văn phòng'), 'decidedBy="owner" must be translated to "bởi Chủ văn phòng" in vi');
+    assert.ok(htmlViDecided.includes('hiệu lực đến:'), 'ttlLabel must use "hiệu lực đến:" in vi');
+    assert.ok(!htmlViDecided.includes('2026-10-14T21:15:00.000Z'), 'expiresAt must not render raw ISO string');
+
+    // Verify 401 WWW-Authenticate header on decision route when Basic Auth is configured
+    const prevUser = process.env.PHONGBAN_USER;
+    const prevPass = process.env.PHONGBAN_PASS;
+    process.env.PHONGBAN_USER = 'unit-user';
+    process.env.PHONGBAN_PASS = 'unit-pass';
+    try {
+      const req = new NextRequest('http://127.0.0.1:4330/api/approvals/0000000000000000/decision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', host: '127.0.0.1:4330' },
+        body: JSON.stringify({ decision: 'approved' }),
+      });
+      const res = await postDecisionRoute(req, { params: Promise.resolve({ requestId: '0000000000000000' }) });
+      assert.equal(res.status, 401);
+      assert.equal(res.headers.get('www-authenticate'), 'Basic realm="aiboss-office"');
+    } finally {
+      if (prevUser === undefined) delete process.env.PHONGBAN_USER;
+      else process.env.PHONGBAN_USER = prevUser;
+      if (prevPass === undefined) delete process.env.PHONGBAN_PASS;
+      else process.env.PHONGBAN_PASS = prevPass;
+    }
   } finally {
     setCurrentUiLanguage('en');
   }

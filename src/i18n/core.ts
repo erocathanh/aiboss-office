@@ -364,3 +364,33 @@ export function t(
   console.warn(`[i18n] Missing translation key: "${key}" (lang="${activeLang}")`);
   return key;
 }
+
+/**
+ * Formats an ISO timestamp into a readable date/time string in the current UI language.
+ * When `mounted` is false (during SSR / initial hydration), uses UTC deterministically
+ * so server and client markup match without React #418 hydration warnings.
+ */
+export function formatLocalTimestamp(
+  iso: string,
+  lang: UiLanguage = currentLanguageState,
+  mounted = true,
+): string {
+  if (!iso || typeof iso !== 'string') return '';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const locale = lang === 'vi' ? 'vi-VN' : 'en-GB';
+    const opts: Intl.DateTimeFormatOptions = {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      ...(mounted ? {} : { timeZone: 'UTC' }),
+    };
+    return d.toLocaleString(locale, opts);
+  } catch {
+    return iso;
+  }
+}

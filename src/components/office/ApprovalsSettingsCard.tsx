@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle, ClockCountdown, ShieldCheck, XCircle } from '@phosphor-icons/react';
 import type { ApprovalItem, ApprovalStatus } from '@/lib/approvals-ledger';
-import { useT } from '@/i18n';
+import { useT, formatLocalTimestamp } from '@/i18n';
 
 export type ApprovalLoadErrorCode = 'ledger_unreadable' | 'io_error' | 'lock_timeout';
 
@@ -140,7 +140,8 @@ export function ApprovalsSettingsCard({
   initialApprovals,
   initialError = null,
 }: ApprovalsSettingsCardProps = {}) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const [mounted, setMounted] = useState(false);
   const [approvals, setApprovals] = useState<ApprovalItem[]>(initialApprovals ?? []);
   const [loadError, setLoadError] = useState<ApprovalLoadErrorCode | null>(initialError ?? null);
   const [loading, setLoading] = useState(!initialApprovals && !initialError);
@@ -174,6 +175,7 @@ export function ApprovalsSettingsCard({
   }, []);
 
   useEffect(() => {
+    setMounted(true);
     fetchApprovals();
   }, [fetchApprovals]);
 
@@ -191,13 +193,19 @@ export function ApprovalsSettingsCard({
       });
       if (!res.ok) {
         const errData = (await res.json().catch(() => ({}))) as { message?: string };
-        setErrorMessage(
-          errData.message || t('settings.approvals.decisionFailed', { status: res.status }),
-        );
+        const baseMsg = t('settings.approvals.decisionFailed', { status: res.status });
+        const detail =
+          typeof errData?.message === 'string' && errData.message.trim()
+            ? ` ${errData.message.trim()}`
+            : '';
+        setErrorMessage(`${baseMsg}${detail}`);
       }
       await fetchApprovals();
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : t('settings.approvals.networkError'));
+      const baseMsg = t('settings.approvals.networkError');
+      const detail =
+        err instanceof Error && err.message.trim() ? ` ${err.message.trim()}` : '';
+      setErrorMessage(`${baseMsg}${detail}`);
     } finally {
       setBusyId(null);
     }
@@ -644,12 +652,21 @@ export function ApprovalsSettingsCard({
                     >
                       {item.decidedBy && (
                         <span>
-                          {t('settings.approvals.byActor', { actor: item.decidedBy })}
+                          {t('settings.approvals.byActor', {
+                            actor:
+                              item.decidedBy === 'owner'
+                                ? t('settings.approvals.actorOwner')
+                                : item.decidedBy === 'localhost'
+                                  ? t('settings.approvals.actorLocalhost')
+                                  : item.decidedBy,
+                          })}
                         </span>
                       )}
                       {item.expiresAt && item.status === 'approved' && (
                         <span>
-                          {t('settings.approvals.ttlLabel', { expiresAt: item.expiresAt })}
+                          {t('settings.approvals.ttlLabel', {
+                            expiresAt: formatLocalTimestamp(item.expiresAt, lang, mounted),
+                          })}
                         </span>
                       )}
                       <span>{formatRelativeAge(item.ts, t)}</span>

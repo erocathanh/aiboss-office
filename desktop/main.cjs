@@ -65,6 +65,40 @@ if (!gotTheLock) {
     }
   }
 
+  // Handle HTTP Basic Auth challenges on loopback (127.0.0.1 / localhost) using process.env
+  const loginAttemptCounts = new Map();
+  app.on('login', (event, _webContents, details, authInfo, callback) => {
+    const envUser = typeof process.env.PHONGBAN_USER === 'string' ? process.env.PHONGBAN_USER : '';
+    const envPass = typeof process.env.PHONGBAN_PASS === 'string' ? process.env.PHONGBAN_PASS : '';
+    if (!envUser || !envPass || typeof callback !== 'function') {
+      return;
+    }
+    let host = (authInfo && typeof authInfo.host === 'string' ? authInfo.host : '').toLowerCase();
+    if (!host && details && typeof details.url === 'string') {
+      try {
+        host = new URL(details.url).hostname.toLowerCase();
+      } catch (e) {
+        host = '';
+      }
+    }
+    const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1';
+    if (!isLoopback) {
+      return;
+    }
+    const key = (details && details.url) ? String(details.url) : host;
+    const prevAttempts = loginAttemptCounts.get(key) || 0;
+    if (prevAttempts >= 1) {
+      loginAttemptCounts.delete(key);
+      callback();
+      return;
+    }
+    loginAttemptCounts.set(key, prevAttempts + 1);
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    callback(envUser, envPass);
+  });
+
   // Handle second-instance focus
   app.on('second-instance', () => {
     focusAndShowWindow();

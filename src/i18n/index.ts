@@ -30,6 +30,7 @@ import {
   lookupTranslationKey,
   interpolateTranslation,
   t,
+  formatLocalTimestamp,
 } from './core.ts';
 
 export {
@@ -60,6 +61,7 @@ export {
   lookupTranslationKey,
   interpolateTranslation,
   t,
+  formatLocalTimestamp,
 };
 
 const UiLanguageContext = createContext<UiLanguage | null>(null);

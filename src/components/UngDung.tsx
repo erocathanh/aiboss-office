@@ -875,7 +875,7 @@ export default function UngDung({
          *    **KHÔNG biết thì KHÔNG suy — và KHÔNG biết thì cũng KHÔNG được hạ cờ.**
          *    Hạ cờ mà việc còn chạy là dựng lại đúng câu ⑥: sổ nói rảnh trong khi ghế đang tiêu tiền.
          */
-        hienCau(t('home.messages.stopUnknownReason', { reason: JSON.stringify(chuaXu) }));
+        hienCau(t('home.messages.stopUnknownReason', { reason: String(chuaXu) }));
       }
     } catch {
       /* mạng chập ⇒ bấm lại; KHÔNG doạ người dùng bằng lỗi đỏ. Cờ do chốt dưới lo. */
@@ -1287,7 +1287,7 @@ export default function UngDung({
     if (!o?.ns || !ma) return;
     capNhat(i, {
       dangFork: true,
-      loiDan: '🧬 ' + t('home.messages.forkInProgressNotice', { duration: moTaHanFork() }),
+      loiDan: '🧬 ' + t('home.messages.forkInProgressNotice', { duration: moTaHanFork(t) }),
     });
     try {
       const r = await fetch('/api/fork', {
@@ -2560,34 +2560,48 @@ export default function UngDung({
                           {o.ns.nhan}
                         </b>
                         <div className="ma-ky-thuat" title={o.ns.ten}>{o.ns.ten}</div>
-                        {seatRunMap[o.ns.ten] && (
-                          <div className="last-run-status" title={t('home.slot.runStatusTitle', { status: seatRunMap[o.ns.ten].status })}>
-                            <span className={`run-dot dot-${seatRunMap[o.ns.ten].status}`} />
-                            <span className="run-text">
-                              {(() => {
-                                const r = seatRunMap[o.ns.ten];
-                                const dateObj = new Date(r.finishedAt || r.startedAt);
-                                const timeStr = dateObj.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-                                if (r.status === 'finished') {
-                                  let dur = '';
-                                  if (r.startedAt && r.finishedAt) {
-                                    const diffSec = Math.max(0.1, (new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000);
-                                    dur = ` · ${diffSec.toFixed(1)}s`;
+                        {seatRunMap[o.ns.ten] && (() => {
+                          const r = seatRunMap[o.ns.ten];
+                          const statusLabel =
+                            r.status === 'queued' ? t('home.slot.runStatusQueued')
+                            : r.status === 'claimed' ? t('home.slot.runStatusClaimed')
+                            : r.status === 'running' ? t('home.slot.runStatusRunning')
+                            : r.status === 'finished' ? t('home.slot.runStatusFinished')
+                            : r.status === 'failed' ? t('home.slot.runStatusFailed')
+                            : r.status === 'killed' ? t('home.slot.runStatusKilled')
+                            : r.status === 'timeout' ? t('home.slot.runStatusTimeout')
+                            : r.status;
+                          return (
+                            <div className="last-run-status" title={t('home.slot.runStatusTitle', { status: statusLabel })}>
+                              <span className={`run-dot dot-${r.status}`} />
+                              <span className="run-text">
+                                {(() => {
+                                  const dateObj = new Date(r.finishedAt || r.startedAt);
+                                  const timeStr = dateObj.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+                                  if (r.status === 'finished') {
+                                    let dur = '';
+                                    if (r.startedAt && r.finishedAt) {
+                                      const diffSec = Math.max(0.1, (new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) / 1000);
+                                      dur = ` · ${diffSec.toFixed(1)}s`;
+                                    }
+                                    return t('home.slot.lastRunFinished', { time: timeStr, duration: dur, code: r.exitCode ?? 0 });
                                   }
-                                  return t('home.slot.lastRunFinished', { time: timeStr, duration: dur, code: r.exitCode ?? 0 });
-                                }
-                                if (r.status === 'running') return t('home.slot.lastRunRunning', { time: timeStr });
-                                if (r.status === 'claimed') return t('home.slot.lastRunClaimed', { time: timeStr });
-                                if (r.status === 'queued') return t('home.slot.lastRunQueued', { time: timeStr });
-                                const code = r.exitCode !== null && r.exitCode !== undefined ? ` · exit ${r.exitCode}` : '';
-                                if (r.status === 'failed') return t('home.slot.lastRunFailed', { time: timeStr, code });
-                                if (r.status === 'killed') return t('home.slot.lastRunKilled', { time: timeStr, code });
-                                if (r.status === 'timeout') return t('home.slot.lastRunTimeout', { time: timeStr, code });
-                                return `${r.status} ${timeStr}`;
-                              })()}
-                            </span>
-                          </div>
-                        )}
+                                  if (r.status === 'running') return t('home.slot.lastRunRunning', { time: timeStr });
+                                  if (r.status === 'claimed') return t('home.slot.lastRunClaimed', { time: timeStr });
+                                  if (r.status === 'queued') return t('home.slot.lastRunQueued', { time: timeStr });
+                                  const code =
+                                    r.exitCode !== null && r.exitCode !== undefined
+                                      ? t('home.slot.exitCodeSuffix', { code: r.exitCode })
+                                      : '';
+                                  if (r.status === 'failed') return t('home.slot.lastRunFailed', { time: timeStr, code });
+                                  if (r.status === 'killed') return t('home.slot.lastRunKilled', { time: timeStr, code });
+                                  if (r.status === 'timeout') return t('home.slot.lastRunTimeout', { time: timeStr, code });
+                                  return t('home.slot.lastRunOther', { status: statusLabel, time: timeStr });
+                                })()}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       {seatActiveMap[o.ns.ten]?.is_terminal_held && (
                         <span
@@ -2820,7 +2834,7 @@ export default function UngDung({
                         {o.phienChoFork && (
                           <div className="khoi-fork">
                             <button className="nut-chu manh" type="button" disabled={o.dangFork} onClick={() => forkVeGhe(i)}>
-                              {o.dangFork ? `🧬 ${t('home.slot.forkingStatus', { duration: moTaHanFork() })}` : `🧬 ${t('home.slot.forkToThisSeat')}`}
+                              {o.dangFork ? `🧬 ${t('home.slot.forkingStatus', { duration: moTaHanFork(t) })}` : `🧬 ${t('home.slot.forkToThisSeat')}`}
                             </button>
                             <span className="ghi-chu-fork">
                               {t('home.slot.forkDescription')}
@@ -3097,7 +3111,7 @@ export default function UngDung({
                           </div>
                           <div className="hs-hang">
                             <span className="hs-nhan">{t('home.slot.profileStatus')}</span>
-                            <span className="hs-gia"><span className={`seat-badge ${o.ns.status || 'idle'}`}>{o.ns.status || 'idle'}</span></span>
+                            <span className="hs-gia"><span className={`seat-badge ${o.matKetNoi ? 'connection-lost' : o.dangChay ? 'running' : o.phienHienTai ? 'ready' : 'idle'}`}>{o.matKetNoi ? t('home.slot.statusConnectionLostAria') : o.dangChay ? t('home.slot.statusRunningAria') : o.phienHienTai ? t('home.slot.statusReadyAria') : t('home.slot.statusIdleAria')}</span></span>
                           </div>
                           <div className="hs-hang">
                             <span className="hs-nhan">{t('home.slot.profileSession')}</span>
