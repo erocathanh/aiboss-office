@@ -4,18 +4,27 @@
  * gen-seat-files.mjs — Sinh tự động CLAUDE.md, .claude/settings.json và .mcp.json cho từng ghế
  * và cả .claude/settings.json ở gốc kho từ data/seats.json và departments/marketing/department.json.
  *
- * Mở rộng từ gen-seat-claude-md.mjs theo yêu cầu đề PHA H1 (mục H1-3 và v02) và S17b (F4, mục 7).
+ * Mở rộng từ gen-seat-claude-md.mjs theo yêu cầu đề PHA H1 (mục H1-3 và v02), S17b (F4, mục 7) và C2-broker.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveSeatLanguageRule } from './gen-seat-claude-md.mjs';
-import { generateSeatClaudeMd } from './gen-seat-claude-md.mjs';
+import { generateSeatClaudeMd, buildDepartmentRosterBlock } from './gen-seat-claude-md.mjs';
 import { escapeSeatSettingsGlobPath } from './seat-settings-anchor.mjs';
 
 export const escapeGlobPath = escapeSeatSettingsGlobPath;
-export { escapeSeatSettingsGlobPath };
+export { escapeSeatSettingsGlobPath, buildDepartmentRosterBlock };
+
+export function resolveAnchorRealRoot(anchorRoot) {
+  const resolvedRoot = path.resolve(anchorRoot);
+  try {
+    return fs.realpathSync(resolvedRoot);
+  } catch {
+    return resolvedRoot;
+  }
+}
 
 export function buildRepoRootDenyRules(repoRoot) {
   const resolvedRoot = path.resolve(repoRoot);
@@ -61,23 +70,30 @@ export function buildRepoRootDenyRules(repoRoot) {
   ];
 }
 
-const KNOWN_MCP_SERVERS = {
-  'agent-broker': {
-    type: 'stdio',
-    command: 'sh',
-    args: [
-      '-c',
-      'exec node "${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-$HOME/Development/agent-broker-mcp/index.js}"',
-    ],
-  },
-};
+const FORBIDDEN_MCP_ABSOLUTE_PREFIXES = ['/Users/', '/private/', '/tmp/'];
 
-function buildMcpJson(mcpList) {
+export function hasForbiddenAbsolutePathInMcpJson(rawContent) {
+  if (typeof rawContent !== 'string') return true;
+  for (const prefix of FORBIDDEN_MCP_ABSOLUTE_PREFIXES) {
+    if (rawContent.includes(prefix)) return true;
+  }
+  return false;
+}
+
+export function buildMcpJson(mcpList, _anchorRoot) {
+  const knownMcpServers = {
+    'agent-broker': {
+      type: 'stdio',
+      command: 'node',
+      args: ['../../../../operations/mcp/agent-broker/index.js'],
+    },
+  };
+
   const servers = {};
   const names = Array.isArray(mcpList) ? mcpList : ['agent-broker'];
   for (const name of names) {
-    if (KNOWN_MCP_SERVERS[name]) {
-      servers[name] = KNOWN_MCP_SERVERS[name];
+    if (knownMcpServers[name]) {
+      servers[name] = knownMcpServers[name];
     }
   }
   return { mcpServers: servers };
@@ -210,7 +226,9 @@ function buildSettingsJson(hooksBasePath, baseDenyRules, seatPermissions = null)
 
 function writeOrCheckFile(filePath, expectedContent, checkOnly, mismatchedFiles) {
   const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : null;
-  if (existing !== expectedContent) {
+  const isMcpFile = path.basename(filePath) === '.mcp.json';
+  const hasForbiddenMcpAbs = isMcpFile && (existing === null || hasForbiddenAbsolutePathInMcpJson(existing));
+  if (existing !== expectedContent || hasForbiddenMcpAbs) {
     mismatchedFiles.push(filePath);
     if (!checkOnly) {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -243,6 +261,12 @@ export function generateSeatFiles({
   }
   const langRule = resolveSeatLanguageRule(rawLang);
 
+  // Ensure operations/data/mailbox exists on prestart / generation
+  const mailboxDir = path.join(repoRoot, 'operations', 'data', 'mailbox');
+  if (!checkOnly && !fs.existsSync(mailboxDir)) {
+    fs.mkdirSync(mailboxDir, { recursive: true });
+  }
+
   // Kiểm tra ghế trên đĩa: quét departments/*/seats/*
   const marketingSeatsDir = path.join(repoRoot, 'departments', 'marketing', 'seats');
   if (fs.existsSync(marketingSeatsDir)) {
@@ -267,12 +291,11 @@ export function generateSeatFiles({
   let updatedFilesCount = 0;
 
   // 1. Generate or check CLAUDE.md via shared generateSeatClaudeMd
-  if (!checkOnly) {
-    const res = generateSeatClaudeMd({ repoRoot, quiet: true });
-    claudeCount = res.totalCount;
-    updatedFilesCount += res.updatedCount;
-  } else {
-    claudeCount = seats.filter((s) => s.department === 'marketing').length;
+  const claudeRes = generateSeatClaudeMd({ repoRoot, quiet: true, checkOnly });
+  claudeCount = claudeRes.totalCount;
+  updatedFilesCount += claudeRes.updatedCount;
+  if (Array.isArray(claudeRes.mismatchedFiles)) {
+    mismatchedFiles.push(...claudeRes.mismatchedFiles);
   }
 
   const baseDenyRules = buildRepoRootDenyRules(anchorRoot);
@@ -297,13 +320,13 @@ export function generateSeatFiles({
     }
     seatSettingsCount++;
 
-    // 3. Generate .mcp.json per seat
+    // 3. Generate .mcp.json per seat (anchored to real anchorRoot)
     const mcpList = Array.isArray(seat.mcp)
       ? seat.mcp
       : Array.isArray(seat.permissions?.mcp_servers)
         ? seat.permissions.mcp_servers
         : ['agent-broker'];
-    const mcpConfig = buildMcpJson(mcpList);
+    const mcpConfig = buildMcpJson(mcpList, anchorRoot);
     const mcpPath = path.join(targetDir, '.mcp.json');
     if (writeOrCheckFile(mcpPath, JSON.stringify(mcpConfig, null, 2) + '\n', checkOnly, mismatchedFiles)) {
       updatedFilesCount++;
@@ -364,6 +387,3 @@ if (
     process.exit(1);
   }
 }
-
-
-

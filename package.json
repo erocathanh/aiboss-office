@@ -18,6 +18,7 @@
     "lint:dem": "eslint . -f json"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@phosphor-icons/react": "^2.1.10",
     "next": "15.5.4",
     "react": "19.1.1",

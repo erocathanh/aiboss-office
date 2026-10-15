@@ -2,10 +2,9 @@
   "mcpServers": {
     "agent-broker": {
       "type": "stdio",
-      "command": "sh",
+      "command": "node",
       "args": [
-        "-c",
-        "exec node \"${AIBOSS_AGENT_BROKER_MCP_SCRIPT:-$HOME/Development/agent-broker-mcp/index.js}\""
+        "../../../../operations/mcp/agent-broker/index.js"
       ]
     }
   }

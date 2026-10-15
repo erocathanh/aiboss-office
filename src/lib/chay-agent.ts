@@ -394,6 +394,7 @@ export const CLAUDE_SEAT_ENV_WHITELIST = [
   'AIBOSS_OFFICE_CONFIG_PATH',
   'AIBOSS_OFFICE_ROOT',
   'AIBOSS_AGENT_BROKER_MCP_SCRIPT',
+  'MCP_HOP_THU_DIR',
   'AIBOSS_SEAT_TERMINAL_MODE',
 ] as const;
 
@@ -405,16 +406,32 @@ const TEST_ONLY_ENV_KEYS = [
   'TEST_MOCK_RELEASE_FILE',
 ] as const;
 
-export function buildClaudeSeatEnv(sourceEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function buildClaudeSeatEnv(
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+  repoRoot?: string
+): NodeJS.ProcessEnv {
   const cleanEnv: Record<string, string | undefined> = {};
   const allowedSet = new Set<string>(CLAUDE_SEAT_ENV_WHITELIST);
   if (sourceEnv.NODE_ENV !== 'production') {
     for (const k of TEST_ONLY_ENV_KEYS) allowedSet.add(k);
   }
 
+  const baseRoot = safeRealpath(repoRoot ?? sourceEnv.AIBOSS_OFFICE_ROOT ?? findOfficeRootFromDir());
+
   for (const [key, val] of Object.entries(sourceEnv)) {
     if (val === undefined) continue;
     if (key === 'AIBOSS_DISABLE_HOOK_2_1' || key === 'AIBOSS_TEST_MODE') continue;
+    if (key === 'MCP_HOP_THU_DIR') {
+      const trimmed = String(val).trim();
+      if (!trimmed) continue;
+      const realCandidate = safeRealpath(path.resolve(baseRoot, trimmed));
+      const rel = path.relative(baseRoot, realCandidate);
+      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+        continue;
+      }
+      cleanEnv[key] = val;
+      continue;
+    }
     if (
       allowedSet.has(key) ||
       key.startsWith('LC_') ||
@@ -813,7 +830,7 @@ export function spawnClaudeSeatProcess(ts: ThamSoDungDoiSoClaude): {
     autoRegenerate: ts.autoRegenerateSettings,
   });
   const doiSo = buildClaudeSeatArgv({ ...ts, repoRoot });
-  const env = buildClaudeSeatEnv(ts.env ?? process.env);
+  const env = buildClaudeSeatEnv(ts.env ?? process.env, repoRoot);
   const tien = spawn(CAU_HINH.lenhClaude, doiSo, {
     cwd: ts.thuMuc,
     stdio: ['pipe', 'pipe', 'pipe'],
