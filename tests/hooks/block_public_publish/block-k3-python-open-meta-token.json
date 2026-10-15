@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"print(open('/Users/test/.meta-token-fanpage').read()[:20])\""
+  }
+}

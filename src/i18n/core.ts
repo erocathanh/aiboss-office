@@ -6,12 +6,13 @@ export type UiLanguage = 'en' | 'vi';
 export type DefaultUiLanguageMode = 'system' | 'en' | 'vi';
 
 export const UI_LANGUAGE_STORAGE_KEY = 'aiboss-office.ui-language';
+export const UI_LANGUAGE_COOKIE_KEY = 'aiboss-office.ui-language';
 export const UI_LANGUAGE_DATA_ATTR = 'data-ui-lang';
 export const UI_LANGUAGE_CHANGE_EVENT = 'aiboss-office:ui-language-change';
 
 /**
- * Single constant governing default UI language behavior when localStorage has no saved preference.
- * - 'system': follows navigator.language / Electron app.getLocale() ('vi*' -> 'vi', otherwise FALLBACK_UI_LANGUAGE)
+ * Single constant governing default UI language behavior when localStorage/cookie has no saved preference.
+ * - 'system': follows Accept-Language / navigator.language / Electron app.getLocale() ('vi*' -> 'vi', otherwise FALLBACK_UI_LANGUAGE)
  * - 'en' | 'vi': forces a fixed default language across the entire application
  */
 export const DEFAULT_UI_LANGUAGE_MODE: DefaultUiLanguageMode = 'system';
@@ -29,6 +30,90 @@ let clientInitialized = false;
 
 export function isUiLanguage(value: unknown): value is UiLanguage {
   return value === 'en' || value === 'vi';
+}
+
+export function parseUiLanguageCookie(
+  cookieHeaderOrValue?: string | null,
+): UiLanguage | null {
+  if (!cookieHeaderOrValue || typeof cookieHeaderOrValue !== 'string') {
+    return null;
+  }
+  const trimmed = cookieHeaderOrValue.trim();
+  if (isUiLanguage(trimmed)) {
+    return trimmed;
+  }
+  const pairs = trimmed.split(';');
+  for (const pair of pairs) {
+    const eqIdx = pair.indexOf('=');
+    if (eqIdx === -1) continue;
+    const name = pair.slice(0, eqIdx).trim();
+    const val = pair.slice(eqIdx + 1).trim();
+    if (name === UI_LANGUAGE_COOKIE_KEY) {
+      try {
+        const decoded = decodeURIComponent(val);
+        if (isUiLanguage(decoded)) return decoded;
+      } catch {
+        if (isUiLanguage(val)) return val;
+      }
+    }
+  }
+  return null;
+}
+
+export function parseAcceptLanguagePrimaryLocale(
+  acceptLanguage?: string | null,
+): string {
+  if (typeof acceptLanguage !== 'string' || !acceptLanguage.trim()) {
+    return '';
+  }
+  const parts = acceptLanguage
+    .split(',')
+    .map((part, index) => {
+      const [tagRaw, ...params] = part.trim().split(';');
+      const tag = (tagRaw || '').trim();
+      let q = 1.0;
+      for (const p of params) {
+        const [k, v] = p.trim().split('=');
+        if (k?.trim().toLowerCase() === 'q' && v !== undefined) {
+          const parsed = Number.parseFloat(v.trim());
+          if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+            q = parsed;
+          }
+        }
+      }
+      return { tag, q, index };
+    })
+    .filter((item) => item.tag.length > 0 && item.q > 0);
+  if (parts.length === 0) return '';
+  parts.sort((a, b) => (b.q !== a.q ? b.q - a.q : a.index - b.index));
+  return parts[0].tag;
+}
+
+/**
+ * Resolves the UI language on the server for SSR:
+ * 1. Explicit cookie (`aiboss-office.ui-language` = 'en' | 'vi')
+ * 2. Fixed mode override ('en' | 'vi') when DEFAULT_UI_LANGUAGE_MODE is not 'system'
+ * 3. Request Accept-Language header ('vi*' -> 'vi', otherwise FALLBACK_UI_LANGUAGE)
+ * 4. FALLBACK_UI_LANGUAGE ('en')
+ */
+export function resolveServerUiLanguage(options?: {
+  cookieValue?: string | null;
+  acceptLanguage?: string | null;
+  modeOverride?: DefaultUiLanguageMode;
+}): UiLanguage {
+  const fromCookie = parseUiLanguageCookie(options?.cookieValue);
+  if (fromCookie) {
+    return fromCookie;
+  }
+  const mode = options?.modeOverride ?? DEFAULT_UI_LANGUAGE_MODE;
+  if (mode === 'en' || mode === 'vi') {
+    return mode;
+  }
+  const primaryLocale = parseAcceptLanguagePrimaryLocale(options?.acceptLanguage);
+  if (primaryLocale.trim().toLowerCase().startsWith('vi')) {
+    return 'vi';
+  }
+  return FALLBACK_UI_LANGUAGE;
 }
 
 /**
@@ -57,6 +142,11 @@ export function resolveSystemUiLanguage(
 export function readUiLanguage(
   storage?: Pick<Storage, 'getItem'> | null,
   rawSystemLocale?: string | null,
+  doc?: {
+    documentElement?: {
+      getAttribute?: (k: string) => string | null;
+    };
+  } | null,
 ): UiLanguage {
   const targetStorage =
     storage !== undefined
@@ -72,12 +162,23 @@ export function readUiLanguage(
   } catch {
     // Ignore storage read errors in restricted environments
   }
+
+  if (rawSystemLocale === undefined && DEFAULT_UI_LANGUAGE_MODE === 'system') {
+    const targetDoc =
+      doc !== undefined ? doc : typeof document !== 'undefined' ? document : null;
+    const domAttr = targetDoc?.documentElement?.getAttribute?.(UI_LANGUAGE_DATA_ATTR);
+    if (isUiLanguage(domAttr)) {
+      return domAttr;
+    }
+  }
+
   return resolveSystemUiLanguage(rawSystemLocale);
 }
 
 export function saveUiLanguage(
   lang: UiLanguage,
   storage?: Pick<Storage, 'setItem'> | null,
+  doc?: { cookie?: string } | null,
 ): UiLanguage {
   const normalized: UiLanguage = isUiLanguage(lang) ? lang : FALLBACK_UI_LANGUAGE;
   const targetStorage =
@@ -92,6 +193,16 @@ export function saveUiLanguage(
     targetStorage?.setItem(UI_LANGUAGE_STORAGE_KEY, normalized);
   } catch {
     // Ignore storage write errors in restricted environments
+  }
+
+  const targetDoc =
+    doc !== undefined ? doc : typeof document !== 'undefined' ? document : null;
+  if (targetDoc && 'cookie' in targetDoc) {
+    try {
+      targetDoc.cookie = `${UI_LANGUAGE_COOKIE_KEY}=${normalized}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    } catch {
+      // Ignore cookie write errors in restricted environments
+    }
   }
   return normalized;
 }

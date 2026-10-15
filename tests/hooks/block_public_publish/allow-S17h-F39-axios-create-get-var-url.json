@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"const axios=require('axios'),client=axios.create(); const url='https://example.net/x'; client.get(url)\""}}

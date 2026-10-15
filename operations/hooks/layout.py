@@ -45,6 +45,18 @@ LAYOUT_MAP = {
 
 REVERSE_MAP = {v: k for k, v in LAYOUT_MAP.items()}
 
+PROJECTS_ROOT_ALL = (PROJECTS_DIR, OPC_PROJECTS_DIR)
+INPUTS_DIR_ALL = (
+    INPUTS_DIR,
+    OPC_INPUTS_DIR,
+    REFERENCES_DIR,
+    OPC_REFERENCES_DIR,
+    TEMPLATES_DIR,
+    OPC_TEMPLATES_DIR,
+)
+OUTPUTS_DIR_ALL = (OUTPUTS_DIR, OPC_OUTPUTS_DIR)
+SAMPLE_GROUND_TRUTH_ALL = (SAMPLE_GROUND_TRUTH_DIR, OPC_SAMPLE_GROUND_TRUTH_DIR)
+
 
 def is_projects_root(name: str) -> bool:
     """Kiểm tra tên thư mục gốc dự án (projects hoặc CAC-DU-AN)."""
@@ -52,8 +64,8 @@ def is_projects_root(name: str) -> bool:
 
 
 def is_inputs_dir(name: str) -> bool:
-    """Kiểm tra tên thư mục đầu vào (inputs hoặc DAU-VAO)."""
-    return name in (INPUTS_DIR, OPC_INPUTS_DIR)
+    """Kiểm tra tên thư mục đầu vào/tham khảo/bản mẫu bất biến (inputs/DAU-VAO, references/THAM-KHAO, templates/BAN-MAU)."""
+    return name in INPUTS_DIR_ALL
 
 
 def is_wip_dir(name: str) -> bool:

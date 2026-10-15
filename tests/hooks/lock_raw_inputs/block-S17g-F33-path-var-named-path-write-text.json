@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"from pathlib import Path; path=Path('projects/THU-SU-THAT/inputs/a.md'); path.write_text('x')\""
+  }
+}

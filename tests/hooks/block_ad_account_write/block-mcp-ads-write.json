@@ -1,0 +1,7 @@
+{
+  "tool_name": "mcp__meta_ads__update_campaign_budget",
+  "tool_input": {
+    "campaign_id": "123",
+    "daily_budget": 1000
+  }
+}

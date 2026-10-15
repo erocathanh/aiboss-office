@@ -270,10 +270,24 @@ export type ThanGhiO = {
  */
 export async function ghiSoO(than: ThanGhiO, goiMang: typeof fetch = fetch): Promise<boolean> {
   try {
+    let payload: ThanGhiO = than;
+    if (!than.binding && goiMang === fetch) {
+      try {
+        const curRes = await goiMang('/api/o');
+        if (curRes && curRes.ok) {
+          const curJson = (await curRes.json()) as {
+            o?: Record<string, { ma_nhan_su: string | null; ma_phien: string | null; generation?: number }>;
+          };
+          payload = { ...than, binding: bindingOf(curJson?.o?.[than.ma_o]) };
+        }
+      } catch {
+        // Ignore fallback binding lookup failure
+      }
+    }
     const res = await goiMang('/api/o', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(than),
+      body: JSON.stringify(payload),
     });
     return res.ok;
   } catch {

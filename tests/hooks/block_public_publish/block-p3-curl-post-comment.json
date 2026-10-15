@@ -1,0 +1,6 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s -X POST \"https://graph.facebook.com/v25.0/123_456/comments\" -d \"message=hi\" -d \"access_token=EAAxxxx\""
+  }
+}

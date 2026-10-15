@@ -95,6 +95,31 @@ function countWords(str) {
   return words ? words.length : 0;
 }
 
+function isInteractiveButtonOrLabelElement(jsxOpeningNode, sourceFile) {
+  if (!jsxOpeningNode || !jsxOpeningNode.tagName) return false;
+  const tagName = jsxOpeningNode.tagName.getText(sourceFile);
+  if (tagName === 'button' || tagName === 'label') {
+    return true;
+  }
+  const props = jsxOpeningNode.attributes?.properties ?? [];
+  for (const prop of props) {
+    if (ts.isJsxAttribute(prop) && prop.name.getText(sourceFile) === 'role' && prop.initializer) {
+      if (ts.isStringLiteral(prop.initializer) && prop.initializer.text === 'button') {
+        return true;
+      }
+      if (
+        ts.isJsxExpression(prop.initializer) &&
+        prop.initializer.expression &&
+        ts.isStringLiteral(prop.initializer.expression) &&
+        prop.initializer.expression.text === 'button'
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function scanUiLiterals({ repoRoot = REPO_ROOT } = {}) {
   const componentsDir = path.join(repoRoot, 'src/components');
   const appDir = path.join(repoRoot, 'src/app');
@@ -120,9 +145,9 @@ export function scanUiLiterals({ repoRoot = REPO_ROOT } = {}) {
       scriptKind,
     );
 
-    const recordCandidate = (rawText, kind, node) => {
+    const recordCandidate = (rawText, kind, node, minWords = 2) => {
       const normalized = rawText.replace(/\s+/g, ' ').trim();
-      if (countWords(normalized) < 2) return;
+      if (countWords(normalized) < minWords) return;
 
       const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       const exception = EXCEPTION_MAP.get(normalized);
@@ -148,14 +173,33 @@ export function scanUiLiterals({ repoRoot = REPO_ROOT } = {}) {
       });
     };
 
-    const visit = (node) => {
+    const visit = (node, insideButtonOrLabel = false) => {
+      let nextInside = insideButtonOrLabel;
+      if (ts.isJsxElement(node)) {
+        if (isInteractiveButtonOrLabelElement(node.openingElement, sourceFile)) {
+          nextInside = true;
+        }
+      } else if (ts.isJsxSelfClosingElement(node)) {
+        if (isInteractiveButtonOrLabelElement(node, sourceFile)) {
+          nextInside = true;
+        }
+      }
+
       if (ts.isJsxText(node)) {
-        recordCandidate(node.getText(sourceFile), 'JSXText', node);
+        const minWords = nextInside ? 1 : 2;
+        const kind = nextInside ? 'JSXText(button/label)' : 'JSXText';
+        recordCandidate(node.getText(sourceFile), kind, node, minWords);
       } else if (ts.isJsxAttribute(node)) {
         const attrName = node.name.getText(sourceFile);
         if (TARGET_ATTRS.has(attrName) && node.initializer) {
+          const minWords = nextInside ? 1 : 2;
           if (ts.isStringLiteral(node.initializer)) {
-            recordCandidate(node.initializer.text, `JSXAttribute(${attrName})`, node.initializer);
+            recordCandidate(
+              node.initializer.text,
+              `JSXAttribute(${attrName})`,
+              node.initializer,
+              minWords,
+            );
           } else if (
             ts.isJsxExpression(node.initializer) &&
             node.initializer.expression &&
@@ -166,14 +210,15 @@ export function scanUiLiterals({ repoRoot = REPO_ROOT } = {}) {
               node.initializer.expression.text,
               `JSXAttribute(${attrName})`,
               node.initializer.expression,
+              minWords,
             );
           }
         }
       }
-      ts.forEachChild(node, visit);
+      ts.forEachChild(node, (child) => visit(child, nextInside));
     };
 
-    visit(sourceFile);
+    visit(sourceFile, false);
   }
 
   return {
@@ -191,7 +236,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   for (const hit of report.allowedHits) {
     console.log(`  - [ALLOW] ${hit.file}:${hit.line} (${hit.kind}) "${hit.text}" -> [${hit.category}] ${hit.reason}`);
   }
-  console.log(`[i18n-scanner] Untranslated UI literal violations (>= 2 words): ${report.violations.length}`);
+  console.log(`[i18n-scanner] Untranslated UI literal violations (>= 2 words, or >= 1 word in button/label): ${report.violations.length}`);
   if (report.violations.length > 0) {
     for (const v of report.violations) {
       console.error(`  - [VIOLATION] ${v.file}:${v.line}:${v.column} (${v.kind}): "${v.text}"`);

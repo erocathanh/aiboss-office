@@ -1,13 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createRequire } from 'node:module';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   en,
   vi,
   UI_LANGUAGE_STORAGE_KEY,
+  UI_LANGUAGE_COOKIE_KEY,
   UI_LANGUAGE_DATA_ATTR,
   DEFAULT_UI_LANGUAGE_MODE,
   FALLBACK_UI_LANGUAGE,
+  parseUiLanguageCookie,
+  parseAcceptLanguagePrimaryLocale,
+  resolveServerUiLanguage,
   resolveSystemUiLanguage,
   readUiLanguage,
   saveUiLanguage,
@@ -16,6 +25,9 @@ import {
   setCurrentUiLanguage,
   t,
 } from '../src/i18n/core.ts';
+import { UiLanguageProvider } from '../src/i18n/index.ts';
+import { ApprovalsSettingsCard } from '../src/components/office/ApprovalsSettingsCard.tsx';
+import { GET as getDesktopStatusRoute } from '../src/app/api/desktop/status/route.ts';
 import { scanUiLiterals } from '../operations/scripts/check-i18n-literals.mjs';
 
 const require = createRequire(import.meta.url);
@@ -199,12 +211,134 @@ test('UI-2 Electron Menu & IPC: desktop menu template and window title rebuild w
   assert.equal(desktopI18n.getWindowTitle('vi'), 'AIBOSS Office — Văn phòng AI tự hành');
 });
 
-test('UI-2 AST Literal Scanner: 0 untranslated UI literal strings (>= 2 words) in src/components/** and src/app/**', () => {
+test('UI-2 AST Literal Scanner: 0 untranslated UI literal strings (>= 2 words, or >= 1 word in button/label) in src/components/** and src/app/**', () => {
   const report = scanUiLiterals();
-  assert.ok(report.scannedFilesCount >= 18);
+  assert.ok(report.scannedFilesCount >= 19);
   assert.deepEqual(
     report.violations,
     [],
     `Found untranslated UI literals: ${JSON.stringify(report.violations, null, 2)}`,
   );
+
+  // Positive control in isolated temp dir: 1-word literal in <button>Save</button> MUST be caught
+  const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'ui2-scanner-pos-'));
+  try {
+    const compDir = path.join(tmpRepo, 'src/components');
+    fs.mkdirSync(compDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(compDir, 'TempBtn.tsx'),
+      'export function TempBtn() { return <button type="button">Save</button>; }\n',
+      'utf8',
+    );
+    const posReport = scanUiLiterals({ repoRoot: tmpRepo });
+    assert.equal(posReport.violations.length, 1);
+    assert.equal(posReport.violations[0].text, 'Save');
+    assert.equal(posReport.violations[0].kind, 'JSXText(button/label)');
+  } finally {
+    fs.rmSync(tmpRepo, { recursive: true, force: true });
+  }
+});
+
+test('UI-2 v02 V2: SSR language resolution (Cookie > Accept-Language > Fallback) + cookie & data-ui-lang sync', () => {
+  assert.equal(UI_LANGUAGE_COOKIE_KEY, 'aiboss-office.ui-language');
+
+  // Cookie parsing
+  assert.equal(parseUiLanguageCookie('vi'), 'vi');
+  assert.equal(parseUiLanguageCookie('en'), 'en');
+  assert.equal(parseUiLanguageCookie('other=1; aiboss-office.ui-language=vi; theme=dark'), 'vi');
+  assert.equal(parseUiLanguageCookie('aiboss-office.ui-language=en'), 'en');
+  assert.equal(parseUiLanguageCookie('aiboss-office.ui-language=fr'), null);
+  assert.equal(parseUiLanguageCookie(''), null);
+
+  // Accept-Language primary locale parsing
+  assert.equal(parseAcceptLanguagePrimaryLocale('vi-VN,vi;q=0.9,en-US;q=0.8'), 'vi-VN');
+  assert.equal(parseAcceptLanguagePrimaryLocale('en-GB,en;q=0.9'), 'en-GB');
+  assert.equal(parseAcceptLanguagePrimaryLocale('en-US;q=0.5,vi-VN;q=0.9'), 'vi-VN');
+
+  // Server resolution priority: cookie > modeOverride > Accept-Language > fallback
+  assert.equal(
+    resolveServerUiLanguage({ acceptLanguage: 'vi-VN,vi;q=0.9,en-US;q=0.8' }),
+    'vi',
+  );
+  assert.equal(
+    resolveServerUiLanguage({ acceptLanguage: 'en-GB,en;q=0.9' }),
+    'en',
+  );
+  assert.equal(
+    resolveServerUiLanguage({
+      cookieValue: 'en',
+      acceptLanguage: 'vi-VN,vi;q=0.9,en-US;q=0.8',
+    }),
+    'en',
+  );
+  assert.equal(
+    resolveServerUiLanguage({
+      cookieValue: 'vi',
+      acceptLanguage: 'en-GB,en;q=0.9',
+    }),
+    'vi',
+  );
+  assert.equal(resolveServerUiLanguage({}), 'en');
+
+  // saveUiLanguage writes both localStorage and document.cookie
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+  };
+  const mockCookieDoc = { cookie: '' };
+  saveUiLanguage('vi', mockStorage, mockCookieDoc);
+  assert.equal(store.get(UI_LANGUAGE_STORAGE_KEY), 'vi');
+  assert.match(mockCookieDoc.cookie, /^aiboss-office\.ui-language=vi; Path=\/; Max-Age=31536000; SameSite=Lax$/);
+
+  // When localStorage is empty (system mode), readUiLanguage honors server-stamped data-ui-lang attribute
+  store.clear();
+  const mockDomDocVi = {
+    documentElement: {
+      getAttribute: (k) => (k === UI_LANGUAGE_DATA_ATTR ? 'vi' : null),
+    },
+  };
+  const mockDomDocEn = {
+    documentElement: {
+      getAttribute: (k) => (k === UI_LANGUAGE_DATA_ATTR ? 'en' : null),
+    },
+  };
+  assert.equal(readUiLanguage(mockStorage, undefined, mockDomDocVi), 'vi');
+  assert.equal(readUiLanguage(mockStorage, undefined, mockDomDocEn), 'en');
+});
+
+test('UI-2 v02 V3 & V4: /api/desktop/status returns 200 and ApprovalsSettingsCard renders in both en and vi', async () => {
+  const statusRes = await getDesktopStatusRoute();
+  assert.equal(statusRes.status, 200);
+  const statusBody = await statusRes.json();
+  assert.equal(statusBody.available, false);
+  assert.equal(statusBody.running, false);
+
+  try {
+    const htmlEn = renderToStaticMarkup(
+      React.createElement(
+        UiLanguageProvider,
+        { initialLang: 'en' },
+        React.createElement(ApprovalsSettingsCard, { initialApprovals: [] }),
+      ),
+    );
+    assert.ok(htmlEn.includes('Approvals'));
+    assert.ok(htmlEn.includes('Pending Requests (0)'));
+    assert.ok(htmlEn.includes('No pending approval requests.'));
+    assert.ok(htmlEn.includes('Decided Ledger (0)'));
+
+    const htmlVi = renderToStaticMarkup(
+      React.createElement(
+        UiLanguageProvider,
+        { initialLang: 'vi' },
+        React.createElement(ApprovalsSettingsCard, { initialApprovals: [] }),
+      ),
+    );
+    assert.ok(htmlVi.includes('Phê duyệt thao tác'));
+    assert.ok(htmlVi.includes('Yêu cầu chờ duyệt (0)'));
+    assert.ok(htmlVi.includes('Chưa có yêu cầu nào đang chờ duyệt.'));
+    assert.ok(htmlVi.includes('Sổ đã quyết (0)'));
+  } finally {
+    setCurrentUiLanguage('en');
+  }
 });

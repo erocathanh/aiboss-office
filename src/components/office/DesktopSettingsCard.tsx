@@ -58,24 +58,6 @@ export function DesktopSettingsCard() {
         return;
       }
 
-      try {
-        const res = await fetch('/api/desktop/status');
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted) {
-            setState({
-              detected: !!data.running,
-              startAtLogin: !!data.startAtLogin,
-              version: data.version,
-              port: data.port,
-            });
-          }
-          return;
-        }
-      } catch {
-        // Not running or endpoint not present
-      }
-
       if (isMounted) {
         setState({
           detected: false,

@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "node -e \"const opts={}; const o={send(opts){fetch('https://example.net/x',opts)}}; o.send({method:'POST'})\""}}

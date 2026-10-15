@@ -8,7 +8,23 @@
     "icon": "🎯",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": []
+    }
   },
   {
     "seat_id": "content-writer",
@@ -19,7 +35,23 @@
     "icon": "✍️",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": []
+    }
   },
   {
     "seat_id": "social-community",
@@ -30,7 +62,34 @@
     "icon": "💬",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": [
+        "Read(~/.meta-token-fanpage)",
+        "Read(~/.fb-user-token-long)",
+        "Read(~/.cloudflare*)",
+        "Read(~/.vercel*/**)",
+        "Read(~/ai-agent/*/khoa/**)",
+        "Read(**/.env*)",
+        "Bash(python3 ~/.claude/skills/doc-comment-fanpage/*)",
+        "Bash(/usr/bin/python3 ~/.claude/skills/doc-comment-fanpage/*)",
+        "Bash(python3 ~/.claude/skills/tra-loi-inbox-fanpage/*)",
+        "Bash(/usr/bin/python3 ~/.claude/skills/tra-loi-inbox-fanpage/*)"
+      ]
+    }
   },
   {
     "seat_id": "email-crm",
@@ -41,7 +100,23 @@
     "icon": "📧",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": []
+    }
   },
   {
     "seat_id": "paid-media",
@@ -52,7 +127,34 @@
     "icon": "📊",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": [
+        "Read(~/.meta-token-fanpage)",
+        "Read(~/.fb-user-token-long)",
+        "Read(~/.cloudflare*)",
+        "Read(~/.vercel*/**)",
+        "Read(~/ai-agent/*/khoa/**)",
+        "Read(**/.env*)",
+        "Bash(python3 ~/.claude/skills/doc-comment-fanpage/*)",
+        "Bash(/usr/bin/python3 ~/.claude/skills/doc-comment-fanpage/*)",
+        "Bash(python3 ~/.claude/skills/tra-loi-inbox-fanpage/*)",
+        "Bash(/usr/bin/python3 ~/.claude/skills/tra-loi-inbox-fanpage/*)"
+      ]
+    }
   },
   {
     "seat_id": "video-creative",
@@ -63,7 +165,23 @@
     "icon": "🎬",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": []
+    }
   },
   {
     "seat_id": "funnel-offer",
@@ -74,7 +192,23 @@
     "icon": "🧲",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": []
+    }
   },
   {
     "seat_id": "reviewer",
@@ -85,6 +219,22 @@
     "icon": "🛡️",
     "status": "idle",
     "pinned_session": null,
-    "example": false
+    "example": false,
+    "mcp": [
+      "agent-broker"
+    ],
+    "permissions": {
+      "allow": [
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "Glob",
+        "Grep",
+        "Bash",
+        "mcp__agent-broker__*"
+      ],
+      "deny": []
+    }
   }
 ]

@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "U=$(cat /tmp/url); curl -X POST \"$U\" -d 'ref=http://localhost/ok'"}}

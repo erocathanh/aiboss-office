@@ -41,6 +41,7 @@ export interface SettingsPageClientProps {
   config: OfficeConfigData;
   effectiveLanguage: string;
   gates: string[];
+  approvalsCardSlot?: React.ReactNode;
   costCardSlot: React.ReactNode;
 }
 
@@ -57,6 +58,7 @@ export function SettingsPageClient({
   config,
   effectiveLanguage,
   gates,
+  approvalsCardSlot,
   costCardSlot,
 }: SettingsPageClientProps) {
   const { lang, t } = useT();
@@ -103,6 +105,9 @@ export function SettingsPageClient({
         </div>
 
         <div className="settings-grid">
+          {/* Card: Approvals Ledger & State Machine (A-4) */}
+          {approvalsCardSlot}
+
           {/* Card 1: Display & Typography (Client Preferences) */}
           <DisplaySettingsCard agentResponseLanguage={effectiveLanguage} />
 

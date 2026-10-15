@@ -1,8 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CostSettingsCard } from '@/components/office/CostSettingsCard';
+import {
+  ApprovalsSettingsCard,
+  type ApprovalLoadErrorCode,
+} from '@/components/office/ApprovalsSettingsCard';
+import {
+  ApprovalIoError,
+  ApprovalLedgerUnreadableError,
+  ApprovalLockTimeoutError,
+  getApprovals,
+  type ApprovalItem,
+} from '@/lib/approvals-ledger';
 import { getAgentLanguage } from '@/lib/office-config';
 import { SettingsPageClient, type OfficeConfigData } from './SettingsPageClient';
+
+export const dynamic = 'force-dynamic';
 
 interface DepartmentConfig {
   id: string;
@@ -53,12 +66,37 @@ export default function SettingsPage() {
   const config = loadOfficeConfig();
   const effectiveLanguage = getAgentLanguage(config);
   const gates = loadMarketingGates();
+  let initialApprovals: ApprovalItem[] | undefined = undefined;
+  let initialApprovalsError: ApprovalLoadErrorCode | null = null;
+  try {
+    initialApprovals = getApprovals({ limit: 50 }).approvals;
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    if (err instanceof ApprovalLockTimeoutError || code === 'lock_timeout') {
+      initialApprovalsError = 'lock_timeout';
+    } else if (
+      err instanceof ApprovalLedgerUnreadableError ||
+      code === 'ledger_unreadable'
+    ) {
+      initialApprovalsError = 'ledger_unreadable';
+    } else if (err instanceof ApprovalIoError || code === 'io_error') {
+      initialApprovalsError = 'io_error';
+    } else {
+      initialApprovalsError = 'io_error';
+    }
+  }
 
   return (
     <SettingsPageClient
       config={config}
       effectiveLanguage={effectiveLanguage}
       gates={gates}
+      approvalsCardSlot={
+        <ApprovalsSettingsCard
+          initialApprovals={initialApprovals}
+          initialError={initialApprovalsError}
+        />
+      }
       costCardSlot={<CostSettingsCard />}
     />
   );
