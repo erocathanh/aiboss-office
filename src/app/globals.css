@@ -974,7 +974,7 @@ table.bang td.ma {
   gap: 8px;
 }
 
-.settings-row:nth-child(4) .settings-value {
+.settings-row.settings-row-ui-language .settings-value {
   white-space: nowrap;
   flex-shrink: 0;
 }
