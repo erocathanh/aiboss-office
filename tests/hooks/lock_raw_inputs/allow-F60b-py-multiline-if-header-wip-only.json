@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\np = 'wip/a'\nif (\n    False\n):\n    p = 'wip/b'\nopen(p, 'w').write('x')\nPY"}}

@@ -1754,16 +1754,66 @@ def _expand_js_closed_block_substatements(
     stmt_end: int,
 ) -> List[Tuple[str, int, int]]:
     """
-    S17m (F56b): When a single `;`/`\\n`-delimited statement starts with one or more closed JS control
-    blocks (`if (...) { ... } let p = 'wip/a'`), split out both the inner `{ ... }` block bodies and
-    the trailing statement after the closing `}` with their exact character offsets in `text`.
+    S17m (F56b) & S17n (F61): When a `;`/`\\n`-delimited statement starts with one or more closed JS control
+    blocks (`if (...) { ... } let p = 'wip/a'`, including empty blocks `if(true){} else {} let p = 'wip/a'`)
+    or contains an unmatched closing brace `}` from an earlier `;`-split block (`b = 2 } let p = 'wip/a'`),
+    split out both the non-empty inner `{ ... }` block bodies and the trailing statement after the closing `}`
+    with their exact character offsets in `text`.
     """
-    pos = 0
     n = len(raw_stmt)
+    # First check for top-level unmatched `}` (where `{` opened in an earlier `;`/`\n` chunk)
+    quote: Optional[str] = None
+    escape = False
+    paren_depth = 0
+    brace_depth = 0
+    for idx in range(n):
+        ch = raw_stmt[idx]
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and quote is not None:
+            escape = True
+            continue
+        if quote is not None:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch
+            continue
+        if ch in ('(', '['):
+            paren_depth += 1
+            continue
+        if ch in (')', ']'):
+            paren_depth = max(0, paren_depth - 1)
+            continue
+        if ch == '{':
+            brace_depth += 1
+            continue
+        if ch == '}' and paren_depth == 0:
+            if brace_depth > 0:
+                brace_depth -= 1
+            else:
+                # Unmatched closing `}` at top level: split before and after `}`
+                left_str = raw_stmt[:idx]
+                right_str = raw_stmt[idx + 1 :]
+                res_unmatched: List[Tuple[str, int, int]] = []
+                if left_str.strip():
+                    res_unmatched.extend(
+                        _expand_js_closed_block_substatements(left_str, stmt_start, stmt_start + idx)
+                    )
+                if right_str.strip():
+                    res_unmatched.extend(
+                        _expand_js_closed_block_substatements(right_str, stmt_start + idx + 1, stmt_end)
+                    )
+                return res_unmatched if res_unmatched else [(raw_stmt, stmt_start, stmt_end)]
+
+    pos = 0
     m_cli = re.match(r'^(?:.*?\s)?(?:-[a-zA-Z]*[ce]|--eval|--print)\s+[\'"]?', raw_stmt)
     if m_cli:
         pos = m_cli.end()
     sub_stmts: List[Tuple[str, int, int]] = []
+    advanced = False
     while pos < n:
         while pos < n and raw_stmt[pos] in (' ', '\t', '\r'):
             pos += 1
@@ -1788,32 +1838,389 @@ def _expand_js_closed_block_substatements(
         _, close_b = _scan_balanced_paren_args(raw_stmt, b_pos + 1)
         if close_b >= n:
             break
+        advanced = True
         inner_str = raw_stmt[b_pos + 1 : close_b]
         if inner_str.strip():
-            sub_stmts.append((inner_str, stmt_start + b_pos + 1, stmt_start + close_b))
+            sub_stmts.extend(
+                _expand_js_closed_block_substatements(inner_str, stmt_start + b_pos + 1, stmt_start + close_b)
+            )
         pos = close_b + 1
-    if not sub_stmts:
+    if not advanced:
         return [(raw_stmt, stmt_start, stmt_end)]
     rem_str = raw_stmt[pos:]
     if rem_str.strip():
-        sub_stmts.append((rem_str, stmt_start + pos, stmt_end))
+        sub_stmts.extend(
+            _expand_js_closed_block_substatements(rem_str, stmt_start + pos, stmt_end)
+        )
     return sub_stmts
+
+
+def _strip_py_comments_and_continuations(expr: str) -> str:
+    """
+    S17n (F60): Strip Python `# ...` comments (outside quotes) and replace `\\` line continuations
+    with spaces so multi-line Python header expressions can be analyzed cleanly.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(expr)
+    quote: Optional[str] = None
+    escape = False
+    while i < n:
+        ch = expr[i]
+        if quote is not None:
+            out.append(ch)
+            if escape:
+                escape = False
+                i += 1
+                continue
+            if ch == '\\':
+                escape = True
+                i += 1
+                continue
+            if len(quote) == 3:
+                if expr[i : i + 3] == quote:
+                    out.extend(expr[i + 1 : i + 3])
+                    quote = None
+                    i += 3
+                    continue
+            elif ch == quote:
+                quote = None
+            i += 1
+            continue
+        if expr[i : i + 3] in ("'''", '"""'):
+            quote = expr[i : i + 3]
+            out.append(quote)
+            i += 3
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '#':
+            while i < n and expr[i] != '\n':
+                i += 1
+            continue
+        if ch == '\\':
+            j = i + 1
+            while j < n and expr[j] in (' ', '\t', '\r'):
+                j += 1
+            if j < n and expr[j] == '\n':
+                out.append(' ')
+                i = j + 1
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _scan_py_logical_header_colon(text: str, expr_start: int, kw: str) -> Tuple[int, bool]:
+    """
+    S17n (F60): Scan a Python compound statement header starting at `expr_start` (right after `kw`)
+    across physical lines joined by open `( [ {`, trailing `\\` line continuations, or triple-quoted strings.
+    Returns `(colon_abs_idx, is_malformed)`:
+    - `(colon_abs_idx >= 0, False)` when a top-level suite-opening `:` is found.
+    - `(-1, True)` when the header has unbalanced brackets `( [ {`, unclosed quotes, or trailing `\\` at EOF.
+    - `(-1, False)` when the line is not a Python suite header (e.g. a JS `if (...) { ... }` or `try { ... }`).
+    """
+    n = len(text)
+    i = expr_start
+    if kw in ('else', 'try', 'finally'):
+        while i < n:
+            if text[i] in (' ', '\t', '\r'):
+                i += 1
+                continue
+            if text[i] == '\\':
+                j = i + 1
+                while j < n and text[j] in (' ', '\t', '\r'):
+                    j += 1
+                if j < n and text[j] == '\n':
+                    i = j + 1
+                    continue
+                if j >= n:
+                    return -1, True
+            break
+        if i < n and text[i] == ':' and text[i + 1 : i + 2] != '=':
+            return i, False
+        return -1, False
+
+    quote: Optional[str] = None
+    escape = False
+    depth = 0
+    in_comment = False
+    saw_token = False
+
+    while i < n:
+        ch = text[i]
+        if in_comment:
+            if ch == '\n':
+                in_comment = False
+                if depth == 0:
+                    return -1, (kw in ('elif', 'except', 'def'))
+            i += 1
+            continue
+
+        if quote is not None:
+            if escape:
+                escape = False
+                i += 1
+                continue
+            if ch == '\\':
+                escape = True
+                i += 1
+                continue
+            if len(quote) == 3:
+                if text[i : i + 3] == quote:
+                    quote = None
+                    i += 3
+                else:
+                    i += 1
+                continue
+            if ch == quote:
+                quote = None
+                i += 1
+                continue
+            if ch == '\n':
+                return -1, True
+            i += 1
+            continue
+
+        if text[i : i + 3] in ("'''", '"""'):
+            quote = text[i : i + 3]
+            saw_token = True
+            i += 3
+            continue
+        if ch in ("'", '"', '`'):
+            quote = ch
+            saw_token = True
+            i += 1
+            continue
+        if ch == '#':
+            in_comment = True
+            i += 1
+            continue
+        if ch == '\\':
+            j = i + 1
+            while j < n and text[j] in (' ', '\t', '\r'):
+                j += 1
+            if j < n and text[j] == '\n':
+                i = j + 1
+                continue
+            if j >= n:
+                return -1, True
+            i += 1
+            continue
+        if ch in ('(', '[', '{'):
+            depth += 1
+            saw_token = True
+            i += 1
+            continue
+        if ch in (')', ']', '}'):
+            depth -= 1
+            if depth < 0:
+                return -1, True
+            saw_token = True
+            i += 1
+            if depth == 0 and ch == ')':
+                k = i
+                while k < n and text[k] in (' ', '\t', '\r'):
+                    k += 1
+                if k < n and text[k] in ('{', ';'):
+                    return -1, False
+            continue
+        if ch == ':' and depth == 0:
+            if i + 1 < n and text[i + 1] == '=':
+                saw_token = True
+                i += 2
+                continue
+            if saw_token or kw == 'except':
+                return i, False
+            return -1, True
+        if ch == ';' and depth == 0:
+            return -1, False
+        if ch == '\n' and depth == 0:
+            return -1, (kw in ('elif', 'except', 'def'))
+        if ch not in (' ', '\t', '\r'):
+            saw_token = True
+        i += 1
+
+    if depth != 0 or quote is not None:
+        return -1, True
+    return -1, (kw in ('elif', 'except', 'def'))
+
+
+def _update_py_line_continuation_state(
+    line_str: str,
+    depth: int,
+    quote: Optional[str],
+) -> Tuple[int, Optional[str], bool]:
+    """Update open bracket depth, triple/single quote state, and trailing backslash continuation across one physical line."""
+    i = 0
+    n = len(line_str)
+    escape = False
+    trailing_bs = False
+    while i < n:
+        ch = line_str[i]
+        if quote is not None:
+            if escape:
+                escape = False
+                i += 1
+                continue
+            if ch == '\\':
+                escape = True
+                i += 1
+                continue
+            if len(quote) == 3:
+                if line_str[i : i + 3] == quote:
+                    quote = None
+                    i += 3
+                else:
+                    i += 1
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if line_str[i : i + 3] in ("'''", '"""'):
+            quote = line_str[i : i + 3]
+            trailing_bs = False
+            i += 3
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            trailing_bs = False
+            i += 1
+            continue
+        if ch == '#':
+            break
+        if ch == '\\':
+            j = i + 1
+            while j < n and line_str[j] in (' ', '\t', '\r'):
+                j += 1
+            if j >= n or line_str[j] == '\n':
+                trailing_bs = True
+                break
+            i += 1
+            continue
+        if ch in ('(', '[', '{'):
+            depth += 1
+            trailing_bs = False
+            i += 1
+            continue
+        if ch in (')', ']', '}'):
+            depth = max(0, depth - 1)
+            trailing_bs = False
+            i += 1
+            continue
+        if ch not in (' ', '\t', '\r', '\n'):
+            trailing_bs = False
+        i += 1
+    return depth, quote, trailing_bs
+
+
+def _scan_python_logical_suites(
+    text: str,
+) -> Tuple[List[Tuple[int, int, int, int, str, str]], List[Tuple[int, int]]]:
+    """
+    S17n (F60): Scan `text` for Python compound statement headers (`if`, `elif`, `else`, `while`, `for`,
+    `with`, `try`, `except`, `finally`, `def`, `class`, `match`, `case`), joining physical lines when
+    parentheses/brackets/braces `( [ {` are open, lines end with `\\`, or inside triple-quoted strings.
+    - Suite base indentation is computed from the FIRST physical line of the logical header.
+    - Returns `(suites, unclosed_ranges)`:
+      - `suites`: list of `(h_start, colon_abs, body_start, body_end, kw, header_expr)`
+      - `unclosed_ranges`: list of `(h_start, len(text))` for malformed/unclosed headers so subsequent
+        assignments are treated fail-closed as conditional (never linear overwrite).
+    """
+    line_spans: List[Tuple[int, int, str]] = []
+    pos = 0
+    for l_str in text.splitlines(keepends=True):
+        line_spans.append((pos, pos + len(l_str), l_str))
+        pos += len(l_str)
+
+    py_suite_prefix_re = re.compile(
+        r'(?:^|[;]|-[a-zA-Z]*c\s+[\'"]?|--eval\s+[\'"]?)(\s*)(?:async\s+)?(if|elif|else|while|for|with|try|except|finally|def|class|match|case)\b'
+    )
+    suites: List[Tuple[int, int, int, int, str, str]] = []
+    unclosed_ranges: List[Tuple[int, int]] = []
+    last_header_colon_abs = -1
+
+    for idx, (l_start, l_end, l_str) in enumerate(line_spans):
+        for m_py in py_suite_prefix_re.finditer(l_str):
+            h_start = l_start + m_py.start()
+            if h_start <= last_header_colon_abs:
+                continue
+            kw = m_py.group(2)
+            expr_start = l_start + m_py.end()
+            colon_abs, is_malformed = _scan_py_logical_header_colon(text, expr_start, kw)
+            if is_malformed:
+                unclosed_ranges.append((h_start, len(text)))
+                continue
+            if colon_abs < 0:
+                continue
+
+            last_header_colon_abs = max(last_header_colon_abs, colon_abs)
+            header_expr = text[expr_start:colon_abs]
+            body_start = colon_abs + 1
+
+            colon_line_idx = idx
+            for k_idx in range(idx, len(line_spans)):
+                if line_spans[k_idx][0] <= colon_abs < line_spans[k_idx][1]:
+                    colon_line_idx = k_idx
+                    break
+            cl_start, cl_end, cl_str = line_spans[colon_line_idx]
+            cl_content_end = cl_end - len(cl_str) + len(cl_str.rstrip('\r\n'))
+            rest_of_line = _strip_py_comments_and_continuations(text[colon_abs + 1 : cl_end]).strip()
+            if rest_of_line:
+                body_end = cl_content_end
+            else:
+                base_indent = len(m_py.group(1))
+                body_end = cl_content_end
+                s_depth = 0
+                s_quote: Optional[str] = None
+                s_bs = False
+                for j in range(colon_line_idx + 1, len(line_spans)):
+                    _, j_end, j_str = line_spans[j]
+                    j_content_end = j_end - len(j_str) + len(j_str.rstrip('\r\n'))
+                    if s_depth == 0 and s_quote is None and not s_bs:
+                        j_stripped = j_str.strip()
+                        if not j_stripped or j_stripped.startswith('#'):
+                            continue
+                        j_indent = len(j_str) - len(j_str.lstrip(' \t'))
+                        if j_indent <= base_indent:
+                            break
+                        body_end = j_content_end
+                    else:
+                        body_end = j_content_end
+                    s_depth, s_quote, s_bs = _update_py_line_continuation_state(j_str, s_depth, s_quote)
+                if s_depth != 0 or s_quote is not None or s_bs:
+                    body_end = len(text)
+
+            suites.append((h_start, colon_abs, body_start, body_end, kw, header_expr))
+
+    return suites, unclosed_ranges
 
 
 def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int, int]]:
     """
-    S17h (Principle 3), S17j (F45, F47), S17l (F51) & S17m (F56b): Yield (var_name, rhs, start_pos, end_pos) in appearance order for
-    top-level assignments across `;` and newline-separated statements, including JS comma-separated declarations,
-    flat object destructuring (`const {client,url}=...`, `const {delete: del, post}=axios`), and JS/Python branches/loops.
+    S17h (Principle 3), S17j (F45, F47), S17l (F51), S17m (F56b) & S17n (F60, F61): Yield (var_name, rhs, start_pos, end_pos)
+    in appearance order for top-level assignments across `;` and newline-separated statements, including JS comma-separated
+    declarations, flat object destructuring (`const {client,url}=...`, `const {delete: del, post}=axios`), and JS/Python branches/loops.
     """
     assign_re = re.compile(r'^(?:(?:const|let|var)\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*(\+?=)(?![=~>])(.+)$', re.DOTALL)
     destruct_re = re.compile(r'^(?:(?:const|let|var)\s+)?\{([^{}]+)\}\s*=(?![=~>])(.+)$', re.DOTALL)
     ident_re = re.compile(r'^[A-Za-z_$][A-Za-z0-9_$]*$')
+    py_suites, _ = _scan_python_logical_suites(text)
     out: List[Tuple[str, str, int, int]] = []
     for m_stmt in re.finditer(r'[^;\n]+', text):
         for raw_stmt, stmt_start, stmt_end in _expand_js_closed_block_substatements(
             m_stmt.group(0), m_stmt.start(), m_stmt.end()
         ):
+            # S17n (F60): If a Python logical header ends with `:` inside `[stmt_start, stmt_end)`, advance past `:`
+            for _h_s, c_abs, _b_s, _b_e, _kw, _h_e in py_suites:
+                if stmt_start <= c_abs < stmt_end:
+                    rel_colon = c_abs - stmt_start
+                    raw_stmt = raw_stmt[rel_colon + 1 :]
+                    stmt_start = c_abs + 1
             s = raw_stmt.strip()
             if not s:
                 continue
@@ -1826,7 +2233,7 @@ def _iter_top_level_assignments_with_pos(text: str) -> List[Tuple[str, str, int,
             ).strip()
             # Strip leading Python compound suite headers on single-line suites (`for _ in range(2): p='...'`)
             s_clean = re.sub(
-                r'^(?:(?:async\s+)?(?:for|while|if|elif|else|try|except|finally|with)\b[^:\n]*:\s*)+',
+                r'^(?:(?:async\s+)?(?:for|while|if|elif|else|try|except|finally|with|def|class|match|case)\b[^:\n]*:\s*)+',
                 '',
                 s_clean,
             ).strip()
@@ -1967,10 +2374,11 @@ def _find_top_level_colon(line_str: str, start_idx: int) -> int:
 
 def _advance_js_single_stmt_end(text: str, start_idx: int) -> int:
     """
-    S17l (F53) & S17m (F57): Given `start_idx` right after a braceless JS control header (`for (...)`, `while (...)`, `if (...)`, `else`),
-    advance past any chained braceless JS control headers (`if (...)`, `else if (...)`, `else`, `for (...)`, `while (...)`,
-    `with (...)`, `switch (...)`) across newlines until the leaf `{ ... }` block or top-level terminating `;` / `\\n`
-    (outside quotes and balanced parentheses/brackets).
+    S17l (F53), S17m (F57) & S17n (F62): Given `start_idx` right after a braceless JS control header
+    (`for (...)`, `while (...)`, `if (...)`, `else`), advance past any chained braceless JS control headers
+    (`if (...)`, `else if (...)`, `else`, `for (...)`, `while (...)`, `with (...)`, `switch (...)`) across newlines
+    until the leaf `{ ... }` block or top-level terminating `;` / `\\n` (outside quotes, nested `${...}` template
+    interpolations, and balanced parentheses/brackets).
     """
     cur_k = start_idx
     n = len(text)
@@ -2004,40 +2412,65 @@ def _advance_js_single_stmt_end(text: str, start_idx: int) -> int:
     quote: Optional[str] = None
     escape = False
     depth = 0
-    for idx in range(cur_k, n):
+    tpl_brace_stack: List[int] = []
+    idx = cur_k
+    while idx < n:
         ch = text[idx]
         if escape:
             escape = False
+            idx += 1
             continue
         if ch == '\\' and quote is not None:
             escape = True
+            idx += 1
             continue
         if quote is not None:
+            if quote == '`' and ch == '$' and idx + 1 < n and text[idx + 1] == '{':
+                tpl_brace_stack.append(depth)
+                depth += 1
+                quote = None
+                idx += 2
+                continue
             if ch == quote:
                 quote = None
+            idx += 1
             continue
         if ch in ("'", '"', '`'):
             quote = ch
+            idx += 1
             continue
         if ch in ('(', '[', '{'):
             depth += 1
+            idx += 1
             continue
         if ch in (')', ']', '}'):
+            if ch == '}' and tpl_brace_stack and depth == tpl_brace_stack[-1] + 1:
+                tpl_brace_stack.pop()
+                depth -= 1
+                quote = '`'
+                idx += 1
+                continue
             depth = max(0, depth - 1)
+            idx += 1
             continue
         if depth == 0 and ch in (';', '\n'):
             return idx
+        idx += 1
     return n
 
 
 def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
     """
-    S17l (F51) & S17m (F56, F56b, F56c): Return True if the assignment at `[c_start, c_end]` is inside or
-    guarded by an active conditional/exception branch in Python (`if`/`elif`/`else`/`try`/`except`/`finally`
-    whose suite encloses `[c_start, c_end]` by indentation or single-line suite) or JS (`if`/`else if`/`else`/
-    `switch`/`case`/`try`/`catch`/`finally`, braced or braceless, or short-circuit `&&`/`||` / ternary `? :`).
+    S17l (F51), S17m (F56, F56b, F56c) & S17n (F60, F61): Return True if the assignment at `[c_start, c_end]` is inside or
+    guarded by an active conditional/exception/scoped suite in Python (`if`/`elif`/`else`/`try`/`except`/`finally`/`with`/
+    `def`/`class`/`match`/`case`, including multi-line logical headers joined by `( [ {`, `\\`, or `'''`/`\"\"\"`) or JS
+    (`if`/`else if`/`else`/`switch`/`case`/`try`/`catch`/`finally`, braced or braceless, or short-circuit `&&`/`||` / ternary `? :`).
     Branches that have already closed before `c_start` do NOT mark subsequent independent assignments as conditional.
     """
+    py_suites, py_unclosed = _scan_python_logical_suites(text)
+    if any(u_start <= c_start for u_start, _ in py_unclosed):
+        return True
+
     closed_js_block_end = 0
 
     # 1. Enclosing JS braced or braceless `if (...)`, `else if (...)`, `switch (...)`, `catch (...)`
@@ -2045,6 +2478,8 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
         h_start = m_js.start()
         if h_start > c_start:
             break
+        if any(ps[0] <= h_start <= ps[1] for ps in py_suites):
+            continue
         _, close_p = _scan_balanced_paren_args(text, m_js.end())
         if close_p >= len(text):
             continue
@@ -2064,6 +2499,8 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
         h_start = m_kw.start()
         if h_start > c_start:
             break
+        if any(ps[0] <= h_start <= ps[1] for ps in py_suites):
+            continue
         b_end = _advance_js_single_stmt_end(text, m_kw.end())
         if h_start <= c_start and c_end <= b_end:
             return True
@@ -2083,43 +2520,14 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
     line_bound = max(last_nl + 1, closed_js_block_end)
     if line_bound < stmt_bound:
         line_prefix = text[line_bound:c_start]
-        if re.search(r'\b(?:if|elif|else|try|except|finally)\b[^#\n]*:', line_prefix):
+        if re.search(r'\b(?:if|elif|else|try|except|finally|with|def|class|match|case)\b[^#\n]*:', line_prefix):
             return True
 
-    # 4. Enclosing Python `if`/`elif`/`else`/`try`/`except`/`finally` block (multi-line indented or single-line suite)
-    line_spans: List[Tuple[int, int, str]] = []
-    pos = 0
-    for l_str in text.splitlines(keepends=True):
-        line_spans.append((pos, pos + len(l_str), l_str))
-        pos += len(l_str)
-
-    py_branch_prefix_re = re.compile(
-        r'(?:^|[;]|-[a-zA-Z]*c\s+[\'"]?|--eval\s+[\'"]?)(\s*)(if|elif|else|try|except|finally)\b'
-    )
-    for idx, (l_start, l_end, l_str) in enumerate(line_spans):
-        if l_start > c_start:
+    # 4. Enclosing Python compound suite (multi-line logical header + indented or single-line suite)
+    for h_start, _colon_abs, body_start, body_end, kw, _hdr_expr in py_suites:
+        if h_start > c_start:
             break
-        for m_py in py_branch_prefix_re.finditer(l_str):
-            colon_rel = _find_top_level_colon(l_str, m_py.end())
-            if colon_rel < 0:
-                continue
-            body_start = l_start + colon_rel + 1
-            rest_of_line = l_str[colon_rel + 1 :].strip()
-            if rest_of_line and not rest_of_line.startswith('#'):
-                body_end = l_end
-            else:
-                base_indent = len(m_py.group(1))
-                body_end = l_end
-                for j in range(idx + 1, len(line_spans)):
-                    _, j_end, j_str = line_spans[j]
-                    j_stripped = j_str.strip()
-                    if not j_stripped or j_stripped.startswith('#'):
-                        continue
-                    j_indent = len(j_str) - len(j_str.lstrip(' \t'))
-                    if j_indent > base_indent:
-                        body_end = j_end
-                    else:
-                        break
+        if kw in ('if', 'elif', 'else', 'try', 'except', 'finally', 'with', 'def', 'class', 'match', 'case'):
             if body_start <= c_start and c_end <= body_end:
                 return True
 
@@ -2130,15 +2538,18 @@ def _find_all_loops(
     text: str,
 ) -> List[Tuple[int, int, int, Optional[str], Optional[str], str]]:
     """
-    S17k (F48 — Option A) & S17l (F53): Find all loop constructs (`for`, `while`, `do`) in `text`.
+    S17k (F48 — Option A), S17l (F53) & S17n (F60): Find all loop constructs (`for`, `while`, `do`) in `text`.
     Returns list of `(header_start, body_start, body_end, iter_var, iter_expr, loop_kind)`.
     """
     loops: List[Tuple[int, int, int, Optional[str], Optional[str], str]] = []
+    py_suites, _ = _scan_python_logical_suites(text)
 
     # 1. JS / C-style `for (...)`, `while (...)`, and `do { ... }` loops
     for m in re.finditer(r'\b(for|while)\s*(?:await\s*)?\(', text):
         kw = m.group(1)
         h_start = m.start()
+        if any(ps[0] <= h_start <= ps[1] for ps in py_suites):
+            continue
         open_paren_after = m.end()
         _, close_paren_idx = _scan_balanced_paren_args(text, open_paren_after)
         if close_paren_idx >= len(text):
@@ -2173,55 +2584,25 @@ def _find_all_loops(
         body_end = close_brace_idx
         loops.append((h_start, body_start, body_end, None, None, 'js_do'))
 
-    # 2. Python `for <var> in <expr>:` and `while <cond>:` loops (multi-line indented or single-line suite)
-    line_spans: List[Tuple[int, int, str]] = []
-    pos = 0
-    for l_str in text.splitlines(keepends=True):
-        line_spans.append((pos, pos + len(l_str), l_str))
-        pos += len(l_str)
-
-    py_loop_prefix_re = re.compile(
-        r'(?:^|[;]|-[a-zA-Z]*c\s+[\'"]?|--eval\s+[\'"]?)(\s*)(?:async\s+)?(for|while)\b\s*'
-    )
-    for idx, (l_start, l_end, l_str) in enumerate(line_spans):
-        for m_py in py_loop_prefix_re.finditer(l_str):
-            kw = m_py.group(2)
-            colon_rel = _find_top_level_colon(l_str, m_py.end())
-            if colon_rel < 0:
+    # 2. Python `for <var> in <expr>:` and `while <cond>:` loops (multi-line logical header + indented or single-line suite)
+    for h_start, _colon_abs, body_start, body_end, kw, header_expr in py_suites:
+        if kw not in ('for', 'while'):
+            continue
+        header_expr_clean = _strip_py_comments_and_continuations(header_expr).strip()
+        iter_var = None
+        iter_expr = None
+        loop_kind = f'py_{kw}'
+        if kw == 'for':
+            m_in = re.match(
+                r'^([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+in\s+(.+)$',
+                header_expr_clean,
+                re.DOTALL,
+            )
+            if not m_in:
                 continue
-            header_expr = l_str[m_py.end() : colon_rel].strip()
-            iter_var = None
-            iter_expr = None
-            loop_kind = f'py_{kw}'
-            if kw == 'for':
-                m_in = re.match(
-                    r'^([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+in\s+(.+)$',
-                    header_expr,
-                    re.DOTALL,
-                )
-                if not m_in:
-                    continue
-                iter_var = m_in.group(1).strip()
-                iter_expr = m_in.group(2).strip()
-            h_start = l_start + m_py.start()
-            body_start = l_start + colon_rel + 1
-            rest_of_line = l_str[colon_rel + 1 :].strip()
-            if rest_of_line and not rest_of_line.startswith('#'):
-                body_end = l_end
-            else:
-                base_indent = len(m_py.group(1))
-                body_end = l_end
-                for j in range(idx + 1, len(line_spans)):
-                    _, j_end, j_str = line_spans[j]
-                    j_stripped = j_str.strip()
-                    if not j_stripped or j_stripped.startswith('#'):
-                        continue
-                    j_indent = len(j_str) - len(j_str.lstrip(' \t'))
-                    if j_indent > base_indent:
-                        body_end = j_end
-                    else:
-                        break
-            loops.append((h_start, body_start, body_end, iter_var, iter_expr, loop_kind))
+            iter_var = m_in.group(1).strip()
+            iter_expr = m_in.group(2).strip()
+        loops.append((h_start, body_start, body_end, iter_var, iter_expr, loop_kind))
 
     return loops
 
@@ -2258,6 +2639,12 @@ def _extract_iterable_path_candidates(
     m_wrap = re.match(r'^(?:new\s+Set|Array\.from|list|tuple|set)\s*\((.+)\)$', s, re.DOTALL)
     if m_wrap:
         s = m_wrap.group(1).strip()
+    while s.startswith('(') and s.endswith(')'):
+        stripped_s = _strip_outer_parens(s)
+        if stripped_s != s and stripped_s[:1] in ('[', '(', '{'):
+            s = stripped_s
+        else:
+            break
     is_list_or_tuple = (s.startswith('[') and s.endswith(']')) or (s.startswith('(') and s.endswith(')'))
     is_set_lit = s.startswith('{') and s.endswith('}') and ':' not in s
     if is_list_or_tuple or is_set_lit:
@@ -2410,6 +2797,20 @@ def _extract_simple_var_multi_env(
         for lp in all_loops:
             if lp[1] <= c_start and c_end <= lp[2] and not (lp[1] <= call_pos <= lp[2]):
                 is_cond = True
+                if lp[3]:
+                    snap_env = {k: vals[-1] for k, vals in m_env.items() if vals}
+                    for raw_iv in lp[3].split(','):
+                        iv = raw_iv.strip()
+                        if not iv:
+                            continue
+                        if ',' in lp[3] or lp[4] is None:
+                            icands = [f"$DYNAMIC_WRITE:{iv}"]
+                        else:
+                            icands = _extract_iterable_path_candidates(lp[4], snap_env, default_join_style, iv)
+                        ex_iv = m_env.setdefault(iv, [])
+                        for ic in icands:
+                            if ic not in ex_iv:
+                                ex_iv.append(ic)
                 break
         is_self_ref = bool(re.search(rf'\b{re.escape(var_name)}\b', rhs))
         if is_self_ref and var_name not in m_env:
