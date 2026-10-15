@@ -9,6 +9,7 @@ import { themMatXich, khoCua, doTep } from '@/lib/goc-tich';
 import { layO, layTatCa, datO, ghiMocKetThuc } from '@/lib/kho-phien';
 import { bindingOf } from '@/components/ung-dung/nap-bo-ghe';
 import { HAN_FORK_MS } from '@/lib/han-gio-fork';
+import { serverNoticeJson } from '@/lib/server-notices';
 
 
 export const runtime = 'nodejs';
@@ -47,19 +48,32 @@ export async function POST(req: NextRequest) {
   const maPhien = String(body.ma_phien ?? '').trim();
   const maO = /^o-\d+$/.test(String(body.ma_o ?? '')) ? String(body.ma_o) : 'o-1';
 
-  if (!timNhanSu(maNhanSu)) return Response.json({ loi: 'Không có ghế này.' }, { status: 404 });
-  if (!/^[0-9a-f-]{16,}$/i.test(maPhien)) return Response.json({ loi: 'Mã phiên không hợp lệ.' }, { status: 400 });
+  if (!timNhanSu(maNhanSu)) {
+    return serverNoticeJson(req, 'fork.seatNotFound', undefined, 404);
+  }
+  if (!/^[0-9a-f-]{16,}$/i.test(maPhien)) {
+    return serverNoticeJson(req, 'fork.invalidSessionId', undefined, 400);
+  }
 
   const nguon = timNguon(maPhien);
-  if (!nguon.length) return Response.json({ loi: `⛔ Không tìm thấy bản ghi nào mang mã ${maPhien.slice(0, 8)}…` }, { status: 404 });
+  if (!nguon.length) {
+    return serverNoticeJson(
+      req,
+      'fork.transcriptNotFound',
+      { sessionPrefix: maPhien.slice(0, 8) },
+      404,
+    );
+  }
 
   // ⚠️ Trùng mã ở NHIỀU kho ⇒ mơ hồ. ⛔ Đừng tự chọn tệp mới nhất — hỏi người.
   const kho = khoCua(maNhanSu);
   const ngoai = nguon.filter((p) => path.dirname(p) !== kho);
   if (ngoai.length > 1) {
-    return Response.json(
-      { loi: `⚠️ Mã này tồn tại ở ${ngoai.length} kho khác nhau — ⛔ không tự chọn được. Nguồn: ${ngoai.join(' · ')}` },
-      { status: 409 },
+    return serverNoticeJson(
+      req,
+      'fork.ambiguousTranscript',
+      { count: ngoai.length, sources: ngoai.join(' · ') },
+      409,
     );
   }
   const goc = ngoai[0] ?? nguon[0];
@@ -118,7 +132,7 @@ export async function POST(req: NextRequest) {
     });
     let ra = '';
     tien.stdout.on('data', (c: Buffer) => { ra += c.toString('utf8'); });
-    tien.stdin.write('Trả lời đúng 1 chữ: ok');
+    tien.stdin.write('Reply with a single word: ok');
     tien.stdin.end();
     // ⏱ Hạn giờ lấy từ NGUỒN DUY NHẤT — xem `@/lib/han-gio-fork`. Trước đây là số trần ở đây,
     //    và hai câu văn ở máy khách là hai bản chép của nó.
@@ -137,7 +151,7 @@ export async function POST(req: NextRequest) {
   });
 
   if (!maMoi || maMoi === maPhien) {
-    return Response.json({ loi: '⛔ Fork ⛔ không cấp được mã mới. Bản chép vẫn còn — nhưng nó CÙNG mã với bản gốc, ⛔ chưa tách được.' }, { status: 500 });
+    return serverNoticeJson(req, 'fork.noNewSessionId', undefined, 500);
   }
 
   // ③ ghi sổ GỐC TÍCH — nối cả chuỗi tổ tiên nếu phiên cha cũng từng là bản fork
@@ -151,7 +165,7 @@ export async function POST(req: NextRequest) {
 
   // ⑤ ô này trỏ sang phiên MỚI
   if (!datO(maO, maNhanSu, maMoi, bindingOf(initialSlots[maO]))) {
-    return Response.json({ loi: 'Fork đã tạo phiên mới nhưng ô đã đổi. Không ghi đè lựa chọn mới.', ma_moi: maMoi }, { status: 409 });
+    return serverNoticeJson(req, 'fork.slotChanged', undefined, 409, { ma_moi: maMoi });
   }
   const forkBinding = bindingOf(layO(maO));
 

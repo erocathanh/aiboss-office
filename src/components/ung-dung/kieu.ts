@@ -69,6 +69,10 @@ interface Tin {
    * ⛔ Đừng bỏ nhãn: người xem phải phân biệt được câu Owner gõ với câu máy tự gửi.
    */
   tu_ai?: string;
+  /** Structured server notice reference for runtime UI language switching. */
+  thongBaoHeThong?: { code: string; params?: Record<string, string | number> };
+  /** Consecutive repeat count for identical system/error notices in the same turn. */
+  soLanLap?: number;
 }
 type CapGheDungSan = { ten: string; phien: string | null; goiY?: string };
 interface OChat {

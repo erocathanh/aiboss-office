@@ -52,6 +52,7 @@ import type { ViSaoDung } from '@/lib/kho-tien-trinh';
 // ⏱ Hạn fork: NHẬP từ nguồn duy nhất, KHÔNG gõ lại con số. Xem chú thích dài trong tệp đó.
 import { moTaHanFork } from '@/lib/han-gio-fork';
 import { useT } from '@/i18n';
+import { resolveClientNotice, appendOrDedupeErrorTin } from '@/lib/server-notices';
 
 
 export default function UngDung({
@@ -1301,8 +1302,9 @@ export default function UngDung({
         body: JSON.stringify({ ma_nhan_su: o.ns.ten, ma_phien: ma, ma_o: `o-${i + 1}` }),
       });
       const j = await r.json();
-      if (!r.ok || j.loi) {
-        capNhat(i, { dangFork: false, loiDan: `⚠️ ${j.loi ?? t('home.messages.forkFailedDefault')}` });
+      if (!r.ok || j.loi || j.code) {
+        const msg = resolveClientNotice(j, t).text || t('home.messages.forkFailedDefault');
+        capNhat(i, { dangFork: false, loiDan: `⚠️ ${msg}` });
         return;
       }
       const dc = j.doi_chung as { nguyen_ven: boolean; so_dong_truoc: number; byte_truoc: number };
@@ -1583,8 +1585,35 @@ export default function UngDung({
       }
       if (khoCho.length > 0) { veChu(khoCho); khoCho = ''; }
     };
-    const themLoi = (chu: string) => {
-      capNhat(i, (cu) => ({ tin: [...cu.tin, { ma: datMa(), ai: 'ho', chu, gio: gioBayGio(), luc: Date.now(), loi: true }] }));
+    const themLoi = (dauVao: unknown) => {
+      const kq = resolveClientNotice(dauVao, t);
+      const chu = kq.text || t('home.messages.unknownError');
+      const countFromPayload =
+        dauVao &&
+        typeof dauVao === 'object' &&
+        typeof (dauVao as { count?: unknown }).count === 'number' &&
+        (dauVao as { count: number }).count >= 1
+          ? (dauVao as { count: number }).count
+          : undefined;
+      capNhat(i, (cu) => ({
+        tin: appendOrDedupeErrorTin(cu.tin, {
+          ma: datMa(),
+          ai: 'ho',
+          chu,
+          gio: gioBayGio(),
+          luc: Date.now(),
+          loi: true,
+          ...(kq.code
+            ? {
+                thongBaoHeThong: {
+                  code: kq.code,
+                  ...(kq.params ? { params: kq.params } : {}),
+                },
+              }
+            : {}),
+          ...(countFromPayload ? { soLanLap: countFromPayload } : {}),
+        }),
+      }));
     };
 
     huyLuong(i);
@@ -1606,7 +1635,7 @@ export default function UngDung({
 
       if (!r.ok || !r.body) {
         const j = await r.json().catch(() => ({ loi: t('home.messages.serverReturnedStatus', { status: r.status }) }));
-        themLoi(j.loi ?? t('home.messages.unknownError'));
+        themLoi(j);
         return;
       }
 
@@ -1631,9 +1660,9 @@ export default function UngDung({
           else if (j.loai === 'mat-ban-ghi') {
             // ⛔ KHÔNG im lặng — người dùng phải biết mình vừa mất ngữ cảnh.
             capNhat(i, { noiTiep: false });
-            themLoi(String(j.thong_diep));
+            themLoi(j);
           } else if (j.loai === 'loi') {
-            themLoi(String(j.thong_diep));
+            themLoi(j);
           } else if (j.loai === 'xong') {
             capNhat(i, {
               ...(typeof j.chi_phi_usd === 'number' ? { chiPhi: j.chi_phi_usd } : {}),
@@ -3151,13 +3180,32 @@ export default function UngDung({
                               {/* 💬 Bong bóng MEMO HOÁ — markdown dựng NGAY CẢ khi đang chảy.
                                   Tin cũ ⛔ không đổi chữ ⇒ ⛔ không dựng lại ⇒ hết nóng máy.
                                   (Học từ `openclaw` trên máy Owner: nó cũng luôn dựng markdown.) */}
-                              <BongBong
-                                chu={tin.chu}
-                                ranh={tin.ranh}
-                                hienMau={o.hienMau && tin.ai === 'ho' && !tin.loi}
-                                loi={tin.loi}
-                                dangChay={o.dangChay && Boolean(tin.dang)}
-                              />
+                              {(() => {
+                                const banDichTin = tin.thongBaoHeThong
+                                  ? resolveClientNotice(
+                                      {
+                                        code: tin.thongBaoHeThong.code,
+                                        params: tin.thongBaoHeThong.params,
+                                        text: tin.chu,
+                                      },
+                                      t,
+                                    )
+                                  : tin.loi
+                                    ? resolveClientNotice(tin.chu, t)
+                                    : { text: tin.chu };
+                                const soLap = tin.soLanLap && tin.soLanLap > 1 ? tin.soLanLap : undefined;
+                                return (
+                                  <BongBong
+                                    chu={banDichTin.text}
+                                    ranh={tin.ranh}
+                                    hienMau={o.hienMau && tin.ai === 'ho' && !tin.loi}
+                                    loi={tin.loi}
+                                    dangChay={o.dangChay && Boolean(tin.dang)}
+                                    soLanLap={soLap}
+                                    nhanLapAria={soLap ? t('system.repeatBadgeAria', { count: soLap }) : undefined}
+                                  />
+                                );
+                              })()}
                               {(() => {
                                 /**
                                  * 🕐 Tin LỊCH SỬ hiện mốc ĐẦY ĐỦ · tin đang sống giữ «HH:mm».

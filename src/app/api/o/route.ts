@@ -6,6 +6,11 @@ import { timNhanSu } from '@/lib/nhan-su';
 import { ghiVetGhiRong } from '@/lib/vet-mat-lien-ket';
 import { claimSeat, releaseSeat } from '@/lib/seat-active';
 import { thuMucAgent } from '@/lib/doc-phien';
+import {
+  buildServerNotice,
+  resolveRequestUiLanguage,
+  serverNoticeJson,
+} from '@/lib/server-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,26 +28,32 @@ export async function POST(req: NextRequest) {
   try {
     than = await req.json();
   } catch {
-    return Response.json({ loi: 'Thân yêu cầu không phải JSON.' }, { status: 400 });
+    return serverNoticeJson(req, 'chat.invalidJson', undefined, 400);
   }
 
   const maO = typeof than.ma_o === 'string' ? than.ma_o.trim() : '';
-  if (!/^o-\d+$/.test(maO)) return Response.json({ loi: 'Mã ô không hợp lệ.' }, { status: 400 });
+  if (!/^o-\d+$/.test(maO)) return serverNoticeJson(req, 'slotApi.invalidSlotId', undefined, 400);
 
   const maNhanSu = typeof than.ma_nhan_su === 'string' ? than.ma_nhan_su.trim() : null;
   const maPhien = typeof than.ma_phien === 'string' ? than.ma_phien.trim() : null;
   // Body decoding may finish after another request has replaced this binding.
   if (!isWriteBinding(than.binding) || !sameBinding(bindingOf(layTatCa()[maO]), than.binding)) {
-    return Response.json({ xong: false, bo_qua: 'loi-thoi', loi: 'Liên kết ô đã đổi. Đọc lại ô trước khi ghi.' }, { status: 409 });
+    return serverNoticeJson(
+      req,
+      'slotApi.bindingChanged',
+      undefined,
+      409,
+      { xong: false, bo_qua: 'loi-thoi' },
+    );
   }
 
   if (maNhanSu && !timNhanSu(maNhanSu)) {
-    return Response.json({ loi: 'Không có nhân sự này.' }, { status: 404 });
+    return serverNoticeJson(req, 'chat.seatNotFound', undefined, 404);
   }
   // ⛔ Chốt chặn: chỉ nhận phiên CÓ THẬT trong kho của ĐÚNG nhân sự đó.
   //    Nếu không, trình duyệt có thể trỏ ô sang phiên của dự án khác trên máy.
   if (maPhien && (!maNhanSu || !coPhien(maNhanSu, maPhien))) {
-    return Response.json({ loi: 'Phiên không thuộc nhân sự này.' }, { status: 400 });
+    return serverNoticeJson(req, 'slotApi.sessionNotOwned', undefined, 400);
   }
 
   /**
@@ -62,11 +73,18 @@ export async function POST(req: NextRequest) {
     const cu = layTatCa()[maO];
     if (cu?.ma_phien && cu.ma_nhan_su === maNhanSu) {
       ghiVetGhiRong(maO, maNhanSu, cu.ma_phien);
+      const preservedNotice = buildServerNotice(
+        'slotApi.emptySessionPreserved',
+        undefined,
+        resolveRequestUiLanguage(req),
+      );
       return Response.json({
         xong: true,
         bo_qua: 'giu-lien-ket',
         ma_phien: cu.ma_phien,
-        vi_sao: 'Xin ghi mã phiên rỗng lên ô đang có phiên mà ⛔ không khai ý định xoá ⇒ giữ nguyên.',
+        code: preservedNotice.code,
+        text: preservedNotice.text,
+        vi_sao: preservedNotice.text,
       });
     }
   }

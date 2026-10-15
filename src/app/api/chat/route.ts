@@ -13,6 +13,12 @@ import { traChuoi } from '@/lib/tra-chuoi';
 import { batMotLan } from '@/lib/khoi-dong-nen';
 import { isSeatHeldByTerminal, claimSeat, updateSeatActivePid } from '@/lib/seat-active';
 import { getOfficeConfig, getAgentLanguage } from '@/lib/office-config';
+import {
+  buildServerNotice,
+  formatServerNotice,
+  resolveRequestUiLanguage,
+  serverNoticeJson,
+} from '@/lib/server-notices';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
 export const dynamic = 'force-dynamic';
@@ -38,12 +44,13 @@ function goi(du_lieu: unknown): Uint8Array {
 export async function POST(req: NextRequest) {
   batMotLan(); // 🚀 cửa Node có nhịp gọi dày nhất — hermes FAIL ⑤
   const khach = nhanDangKhach(req.headers);
+  const reqLang = resolveRequestUiLanguage(req);
 
   let than: { ma_o?: unknown; ma_nhan_su?: unknown; cau_hoi?: unknown; phien_moi?: unknown };
   try {
     than = await req.json();
   } catch {
-    return Response.json({ loi: 'Thân yêu cầu không phải JSON.' }, { status: 400 });
+    return serverNoticeJson(req, 'chat.invalidJson', undefined, 400);
   }
 
   const maO = typeof than.ma_o === 'string' && /^o-\d+$/.test(than.ma_o) ? than.ma_o : 'o-1';
@@ -51,14 +58,19 @@ export async function POST(req: NextRequest) {
   const cauHoi = typeof than.cau_hoi === 'string' ? than.cau_hoi.trim() : '';
   const phienMoi = than.phien_moi === true;
 
-  if (!maNhanSu) return Response.json({ loi: 'Thiếu nhân sự.' }, { status: 400 });
-  if (!cauHoi) return Response.json({ loi: 'Câu hỏi trống.' }, { status: 400 });
+  if (!maNhanSu) return serverNoticeJson(req, 'chat.missingSeat', undefined, 400);
+  if (!cauHoi) return serverNoticeJson(req, 'chat.emptyPrompt', undefined, 400);
   if (cauHoi.length > CAU_HINH.toiDaKyTu) {
-    return Response.json({ loi: `Câu hỏi dài quá ${CAU_HINH.toiDaKyTu} ký tự.` }, { status: 413 });
+    return serverNoticeJson(
+      req,
+      'chat.promptTooLong',
+      { maxChars: CAU_HINH.toiDaKyTu },
+      413,
+    );
   }
 
   const ns = timNhanSu(maNhanSu);
-  if (!ns) return Response.json({ loi: 'Không có nhân sự này.' }, { status: 404 });
+  if (!ns) return serverNoticeJson(req, 'chat.seatNotFound', undefined, 404);
 
   // Phiên nào? Lấy từ SỔ TRÊN ĐĨA — ⛔ trình duyệt không tự chỉ định mã phiên.
   const o = layO(maO);
@@ -121,14 +133,25 @@ export async function POST(req: NextRequest) {
      *      ⛔  ⇒ mới được nói «nơi khác», và phải nói rõ đó là SUY ĐOÁN
      */
     const dangTrongApp = dsViec().find((v) => v.ma_nhan_su === maNhanSu);
-    const loi = dangTrongApp
-      ? `Ghế này ĐANG CHẠY DỞ ngay trong app (ô ${dangTrongApp.ma_o}, đã chạy ` +
-        `${Math.round((Date.now() - dangTrongApp.bat_dau) / 1000)} giây). ` +
-        'Chờ nó xong, hoặc bấm nút Dừng ở ô đó rồi gửi lại.'
-      : `Phiên này vừa đổi trong ${NGUONG_SONG_PHUT} phút mà sổ tiến trình của app ⛔ có nó. ` +
-        'Nhiều khả năng nó đang chạy ở NƠI KHÁC (cửa sổ dòng lệnh chẳng hạn) — đây là SUY ĐOÁN, ' +
-        '⛔ phải điều app đo được. Nối vào lúc này sẽ hỏng bản ghi phiên; hãy mở phiên mới.';
-    return Response.json({ loi, trong_app: !!dangTrongApp }, { status: 409 });
+    if (dangTrongApp) {
+      return serverNoticeJson(
+        req,
+        'chat.seatBusyInApp',
+        {
+          slotId: dangTrongApp.ma_o,
+          seconds: Math.round((Date.now() - dangTrongApp.bat_dau) / 1000),
+        },
+        409,
+        { trong_app: true },
+      );
+    }
+    return serverNoticeJson(
+      req,
+      'chat.sessionActiveElsewhere',
+      { minutes: NGUONG_SONG_PHUT },
+      409,
+      { trong_app: false },
+    );
   }
 
   /**
@@ -165,32 +188,24 @@ export async function POST(req: NextRequest) {
   if (!isBypassSlotGateForTest() && dongO.trang_thai !== 'trong' && dongO.trang_thai !== 'chet') {
     const v = dongO.v;
     const giay = Math.round((Date.now() - v.bat_dau) / 1000);
-    /**
-     * 🔻 ĐƯỜNG THOÁT `xinBoQua` ĐÃ GỠ (02/09, cùng bản vá tay cầm) — và đây là chỗ tôi đi XA HƠN
-     *    chữ trong đề bài, nên tôi ghi lại để @app-pm bác được nếu tôi sai.
-     *
-     * 🕳 Đề bài dặn «`xinBoQua` là đường thoát có chủ ý ⇒ đổi sang so tay cầm». Nhưng nó chỉ được
-     *    gọi TRONG ĐÚNG MỘT điều kiện: `dongO.trang_thai === 'khong_ro'`. Mà `khong_ro` sinh ra từ
-     *    phép ĐỌC `ps` hụt — và bản tay cầm KHÔNG đọc gì cả, nên trạng thái ấy KHÔNG còn tồn tại.
-     *    Đổi kiểu so xong thì hàm vẫn đúng, chỉ là **KHÔNG BAO GIỜ được gọi**.
-     * 🔑 Đó đúng thứ tôi vừa bác ở `so_tu_mau_thuan` và @app-pm đã nhận: **một nhánh không thể
-     *    chạy thì không thể nghiệm thu, và nó không cứu được ai — vì điều kiện vào nó là sai.**
-     *    Giữ lại chỉ tạo cảm giác «vẫn còn đường lùi» cho người đọc sau.
-     * ⚖️ Đã kiểm KHÔNG mở ra khoá chết mới: hai trạng thái còn chặn đều TỰ THÁO —
-     *      'song'         ⇒ con thoát ⇒ `khiChet` hoặc `quetRac` xoá dòng ⇒ ô mở lại
-     *      'so_mau_thuan' ⇒ vốn CHƯA BAO GIỜ có đường thoát, nên đây KHÔNG phải bước lùi;
-     *                       và nó cũng tự tháo khi con thoát. @app-pm đã chốt: giữ, kêu, chặn.
-     */
     {
-      const chung =
-        dongO.trang_thai === 'so_mau_thuan'
-          ? `Sổ tiến trình TỰ MÂU THUẪN ở ô ${maO}: có ô khác cũng giữ tay cầm này ` +
-            `(pid ${v.pid_de_hien_thi}). Đây là LỖI CỦA APP. Tôi KHÔNG mở lượt mới cho tới khi ` +
-            'biết dòng nào đúng.'
-          : `Ô ${maO} ĐANG CHẠY một lượt khác (${v.ma_nhan_su}, đã chạy ${giay} giây). ` +
-            'Chờ nó xong, hoặc bấm Dừng ở ô đó rồi gửi lại.';
       traCho(maO);
-      return Response.json({ loi: chung, trong_app: true }, { status: 409 });
+      if (dongO.trang_thai === 'so_mau_thuan') {
+        return serverNoticeJson(
+          req,
+          'chat.ledgerInconsistent',
+          { slotId: maO, pid: String(v.pid_de_hien_thi ?? 'null') },
+          409,
+          { trong_app: true },
+        );
+      }
+      return serverNoticeJson(
+        req,
+        'chat.slotBusy',
+        { slotId: maO, seatId: v.ma_nhan_su, seconds: giay },
+        409,
+        { trong_app: true },
+      );
     }
   }
 
@@ -200,10 +215,13 @@ export async function POST(req: NextRequest) {
    *    HAI yêu cầu tới CÙNG LÚC: cả hai cùng thấy sổ trống, cả hai cùng đi tiếp, cả hai cùng sinh.
    */
   if (!isBypassSlotGateForTest() && !datCho(maO)) {
-    return Response.json({
-      loi: `Ô ${maO} đang mở một lượt khác ngay lúc này. Thử lại sau vài giây.`,
-      trong_app: true,
-    }, { status: 409 });
+    return serverNoticeJson(
+      req,
+      'chat.slotOpening',
+      { slotId: maO },
+      409,
+      { trong_app: true },
+    );
   }
   /**
    * ⚠️ KHOÁ NHẢ Ở ĐÂU MỚI ĐÚNG: nó phải phủ đúng quãng «từ cổng tới lúc DÒNG SỔ ĐÃ CÓ».
@@ -218,8 +236,15 @@ export async function POST(req: NextRequest) {
   const chan = xinLuot(khach);
   if (!chan.cho_qua) {
     traCho(maO);   // lối thoát sớm ⇒ NHẢ, KHÔNG thì ô kẹt vĩnh viễn
+    const rateNotice = buildServerNotice(chan.code, chan.params, reqLang);
     return Response.json(
-      { loi: chan.ly_do, cho_giay: chan.cho_giay },
+      {
+        code: rateNotice.code,
+        ...(rateNotice.params ? { params: rateNotice.params } : {}),
+        text: rateNotice.text,
+        loi: rateNotice.text,
+        cho_giay: chan.cho_giay,
+      },
       { status: 429, headers: { 'Retry-After': String(chan.cho_giay) } },
     );
   }
@@ -287,11 +312,12 @@ export async function POST(req: NextRequest) {
         guiSSE(goi({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) }));
         // ⛔ Không im lặng: báo thẳng là đã mất bản ghi phiên cũ.
         if (matBanGhi) {
+          const missingNotice = buildServerNotice('chat.missingTranscript', undefined, reqLang);
           guiSSE(goi({
             loai: 'mat-ban-ghi',
-            thong_diep:
-              'Không đọc được bản ghi phiên cũ (đã đo 2 lần) — lượt này mở PHIÊN MỚI. ' +
-              'Liên kết cũ vẫn GIỮ trong sổ: bấm chọn lại phiên là nối về được.',
+            thong_diep: missingNotice.text,
+            code: missingNotice.code,
+            text: missingNotice.text,
           }));
         }
 
@@ -364,9 +390,17 @@ export async function POST(req: NextRequest) {
               }
               daCoLoi = true;
               const msg = err instanceof Error ? err.message : String(err);
+              const stdinNotice = buildServerNotice(
+                'run.failed',
+                { detail: `[stdin error] ${msg}`.slice(0, 300) },
+                reqLang,
+              );
               guiSSE(goi({
                 loai: 'loi',
-                thong_diep: `[stdin error] ${msg}`,
+                thong_diep: stdinNotice.text,
+                code: stdinNotice.code,
+                params: stdinNotice.params,
+                text: stdinNotice.text,
               }));
             });
             const ghi = dangKyViec(maO, tien, maNhanSu); // để nút DỪNG còn giết được
@@ -377,15 +411,22 @@ export async function POST(req: NextRequest) {
               // S15b: DO NOT write terminal run status here.
               // guiLenhDung(tien) only sends a stop signal to the child; the child has not terminated yet.
               // The khiChet exit handler alone decides the final run status upon child exit.
+              const busyParams = {
+                seatId: ghi.ma_nhan_su_cu,
+                pid: String(ghi.pid_cu ?? 'null'),
+                seconds: ghi.chay_duoc_giay,
+                forceKillSeconds: giayTuEp(),
+              };
+              const busyNotice = buildServerNotice('slot.busyRejected', busyParams, reqLang);
+              const compatText = isBypassSlotGateForTest()
+                ? formatServerNotice('slot.busyRejected', busyParams, 'vi')
+                : busyNotice.text;
               guiSSE(goi({
                 loai: 'loi',
-                thong_diep:
-                  `Ô này ĐANG CHẠY một lượt khác (${ghi.ma_nhan_su_cu}, pid ${ghi.pid_cu}, ` +
-                  `đã chạy ${ghi.chay_duoc_giay} giây), nên tôi KHÔNG mở lượt mới đè lên nó.\n\n` +
-                  `Lượt anh vừa gửi: tôi ĐÃ GỬI lệnh dừng cho nó và đang chờ nó đóng — nếu nó chưa ` +
-                  `đóng trong ${giayTuEp()} giây thì tôi ép. Lượt ĐANG CHẠY thì **vẫn nguyên vẹn**, ` +
-                  'nút Dừng của nó vẫn dùng được — anh KHÔNG mất gì cả.\n\n' +
-                  'Chờ nó xong, hoặc bấm Dừng ở ô này rồi gửi lại.',
+                thong_diep: compatText,
+                code: busyNotice.code,
+                params: busyNotice.params,
+                text: busyNotice.text,
               }));
             }
           },
@@ -436,7 +477,16 @@ export async function POST(req: NextRequest) {
             }
           } else if (mau.loai === 'loi') {
             daCoLoi = true;
-            guiSSE(goi({ loai: 'loi', thong_diep: mau.thong_diep }));
+            const resolvedText = mau.code
+              ? formatServerNotice(mau.code, mau.params, reqLang)
+              : (mau.text ?? mau.thong_diep);
+            guiSSE(goi({
+              loai: 'loi',
+              thong_diep: resolvedText,
+              ...(mau.code ? { code: mau.code } : {}),
+              ...(mau.params ? { params: mau.params } : {}),
+              text: resolvedText,
+            }));
           } else if (mau.loai === 'xong') {
             try { updateRun(runId, { costStatus: 'unpriced' }); } catch { /* ignore */ }
             if (!rejectReason) {
@@ -461,8 +511,18 @@ export async function POST(req: NextRequest) {
             } catch { /* ignore */ }
             updateSeatActivePid(maNhanSu, null);
           }
+          const fallbackNotice =
+            e instanceof Error
+              ? buildServerNotice('run.failed', { detail: e.message.slice(0, 300) }, reqLang)
+              : buildServerNotice('chat.unknownError', undefined, reqLang);
           guiSSE(
-            goi({ loai: 'loi', thong_diep: e instanceof Error ? e.message : 'Lỗi không rõ.' }),
+            goi({
+              loai: 'loi',
+              thong_diep: fallbackNotice.text,
+              code: fallbackNotice.code,
+              ...(fallbackNotice.params ? { params: fallbackNotice.params } : {}),
+              text: fallbackNotice.text,
+            }),
           );
         }
       } finally {

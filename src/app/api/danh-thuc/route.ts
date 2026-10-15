@@ -13,6 +13,11 @@ import {
   recordWake,
   updateWake,
 } from '@/lib/runs-ledger';
+import {
+  buildServerNotice,
+  resolveRequestUiLanguage,
+  serverNoticeJson,
+} from '@/lib/server-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -204,8 +209,15 @@ export async function POST(req: NextRequest) {
   // ⛔ CHỐNG VÒNG LẶP #2 — trần 6 lượt/phút cho CẢ máy chủ.
   const suat = xinLuot();
   if (!suat.cho_qua) {
+    const rateNotice = buildServerNotice(suat.code, suat.params, resolveRequestUiLanguage(req));
     return Response.json(
-      { loi: suat.ly_do, cho_giay: suat.cho_giay },
+      {
+        code: rateNotice.code,
+        ...(rateNotice.params ? { params: rateNotice.params } : {}),
+        text: rateNotice.text,
+        loi: rateNotice.text,
+        cho_giay: suat.cho_giay,
+      },
       { status: 429, headers: { 'Retry-After': String(suat.cho_giay) } },
     );
   }
@@ -234,17 +246,20 @@ export async function POST(req: NextRequest) {
     const dangMo = Object.entries(so)
       .filter(([, v]) => v?.ma_nhan_su)
       .map(([k, v]) => `${k}=${v!.ma_nhan_su}`);
-    return Response.json(
+    return serverNoticeJson(
+      req,
+      'wake.seatNotOpen',
       {
-        loi:
-          `Ghế "${maNhanSu}" hiện ⛔ KHÔNG mở ở ô nào (đang mở: ${dangMo.join(', ') || 'trống'}). ` +
-          'Vào giao diện gắn ghế vào một ô rồi gọi lại.',
+        seatId: maNhanSu,
+        openSlots: dangMo.join(', '),
+      },
+      404,
+      {
         wakeId,
         status: 'skipped',
         reason: 'seat_not_open_in_any_slot',
-        dang_mo: dangMo.length ? dangMo : ['(chưa có ô nào mở)'],
+        dang_mo: dangMo.length ? dangMo : ['(none)'],
       },
-      { status: 404 },
     );
   }
 

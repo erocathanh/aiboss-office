@@ -199,11 +199,24 @@ export const CONG_CU_CAM: string[] = (!GIONG_TERMINAL && ngheRaNgoai()) ? CAM_KH
   );
 }
 
+import {
+  buildServerNotice,
+  classifyAgentError,
+  type ServerNoticeParams,
+  type ServerNoticePayload,
+} from './server-notices';
+
 export type MauTraLoi =
   | { loai: 'phien'; ma_phien: string }
   | { loai: 'chu'; chu: string }
   | { loai: 'xong'; ma_phien: string; chi_phi_usd: number | null; token: number | null; rawResult?: Record<string, unknown> }
-  | { loai: 'loi'; thong_diep: string };
+  | {
+      loai: 'loi';
+      thong_diep: string;
+      code?: string;
+      params?: ServerNoticeParams;
+      text?: string;
+    };
 
 export interface ThamSoChay {
   cauHoi: string;
@@ -256,53 +269,11 @@ export interface ThamSoChay {
 }
 
 /**
- * Bộ sinh bất đồng bộ — trả về từng mẩu ngay khi tiến trình con nhả ra.
- * ⛔ Không gom rồi trả một cục.
+ * Classifies raw Claude CLI error output into a structured notice `{ code, params, text }`.
+ * Client UI resolves `code` + `params` into the active UI language (`en` or `vi`).
  */
-/**
- * Dịch lỗi thô của Claude thành câu người đọc hiểu.
- *
- * 🔴 Ca thật 14/08: ghế in nguyên `[ede_diagnostic] result_type=user last_content_type=n/a
- *    stop_reason=tool_use` ra bong bóng chat. Owner đọc ⛔ không hiểu gì, mà chuỗi đó
- *    cũng ⛔ không nói được phải làm gì tiếp.
- * 📌 Lỗi kỹ thuật in thô = **đổ việc dịch nghĩa sang người dùng**. Máy biết bối cảnh
- *    thì máy phải dịch.
- */
-function dichLoi(tho: string): string {
-  const t = (tho || '').trim();
-  if (!t) return 'Lượt chạy thất bại mà không có mô tả. Thử gửi lại câu hỏi.';
-
-  // Model kết thúc lượt bằng ý định GỌI CÔNG CỤ mà vòng lặp ⛔ không đi tiếp được.
-  if (/stop_reason=tool_use|ede_diagnostic/i.test(t)) {
-    return (
-      '⚠️ Lượt này dừng giữa lúc trợ lý đang dùng một công cụ.\n\n' +
-      /**
-       * 🔴 DÒNG TRẤN AN ĐẶT TRÊN CÙNG (Owner 18/08: «đọc đỡ sợ»).
-       * Ca thật: ghế PM chạy BÊN TRONG chính app này, nên khi nó khởi động lại máy chủ
-       * là nó GIẾT đúng tiến trình đang phục vụ lượt chat ⇒ câu trả lời đứt ngang.
-       * ⇒ Đây là nguyên nhân LÀNH và HAY GẶP NHẤT ở nhà mình — nói TRƯỚC, ⛔ đừng để
-       *   Owner đọc ba đoạn kỹ thuật rồi mới biết «à, chỉ là khởi động lại».
-       */
-      '🔄 **Nếu vừa có ai khởi động lại máy chủ (dựng bản mới) thì đây là chuyện BÌNH THƯỜNG** — ' +
-      'máy chủ tắt vài giây nên lượt đang chạy bị cắt. **Gửi lại câu vừa rồi.**\n\n' +
-      '**Nguyên nhân hay gặp NHẤT là bị cắt ngang** — máy chủ chém tiến trình, ' +
-      'hoặc bạn bấm dừng. Ghế nặng (opus + nỗ lực cao nhất) đọc lâu là chuyện thường; ' +
-      'nếu vừa thấy dòng ⏱️ báo im lặng ở trên thì **thủ phạm là ngưỡng im-lặng, ' +
-      'KHÔNG phải câu hỏi của bạn** — dòng ⏱️ đó nói rõ cách xử.\n\n' +
-      'Ít gặp hơn: câu lệnh kéo theo **kỹ năng cần sống lâu** (canh kênh, hẹn giờ) — ' +
-      'mấy thứ đó chưa chạy được ở đây vì mỗi lượt là một tiến trình rồi tắt; ' +
-      'khi đó hãy bảo nó *ghi vào kênh* thay vì *canh kênh*.\n\n' +
-      '**Gửi lại câu hỏi trước đã** — phần lớn ca chỉ cần vậy.\n\n' +
-      '`' + t.slice(0, 120) + '`'
-    );
-  }
-  if (/budget|max-budget/i.test(t)) {
-    return '⚠️ Lượt bị chặn vì trần tiền. Trần đã gỡ từ 14/08 — nếu vẫn thấy câu này, khởi động lại máy chủ.';
-  }
-  if (/not authenticated|unauthor|login/i.test(t)) {
-    return '⚠️ Máy chưa đăng nhập Claude Code. Mở terminal chạy `claude` một lần rồi thử lại.';
-  }
-  return '⚠️ Lượt chạy thất bại:\n\n`' + t.slice(0, 300) + '`';
+export function dichLoi(tho: string): ServerNoticePayload {
+  return classifyAgentError(tho, 'en');
 }
 
 /**
@@ -1008,7 +979,14 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
       if (j.is_error) {
         const ds = Array.isArray(j.errors) ? (j.errors as string[]).join(' · ') : '';
         const tho = ds || (typeof j.result === 'string' ? j.result : '');
-        day({ loai: 'loi', thong_diep: dichLoi(tho) });
+        const notice = dichLoi(tho);
+        day({
+          loai: 'loi',
+          thong_diep: notice.text,
+          code: notice.code,
+          ...(notice.params ? { params: notice.params } : {}),
+          text: notice.text,
+        });
       }
       // ⭐ TOKEN mới là thứ ăn vào cửa sổ 5 giờ + cửa sổ TUẦN (dùng chung với
       //    Claude chat của Owner) — đô-la chỉ là số máy tự quy đổi. Phải hiện token.
@@ -1030,6 +1008,8 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     }
   }
 
+  let loiTienTrinhNotice = null as ServerNoticePayload | null;
+
   tien.on('error', (e) => {
     /**
      * ⚰️ GỠ DÒNG SỔ Ở CẢ ĐƯỜNG NÀY — @app-pm thêm vào đề bài 02/09 cùng lúc với chốt `if (tien.pid)`.
@@ -1041,9 +1021,10 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
      *    sau này cũng mặc định sạch sổ, KHÔNG phải nhớ thêm.
      */
     ts.khiChet?.(tien, null);
-    loiTienTrinh =
-      `Không chạy được lệnh "${CAU_HINH.lenhClaude}": ${e.message}. ` +
-      'Kiểm tra Claude Code đã cài và đã đăng nhập chưa.';
+    loiTienTrinhNotice = buildServerNotice('process.spawnError', {
+      message: e.message,
+    });
+    loiTienTrinh = loiTienTrinhNotice.text;
     ketThuc = true;
     danhThuc?.();
     danhThuc = null;
@@ -1060,19 +1041,24 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
     //    cách một phép đo tự nói dối: người dùng đi sửa câu hỏi trong khi thủ phạm
     //    là cái đồng hồ của ta (ca 14/08, hai lượt cùng chết ở giây 117).
     if (biCatVIImLang) {
-      const giay = Math.round(CAU_HINH.hanGio / 1000);
-      loiTienTrinh =
-        `⏱️ Ghế bị dừng vì **KHÔNG nhả chữ nào ra luồng chính suốt ${giay} giây**.\n\n` +
-        'Đồng hồ đặt lại mỗi lần có chữ ra **luồng chính** (stdout). Chữ ra **luồng lỗi** ' +
-        '(stderr) KHÔNG đặt lại nó — ghế chỉ ghi ra luồng lỗi thì vẫn bị dừng dù đang chạy.\n\n' +
-        '**Việc dừng ở đây KHÔNG cho biết bài đã xong hay bị treo** — nó chỉ nói khoảng lặng ' +
-        'đã quá ngưỡng. Muốn biết thì kiểm KẾT QUẢ: thứ bạn cần đã có chưa.\n\n' +
-        `**Muốn nới ngưỡng:** dừng máy chủ rồi mở lại bằng \`HAN_GIO_MS=${CAU_HINH.hanGio * 3} pnpm dev\` ` +
-        `— gấp ba mức đang chạy (${giay} giây).`;
+      const minutes = Math.max(1, Math.round(CAU_HINH.hanGio / 60000));
+      loiTienTrinhNotice = buildServerNotice('process.silenceTimeout', {
+        minutes,
+      });
+      loiTienTrinh = loiTienTrinhNotice.text;
     } else if (signal) {
-      loiTienTrinh = `Tiến trình claude bị dừng bởi tín hiệu ${signal}.`;
+      loiTienTrinhNotice = buildServerNotice('process.signaled', {
+        signal,
+      });
+      loiTienTrinh = loiTienTrinhNotice.text;
     } else if (ma !== 0 && ma !== null) {
-      loiTienTrinh = `Tiến trình claude thoát với mã ${ma}.${loiChuan ? ' ' + loiChuan.trim() : ''}`;
+      const exitDetail = loiChuan.trim()
+        ? `${ma} (${loiChuan.trim().slice(0, 240)})`
+        : String(ma);
+      loiTienTrinhNotice = buildServerNotice('process.exited', {
+        exitCode: exitDetail,
+      });
+      loiTienTrinh = loiTienTrinhNotice.text;
     }
     ketThuc = true;
     danhThuc?.();
@@ -1088,7 +1074,17 @@ export async function* chayAgent(ts: ThamSoChay): AsyncGenerator<MauTraLoi> {
       });
     }
     while (hangDoi.length > 0) yield hangDoi.shift()!;
-    if (loiTienTrinh) yield { loai: 'loi', thong_diep: loiTienTrinh };
+    if (loiTienTrinhNotice) {
+      yield {
+        loai: 'loi',
+        thong_diep: loiTienTrinhNotice.text,
+        code: loiTienTrinhNotice.code,
+        ...(loiTienTrinhNotice.params ? { params: loiTienTrinhNotice.params } : {}),
+        text: loiTienTrinhNotice.text,
+      };
+    } else if (loiTienTrinh) {
+      yield { loai: 'loi', thong_diep: loiTienTrinh };
+    }
   } finally {
     clearTimeout(donGio);
     ts.tinHieuHuy?.removeEventListener('abort', huy);

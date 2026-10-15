@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { gietViec, dsViec, giayTuEp } from '@/lib/kho-tien-trinh';
 import { batMotLan } from '@/lib/khoi-dong-nen';
+import { serverNoticeJson } from '@/lib/server-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,11 +50,11 @@ export async function POST(req: NextRequest) {
   try {
     than = await req.json();
   } catch {
-    return Response.json({ loi: 'Thân yêu cầu không phải JSON.' }, { status: 400 });
+    return serverNoticeJson(req, 'chat.invalidJson', undefined, 400);
   }
 
   const maO = typeof than.ma_o === 'string' ? than.ma_o.trim() : '';
-  if (!/^o-\d+$/.test(maO)) return Response.json({ loi: 'Mã ô không hợp lệ.' }, { status: 400 });
+  if (!/^o-\d+$/.test(maO)) return serverNoticeJson(req, 'slotApi.invalidSlotId', undefined, 400);
 
   /**
    * 🔴 ĐÃ BỎ `layViec(maO)` (@app-pm chốt 02/09). Nó từng ở đây CHỈ để lấy `ma_nhan_su` cho phản hồi,

@@ -50,6 +50,7 @@ import { timNhanSu } from '@/lib/nhan-su';
 import { traChuoi } from '@/lib/tra-chuoi';
 import { isSeatHeldByTerminal, claimSeat, updateSeatActivePid } from '@/lib/seat-active';
 import { getOfficeConfig, getAgentLanguage } from '@/lib/office-config';
+import { buildServerNotice, type ServerNoticeParams } from '@/lib/server-notices';
 
 /** Sự kiện lõi bắn ra. Cùng HÌNH DẠNG với thứ `/api/chat` đang đẩy qua SSE. */
 export type SuKienLuot =
@@ -57,7 +58,13 @@ export type SuKienLuot =
   | { loai: 'tra-chuoi'; do_phu: unknown; so_tang: unknown; so_khop: number; tu_khoa: unknown }
   | { loai: 'da-noi-mach'; noi_tiep: boolean }
   | { loai: 'chu'; chu: string }
-  | { loai: 'loi'; thong_diep: string }
+  | {
+      loai: 'loi';
+      thong_diep: string;
+      code?: string;
+      params?: ServerNoticeParams;
+      text?: string;
+    }
   // ⚠️ `null` chứ KHÔNG phải `undefined`: `chayAgent` trả `number | null` khi Claude
   //    không khai chi phí. Khai `?: number` ở đây làm tsc chặn — và nó chặn ĐÚNG.
   | { loai: 'xong'; chi_phi_usd: number | null; token: number | null; rawResult?: Record<string, unknown> };
@@ -119,7 +126,15 @@ export async function chayMotLuot(
   const { maO, maNhanSu, cauHoi, maPhienCu, tinHieuHuy } = vao;
 
   const ns = timNhanSu(maNhanSu);
-  if (!ns) return { maPhien: maPhienCu, pid_de_hien_thi: null, loi: `Không có nhân sự "${maNhanSu}".`, buocOThatBai: false };
+  if (!ns) {
+    const notice = buildServerNotice('chat.seatNotFound');
+    return {
+      maPhien: maPhienCu,
+      pid_de_hien_thi: null,
+      loi: notice.text,
+      buocOThatBai: false,
+    };
+  }
 
   // ⛔ Check if seat is currently claimed and active in terminal (5A-1)
   const { isHeld: giuTerminal, record: recTerminal } = isSeatHeldByTerminal(maNhanSu);
@@ -225,11 +240,16 @@ export async function chayMotLuot(
          */
         if (!datO(maO, maNhanSu, mau.ma_phien)) {
           buocOThatBai = true;
+          const slotNotice = buildServerNotice('runner.slotBindFailed', {
+            slotId: maO,
+            sessionId: mau.ma_phien,
+          });
           nhan({
             loai: 'loi',
-            thong_diep:
-              `Lượt CHẠY THẬT nhưng KHÔNG buộc được vào ô «${maO}» (ô ngoài tầm). ` +
-              `Chữ vẫn nằm trong bản ghi phiên ${mau.ma_phien}, mở lại ghế là đọc được.`,
+            thong_diep: slotNotice.text,
+            code: slotNotice.code,
+            params: slotNotice.params,
+            text: slotNotice.text,
           });
         }
         nhan({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) });
@@ -237,7 +257,13 @@ export async function chayMotLuot(
         nhan({ loai: 'chu', chu: mau.chu });
       } else if (mau.loai === 'loi') {
         loi = mau.thong_diep;
-        nhan({ loai: 'loi', thong_diep: mau.thong_diep });
+        nhan({
+          loai: 'loi',
+          thong_diep: mau.thong_diep,
+          ...(mau.code ? { code: mau.code } : {}),
+          ...(mau.params ? { params: mau.params } : {}),
+          ...(mau.text ? { text: mau.text } : {}),
+        });
       } else if (mau.loai === 'xong') {
         rawResult = mau.rawResult ?? null;
         nhan({ loai: 'xong', chi_phi_usd: mau.chi_phi_usd, token: mau.token, rawResult: rawResult ?? undefined });
@@ -250,8 +276,13 @@ export async function chayMotLuot(
     }
     return { maPhien, pid_de_hien_thi: pidDeHienThi, loi, buocOThatBai, exitCode, exitSignal, rawResult };
   } catch (e) {
-    const thongDiep = e instanceof Error ? e.message : 'Lỗi không rõ.';
-    nhan({ loai: 'loi', thong_diep: thongDiep });
+    const fallbackNotice = buildServerNotice('chat.unknownError');
+    const thongDiep = e instanceof Error ? e.message : fallbackNotice.text;
+    nhan({
+      loai: 'loi',
+      thong_diep: thongDiep,
+      ...(e instanceof Error ? {} : { code: fallbackNotice.code, text: fallbackNotice.text }),
+    });
     return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai, exitCode: exitCode ?? 1, exitSignal, rawResult };
   } finally {
     updateSeatActivePid(maNhanSu, null);

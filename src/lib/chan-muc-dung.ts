@@ -1,4 +1,5 @@
 import { CAU_HINH } from './cau-hinh';
+import { buildServerNotice, type ServerNoticeParams } from './server-notices';
 
 /**
  * Chặn mức dùng — "agent chạy hoang = tiền thật".
@@ -16,14 +17,28 @@ let dangChay = 0;
 
 export type KetQuaChan =
   | { cho_qua: true }
-  | { cho_qua: false; ly_do: string; cho_giay: number };
+  | {
+      cho_qua: false;
+      ly_do: string;
+      cho_giay: number;
+      code: string;
+      params: ServerNoticeParams;
+      text: string;
+    };
 
 export function xinLuot(khach: string): KetQuaChan {
   if (dangChay >= CAU_HINH.tranDongThoi) {
+    const notice = buildServerNotice('rate.concurrencyCap', {
+      active: dangChay,
+      max: CAU_HINH.tranDongThoi,
+    });
     return {
       cho_qua: false,
-      ly_do: `Máy chủ đang chạy ${dangChay} lượt cùng lúc (trần ${CAU_HINH.tranDongThoi}). Chờ một chút rồi gửi lại.`,
+      ly_do: notice.text,
       cho_giay: 5,
+      code: notice.code,
+      params: notice.params ?? {},
+      text: notice.text,
     };
   }
 
@@ -35,10 +50,17 @@ export function xinLuot(khach: string): KetQuaChan {
     const somNhat = Math.min(...moc);
     const choGiay = Math.max(1, Math.ceil((somNhat + 60_000 - bayGio) / 1000));
     soDoLuot.set(khach, moc);
+    const notice = buildServerNotice('rate.perMinuteCap', {
+      maxPerMin: CAU_HINH.soLuotMoiPhut,
+      waitSec: choGiay,
+    });
     return {
       cho_qua: false,
-      ly_do: `Quá ${CAU_HINH.soLuotMoiPhut} lượt mỗi phút. Chờ ${choGiay} giây rồi gửi lại.`,
+      ly_do: notice.text,
       cho_giay: choGiay,
+      code: notice.code,
+      params: notice.params ?? {},
+      text: notice.text,
     };
   }
 

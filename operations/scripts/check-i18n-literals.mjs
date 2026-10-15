@@ -229,6 +229,228 @@ export function scanUiLiterals({ repoRoot = REPO_ROOT } = {}) {
   };
 }
 
+
+const VI_DIACRITIC_RE = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+
+const SERVER_PIPELINE_FILES = new Set([
+  "src/lib/chay-agent.ts",
+  "src/lib/chay-mot-luot.ts",
+  "src/lib/chan-muc-dung.ts",
+  "src/lib/kho-danh-thuc.ts",
+  "src/lib/khoi-dong-nen.ts",
+  "src/lib/server-notices.ts",
+]);
+
+export const SERVER_NOTICE_LINE_WHITELIST = [
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 90,
+    text: "cờ dòng lệnh",
+    reason: "Server-only CLI startup host binding diagnostic log (ngheRaNgoai).",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 95,
+    text: "không ai khai",
+    reason: "Server-only CLI startup host binding diagnostic log (ngheRaNgoai).",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 195,
+    text: "${...} — host «${...}» từ ${...}",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 195,
+    text: "nghe ra ngoài",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 195,
+    text: "chỉ máy này",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 195,
+    text: "rỗng",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 197,
+    text: "[chay-agent] giọng terminal: ${...}",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 197,
+    text: "BẬT",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 197,
+    text: "TẮT",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 198,
+    text: " · lý do: ${...} · số công cụ bị cấm: ${...}",
+    reason: "Server-only console diagnostic banner on startup.",
+  },
+  {
+    file: "src/lib/chay-agent.ts",
+    lineHint: 670,
+    text: "Kiểm quyền ghi tại .claude/settings.json và departments/**/.claude/settings.json, sau đó chạy: node operations/scripts/gen-seat-files.mjs --check",
+    reason: "Server-internal S17c/S17d seat settings anchor remediation hint.",
+  },
+];
+
+const CLIENT_PAYLOAD_PROPS = new Set(["loi", "thong_diep", "text", "error", "message", "ly_do"]);
+const CLIENT_PAYLOAD_CALLS = new Set([
+  "json",
+  "serverNoticeJson",
+  "buildServerNotice",
+  "formatServerNotice",
+  "classifyAgentError",
+  "dichLoi",
+  "day",
+  "nhan",
+  "goi",
+]);
+
+function isInsideConsoleCall(node, sourceFile) {
+  let cur = node.parent;
+  while (cur) {
+    if (ts.isCallExpression(cur)) {
+      const exprText = cur.expression.getText(sourceFile);
+      if (/^console\.(log|warn|error|info|debug)$/.test(exprText)) {
+        return true;
+      }
+    }
+    cur = cur.parent;
+  }
+  return false;
+}
+
+function getClientPayloadContext(node, sourceFile) {
+  let cur = node.parent;
+  while (cur) {
+    if (ts.isPropertyAssignment(cur)) {
+      const propName = cur.name.getText(sourceFile).replace(/^["']|["']$/g, "");
+      if (CLIENT_PAYLOAD_PROPS.has(propName)) {
+        return `ObjectProperty(${propName})`;
+      }
+    }
+    if (ts.isCallExpression(cur)) {
+      const exprText = cur.expression.getText(sourceFile);
+      const baseName = exprText.split(".").pop();
+      if (
+        CLIENT_PAYLOAD_CALLS.has(baseName) ||
+        exprText === "Response.json" ||
+        exprText === "NextResponse.json"
+      ) {
+        return `Call(${exprText})`;
+      }
+    }
+    if (ts.isFunctionDeclaration(cur) && cur.name && cur.name.text === "dichLoi") {
+      return "Function(dichLoi)";
+    }
+    cur = cur.parent;
+  }
+  return null;
+}
+
+export function scanServerSourceText(content, relPath = "synthetic.ts") {
+  const scriptKind = relPath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sourceFile = ts.createSourceFile(
+    relPath,
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
+  const violations = [];
+  const whitelistedHits = [];
+  const isStrictServerFile =
+    relPath.startsWith("src/app/api/") || SERVER_PIPELINE_FILES.has(relPath);
+
+  const checkLiteral = (rawText, node) => {
+    if (!VI_DIACRITIC_RE.test(rawText)) return;
+    if (isInsideConsoleCall(node, sourceFile)) return;
+
+    const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    const wl = SERVER_NOTICE_LINE_WHITELIST.find(
+      (item) => item.file === relPath && item.text === rawText,
+    );
+    if (wl) {
+      whitelistedHits.push({
+        file: relPath,
+        line: line + 1,
+        column: character + 1,
+        text: rawText,
+        reason: wl.reason,
+      });
+      return;
+    }
+
+    const payloadCtx = getClientPayloadContext(node, sourceFile);
+    if (payloadCtx || isStrictServerFile) {
+      violations.push({
+        file: relPath,
+        line: line + 1,
+        column: character + 1,
+        kind: payloadCtx ?? "ServerNoticePipelineLiteral",
+        text: rawText.replace(/\s+/g, " ").trim(),
+      });
+    }
+  };
+
+  const visit = (node) => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      checkLiteral(node.text, node);
+    } else if (ts.isTemplateExpression(node)) {
+      const joined = [
+        node.head.text,
+        ...node.templateSpans.map((span) => span.literal.text),
+      ].join("${...}");
+      checkLiteral(joined, node);
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return { violations, whitelistedHits };
+}
+
+export function scanServerNoticeLiterals({ repoRoot = REPO_ROOT } = {}) {
+  const libDir = path.join(repoRoot, "src/lib");
+  const apiDir = path.join(repoRoot, "src/app/api");
+  const files = [...collectSourceFiles(libDir), ...collectSourceFiles(apiDir)];
+
+  const violations = [];
+  const whitelistedHits = [];
+
+  for (const filePath of files) {
+    const relPath = path.relative(repoRoot, filePath).replace(/\\/g, "/");
+    const content = fs.readFileSync(filePath, "utf8");
+    const res = scanServerSourceText(content, relPath);
+    violations.push(...res.violations);
+    whitelistedHits.push(...res.whitelistedHits);
+  }
+
+  return {
+    scannedFilesCount: files.length,
+    violations,
+    whitelistedHits,
+    whitelist: SERVER_NOTICE_LINE_WHITELIST,
+  };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const report = scanUiLiterals();
   console.log(`[i18n-scanner] Scanned ${report.scannedFilesCount} files under src/components/** and src/app/** (excluding src/app/api/**).`);
@@ -237,9 +459,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`  - [ALLOW] ${hit.file}:${hit.line} (${hit.kind}) "${hit.text}" -> [${hit.category}] ${hit.reason}`);
   }
   console.log(`[i18n-scanner] Untranslated UI literal violations (>= 2 words, or >= 1 word in button/label): ${report.violations.length}`);
-  if (report.violations.length > 0) {
+  const serverReport = scanServerNoticeLiterals();
+  console.log(`[i18n-scanner] Scanned ${serverReport.scannedFilesCount} server files under src/lib/** and src/app/api/**.`);
+  console.log(`[i18n-scanner] Server internal whitelist matched: ${serverReport.whitelistedHits.length}`);
+  console.log(`[i18n-scanner] Hardcoded Vietnamese server notice violations: ${serverReport.violations.length}`);
+  if (report.violations.length > 0 || serverReport.violations.length > 0) {
     for (const v of report.violations) {
-      console.error(`  - [VIOLATION] ${v.file}:${v.line}:${v.column} (${v.kind}): "${v.text}"`);
+      console.error(`  - [UI-VIOLATION] ${v.file}:${v.line}:${v.column} (${v.kind}): "${v.text}"`);
+    }
+    for (const v of serverReport.violations) {
+      console.error(`  - [SERVER-VIOLATION] ${v.file}:${v.line}:${v.column} (${v.kind}): "${v.text}"`);
     }
     process.exit(1);
   }
