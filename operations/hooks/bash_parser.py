@@ -2459,13 +2459,19 @@ def _advance_js_single_stmt_end(text: str, start_idx: int) -> int:
     return n
 
 
-def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
+def _is_assignment_conditional(
+    text: str,
+    c_start: int,
+    c_end: int,
+    call_pos: Optional[int] = None,
+) -> bool:
     """
-    S17l (F51), S17m (F56, F56b, F56c) & S17n (F60, F61): Return True if the assignment at `[c_start, c_end]` is inside or
-    guarded by an active conditional/exception/scoped suite in Python (`if`/`elif`/`else`/`try`/`except`/`finally`/`with`/
-    `def`/`class`/`match`/`case`, including multi-line logical headers joined by `( [ {`, `\\`, or `'''`/`\"\"\"`) or JS
-    (`if`/`else if`/`else`/`switch`/`case`/`try`/`catch`/`finally`, braced or braceless, or short-circuit `&&`/`||` / ternary `? :`).
-    Branches that have already closed before `c_start` do NOT mark subsequent independent assignments as conditional.
+    S17l (F51), S17m (F56, F56b, F56c), S17n (F60, F61) & S17o (F64): Return True if the assignment at `[c_start, c_end]`
+    is conditional (may not have executed) relative to `call_pos`.
+    An enclosing suite `S` (`if`/`elif`/`else`/`try`/`except`/`finally`/`with`/`def`/`class`/`case`) makes an assignment
+    conditional ONLY when `call_pos` is outside `S` (or before the assignment); when `call_pos` is inside the same suite `S`
+    after the assignment (`body_start <= c_start and c_end <= call_pos <= body_end`), reaching `call_pos` guarantees the
+    earlier assignment in `S` executed (unless guarded by a narrower inner suite that does not enclose `call_pos`).
     """
     py_suites, py_unclosed = _scan_python_logical_suites(text)
     if any(u_start <= c_start for u_start, _ in py_unclosed):
@@ -2488,9 +2494,12 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
             k += 1
         if k < len(text) and text[k] == ':':
             continue
-        b_end = _advance_js_single_stmt_end(text, close_p + 1)
+        b_start = close_p + 1
+        b_end = _advance_js_single_stmt_end(text, b_start)
         if h_start <= c_start and c_end <= b_end:
-            return True
+            kw_js = m_js.group(1)
+            if kw_js == 'switch' or call_pos is None or not (b_start <= c_start and c_end <= call_pos <= b_end):
+                return True
         if b_end < c_start:
             closed_js_block_end = max(closed_js_block_end, b_end + 1)
 
@@ -2501,9 +2510,11 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
             break
         if any(ps[0] <= h_start <= ps[1] for ps in py_suites):
             continue
-        b_end = _advance_js_single_stmt_end(text, m_kw.end())
+        b_start = m_kw.end()
+        b_end = _advance_js_single_stmt_end(text, b_start)
         if h_start <= c_start and c_end <= b_end:
-            return True
+            if call_pos is None or not (b_start <= c_start and c_end <= call_pos <= b_end):
+                return True
         if b_end < c_start:
             closed_js_block_end = max(closed_js_block_end, b_end + 1)
 
@@ -2512,15 +2523,23 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
     last_nl = text.rfind('\n', 0, c_start)
     stmt_bound = max(last_semi + 1, last_nl + 1, closed_js_block_end)
     stmt_prefix = text[stmt_bound:c_start]
-    if re.search(
-        r'\b(?:if|elif|else|switch|case|default|try|catch|except|finally)\b|&&|\|\||\?',
-        stmt_prefix,
-    ):
+    if re.search(r'\b(?:switch|case|default)\b|&&|\|\||\?', stmt_prefix):
+        return True
+    for m_sp in re.finditer(r'\b(?:if|elif|else|try|catch|except|finally)\b', stmt_prefix):
+        abs_kw = stmt_bound + m_sp.start()
+        if any(ps[0] <= abs_kw <= ps[1] for ps in py_suites):
+            continue
         return True
     line_bound = max(last_nl + 1, closed_js_block_end)
     if line_bound < stmt_bound:
         line_prefix = text[line_bound:c_start]
-        if re.search(r'\b(?:if|elif|else|try|except|finally|with|def|class|match|case)\b[^#\n]*:', line_prefix):
+        for m_lp in re.finditer(
+            r'\b(?:if|elif|else|try|except|finally|with|def|class|match|case)\b[^#\n]*:',
+            line_prefix,
+        ):
+            abs_kw = line_bound + m_lp.start()
+            if any(ps[0] <= abs_kw <= ps[1] for ps in py_suites):
+                continue
             return True
 
     # 4. Enclosing Python compound suite (multi-line logical header + indented or single-line suite)
@@ -2529,7 +2548,8 @@ def _is_assignment_conditional(text: str, c_start: int, c_end: int) -> bool:
             break
         if kw in ('if', 'elif', 'else', 'try', 'except', 'finally', 'with', 'def', 'class', 'match', 'case'):
             if body_start <= c_start and c_end <= body_end:
-                return True
+                if kw == 'match' or call_pos is None or not (body_start <= c_start and c_end <= call_pos <= body_end):
+                    return True
 
     return False
 
@@ -2747,7 +2767,7 @@ def _extract_simple_var_env(
         if call_pos is not None and c_end > call_pos:
             continue
         counts[var_name] = counts.get(var_name, 0) + 1
-        is_cond = _is_assignment_conditional(text, c_start, c_end)
+        is_cond = _is_assignment_conditional(text, c_start, c_end, call_pos=call_pos)
         if (call_pos is None or is_cond) and counts[var_name] > 1:
             env[var_name] = f"$DYNAMIC_WRITE:{var_name}"
         elif is_cond and counts[var_name] == 1:
@@ -2793,7 +2813,7 @@ def _extract_simple_var_multi_env(
         c_end: int,
         force_union: bool = False,
     ) -> None:
-        is_cond = force_union or _is_assignment_conditional(text, c_start, c_end)
+        is_cond = force_union or _is_assignment_conditional(text, c_start, c_end, call_pos=call_pos)
         for lp in all_loops:
             if lp[1] <= c_start and c_end <= lp[2] and not (lp[1] <= call_pos <= lp[2]):
                 is_cond = True
@@ -3325,7 +3345,7 @@ def _extract_receiver_type_vars_at_pos(
             kind = 'other'
         kinds = seen_kinds.setdefault(var_name, set())
         kinds.add(kind)
-        has_branch_before = _is_assignment_conditional(text, c_start, c_end)
+        has_branch_before = _is_assignment_conditional(text, c_start, c_end, call_pos=call_pos)
         in_enclosing_loop = outer_loop_start is not None and c_start >= outer_loop_start
         if (has_branch_before or in_enclosing_loop) and len(kinds) > 1:
             ambig_vars.add(var_name)

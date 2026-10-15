@@ -407,6 +407,8 @@ POS_CONTROL_CASES=(
     "lock_raw_inputs:block-F60-py-multiline-if-header-rebind-wip-write-inputs.json"
     "lock_raw_inputs:block-F60c-py-backslash-continued-if-header.json"
     "lock_raw_inputs:block-F60d-py-multiline-while-header.json"
+    "lock_raw_inputs:block-F64c-py-with-assign-inputs-write.json"
+    "lock_raw_inputs:block-F64d-py-def-assign-inputs-write.json"
     "block_secret_leak:block-bash-cat-envrc.json"
     "block_secret_leak:block-bash-cat-env-prod.json"
     "block_secret_leak:block-bash-cat-env-backup.json"
