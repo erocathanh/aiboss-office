@@ -494,14 +494,16 @@ def scan_script_content(content: str, label: str, sub_cmd: str = "") -> str:
     return ""
 
 
-def _resolve_ruby_script_arg(
+def _resolve_ruby_script_args(
     sub_cmd: str,
     current_cwd: str,
     heredoc_written_files: dict[str, str] | None = None,
-) -> str:
-    """H40 (v11): Khi `bash_parser.get_executed_script_arg` trả rỗng (hoặc trượt do cờ nhận đối số của Ruby),
-    nhận diện trực tiếp `irb <tệp>`, `ruby ... <tệp>`, tệp `.rb` chạy trực tiếp và tệp thực thi có shebang Ruby.
+) -> tuple[list[str], list[str]]:
+    """H40 (v11) & H43 (v12): Khi `bash_parser.get_executed_script_arg` trả rỗng (hoặc trượt do cờ nhận đối số của Ruby),
+    nhận diện trực tiếp toàn bộ chuỗi preload `-r`/`--require`, `irb <tệp>`, `ruby ... <tệp>`,
+    tệp `.rb` chạy trực tiếp và tệp thực thi có shebang Ruby, kèm danh sách thư mục `-I`.
     """
+    load_dirs = [current_cwd]
     sc = parse_simple_command_safe(sub_cmd, current_cwd)
     if sc and sc.words:
         tokens = sc.words
@@ -510,7 +512,7 @@ def _resolve_ruby_script_arg(
     else:
         raw_tokens = split_tokens(sub_cmd)
         if not raw_tokens:
-            return ""
+            return [], load_dirs
         idx = 0
         while idx < len(raw_tokens):
             tok = raw_tokens[idx].strip('\'"')
@@ -525,58 +527,91 @@ def _resolve_ruby_script_arg(
                 continue
             break
         if idx >= len(raw_tokens):
-            return ""
+            return [], load_dirs
         tokens = raw_tokens[idx:]
         first_token = tokens[0].strip('\'"')
         base_cmd = os.path.basename(first_token).lower()
 
     if not tokens or not base_cmd or base_cmd in EXEMPT_PRINT_COMMANDS:
-        return ""
+        return [], load_dirs
 
     if base_cmd in ('irb', 'ruby'):
-        req_arg = ""
+        req_args: list[str] = []
+        seen_eval = False
         i = 1
         while i < len(tokens):
             arg = tokens[i].strip('\'"')
             if arg == '--':
-                if i + 1 < len(tokens):
+                if not seen_eval and i + 1 < len(tokens):
                     cand = tokens[i + 1].strip('\'"')
-                    if cand and cand != '-':
-                        return cand
+                    if cand and cand != '-' and cand not in req_args:
+                        req_args.append(cand)
                 break
-            if arg in ('-e', '--eval') or (arg.startswith('-e') and not arg.startswith('--') and len(arg) > 2):
-                return req_arg
-            if arg in ('-I', '-C', '-E', '-K', '-U') and i + 1 < len(tokens):
+            if arg in ('-e', '--eval') and i + 1 < len(tokens):
+                seen_eval = True
+                i += 2
+                continue
+            if arg.startswith('-e') and not arg.startswith('--') and len(arg) > 2:
+                seen_eval = True
+                i += 1
+                continue
+            if arg == '-I' and i + 1 < len(tokens):
+                inc_val = tokens[i + 1].strip('\'"')
+                for p in inc_val.split(':'):
+                    if p:
+                        norm_p = os.path.normpath(p if os.path.isabs(p) else os.path.join(current_cwd, p))
+                        if norm_p not in load_dirs:
+                            load_dirs.append(norm_p)
+                i += 2
+                continue
+            if arg.startswith('-I') and not arg.startswith('--') and len(arg) > 2:
+                inc_val = arg[2:].strip('\'"')
+                for p in inc_val.split(':'):
+                    if p:
+                        norm_p = os.path.normpath(p if os.path.isabs(p) else os.path.join(current_cwd, p))
+                        if norm_p not in load_dirs:
+                            load_dirs.append(norm_p)
+                i += 1
+                continue
+            if arg in ('-C', '-E', '-K', '-U') and i + 1 < len(tokens):
                 i += 2
                 continue
             if arg in ('-r', '--require') and i + 1 < len(tokens):
-                req_arg = tokens[i + 1].strip('\'"')
+                req_val = tokens[i + 1].strip('\'"')
+                if req_val and req_val not in req_args:
+                    req_args.append(req_val)
                 i += 2
                 continue
             if arg.startswith('-r') and not arg.startswith('--') and len(arg) > 2:
-                req_arg = arg[2:].strip('\'"')
+                req_val = arg[2:].strip('\'"')
+                if req_val and req_val not in req_args:
+                    req_args.append(req_val)
                 i += 1
                 continue
             if arg.startswith('--require='):
-                req_arg = arg.split('=', 1)[1].strip('\'"')
+                req_val = arg.split('=', 1)[1].strip('\'"')
+                if req_val and req_val not in req_args:
+                    req_args.append(req_val)
                 i += 1
                 continue
             if arg.startswith('-'):
                 i += 1
                 continue
-            if arg and arg != '-':
-                return arg
+            if arg and arg != '-' and not seen_eval:
+                if arg not in req_args:
+                    req_args.append(arg)
+                break
             i += 1
-        return req_arg
+        return req_args, load_dirs
 
     if first_token.lower().endswith('.rb') or base_cmd.endswith('.rb'):
-        return first_token
+        return [first_token], load_dirs
 
     if base_cmd not in SCRIPT_RUNNERS and base_cmd not in SMTP_CLIENT_BINARIES:
         if heredoc_written_files:
             hd_body = bash_parser.find_heredoc_body_for_script(first_token, heredoc_written_files)
             if hd_body and is_ruby_runner_or_script(content=hd_body):
-                return first_token
+                return [first_token], load_dirs
         expanded = os.path.expanduser(first_token)
         cand_path = os.path.normpath(expanded if os.path.isabs(expanded) else os.path.join(current_cwd, expanded))
         try:
@@ -584,67 +619,82 @@ def _resolve_ruby_script_arg(
                 with open(cand_path, "r", encoding="utf-8", errors="ignore") as f:
                     first_line = f.readline(256)
                 if is_ruby_runner_or_script(content=first_line):
-                    return first_token
+                    return [first_token], load_dirs
         except OSError:
             pass
 
-    return ""
+    return [], load_dirs
+
+
+def _resolve_ruby_script_arg(
+    sub_cmd: str,
+    current_cwd: str,
+    heredoc_written_files: dict[str, str] | None = None,
+) -> str:
+    args, _ = _resolve_ruby_script_args(sub_cmd, current_cwd, heredoc_written_files)
+    return args[0] if args else ""
 
 
 def check_script_file_bulk_send(sub_cmd: str, current_cwd: str, heredoc_written_files=None) -> str:
     """Nếu lệnh chạy một tệp kịch bản (< 1MB hoặc vừa được ghi bởi heredoc trong cùng lệnh),
-    đọc ruột tệp và xét các mẫu địa chỉ gửi.
+    đọc ruột tệp và xét các mẫu địa chỉ gửi (bao gồm toàn bộ chuỗi `-r`/`--require` của Ruby — H43).
     """
-    script_arg = bash_parser.get_executed_script_arg(sub_cmd)
-    if not script_arg:
-        script_arg = _resolve_ruby_script_arg(sub_cmd, current_cwd, heredoc_written_files)
-    if not script_arg:
+    primary_arg = bash_parser.get_executed_script_arg(sub_cmd)
+    ruby_args, ruby_load_dirs = _resolve_ruby_script_args(sub_cmd, current_cwd, heredoc_written_files)
+    candidate_args: list[str] = []
+    if primary_arg:
+        candidate_args.append(primary_arg)
+    for ra in ruby_args:
+        if ra and ra not in candidate_args:
+            candidate_args.append(ra)
+    if not candidate_args:
         return ""
 
-    if heredoc_written_files:
-        hd_body = bash_parser.find_heredoc_body_for_script(script_arg, heredoc_written_files)
-        if hd_body:
-            clean_arg = script_arg.strip('\'"')
-            base_arg = os.path.basename(clean_arg)
-            reason = scan_script_content(hd_body, base_arg or clean_arg, sub_cmd=sub_cmd)
+    for script_arg in candidate_args:
+        if heredoc_written_files:
+            hd_body = bash_parser.find_heredoc_body_for_script(script_arg, heredoc_written_files)
+            if hd_body:
+                clean_arg = script_arg.strip('\'"')
+                base_arg = os.path.basename(clean_arg)
+                reason = scan_script_content(hd_body, base_arg or clean_arg, sub_cmd=sub_cmd)
+                if reason:
+                    return reason
+
+        expanded = os.path.expanduser(script_arg.strip('\'"'))
+        path_candidates: list[str] = []
+        if os.path.isabs(expanded):
+            norm_abs = os.path.normpath(expanded)
+            path_candidates.append(norm_abs)
+            if not norm_abs.endswith(".rb"):
+                path_candidates.append(norm_abs + ".rb")
+        else:
+            for d in ruby_load_dirs:
+                norm_rel = os.path.normpath(os.path.join(d, expanded))
+                if norm_rel not in path_candidates:
+                    path_candidates.append(norm_rel)
+                if not norm_rel.endswith(".rb"):
+                    norm_rb = norm_rel + ".rb"
+                    if norm_rb not in path_candidates:
+                        path_candidates.append(norm_rb)
+
+        for script_path in path_candidates:
+            if not os.path.isfile(script_path):
+                continue
+            if is_exempt_repo_script(script_path, current_cwd):
+                break
+            try:
+                if os.path.getsize(script_path) >= MAX_SCRIPT_SIZE:
+                    break
+                with open(script_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read(MAX_SCRIPT_SIZE)
+            except OSError:
+                break
+            reason = scan_script_content(content, os.path.basename(script_path), sub_cmd=sub_cmd)
             if reason:
                 return reason
+            break
 
-    expanded = os.path.expanduser(script_arg)
-    if os.path.isabs(expanded):
-        script_path = os.path.normpath(expanded)
-    else:
-        script_path = os.path.normpath(os.path.join(current_cwd, expanded))
-
-    if not os.path.isfile(script_path):
-        alt_arg = _resolve_ruby_script_arg(sub_cmd, current_cwd, heredoc_written_files)
-        if alt_arg and alt_arg != script_arg:
-            script_arg = alt_arg
-            if heredoc_written_files:
-                hd_body = bash_parser.find_heredoc_body_for_script(script_arg, heredoc_written_files)
-                if hd_body:
-                    clean_arg = script_arg.strip('\'"')
-                    base_arg = os.path.basename(clean_arg)
-                    reason = scan_script_content(hd_body, base_arg or clean_arg, sub_cmd=sub_cmd)
-                    if reason:
-                        return reason
-            expanded = os.path.expanduser(script_arg)
-            script_path = os.path.normpath(expanded if os.path.isabs(expanded) else os.path.join(current_cwd, expanded))
-
-    if is_exempt_repo_script(script_path, current_cwd):
-        return ""
-
-    try:
-        if not os.path.isfile(script_path):
-            return ""
-        if os.path.getsize(script_path) >= MAX_SCRIPT_SIZE:
-            return ""
-        with open(script_path, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read(MAX_SCRIPT_SIZE)
-    except OSError:
-        return ""
-
-    return scan_script_content(content, os.path.basename(script_path), sub_cmd=sub_cmd)
+    return ""
 
 
 def check_script_dong_y(sub_cmd: str) -> bool:
@@ -1179,7 +1229,7 @@ FORBIDDEN_CALL_KWARGS = {
     "parse_float", "parse_int", "parse_constant", "cls", "key",
 }
 INTERPRETER_CODE_LOAD_ENV_VARS = {
-    # Python (docs.python.org/3/using/cmdline.html#environment-variables)
+    # Python (docs.python.org/3/using/cmdline.html#environment-variables & `python3 --help-env` — H38 & H42)
     "PYTHONPATH",
     "PYTHONSTARTUP",
     "PYTHONHOME",
@@ -1187,6 +1237,33 @@ INTERPRETER_CODE_LOAD_ENV_VARS = {
     "PYTHONEXECUTABLE",
     "PYTHONINSPECT",
     "PYTHONBREAKPOINT",
+    "PYTHONWARNINGS",
+    "PYTHONPLATLIBDIR",
+    "PYTHONCASEOK",
+    "PYTHONNOUSERSITE",
+    "PYTHONSAFEPATH",
+    "PYTHONPYCACHEPREFIX",
+    "PYTHONDEVMODE",
+    "PYTHONFAULTHANDLER",
+    "PYTHONTRACEMALLOC",
+    "PYTHONPROFILEIMPORTTIME",
+    "PYTHONPERFSUPPORT",
+    "PYTHONMALLOC",
+    "PYTHONCOERCECLOCALE",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+    "PYTHONHASHSEED",
+    "PYTHONINTMAXSTRDIGITS",
+    "PYTHONVERBOSE",
+    "PYTHONDEBUG",
+    "PYTHONOPTIMIZE",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONUNBUFFERED",
+    "PYTHONNODEBUGRANGES",
+    "PYTHONWARNDEFAULTENCODING",
+    "PYTHON_FROZEN_MODULES",
+    "PYTHON_BASIC_REPL",
+    "PYTHON_HISTORY",
     "VIRTUAL_ENV",
     # Node.js / Deno / Bun (nodejs.org/api/cli.html#environment-variables, docs.deno.com, bun.sh)
     "NODE_OPTIONS",
@@ -1224,6 +1301,8 @@ INTERPRETER_CODE_LOAD_ENV_VARS = {
     "ENV",
     "ZDOTDIR",
 }
+SAFE_PYTHON_WARNING_ACTIONS = {"default", "error", "ignore", "always", "module", "once"}
+SAFE_PYTHON_ISOLATED_SHORT_FLAGS = set("ISESsBOuqbv")
 ALLOWED_PY_BINOPS = (
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow,
     ast.LShift, ast.RShift, ast.BitOr, ast.BitXor, ast.BitAnd,
@@ -1235,9 +1314,17 @@ ALLOWED_PY_CMPOPS = (
 )
 
 
+def _is_safe_python_warning_arg(arg: str) -> bool:
+    """H42 (v12): `-W` can import arbitrary modules at startup via dotted warning categories
+    (e.g. `-W ignore::hookwarn.CustomWarning`), even under `-I`. Only bare action keywords
+    without `:` or `.` are safe when a bulk-send signal is present.
+    """
+    return bool(arg) and arg in SAFE_PYTHON_WARNING_ACTIONS
+
+
 def has_unsafe_inline_runner_flags(sc: bash_parser.SimpleCommand | None) -> bool:
-    """H34 (v09) & H38 (v11): Detect interpreter flags that load external modules/files or select code by module name
-    rather than pure inline code (`-m`/`-i` in Python, `-M`/`-m`/`-I`/`-d`/`-P`/`-S` in Perl,
+    """H34 (v09), H38 (v11) & H42 (v12): Detect interpreter flags that load external modules/files or select code by module name
+    rather than pure inline code (`-m`/`-i`/`-W`/`-X` in Python, `-M`/`-m`/`-I`/`-d`/`-P`/`-S` in Perl,
     `-r`/`-I`/`-S`/`-s` in Ruby/IRB, `-r`/`--require`/`--import`/`--loader`/`--import-map` in Node/Bun/Deno,
     `-c`/`-d`/`-f` in PHP).
     """
@@ -1252,17 +1339,23 @@ def has_unsafe_inline_runner_flags(sc: bash_parser.SimpleCommand | None) -> bool
         if w == '--':
             break
         if is_py:
-            if w in ('-W', '-X') and i + 1 < len(words):
+            if w == '-W':
+                if i + 1 >= len(words) or not _is_safe_python_warning_arg(words[i + 1]):
+                    return True
                 i += 2
                 continue
-            if w.startswith(('-W', '-X')) and len(w) > 2:
+            if w.startswith('-W') and len(w) > 2:
+                if not _is_safe_python_warning_arg(w[2:]):
+                    return True
                 i += 1
                 continue
+            if w == '-X' or (w.startswith('-X') and len(w) > 2):
+                return True
             if w in ('-m', '-i') or w.startswith(('-m', '-i')):
                 return True
             if w.startswith('-') and not w.startswith('--'):
                 flags_part = w[1:]
-                if 'm' in flags_part or 'i' in flags_part:
+                if 'm' in flags_part or 'i' in flags_part or 'W' in flags_part or 'X' in flags_part:
                     return True
                 if flags_part == 'c' or flags_part.endswith('c'):
                     break
@@ -1297,6 +1390,52 @@ def has_unsafe_inline_runner_flags(sc: bash_parser.SimpleCommand | None) -> bool
     return False
 
 
+def is_python_isolated_inline_runner(sc: bash_parser.SimpleCommand | None) -> bool:
+    """H41 (v12): Return True ONLY when a Python `-c` invocation explicitly sets Python's isolated mode (`-I`)
+    before `-c`, with only safe short flags before `-c`.
+    In isolated mode (`python3 -I`), Python neither adds cwd/script directory (`''`) nor user site-packages
+    to `sys.path` and ignores all `PYTHON*` environment variables, preventing cwd module shadowing (e.g. `./json.py`).
+    """
+    if sc is None or not sc.words:
+        return False
+    exe = sc.executable
+    if not (exe in ('python', 'python2', 'python3', 'py') or exe.startswith(('python2.', 'python3.'))):
+        return False
+    if has_unsafe_inline_runner_flags(sc):
+        return False
+    words = sc.words
+    has_isolated = False
+    i = 1
+    while i < len(words):
+        w = words[i]
+        if w == '--' or not w.startswith('-') or w == '-' or w.startswith('--'):
+            return False
+        if w == '-W':
+            if i + 1 >= len(words) or not _is_safe_python_warning_arg(words[i + 1]):
+                return False
+            i += 2
+            continue
+        if w.startswith('-W') and len(w) > 2:
+            if not _is_safe_python_warning_arg(w[2:]):
+                return False
+            i += 1
+            continue
+        flags_part = w[1:]
+        if flags_part == 'c' or flags_part.endswith('c'):
+            prefix_flags = flags_part[:-1]
+            if any(ch not in SAFE_PYTHON_ISOLATED_SHORT_FLAGS for ch in prefix_flags):
+                return False
+            if 'I' in prefix_flags:
+                has_isolated = True
+            return has_isolated and (i + 1 < len(words))
+        if any(ch not in SAFE_PYTHON_ISOLATED_SHORT_FLAGS for ch in flags_part):
+            return False
+        if 'I' in flags_part:
+            has_isolated = True
+        i += 1
+    return False
+
+
 def _get_py_attr_chain_root(node: ast.Attribute) -> tuple[ast.Name | None, list[str]]:
     """H35 (v10) & H38 (v11): Walk an `ast.Attribute` chain (`a.b.c`) and return `(root_name_node, [attr1, attr2, ...])`
     only when every link is a Load Attribute with no leading `_` and the base is a Load Name with no leading `_`.
@@ -1314,15 +1453,18 @@ def _get_py_attr_chain_root(node: ast.Attribute) -> tuple[ast.Name | None, list[
     return None, []
 
 
-def _is_recognized_harmless_python_code(code_text: str) -> bool:
-    """H35 (v10) & H38 (v11): Closed-allowlist AST recognizer for Python (`python`/`python3 -c`) inline code when a send signal
-    is present in reachable environment bindings.
-    Proves "pure print" ONLY when there is no path to alter module lookup or execute external code:
-    1. All `Import` / `ImportFrom` statements appear at the very top of `tree.body` before any `Assign` or `Expr`/`Call`.
-    2. `sys` is strictly read-only within `SAFE_SYS_READONLY_ATTRS`; no `Call` may have root `sys`.
-    3. Callable module functions are restricted to pure modules (`json`, `math`, `re`, `datetime`) with an explicit
-       closed function set (`SAFE_PY_MODULE_CALLABLES` / `SAFE_PY_SUBMODULE_CALLABLES`); arguments cannot contain callables
-       or module objects; no attribute/subscript assignment is allowed.
+def _is_recognized_harmless_python_code(code_text: str, allow_imports: bool = False) -> bool:
+    """H35 (v10), H38 (v11) & H41 (v12): Closed-allowlist AST recognizer for Python (`python`/`python3 -c`) inline code
+    when a send signal is present in reachable environment bindings.
+    - Without isolated mode (`allow_imports=False`), NO `Import` or `ImportFrom` statement is allowed, because non-isolated
+      `python3 -c` prepends `''` (cwd) to `sys.path` and could load a shadowing `./<module>.py` (e.g. `./json.py`).
+      Only pure expressions/statements built from `SAFE_PY_BUILTINS`, literals, and operators are accepted.
+    - With isolated mode (`allow_imports=True`, i.e. `python3 -I -c` and no module-loading env vars or unsafe flags):
+      1. All `Import` / `ImportFrom` statements must appear at the top of `tree.body` before any `Assign` or `Expr`/`Call`.
+      2. `sys` is strictly read-only within `SAFE_SYS_READONLY_ATTRS`; no `Call` may have root `sys`.
+      3. Callable module functions are restricted to pure modules (`json`, `math`, `re`, `datetime`) with an explicit
+         closed function set (`SAFE_PY_MODULE_CALLABLES` / `SAFE_PY_SUBMODULE_CALLABLES`); arguments cannot contain callables
+         or module objects; no attribute/subscript assignment is allowed.
     """
     if not code_text or not code_text.strip():
         return True
@@ -1459,7 +1601,7 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
     seen_non_import = False
     for stmt in tree.body:
         if isinstance(stmt, ast.Import):
-            if seen_non_import or not stmt.names:
+            if not allow_imports or seen_non_import or not stmt.names:
                 return False
             for alias in stmt.names:
                 if not isinstance(alias, ast.alias) or alias.name not in SAFE_PY_IMPORT_MODULES:
@@ -1478,7 +1620,8 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
                 imported_modules[bound] = alias.name
         elif isinstance(stmt, ast.ImportFrom):
             if (
-                seen_non_import
+                not allow_imports
+                or seen_non_import
                 or stmt.level != 0
                 or not stmt.module
                 or stmt.module not in SAFE_PY_IMPORT_MODULES
@@ -1828,18 +1971,21 @@ def _is_recognized_harmless_const_print_code(code_text: str, lang: str) -> bool:
     return True
 
 
-def is_provably_harmless_inline_runner_code(code_text: str, runner_exe: str = "") -> bool:
-    """H34 (v09) & H35 (v10): Closed-allowlist structural recognizer for direct inline code runners (`python3 -c`,
-    `node -e`, `ruby -e`, `perl -e`, `php -r`, `deno eval`, `bun -e`) when reachable environment bindings contain
-    a bulk-send signal.
-    Never defaults to True: returns True ONLY when the code matches the closed AST allowlist (Python) or the
-    constant-print statement grammar (Node/Ruby/Perl/PHP); returns False for all unrecognized structures.
+def is_provably_harmless_inline_runner_code(
+    code_text: str, runner_exe: str = "", allow_imports: bool = False
+) -> bool:
+    """H34 (v09), H35 (v10), H38 (v11) & H41 (v12): Closed-allowlist structural recognizer for direct inline code runners
+    (`python3 -c`, `node -e`, `ruby -e`, `perl -e`, `php -r`, `deno eval`, `bun -e`) when reachable environment bindings
+    contain a bulk-send signal.
+    Never defaults to True: returns True ONLY when the code matches the closed AST allowlist (Python, with `allow_imports`
+    enabled ONLY under isolated mode `python3 -I -c` and no module-loading env vars) or the constant-print statement
+    grammar (Node/Ruby/Perl/PHP); returns False for all unrecognized structures.
     """
     if not code_text or not code_text.strip():
         return True
     exe = (runner_exe or "").lower()
     if exe in ('python', 'python2', 'python3', 'py') or exe.startswith(('python2.', 'python3.')):
-        return _is_recognized_harmless_python_code(code_text)
+        return _is_recognized_harmless_python_code(code_text, allow_imports=allow_imports)
     if exe in ('node', 'nodejs', 'deno', 'bun'):
         return _is_recognized_harmless_const_print_code(code_text, "js")
     if exe in ('ruby', 'irb'):
@@ -1850,7 +1996,7 @@ def is_provably_harmless_inline_runner_code(code_text: str, runner_exe: str = ""
         return _is_recognized_harmless_const_print_code(code_text, "php")
     if not exe:
         return (
-            _is_recognized_harmless_python_code(code_text)
+            _is_recognized_harmless_python_code(code_text, allow_imports=False)
             or _is_recognized_harmless_const_print_code(code_text, "js")
             or _is_recognized_harmless_const_print_code(code_text, "ruby")
             or _is_recognized_harmless_const_print_code(code_text, "perl")
@@ -2218,6 +2364,11 @@ def should_block_bulk_send(
                 if inline_code_pairs:
                     if env_has_signal and (has_unsafe_inline_runner_flags(sc) or code_load_vars_active):
                         return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                    allow_isolated_py_imports = (
+                        is_python_isolated_inline_runner(sc)
+                        and not code_load_vars_active
+                        and not has_unsafe_inline_runner_flags(sc)
+                    )
                     for code_arg, raw_code_arg in inline_code_pairs:
                         expanded_code, code_unresolved = expand_shell_vars_in_raw_token(
                             raw_code_arg, static_vars, unresolved_vars
@@ -2231,7 +2382,9 @@ def should_block_bulk_send(
                             uncertain_code_reason = check_inline_code_uncertain_network_write(candidate_code)
                             if uncertain_code_reason:
                                 return uncertain_code_reason
-                            if env_has_signal and not is_provably_harmless_inline_runner_code(candidate_code, runner_exe_name):
+                            if env_has_signal and not is_provably_harmless_inline_runner_code(
+                                candidate_code, runner_exe_name, allow_imports=allow_isolated_py_imports
+                            ):
                                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                         if code_unresolved and (chain_has_bulk_send_signal or env_has_signal):
                             return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."

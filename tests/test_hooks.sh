@@ -472,6 +472,10 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-H38f-prefix-startup-file-var.json"
     "guard_bulk_send:block-H40-irb-script-net-smtp.json"
     "guard_bulk_send:block-H40b-rb-file-shebang-net-smtp.json"
+    "guard_bulk_send:block-H41-python-import-not-isolated-with-signal.json"
+    "guard_bulk_send:block-H41c-python-isolated-but-env-loader.json"
+    "guard_bulk_send:block-H42-python-warning-category-import.json"
+    "guard_bulk_send:block-H43-ruby-multi-preload-net-smtp.json"
 )
 
 saved_total=$TOTAL

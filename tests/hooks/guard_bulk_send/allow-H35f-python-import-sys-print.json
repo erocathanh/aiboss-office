@@ -2,6 +2,6 @@
   "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
   "tool_input": {
-    "command": "X=msmtp python3 -c 'import sys; print(sys.version_info[0])'"
+    "command": "X=msmtp python3 -I -c 'import sys; print(sys.version_info[0])'"
   }
 }

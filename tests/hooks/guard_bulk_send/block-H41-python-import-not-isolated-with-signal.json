@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cd wip && CODE='import smtplib; smtplib.SMTP(\"localhost\",2525).sendmail(\"a@example.invalid\",\"b@example.invalid\",\"m\")' python3 -S -c 'import json; print(1)'"
+  }
+}

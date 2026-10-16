@@ -1,7 +1,0 @@
-{
-  "hook_event_name": "PreToolUse",
-  "tool_name": "Bash",
-  "tool_input": {
-    "command": "CODE='import smtplib; smtplib.SMTP(\"localhost\",2525).sendmail(\"a@example.invalid\",\"b@example.invalid\",\"m\")' python3 -c 'import json, math; print(json.dumps({\"a\": math.pi}))'"
-  }
-}
