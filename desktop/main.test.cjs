@@ -801,7 +801,7 @@ test('F40 (d): 401 with X-AIBOSS-Instance signed by a different nonce cancels vi
     PHONGBAN_USER: 'owner-u',
     PHONGBAN_PASS: 'owner-p',
   });
-  const rogueNonce = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+  const rogueNonce = "ffffffffffffffff".repeat(4);
   const wrongProof = computeTestInstanceProof(rogueNonce, '127.0.0.1', 4330, 'aiboss-office');
   const res = fire(
     'http://127.0.0.1:4330/api/approvals/req-4/decision',
@@ -959,8 +959,8 @@ test('F42 (g): proxy forward mock (proxy on 4330 relays 401 proof signed by real
 
 test('F42 (h): replaying old proof after instance-4330.json rotates on server restart cancels via callback() without sending credentials', () => {
   const clock = { now: 1_700_000_000_000 };
-  const oldNonce = 'aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111';
-  const newNonce = 'bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222';
+  const oldNonce = "aaaa1111aaaa1111".repeat(4);
+  const newNonce = "bbbb2222bbbb2222".repeat(4);
   const { fire, tempConfigDir, logs } = createLoginHarness(
     { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
     clock,
@@ -968,26 +968,40 @@ test('F42 (h): replaying old proof after instance-4330.json rotates on server re
   );
   const oldProof = computeTestInstanceProof(oldNonce, '127.0.0.1', 4330, 'aiboss-office');
 
-  // Server restarts and writes a new nonce to instance-4330.json with updated mtime
+  // 1st fire: warms instanceNonceCache with oldNonce and supplies credentials once
+  const resFirst = fire(
+    'http://127.0.0.1:4330/api/approvals/req-h1/decision',
+    { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-h1/decision',
+      responseHeaders: { 'X-AIBOSS-Instance': oldProof },
+    },
+  );
+  assert.equal(resFirst.prevented, true);
+  assert.deepEqual(resFirst.cbCalls, [['owner-u', 'owner-p']]);
+
+  // Within the 5s cache TTL (+1s), server restarts and atomically replaces instance-4330.json with newNonce
+  clock.now += 1_000;
   const nonceFile = path.join(tempConfigDir, 'instance-4330.json');
+  const tmpFile = path.join(tempConfigDir, '.instance-4330.rotated.tmp');
   fs.writeFileSync(
-    nonceFile,
+    tmpFile,
     JSON.stringify({
+      host: '127.0.0.1',
       port: 4330,
       nonce: newNonce,
       startedAt: '2026-10-16T00:05:00.000Z',
     }),
     { encoding: 'utf8', mode: 0o600 },
   );
-  const futureTime = new Date(Date.now() + 10_000);
-  fs.utimesSync(nonceFile, futureTime, futureTime);
+  fs.renameSync(tmpFile, nonceFile);
 
-  // Replaying oldProof against rotated instance-4330.json must fail-closed
+  // 2nd fire: replaying oldProof after file rotation must invalidate hot cache and fail-closed
   const resReplay = fire(
-    'http://127.0.0.1:4330/api/approvals/req-h/decision',
+    'http://127.0.0.1:4330/api/approvals/req-h2/decision',
     { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
     {
-      url: 'http://127.0.0.1:4330/api/approvals/req-h/decision',
+      url: 'http://127.0.0.1:4330/api/approvals/req-h2/decision',
       responseHeaders: { 'X-AIBOSS-Instance': oldProof },
     },
   );
@@ -996,6 +1010,96 @@ test('F42 (h): replaying old proof after instance-4330.json rotates on server re
   assert.ok(logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
   assert.equal(
     logs.some((l) => l.includes(oldNonce) || l.includes(newNonce) || l.includes(oldProof) || l.includes('owner-p')),
+    false,
+  );
+});
+
+test('F46 (i): 401 with X-AIBOSS-Instance signed for ::1:4330 while authInfo.host is 127.0.0.1 cancels via callback() without sending credentials', () => {
+  const { fire, defaultNonce, logs } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+  );
+  const ipv6Proof = computeTestInstanceProof(defaultNonce, '::1', 4330, 'aiboss-office');
+  const res = fire(
+    'http://127.0.0.1:4330/api/approvals/req-f46-i/decision',
+    { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-f46-i/decision',
+      responseHeaders: { 'X-AIBOSS-Instance': ipv6Proof },
+    },
+  );
+  assert.equal(res.prevented, false);
+  assert.deepEqual(res.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
+  assert.equal(logs.some((l) => l.includes(defaultNonce) || l.includes(ipv6Proof) || l.includes('owner-p')), false);
+});
+
+test('F46 (j): 401 when authInfo.host is localhost or ::1 cancels via callback() without sending credentials (no loopback merging)', () => {
+  const { fire, defaultNonce, logs } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+  );
+  const ipv4Proof = computeTestInstanceProof(defaultNonce, '127.0.0.1', 4330, 'aiboss-office');
+  for (const nonIpv4Host of ['localhost', '::1', '[::1]']) {
+    const proofForHost = computeTestInstanceProof(defaultNonce, nonIpv4Host, 4330, 'aiboss-office');
+    const res = fire(
+      `http://${nonIpv4Host === '::1' ? '[::1]' : nonIpv4Host}:4330/api/approvals/req-f46-j/decision`,
+      { host: nonIpv4Host, port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+      {
+        url: `http://${nonIpv4Host === '::1' ? '[::1]' : nonIpv4Host}:4330/api/approvals/req-f46-j/decision`,
+        responseHeaders: { 'X-AIBOSS-Instance': ipv4Proof || proofForHost },
+      },
+    );
+    assert.equal(res.prevented, false, `must not preventDefault for host=${nonIpv4Host}`);
+    assert.deepEqual(res.cbCalls, [[]], `must cancel via callback() for host=${nonIpv4Host}`);
+  }
+  assert.ok(logs.some((l) => l.includes('non-IPv4 loopback host rejected')));
+});
+
+test('F46 (k): same-port IPv4<->IPv6 proxy relay mock (proxy on 127.0.0.1:4330 relays proof signed by real server on [::1]:4330) cancels via callback() without sending credentials', () => {
+  const realServerIpv6Nonce = "cccc3333cccc3333".repeat(4);
+  const { fire, getHeadersReceivedHook, logs } = createLoginHarness(
+    { PHONGBAN_USER: 'owner-u', PHONGBAN_PASS: 'owner-p' },
+    { now: 1_700_000_000_000 },
+    { nonce: realServerIpv6Nonce, triggerWhenReady: true },
+  );
+  // Real server bound to [::1]:4330 writes instance-4330.json and signs proof for ::1:4330:aiboss-office
+  const proofFromIpv6RealServer = computeTestInstanceProof(
+    realServerIpv6Nonce,
+    '::1',
+    4330,
+    'aiboss-office',
+  );
+  const hook = getHeadersReceivedHook();
+  assert.equal(typeof hook, 'function');
+
+  // Proxy on 127.0.0.1:4330 forwards the 401 and X-AIBOSS-Instance header back to Electron on 127.0.0.1:4330
+  hook(
+    {
+      url: 'http://127.0.0.1:4330/api/approvals/req-f46-k/decision',
+      statusCode: 401,
+      responseHeaders: {
+        'WWW-Authenticate': ['Basic realm="aiboss-office"'],
+        'X-AIBOSS-Instance': [proofFromIpv6RealServer],
+      },
+    },
+    () => {},
+  );
+  const resProxyRelay = fire(
+    'http://127.0.0.1:4330/api/approvals/req-f46-k/decision',
+    { host: '127.0.0.1', port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+    { url: 'http://127.0.0.1:4330/api/approvals/req-f46-k/decision' },
+  );
+  assert.equal(resProxyRelay.prevented, false);
+  assert.deepEqual(resProxyRelay.cbCalls, [[]]);
+  assert.ok(logs.some((l) => l.includes('X-AIBOSS-Instance HMAC mismatch')));
+  assert.equal(
+    logs.some(
+      (l) =>
+        l.includes(realServerIpv6Nonce) ||
+        l.includes(proofFromIpv6RealServer) ||
+        l.includes('owner-p'),
+    ),
     false,
   );
 });

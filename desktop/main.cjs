@@ -83,9 +83,11 @@ if (!gotTheLock) {
   const INSTANCE_HEADER_TTL_MS = 5 * 1000;
   const loginAttemptState = new Map();
   const recentInstanceProofHeaders = new Map();
+  const IPV4_LOOPBACK_HOST = '127.0.0.1';
   let instanceNonceCache = {
     filePath: '',
     mtimeMs: -1,
+    ino: -1,
     expiresAt: 0,
     nonce: null,
   };
@@ -105,6 +107,7 @@ if (!gotTheLock) {
       if (
         instanceNonceCache.filePath === filePath &&
         instanceNonceCache.mtimeMs === stat.mtimeMs &&
+        instanceNonceCache.ino === stat.ino &&
         nowMs < instanceNonceCache.expiresAt &&
         typeof instanceNonceCache.nonce === 'string'
       ) {
@@ -121,6 +124,7 @@ if (!gotTheLock) {
         instanceNonceCache = {
           filePath,
           mtimeMs: stat.mtimeMs,
+          ino: stat.ino,
           expiresAt: nowMs + INSTANCE_NONCE_CACHE_TTL_MS,
           nonce: raw.nonce,
         };
@@ -129,7 +133,7 @@ if (!gotTheLock) {
     } catch {
       // Missing or unreadable instance-<port>.json
     }
-    instanceNonceCache = { filePath: '', mtimeMs: -1, expiresAt: 0, nonce: null };
+    instanceNonceCache = { filePath: '', mtimeMs: -1, ino: -1, expiresAt: 0, nonce: null };
     return null;
   }
 
@@ -151,14 +155,6 @@ if (!gotTheLock) {
     return null;
   }
 
-  function normalizeLoopbackHost(rawHost) {
-    const h = String(rawHost || '').trim().toLowerCase();
-    if (h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]') {
-      return '127.0.0.1';
-    }
-    return null;
-  }
-
   function registerInstanceHeaderListener() {
     if (
       !session ||
@@ -173,7 +169,6 @@ if (!gotTheLock) {
         if (details && details.statusCode === 401 && typeof details.url === 'string') {
           const parsedUrl = new URL(details.url);
           const rawHost = (parsedUrl.hostname || '').toLowerCase();
-          const h = normalizeLoopbackHost(rawHost) || rawHost;
           const p = parsedUrl.port
             ? Number.parseInt(parsedUrl.port, 10)
             : parsedUrl.protocol === 'https:'
@@ -183,8 +178,8 @@ if (!gotTheLock) {
           const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
           const realm = realmMatch ? realmMatch[1] : APP_BASIC_REALM;
           const instanceHeader = extractHeaderCaseInsensitive(details.responseHeaders, 'x-aiboss-instance');
-          const keyWithRealm = `${h}:${p}:${realm}`;
-          const keyHostPort = `${h}:${p}`;
+          const keyWithRealm = `${rawHost}:${p}:${realm}`;
+          const keyHostPort = `${rawHost}:${p}`;
           const exp = Date.now() + INSTANCE_HEADER_TTL_MS;
           if (instanceHeader) {
             recentInstanceProofHeaders.set(keyWithRealm, { value: instanceHeader, expiresAt: exp });
@@ -207,9 +202,8 @@ if (!gotTheLock) {
     if (details && details.responseHeaders && typeof details.responseHeaders === 'object') {
       return extractHeaderCaseInsensitive(details.responseHeaders, 'x-aiboss-instance');
     }
-    const canonicalHost = normalizeLoopbackHost(host) || host;
-    const keyWithRealm = `${canonicalHost}:${port}:${realm}`;
-    const keyHostPort = `${canonicalHost}:${port}`;
+    const keyWithRealm = `${host}:${port}:${realm}`;
+    const keyHostPort = `${host}:${port}`;
     const entry = recentInstanceProofHeaders.get(keyWithRealm) || recentInstanceProofHeaders.get(keyHostPort);
     recentInstanceProofHeaders.delete(keyWithRealm);
     recentInstanceProofHeaders.delete(keyHostPort);
@@ -223,15 +217,14 @@ if (!gotTheLock) {
     if (typeof headerValue !== 'string' || !/^v1\.[0-9a-f]{64}$/i.test(headerValue.trim())) {
       return false;
     }
-    const canonicalHost = normalizeLoopbackHost(host);
-    if (!canonicalHost) {
+    if (host !== IPV4_LOOPBACK_HOST) {
       return false;
     }
     const expected =
       'v1.' +
       crypto
         .createHmac('sha256', nonce)
-        .update(`${canonicalHost}:${port}:${realm}`, 'utf8')
+        .update(`${IPV4_LOOPBACK_HOST}:${port}:${realm}`, 'utf8')
         .digest('hex');
     const actualBuf = Buffer.from(headerValue.trim().toLowerCase(), 'utf8');
     const expectedBuf = Buffer.from(expected.toLowerCase(), 'utf8');
@@ -265,22 +258,43 @@ if (!gotTheLock) {
     if (authInfo.scheme.toLowerCase() !== 'basic') {
       return;
     }
-    // 3. Host must be loopback AND port must match targetPort from resolvePort (strict integer type, F41)
-    const host = authInfo.host.toLowerCase();
-    const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+    // 3. Port must match targetPort from resolvePort (strict integer type, F41)
     const port = authInfo.port;
-    if (!isLoopback || port !== targetPort) {
+    if (port !== targetPort) {
       return;
     }
     // 4. Realm must match APP_BASIC_REALM ('aiboss-office', must match src/app/api/approvals/[requestId]/decision/route.ts)
     if (authInfo.realm !== APP_BASIC_REALM) {
       return;
     }
+    // 5. Enforce strict IPv4 loopback ('127.0.0.1') on Electron side; do NOT merge localhost/::1/[::1] (F46)
+    const host = authInfo.host.toLowerCase();
+    if (host !== IPV4_LOOPBACK_HOST) {
+      if (host === 'localhost' || host === '::1' || host === '[::1]') {
+        console.log(
+          `[AIBOSS Desktop] WARNING: Basic Auth challenge for ${host}:${port}:${authInfo.realm} cancelled (non-IPv4 loopback host rejected; only 127.0.0.1 is trusted)`,
+        );
+        callback();
+      }
+      return;
+    }
 
     const key = `${host}:${port}:${authInfo.realm}`;
     const now = Date.now();
+    const instanceNonce = readInstanceNonce(targetPort, now);
+
     let state = loginAttemptState.get(key);
     if (state && state.blockedUntil > 0 && now >= state.blockedUntil) {
+      loginAttemptState.delete(key);
+      state = undefined;
+    }
+    if (
+      state &&
+      state.blockedUntil === 0 &&
+      instanceNonce &&
+      typeof state.nonce === 'string' &&
+      state.nonce !== instanceNonce
+    ) {
       loginAttemptState.delete(key);
       state = undefined;
     }
@@ -296,8 +310,7 @@ if (!gotTheLock) {
       return;
     }
 
-    // 5. Instance nonce HMAC proof check (F40)
-    const instanceNonce = readInstanceNonce(targetPort, now);
+    // 6. Instance nonce HMAC proof check (F40, F42, F46)
     if (!instanceNonce) {
       console.log(
         `[AIBOSS Desktop] WARNING: Basic Auth challenge for ${key} cancelled (missing or invalid instance-${targetPort}.json)`,
@@ -323,7 +336,7 @@ if (!gotTheLock) {
       return;
     }
 
-    loginAttemptState.set(key, { attempts: 1, blockedUntil: 0 });
+    loginAttemptState.set(key, { attempts: 1, blockedUntil: 0, nonce: instanceNonce });
     if (event && typeof event.preventDefault === 'function') {
       event.preventDefault();
     }

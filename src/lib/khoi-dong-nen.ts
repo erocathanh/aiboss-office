@@ -115,7 +115,7 @@ export function batMotLan(): void {
     try {
       initInstanceNonce();
     } catch {
-      console.error('[instance-nonce] Startup initialization failed; continuing runner startup');
+      // Startup error logging is handled once inside initInstanceNonce (F49)
     }
     try {
       if (process.env.CHAY_NEN === '1') {

@@ -4086,7 +4086,12 @@ approval_check.main()
     console.log('  [PASS] Case 43 (F34 + F33 P2 v10): /settings page error boundary isolates io_error, ledger_unreadable, and lock_timeout into approvals-error-card while keeping DisplaySettingsCard ("Text size") intact');
 
 
-    // Case 44 (F40 UI-2e): 401 decision response emits X-AIBOSS-Instance matching HMAC from instance-<port>.json; 200 and 503 responses do NOT include X-AIBOSS-Instance
+    // Case 44 (F40 + F42 + F45 + F46 + F47 + F49 UI-2e v03): 401 decision response emits X-AIBOSS-Instance matching HMAC from instance-<port>.json; 200 and 503 responses do NOT include X-AIBOSS-Instance
+    const {
+      initInstanceNonce,
+      buildInstanceProofHeader,
+      cleanupInstanceNonceFiles,
+    } = await import('../src/lib/instance-nonce.ts');
     const c44ConfigDir = path.join(testDataDir, 'f40-config-c44');
     const prevConfigDir44 = process.env.AIBOSS_CONFIG_DIR;
     const prevUser44 = process.env.PHONGBAN_USER;
@@ -4095,6 +4100,7 @@ approval_check.main()
       process.env.AIBOSS_CONFIG_DIR = c44ConfigDir;
       process.env.PHONGBAN_USER = 'f40-owner';
       process.env.PHONGBAN_PASS = 'f40-secret-pass';
+      initInstanceNonce({ host: '127.0.0.1', port: 4330, configDir: c44ConfigDir });
 
       // Seed a fresh pending request for Case 44
       const c44Ts = '2026-10-14T18:44:00Z';
@@ -4143,6 +4149,7 @@ approval_check.main()
       assert.equal(fileMode44, 0o600, 'instance-4330.json mode must be 0600');
 
       const nonceJson44 = JSON.parse(fs.readFileSync(nonceFile44, 'utf-8'));
+      assert.equal(nonceJson44.host, '127.0.0.1');
       assert.equal(nonceJson44.port, 4330);
       assert.match(nonceJson44.nonce, /^[0-9a-f]{64}$/);
       assert.ok(typeof nonceJson44.startedAt === 'string' && nonceJson44.startedAt.length > 0);
@@ -4178,30 +4185,100 @@ approval_check.main()
         'F42: server must NEVER create instance-4342.json from request Host header'
       );
       const forgedRespProof = resForgedHost401.headers.get('x-aiboss-instance');
-      if (forgedRespProof) {
-        const wrongPortProof =
-          'v1.' +
-          crypto
-            .createHmac('sha256', nonceJson44.nonce)
-            .update('127.0.0.1:4342:aiboss-office', 'utf8')
-            .digest('hex');
-        assert.notEqual(
-          forgedRespProof,
-          wrongPortProof,
-          'F42: server must NEVER sign X-AIBOSS-Instance for caller-supplied Host port 4342'
+      assert.equal(
+        forgedRespProof,
+        expectedProof44,
+        'F42: proof must be signed strictly for real listener 127.0.0.1:4330'
+      );
+
+      // 44a-f46: Server bind address identity (::1 -> signs ::1; 0.0.0.0 / :: -> no proof; 127.0.0.1 -> signs 127.0.0.1)
+      const c44Ipv6Dir = path.join(testDataDir, 'f46-ipv6-dir');
+      const ipv6Entry = initInstanceNonce({ host: '::1', port: 4343, configDir: c44Ipv6Dir });
+      assert.ok(ipv6Entry, 'F46: ::1 loopback bind must initialize instance-4343.json');
+      assert.equal(ipv6Entry.host, '::1');
+      const ipv6ProofHeader = buildInstanceProofHeader('aiboss-office');
+      const expectedIpv6Proof =
+        'v1.' +
+        crypto
+          .createHmac('sha256', ipv6Entry.nonce)
+          .update('::1:4343:aiboss-office', 'utf8')
+          .digest('hex');
+      const wrongIpv4ProofFor4343 =
+        'v1.' +
+        crypto
+          .createHmac('sha256', ipv6Entry.nonce)
+          .update('127.0.0.1:4343:aiboss-office', 'utf8')
+          .digest('hex');
+      assert.equal(ipv6ProofHeader, expectedIpv6Proof, 'F46: server bound to ::1 must sign ::1:4343:aiboss-office');
+      assert.notEqual(ipv6ProofHeader, wrongIpv4ProofFor4343, 'F46: server bound to ::1 must NOT sign 127.0.0.1');
+
+      const c44WildcardDir = path.join(testDataDir, 'f46-wildcard-dir');
+      for (const [wildHost, wildPort] of [['0.0.0.0', 4344], ['::', 4345]]) {
+        const wildEntry = initInstanceNonce({ host: wildHost, port: wildPort, configDir: c44WildcardDir });
+        assert.equal(wildEntry, null, `F46: wildcard bind ${wildHost} must return null`);
+        assert.equal(
+          fs.existsSync(path.join(c44WildcardDir, `instance-${wildPort}.json`)),
+          false,
+          `F46: wildcard bind ${wildHost} must NOT write instance-${wildPort}.json`
         );
         assert.equal(
-          forgedRespProof,
-          expectedProof44,
-          'F42: proof (if present) must be signed strictly for real listener port 4330'
+          buildInstanceProofHeader('aiboss-office'),
+          null,
+          `F46: wildcard bind ${wildHost} must NOT emit X-AIBOSS-Instance proof`
         );
       }
 
-      // 44a-f45: Pre-existing 0755 config dir is tightened to 0700; unwritable config dir fails closed (401 without proof, never 500)
+      // 44a-f47: Lifecycle — deleting instance-<port>.json mid-run returns null (401 without proof) and does NOT rewrite with old nonce; cleanup checks inode+nonce (TOCTOU safe)
+      const c44LifecycleDir = path.join(testDataDir, 'f47-lifecycle-dir');
+      const entry47 = initInstanceNonce({ host: '127.0.0.1', port: 4346, configDir: c44LifecycleDir });
+      assert.ok(entry47 && fs.existsSync(entry47.filePath));
+      assert.ok(buildInstanceProofHeader('aiboss-office'));
+      fs.unlinkSync(entry47.filePath);
+      assert.equal(
+        buildInstanceProofHeader('aiboss-office'),
+        null,
+        'F47: buildInstanceProofHeader must return null when nonce file is removed at runtime'
+      );
+      assert.equal(
+        fs.existsSync(entry47.filePath),
+        false,
+        'F47: buildInstanceProofHeader must NOT call init again or rewrite deleted nonce file'
+      );
+
+      const c44ToctouDir = path.join(testDataDir, 'f47-toctou-dir');
+      const entry48 = initInstanceNonce({ host: '127.0.0.1', port: 4347, configDir: c44ToctouDir });
+      assert.ok(entry48 && fs.existsSync(entry48.filePath));
+      const newProcessNonce = "dddd4444dddd4444".repeat(4);
+      const replacementTmp = path.join(c44ToctouDir, '.instance-4347.newproc.tmp');
+      fs.writeFileSync(
+        replacementTmp,
+        JSON.stringify({
+          host: '127.0.0.1',
+          port: 4347,
+          nonce: newProcessNonce,
+          startedAt: new Date().toISOString(),
+        }),
+        { encoding: 'utf8', mode: 0o600 }
+      );
+      fs.renameSync(replacementTmp, entry48.filePath);
+      cleanupInstanceNonceFiles();
+      assert.equal(
+        fs.existsSync(entry48.filePath),
+        true,
+        'F47: cleanupInstanceNonceFiles must NOT delete file replaced by a newer process (inode/nonce mismatch)'
+      );
+      // Reset shuttingDown state by re-initializing a fresh target
+      const gState = globalThis.__aibossInstanceNonceStateV3;
+      if (gState) {
+        gState.shuttingDown = false;
+      }
+
+      // 44a-f45 & f49: Pre-existing 0755 config dir is tightened to 0700; unwritable config dir fails closed (401 without proof, never 500) and logs strictly ONE value-free line per startup (F49)
       const c44BroadDir = path.join(testDataDir, 'f45-broad-dir');
       fs.mkdirSync(c44BroadDir, { recursive: true, mode: 0o755 });
       fs.chmodSync(c44BroadDir, 0o755);
       process.env.AIBOSS_CONFIG_DIR = c44BroadDir;
+      initInstanceNonce({ host: '127.0.0.1', port: 4330, configDir: c44BroadDir });
       const resBroad = await postDecisionRoute(req401, {
         params: Promise.resolve({ requestId: c44ReqId }),
       });
@@ -4214,18 +4291,41 @@ approval_check.main()
 
       const c44BlockedFile = path.join(testDataDir, 'f45-not-a-dir');
       fs.writeFileSync(c44BlockedFile, 'block', 'utf8');
-      process.env.AIBOSS_CONFIG_DIR = path.join(c44BlockedFile, 'subdir');
-      const resUnwritable = await postDecisionRoute(req401, {
-        params: Promise.resolve({ requestId: c44ReqId }),
-      });
-      assert.equal(resUnwritable.status, 401, 'F45: nonce init failure must still return 401 Basic (never 500)');
-      assert.equal(resUnwritable.headers.get('www-authenticate'), 'Basic realm="aiboss-office"');
+      const unwritableDir = path.join(c44BlockedFile, 'subdir');
+      process.env.AIBOSS_CONFIG_DIR = unwritableDir;
+      const capturedErrLogs = [];
+      const origConsoleError = console.error;
+      console.error = (...args) => {
+        capturedErrLogs.push(args.join(' '));
+      };
+      try {
+        initInstanceNonce({ host: '127.0.0.1', port: 4330, configDir: unwritableDir });
+        initInstanceNonce({ host: '127.0.0.1', port: 4330, configDir: unwritableDir });
+        const resUnwritable1 = await postDecisionRoute(req401, {
+          params: Promise.resolve({ requestId: c44ReqId }),
+        });
+        const resUnwritable2 = await postDecisionRoute(req401, {
+          params: Promise.resolve({ requestId: c44ReqId }),
+        });
+        assert.equal(resUnwritable1.status, 401, 'F45: nonce init failure must still return 401 Basic (never 500)');
+        assert.equal(resUnwritable2.status, 401);
+        assert.equal(resUnwritable1.headers.get('www-authenticate'), 'Basic realm="aiboss-office"');
+        assert.equal(
+          resUnwritable1.headers.get('x-aiboss-instance'),
+          null,
+          'F45: 401 response must omit X-AIBOSS-Instance when nonce file cannot be written'
+        );
+      } finally {
+        console.error = origConsoleError;
+      }
       assert.equal(
-        resUnwritable.headers.get('x-aiboss-instance'),
-        null,
-        'F45: 401 response must omit X-AIBOSS-Instance when nonce file cannot be written'
+        capturedErrLogs.length,
+        1,
+        `F49: startup write/chmod failure must log strictly 1 value-free line (got ${capturedErrLogs.length})`
       );
+      assert.equal(/[0-9a-f]{64}/i.test(capturedErrLogs[0]), false, 'F49: error log must not contain hex64 secrets');
       process.env.AIBOSS_CONFIG_DIR = c44ConfigDir;
+      initInstanceNonce({ host: '127.0.0.1', port: 4330, configDir: c44ConfigDir });
 
       // 44b: 200 response with valid Basic Auth does NOT include X-AIBOSS-Instance
       const basicAuth44 = 'Basic ' + Buffer.from('f40-owner:f40-secret-pass', 'utf8').toString('base64');
@@ -4285,7 +4385,7 @@ approval_check.main()
         process.env.PHONGBAN_PASS = prevPass44;
       }
     }
-    console.log('  [PASS] Case 44 (F40 UI-2e): 401 decision response emits X-AIBOSS-Instance = v1.<64 hex> matching instance-4330.json HMAC (0600/0700), while 200 and 503 responses omit X-AIBOSS-Instance');
+    console.log('  [PASS] Case 44 (F40 + F42 + F45 + F46 + F47 + F49 UI-2e v03): 401 decision response emits X-AIBOSS-Instance = v1.<64 hex> bound strictly to listener host/port (0600/0700, 1 log line on error), while 200 and 503 omit X-AIBOSS-Instance');
 
     console.log('>>> ALL 44 A-4 v10 APPROVAL LEDGER TEST CASES PASSED <<<');
   } finally {
