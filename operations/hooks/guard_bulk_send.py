@@ -24,6 +24,7 @@ Cập nhật theo BỔ SUNG-01, PHA H1 v02, OPC v07, v09 và v10:
 
 from __future__ import annotations
 
+import ast
 import sys
 import os
 import json
@@ -63,7 +64,13 @@ BULK_SEND_ENDPOINTS = [
 
 # Mẫu SMTP cần chặn duyệt (trong Python/Node chỉ chặn khi thật sự import/dùng smtplib/nodemailer, hoặc gọi client thật)
 SMTP_PATTERN = re.compile(
-    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|\bnodemailer\b|\bcreateTransport\b|\bnet/smtp\b|\bNet::SMTP\b|smtps?://|--mail-rcpt\b|\bsendmail\b|\bmsmtp\b|\bswaks\b)',
+    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|\bnodemailer\b|\bcreateTransport\b|smtps?://|--mail-rcpt\b|\bsendmail\b|\bmsmtp\b|\bswaks\b)',
+    re.IGNORECASE,
+)
+
+# H37 (v10): Mẫu SMTP thành ngữ Ruby chỉ áp cho runner Ruby (ruby -e, irb), tệp .rb, hoặc shebang ruby, và chỉ ở dạng DÙNG
+RUBY_SMTP_PATTERN = re.compile(
+    r'(?:\brequire\s*(?:\(\s*)?[\'"]net/smtp[\'"]|\bNet::SMTP\s*(?:\.|::)\s*(?:start|new)\b)',
     re.IGNORECASE,
 )
 
@@ -109,19 +116,19 @@ MCP_SEND_PATTERN = re.compile(r'mcp__.*(?:send|broadcast|reply|forward|post_mess
 SCRIPT_RUNNERS = {
     'python', 'python2', 'python3', 'py',
     'node', 'nodejs', 'deno', 'bun',
-    'ruby', 'perl', 'php',
+    'ruby', 'irb', 'perl', 'php',
     'bash', 'sh', 'zsh', 'ksh', 'dash',
     'eval', 'exec', 'osascript', 'xargs', 'source', '.',
 }
 INLINE_CODE_RUNNERS = {
     'python', 'python2', 'python3', 'py',
     'node', 'nodejs', 'deno', 'bun',
-    'ruby', 'perl', 'php', 'osascript',
+    'ruby', 'irb', 'perl', 'php', 'osascript',
     'bash', 'sh', 'zsh', 'ksh', 'dash',
 }
 SMTP_CLIENT_BINARIES = {'sendmail', 'msmtp', 'swaks', 'curl', 'wget', 'nc', 'ncat', 'netcat', 'openssl', 'telnet', 'mail', 'mailx', 'mutt'}
 COMMAND_WRAPPERS = {'env', 'sudo', 'command', 'nohup', 'nice', 'time', 'caffeinate', 'timeout'}
-SCRIPT_EXTENSIONS = ('.py', '.sh', '.js', '.mjs')
+SCRIPT_EXTENSIONS = ('.py', '.sh', '.js', '.mjs', '.rb')
 EXEMPT_PRINT_COMMANDS = {
     'echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack',
     'cat', 'sed', 'gsed', 'awk', 'gawk', 'mawk', 'nawk',
@@ -417,12 +424,38 @@ def is_exempt_repo_script(script_path: str, current_cwd: str) -> bool:
     return False
 
 
-def scan_script_content(content: str, label: str) -> str:
+def is_ruby_runner_or_script(
+    sub_cmd: str = "",
+    sc: bash_parser.SimpleCommand | None = None,
+    label: str = "",
+    content: str = "",
+) -> bool:
+    """H37 (v10): Kiểm tra lệnh hoặc tệp kịch bản có thuộc môi trường Ruby (`ruby`, `irb`, `.rb`, shebang `ruby`) không."""
+    if sc is not None and sc.executable in ('ruby', 'irb'):
+        return True
+    if sub_cmd:
+        _, base_cmd = extract_subcommand_executable(sub_cmd)
+        if base_cmd in ('ruby', 'irb'):
+            return True
+    if label and label.lower().endswith('.rb'):
+        return True
+    if content:
+        stripped = content.lstrip()
+        if stripped.startswith('#!'):
+            first_line = stripped.splitlines()[0].lower()
+            if 'ruby' in first_line:
+                return True
+    return False
+
+
+def scan_script_content(content: str, label: str, sub_cmd: str = "") -> str:
     """Quét nội dung kịch bản tìm các mẫu địa chỉ gửi hoặc SMTP."""
     for endpoint in BULK_SEND_ENDPOINTS:
         if endpoint.search(content):
             return f"Phát hiện tệp kịch bản ({label}) chứa địa chỉ gửi dữ liệu ra ngoài ({endpoint.pattern}). Lệnh bị chặn và cần chủ trực tiếp duyệt."
     if SMTP_PATTERN.search(content):
+        return f"Phát hiện tệp kịch bản ({label}) chứa kết nối gửi email qua SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+    if is_ruby_runner_or_script(sub_cmd=sub_cmd, label=label, content=content) and RUBY_SMTP_PATTERN.search(content):
         return f"Phát hiện tệp kịch bản ({label}) chứa kết nối gửi email qua SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
     return ""
 
@@ -440,7 +473,7 @@ def check_script_file_bulk_send(sub_cmd: str, current_cwd: str, heredoc_written_
         if hd_body:
             clean_arg = script_arg.strip('\'"')
             base_arg = os.path.basename(clean_arg)
-            reason = scan_script_content(hd_body, base_arg or clean_arg)
+            reason = scan_script_content(hd_body, base_arg or clean_arg, sub_cmd=sub_cmd)
             if reason:
                 return reason
 
@@ -463,7 +496,7 @@ def check_script_file_bulk_send(sub_cmd: str, current_cwd: str, heredoc_written_
     except OSError:
         return ""
 
-    return scan_script_content(content, os.path.basename(script_path))
+    return scan_script_content(content, os.path.basename(script_path), sub_cmd=sub_cmd)
 
 
 def check_script_dong_y(sub_cmd: str) -> bool:
@@ -527,7 +560,7 @@ def extract_target_host(tool_name: str, tool_input: dict) -> str:
     if "fetch_page_messages" in text:
         return "inbox-reader"
 
-    if SMTP_PATTERN.search(text):
+    if SMTP_PATTERN.search(text) or RUBY_SMTP_PATTERN.search(text):
         return "smtp"
 
     return "local"
@@ -541,10 +574,10 @@ WATCHED_BULK_HOSTS = ('graph.facebook.com', 'openapi.zalo.me', 'api.resend.com',
 
 
 def has_bulk_send_signal(text: str) -> bool:
-    """Kiểm tra nhanh chuỗi có chứa mẫu SMTP hoặc BULK_SEND_ENDPOINTS không."""
+    """Kiểm tra nhanh chuỗi có chứa mẫu SMTP (hoặc RUBY_SMTP_PATTERN ở dạng dùng) hay BULK_SEND_ENDPOINTS không."""
     if not text:
         return False
-    if SMTP_PATTERN.search(text):
+    if SMTP_PATTERN.search(text) or RUBY_SMTP_PATTERN.search(text):
         return True
     for endpoint in BULK_SEND_ENDPOINTS:
         if endpoint.search(text):
@@ -675,29 +708,71 @@ def expand_shell_vars_in_raw_token(
     return "".join(out), has_unresolved
 
 
+def extract_expanded_var_names_in_raw_token(raw_token: str) -> set[str]:
+    """H36 (v10): Trích tập tên biến shell được mở rộng (`$VAR`, `${VAR}`) ngoài vùng nháy đơn trong `raw_token`."""
+    names: set[str] = set()
+    if not raw_token or '$' not in raw_token:
+        return names
+
+    i = 0
+    n = len(raw_token)
+    in_single = False
+    in_double = False
+
+    while i < n:
+        ch = raw_token[i]
+        if in_single:
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+
+        if ch == '\\':
+            i += 2 if (i + 1 < n) else 1
+            continue
+
+        if ch == "'" and not in_double:
+            in_single = True
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = not in_double
+            i += 1
+            continue
+
+        if ch == '$':
+            m = SHELL_VAR_REF_RE.match(raw_token, i)
+            if m:
+                var_name = m.group(1) or m.group(2) or ""
+                if var_name:
+                    names.add(var_name)
+                i = m.end()
+                continue
+
+        i += 1
+
+    return names
+
+
 def update_shell_var_bindings(
     sub_cmd: str,
     sc: bash_parser.SimpleCommand | None,
     static_vars: dict[str, str],
     unresolved_vars: set[str],
-) -> tuple[bool, dict[str, str], set[str]]:
-    """H19 (v05), H23 (v06) & H27 (v07): Cập nhật bảng gán biến shell của CHA (`static_vars` / `unresolved_vars`),
-    đồng thời dựng bảng môi trường của TIẾN TRÌNH CON (`child_static_vars` / `child_unresolved_vars`)
-    và kiểm tra tín hiệu gửi trong vế phải phép gán.
-    - H23 (v06): Tách «biến môi trường tạm đầu lệnh» (`VAR=val cmd ...`, khi `sc.executable` là lệnh thực thi)
-      khỏi «bảng binding dài hạn của shell cha» (gán thuần `VAR=val` không có lệnh, hoặc builtin khai báo
-      `export`/`local`/`declare`/`typeset`/`readonly`/`read`).
-      Trong POSIX/Bash, khi chạy `CODE='print(1)' python3 -c "$CODE"`, bước mở rộng `"$CODE"` trên argv
-      dùng giá trị `CODE` CÓ TRƯỚC lệnh ở bảng cha; phép gán đầu lệnh `CODE='print(1)'` chỉ cấp biến môi trường
-      cho tiến trình con và KHÔNG ghi đè `static_vars` của cha.
-    - H27 (v07): Khi lệnh thực thi là shell con (`sh -c`/`bash -c`/`zsh -c`/`dash -c`/`ksh -c`, `eval`, hoặc qua
-      wrapper `xargs sh -c`, `find -exec sh -c`, `nohup sh -c`, `timeout N sh -c`, `sudo -E sh -c`), tiến trình
-      shell con nhận môi trường `child_static_vars` = bảng cha + các phép gán đầu lệnh áp đè lên. Bảng con KHÔNG
-      ghi ngược vào bảng cha sau khi lệnh kết thúc.
-    - Lưu ý bảo thủ (Hermes / H23 / H27 §1d): trường hợp gán tạm đầu lệnh có mẫu SMTP/nodemailer mà không giải
-      được đường dùng (hoặc chỉ có `CODE='…smtplib…' python3 -c "$CODE"` chưa gán trước) trả `found_signal = True`
-      và chặn bảo thủ có chủ đích (over-approximation).
+    exported_vars: set[str] | None = None,
+) -> tuple[bool, dict[str, str], set[str], set[str]]:
+    """H19 (v05), H23 (v06), H27 (v07) & H36 (v10): Cập nhật bảng gán biến shell của CHA (`static_vars` / `unresolved_vars`),
+    tập biến đã `export` của CHA (`exported_vars`), đồng thời dựng bảng môi trường của TIẾN TRÌNH CON
+    (`child_static_vars` / `child_unresolved_vars` / `child_exported_vars`) và kiểm tra tín hiệu gửi trong vế phải phép gán.
+    - H36 (v10): Gán thuần không export (`is_pure_assignment`) chỉ lưu vào `static_vars`, KHÔNG tự thêm vào `exported_vars`
+      hay `child_exported_vars` (trừ khi biến đã được `export` trước đó). Biến chỉ vào `child_exported_vars` khi:
+      (a) là gán đầu lệnh của chính lệnh con (`not persist_bindings`), hoặc
+      (c) đã được `export` (`export X=...`, `X=...; export X`, `declare -x X=...`).
     """
+    if exported_vars is None:
+        exported_vars = set()
+
     found_signal = False
     sub_has_cmd_subst = bool(bash_parser.extract_substitutions_safe(sub_cmd))
 
@@ -706,6 +781,33 @@ def update_shell_var_bindings(
     )
     is_pure_assignment = (sc is None or not sc.executable)
     persist_bindings = is_pure_assignment or is_declaration_builtin
+
+    is_export_builtin = False
+    if sc is not None:
+        if sc.executable == 'set':
+            words_rest = sc.words[1:]
+            for w_i, w in enumerate(words_rest):
+                if w.startswith('-') and not w.startswith('--') and 'a' in w and w != '-o':
+                    exported_vars.add("__ALLEXPORT__")
+                elif w.startswith('+') and 'a' in w and w != '+o':
+                    exported_vars.discard("__ALLEXPORT__")
+                elif w == '-o' and w_i + 1 < len(words_rest) and words_rest[w_i + 1] == 'allexport':
+                    exported_vars.add("__ALLEXPORT__")
+                elif w == '+o' and w_i + 1 < len(words_rest) and words_rest[w_i + 1] == 'allexport':
+                    exported_vars.discard("__ALLEXPORT__")
+        if sc.executable == 'export':
+            has_unexport = any(
+                w.startswith('-') and not w.startswith('--') and 'n' in w
+                for w in sc.words[1:]
+            )
+            if not has_unexport:
+                is_export_builtin = True
+        elif sc.executable in ('declare', 'typeset'):
+            if any(
+                w.startswith('-') and not w.startswith('--') and 'x' in w
+                for w in sc.words[1:]
+            ):
+                is_export_builtin = True
 
     raw_assignments: list[tuple[str, bool, str]] = []
     if sc is not None and getattr(sc, "raw_env_assignments", None):
@@ -742,6 +844,10 @@ def update_shell_var_bindings(
             if m_assign:
                 raw_rhs = raw_w.split('=', 1)[1] if '=' in raw_w else m_assign.group(3)
                 raw_assignments.append((m_assign.group(1), m_assign.group(2) == '+=', raw_rhs))
+            elif is_export_builtin:
+                clean_w = w.strip('\'"')
+                if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', clean_w):
+                    exported_vars.add(clean_w)
     elif sc is not None and sc.executable == 'read':
         for w in sc.words[1:]:
             if w.startswith('-'):
@@ -750,10 +856,14 @@ def update_shell_var_bindings(
             if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', clean_w):
                 unresolved_vars.add(clean_w)
                 static_vars.pop(clean_w, None)
+                if "__ALLEXPORT__" in exported_vars:
+                    exported_vars.add(clean_w)
 
     child_static_vars: dict[str, str] = dict(static_vars)
     child_unresolved_vars: set[str] = set(unresolved_vars)
+    child_exported_vars: set[str] = set(exported_vars)
 
+    allexport_active = "__ALLEXPORT__" in exported_vars
     for var_name, is_append, raw_rhs in raw_assignments:
         if has_bulk_send_signal(raw_rhs):
             found_signal = True
@@ -761,6 +871,11 @@ def update_shell_var_bindings(
         if has_bulk_send_signal(expanded_rhs):
             found_signal = True
         is_dynamic = rhs_unresolved or (sub_has_cmd_subst and ('$ (' in raw_rhs or '$(' in raw_rhs or '`' in raw_rhs))
+
+        if (not persist_bindings) or is_export_builtin or allexport_active or (var_name in exported_vars):
+            child_exported_vars.add(var_name)
+        if is_export_builtin or (persist_bindings and allexport_active):
+            exported_vars.add(var_name)
 
         # H27: Luôn áp phép gán đầu lệnh lên bảng môi trường của tiến trình con (child_static_vars / child_unresolved_vars)
         if is_dynamic:
@@ -792,7 +907,7 @@ def update_shell_var_bindings(
                 unresolved_vars.discard(var_name)
                 static_vars[var_name] = expanded_rhs
 
-    return found_signal, child_static_vars, child_unresolved_vars
+    return found_signal, child_static_vars, child_unresolved_vars, child_exported_vars
 
 
 def check_inline_code_uncertain_network_write(code_text: str) -> str:
@@ -849,32 +964,24 @@ def check_inline_code_uncertain_network_write(code_text: str) -> str:
     return ""
 
 
-SAFE_PRINT_IMPORT_MODULES = {"sys", "math", "json", "re", "datetime"}
-SAFE_PRINT_FROM_IMPORT_MODULES = {"math", "json", "re", "datetime"}
-SAFE_NODE_REQUIRE_MODULES = {"util", "math", "json", "assert", "path"}
-FORBIDDEN_INLINE_RUNNER_RE = re.compile(
-    r"(?:"
-    r"\b(?:exec|eval|compile|__import__|importlib|runpy|instance_eval|class_eval|module_eval|send|public_send|__send__|getattr|globals|locals|vars|load|autoload|require_relative|dofile|loadfile|loadstring|const_get|const_set|method|syscall|passthru|shell_exec|proc_open|pcntl_exec|create_function|include|include_once|require_once|fsockopen|stream_socket_client|mail|readpipe|use|breakpoint|input)\b"
-    r"|\b(?:builtins|__builtins__|__subclasses__|__globals__|__code__|__dict__|__class__|Kernel|ObjectSpace|TOPLEVEL_BINDING|Reflect|globalThis|global|constructor|Deno|Bun|modules|_getframe|stdin)\b"
-    r"|\bgetenv(?:\b|\s*\()"
-    r"|\benviron\b"
-    r"|\bENV(?:\b|\s*[\[\.\(])"
-    r"|[\$@%]ENV(?:\b|\s*[\{\[])"
-    r"|\$_(?:ENV|SERVER)\b"
-    r"|\bprocess\b"
-    r"|\bos\s*\."
-    r"|\bsubprocess\b"
-    r"|\bsystem\b"
-    r"|\b(?:popen|spawn|spawnSync|execSync|execFile|execFileSync|fork)\b"
-    r"|\bopen(?:\b|\s*\()"
-    r"|\b(?:read|readFile|readFileSync|createReadStream)\b"
-    r"|\bFunction\s*\("
-    r"|\bvm\s*\."
-    r"|\bchild_process\b"
-    r"|\bopen3\b"
-    r"|\bsys\s*\.\s*(?:modules|__dict__|stdin|_getframe)\b"
-    r"|`|\bqx\b|%x[\(\[\{<]"
-    r")"
+SAFE_PY_IMPORT_MODULES = {"sys", "math", "json", "re", "datetime"}
+SAFE_PY_BUILTINS = {
+    "print", "len", "sum", "range", "str", "int", "float", "repr",
+    "sorted", "min", "max", "abs", "round", "enumerate", "zip",
+}
+FORBIDDEN_MODULE_ATTRS = {
+    "modules", "stdin", "audithook", "breakpointhook",
+    "displayhook", "excepthook", "setprofile", "settrace", "addaudithook", "exit",
+    "monitoring", "codecs", "copyreg", "functools", "enum", "sre_compile", "sre_parse", "scanner",
+}
+ALLOWED_PY_BINOPS = (
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow,
+    ast.LShift, ast.RShift, ast.BitOr, ast.BitXor, ast.BitAnd,
+)
+ALLOWED_PY_UNARYOPS = (ast.UAdd, ast.USub, ast.Not, ast.Invert)
+ALLOWED_PY_CMPOPS = (
+    ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+    ast.Is, ast.IsNot, ast.In, ast.NotIn,
 )
 
 
@@ -897,55 +1004,522 @@ def has_unsafe_inline_runner_flags(sc: bash_parser.SimpleCommand | None) -> bool
     return False
 
 
-def is_provably_harmless_inline_runner_code(code_text: str) -> bool:
-    """H34 (v09): Fail-closed allowlist check for direct inline code runners (`python3 -c`, `node -e`, `ruby -e`,
-    `perl -e`, `php -r`, `deno eval`, `bun -e`) when prefix/environment bindings contain a bulk-send signal.
-    Only returns True when `code_text` contains NO dynamic evaluation, environment access, OS/process/file/network
-    operations, or non-print module imports/requires from the closed forbidden list.
+def _get_py_attr_chain_root(node: ast.Attribute) -> tuple[ast.Name | None, list[str]]:
+    """H35 (v10): Walk an `ast.Attribute` chain (`a.b.c`) and return `(root_name_node, [attr1, attr2, ...])`
+    only when every link is a Load Attribute with no leading `_` and the base is a Load Name with no leading `_`.
+    """
+    attrs: list[str] = []
+    cur: ast.AST = node
+    while isinstance(cur, ast.Attribute):
+        if not isinstance(cur.ctx, ast.Load) or not cur.attr or cur.attr.startswith("_") or cur.attr == "modules":
+            return None, []
+        attrs.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name) and isinstance(cur.ctx, ast.Load) and cur.id and not cur.id.startswith("_"):
+        attrs.reverse()
+        return cur, attrs
+    return None, []
+
+
+def _is_recognized_harmless_python_code(code_text: str) -> bool:
+    """H35 (v10): Closed-allowlist AST recognizer for Python (`python`/`python3 -c`) inline code when a send signal
+    is present in reachable environment bindings.
+    Only returns True if `ast.parse` succeeds and every statement/expression node belongs to the closed allowlist.
+    Any unrecognized node, attribute, call target, or syntax error returns False.
     """
     if not code_text or not code_text.strip():
         return True
-    if FORBIDDEN_INLINE_RUNNER_RE.search(code_text):
+    try:
+        tree = ast.parse(code_text, mode="exec")
+    except (SyntaxError, ValueError, TypeError, MemoryError):
         return False
 
-    # Validate Python/JS `import` statements: only allow `import sys/math/json/re/datetime` (or `from <safe> import ...`)
-    if re.search(r"\bimport\b", code_text):
-        if re.search(r"\bimport\s*\(", code_text):
-            return False
-        total_import_kw = len(re.findall(r"\bimport\b", code_text))
-        matched_import_kw = 0
-        for m_from in re.finditer(r"(?:^|[;\n])\s*from\s+([A-Za-z0-9_.]+)\s+import\s+([A-Za-z0-9_,\s]+)", code_text):
-            mod_name = m_from.group(1).strip()
-            if mod_name not in SAFE_PRINT_FROM_IMPORT_MODULES:
+    if not isinstance(tree, ast.Module):
+        return False
+
+    imported_modules: dict[str, str] = {}
+    imported_callables: set[str] = set()
+    assigned_names: set[str] = set()
+
+    def is_valid_expr(expr: ast.AST) -> bool:
+        if isinstance(expr, ast.Constant):
+            return isinstance(expr.value, (int, float, complex, str, bytes, bool, type(None)))
+
+        if isinstance(expr, ast.Name):
+            if not isinstance(expr.ctx, ast.Load) or not expr.id or expr.id.startswith("_"):
                 return False
-            matched_import_kw += 1
-        for m_imp in re.finditer(r"(?:^|[;\n])\s*import\s+([^;\n]+)", code_text):
-            clauses = [c.strip() for c in m_imp.group(1).split(",") if c.strip()]
-            if not clauses:
+            return (
+                expr.id in SAFE_PY_BUILTINS
+                or expr.id in imported_modules
+                or expr.id in imported_callables
+                or expr.id in assigned_names
+            )
+
+        if isinstance(expr, ast.Attribute):
+            root_name, attr_chain = _get_py_attr_chain_root(expr)
+            if root_name is None or not attr_chain:
                 return False
-            for clause in clauses:
-                m_c = re.match(r"^([A-Za-z0-9_.]+)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$", clause)
-                if not m_c or m_c.group(1) not in SAFE_PRINT_IMPORT_MODULES:
+            rid = root_name.id
+            if rid in imported_modules:
+                if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
                     return False
-            matched_import_kw += 1
-        if matched_import_kw != total_import_kw:
+                return True
+            if rid in assigned_names or rid in imported_callables:
+                if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
+                    return False
+                return True
             return False
 
-    # Validate Node/Ruby `require`: forbid Ruby `require '...'` and allow only `require('<safe>')`
-    if re.search(r"\brequire\b", code_text):
-        total_req_kw = len(re.findall(r"\brequire\b", code_text))
-        matched_req_kw = 0
-        for m_req in re.finditer(r"\brequire\s*\(\s*(['\"])([^'\"]+)\1\s*\)", code_text):
-            mod_name = m_req.group(2).strip()
-            if mod_name.startswith("node:"):
-                mod_name = mod_name[5:]
-            if mod_name not in SAFE_NODE_REQUIRE_MODULES:
+        if isinstance(expr, ast.Call):
+            for arg in expr.args:
+                if isinstance(arg, ast.Starred) or not is_valid_expr(arg):
+                    return False
+            for kw in expr.keywords:
+                if not isinstance(kw, ast.keyword) or kw.arg is None or kw.arg.startswith("_"):
+                    return False
+                if not is_valid_expr(kw.value):
+                    return False
+
+            func = expr.func
+            if isinstance(func, ast.Name):
+                if not isinstance(func.ctx, ast.Load) or not func.id or func.id.startswith("_"):
+                    return False
+                return func.id in SAFE_PY_BUILTINS or func.id in imported_callables
+            if isinstance(func, ast.Attribute):
+                root_name, attr_chain = _get_py_attr_chain_root(func)
+                if root_name is None or not attr_chain:
+                    return False
+                rid = root_name.id
+                if rid in imported_modules:
+                    if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
+                        return False
+                    return True
+                if rid in imported_callables:
+                    if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
+                        return False
+                    return True
                 return False
-            matched_req_kw += 1
-        if matched_req_kw != total_req_kw:
+            return False
+
+        if isinstance(expr, ast.Subscript):
+            if not isinstance(expr.ctx, ast.Load) or not is_valid_expr(expr.value):
+                return False
+            sl = expr.slice
+            if isinstance(sl, ast.Slice):
+                return (
+                    (sl.lower is None or is_valid_expr(sl.lower))
+                    and (sl.upper is None or is_valid_expr(sl.upper))
+                    and (sl.step is None or is_valid_expr(sl.step))
+                )
+            return is_valid_expr(sl)
+
+        if isinstance(expr, ast.BinOp):
+            return isinstance(expr.op, ALLOWED_PY_BINOPS) and is_valid_expr(expr.left) and is_valid_expr(expr.right)
+
+        if isinstance(expr, ast.UnaryOp):
+            return isinstance(expr.op, ALLOWED_PY_UNARYOPS) and is_valid_expr(expr.operand)
+
+        if isinstance(expr, ast.Compare):
+            if not is_valid_expr(expr.left) or not expr.ops or len(expr.ops) != len(expr.comparators):
+                return False
+            return all(isinstance(op, ALLOWED_PY_CMPOPS) for op in expr.ops) and all(
+                is_valid_expr(comp) for comp in expr.comparators
+            )
+
+        if isinstance(expr, ast.JoinedStr):
+            return all(is_valid_expr(v) for v in expr.values)
+
+        if isinstance(expr, ast.FormattedValue):
+            if not is_valid_expr(expr.value):
+                return False
+            return expr.format_spec is None or is_valid_expr(expr.format_spec)
+
+        if isinstance(expr, (ast.List, ast.Tuple)):
+            if not isinstance(expr.ctx, ast.Load):
+                return False
+            return all(not isinstance(elt, ast.Starred) and is_valid_expr(elt) for elt in expr.elts)
+
+        if isinstance(expr, ast.Dict):
+            if len(expr.keys) != len(expr.values):
+                return False
+            return all(k is not None and is_valid_expr(k) for k in expr.keys) and all(
+                is_valid_expr(v) for v in expr.values
+            )
+
+        return False
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            if not stmt.names:
+                return False
+            for alias in stmt.names:
+                if not isinstance(alias, ast.alias) or alias.name not in SAFE_PY_IMPORT_MODULES:
+                    return False
+                bound = alias.asname if alias.asname else alias.name
+                if not bound or bound.startswith("_") or "." in bound:
+                    return False
+                imported_modules[bound] = alias.name
+        elif isinstance(stmt, ast.ImportFrom):
+            if stmt.level != 0 or not stmt.module or stmt.module not in SAFE_PY_IMPORT_MODULES or not stmt.names:
+                return False
+            for alias in stmt.names:
+                if not isinstance(alias, ast.alias) or not alias.name or alias.name == "*" or alias.name.startswith("_"):
+                    return False
+                if alias.name in FORBIDDEN_MODULE_ATTRS:
+                    return False
+                bound = alias.asname if alias.asname else alias.name
+                if not bound or bound.startswith("_"):
+                    return False
+                if stmt.module == "sys":
+                    assigned_names.add(bound)
+                else:
+                    imported_callables.add(bound)
+                    assigned_names.add(bound)
+        elif isinstance(stmt, ast.Assign):
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                return False
+            target_name = stmt.targets[0].id
+            if not target_name or target_name.startswith("_") or not isinstance(stmt.targets[0].ctx, ast.Store):
+                return False
+            if not is_valid_expr(stmt.value):
+                return False
+            if isinstance(stmt.value, ast.Name) and stmt.value.id in imported_modules:
+                imported_modules[target_name] = imported_modules[stmt.value.id]
+            assigned_names.add(target_name)
+        elif isinstance(stmt, ast.Expr):
+            if not is_valid_expr(stmt.value):
+                return False
+        else:
             return False
 
     return True
+
+
+def _split_const_print_statements(code_text: str) -> list[str] | None:
+    """H35 (v10): Split inline code into statements separated by `;` or newline outside quotes.
+    Returns None if quotes are unclosed or backticks appear.
+    """
+    stmts: list[str] = []
+    cur: list[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    n = len(code_text)
+
+    while i < n:
+        ch = code_text[i]
+        if ch == '`':
+            return None
+        if in_single:
+            cur.append(ch)
+            if ch == '\\' and i + 1 < n:
+                cur.append(code_text[i + 1])
+                i += 2
+                continue
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+        if in_double:
+            cur.append(ch)
+            if ch == '\\' and i + 1 < n:
+                cur.append(code_text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if ch == "'":
+            in_single = True
+            cur.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_double = True
+            cur.append(ch)
+            i += 1
+            continue
+        if ch in (';', '\n', '\r'):
+            s = "".join(cur).strip()
+            if s:
+                stmts.append(s)
+            cur = []
+            i += 1
+            continue
+
+        cur.append(ch)
+        i += 1
+
+    if in_single or in_double:
+        return None
+    tail = "".join(cur).strip()
+    if tail:
+        stmts.append(tail)
+    return stmts
+
+
+def _tokenize_const_print_args(arg_str: str, lang: str) -> list[tuple[str, str]] | None:
+    """H35 (v10): Tokenize `<arg_list>` of a constant print statement for Node/Ruby/Perl/PHP.
+    Only accepts string literals, numeric literals, arithmetic/concat operators, grouping parens, and commas.
+    Any identifier, bracket, brace, template literal, or interpolation returns None.
+    """
+    tokens: list[tuple[str, str]] = []
+    i = 0
+    n = len(arg_str)
+
+    while i < n:
+        ch = arg_str[i]
+        if ch in (' ', '\t', '\r', '\n'):
+            i += 1
+            continue
+
+        if ch == "'":
+            j = i + 1
+            while j < n:
+                c = arg_str[j]
+                if c == '\\':
+                    j += 2
+                    continue
+                if c == "'":
+                    break
+                j += 1
+            if j >= n or arg_str[j] != "'":
+                return None
+            tokens.append(("VAL", arg_str[i : j + 1]))
+            i = j + 1
+            continue
+
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                c = arg_str[j]
+                if c in ('$', '@') and lang in ("ruby", "perl", "php"):
+                    return None
+                if c == '#' and lang == "ruby" and j + 1 < n and arg_str[j + 1] in ('{', '$', '@'):
+                    return None
+                if c == '\\':
+                    if j + 1 < n and arg_str[j + 1] in ('$', '@') and lang in ("ruby", "perl", "php"):
+                        return None
+                    j += 2
+                    continue
+                if c == '"':
+                    break
+                j += 1
+            if j >= n or arg_str[j] != '"':
+                return None
+            tokens.append(("VAL", arg_str[i : j + 1]))
+            i = j + 1
+            continue
+
+        if ch.isdigit():
+            j = i
+            while j < n and arg_str[j].isdigit():
+                j += 1
+            if j < n and arg_str[j] == '.' and j + 1 < n and arg_str[j + 1].isdigit():
+                j += 1
+                while j < n and arg_str[j].isdigit():
+                    j += 1
+            if j < n and (arg_str[j].isalpha() or arg_str[j] in ('_', '$', '.')):
+                return None
+            tokens.append(("VAL", arg_str[i:j]))
+            i = j
+            continue
+
+        if ch in ('+', '-'):
+            tokens.append(("ADD_OP", ch))
+            i += 1
+            continue
+
+        if ch in ('*', '/', '%'):
+            tokens.append(("MUL_OP", ch))
+            i += 1
+            continue
+
+        if ch == '.' and lang in ("perl", "php"):
+            tokens.append(("MUL_OP", ch))
+            i += 1
+            continue
+
+        if ch == '(':
+            tokens.append(("LPAREN", ch))
+            i += 1
+            continue
+
+        if ch == ')':
+            tokens.append(("RPAREN", ch))
+            i += 1
+            continue
+
+        if ch == ',':
+            tokens.append(("COMMA", ch))
+            i += 1
+            continue
+
+        return None
+
+    return tokens
+
+
+def _is_valid_const_arg_list(arg_str: str, lang: str) -> bool:
+    tokens = _tokenize_const_print_args(arg_str, lang)
+    if tokens is None or not tokens:
+        return False
+
+    expect_operand = True
+    paren_depth = 0
+    for tok_type, _tok_val in tokens:
+        if expect_operand:
+            if tok_type == "VAL":
+                expect_operand = False
+            elif tok_type == "LPAREN":
+                paren_depth += 1
+            elif tok_type == "ADD_OP":
+                pass
+            else:
+                return False
+        else:
+            if tok_type in ("ADD_OP", "MUL_OP"):
+                expect_operand = True
+            elif tok_type == "RPAREN":
+                if paren_depth <= 0:
+                    return False
+                paren_depth -= 1
+            elif tok_type == "COMMA":
+                if paren_depth != 0:
+                    return False
+                expect_operand = True
+            else:
+                return False
+
+    return (not expect_operand) and (paren_depth == 0)
+
+
+def _strip_outer_call_parens_if_enclosing(text: str) -> tuple[bool, str]:
+    """If `text` starts with `(` and the matching closing `)` is the very last character of `text`,
+    return `(True, inner_text)`; otherwise return `(False, text)`.
+    """
+    s = text.strip()
+    if not s.startswith("(") or not s.endswith(")"):
+        return False, s
+    depth = 0
+    in_single = False
+    in_double = False
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if in_single:
+            if ch == '\\':
+                i += 2
+                continue
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+        if in_double:
+            if ch == '\\':
+                i += 2
+                continue
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+        if ch == "'":
+            in_single = True
+        elif ch == '"':
+            in_double = True
+        elif ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                if i == n - 1:
+                    return True, s[1:-1].strip()
+                return False, s
+        i += 1
+    return False, s
+
+
+def _is_recognized_harmless_const_print_code(code_text: str, lang: str) -> bool:
+    """H35 (v10): Closed-allowlist recognizer for Node/deno/bun (`js`), Ruby (`ruby`), Perl (`perl`), and PHP (`php`).
+    Only returns True when the entire code consists of one or more constant print statements
+    (`console.log(...)` / `puts` / `print` / `echo`) whose arguments contain only string literals, numbers,
+    arithmetic/string concatenation, and commas.
+    """
+    if not code_text or not code_text.strip():
+        return True
+    stmts = _split_const_print_statements(code_text)
+    if stmts is None:
+        return False
+    if not stmts:
+        return True
+
+    for stmt in stmts:
+        if lang == "js":
+            m = re.match(r"^console\.log\s*(\(.*)$", stmt, re.DOTALL)
+            if not m:
+                return False
+            is_enclosed, inner = _strip_outer_call_parens_if_enclosing(m.group(1))
+            if not is_enclosed:
+                return False
+            if inner and not _is_valid_const_arg_list(inner, "js"):
+                return False
+        elif lang in ("ruby", "perl", "php"):
+            if lang == "ruby":
+                m = re.match(r"^(?:puts|print)(?:(\s*\(.*)|(\s+.+))$", stmt, re.DOTALL)
+            elif lang == "perl":
+                m = re.match(r"^(?:print|say)(?:(\s*\(.*)|(\s+.+))$", stmt, re.DOTALL)
+            else:
+                m = re.match(r"^(?:echo|print)(?:(\s*\(.*)|(\s+.+))$", stmt, re.DOTALL)
+            if not m:
+                return False
+            rest_raw = m.group(1) if m.group(1) is not None else m.group(2)
+            has_leading_space = bool(rest_raw and rest_raw[0].isspace())
+            rest = rest_raw.strip()
+            is_enclosed, inner = _strip_outer_call_parens_if_enclosing(rest)
+            if is_enclosed:
+                if not inner or not _is_valid_const_arg_list(inner, lang):
+                    return False
+            else:
+                if not has_leading_space or not _is_valid_const_arg_list(rest, lang):
+                    return False
+        else:
+            return False
+
+    return True
+
+
+def is_provably_harmless_inline_runner_code(code_text: str, runner_exe: str = "") -> bool:
+    """H34 (v09) & H35 (v10): Closed-allowlist structural recognizer for direct inline code runners (`python3 -c`,
+    `node -e`, `ruby -e`, `perl -e`, `php -r`, `deno eval`, `bun -e`) when reachable environment bindings contain
+    a bulk-send signal.
+    Never defaults to True: returns True ONLY when the code matches the closed AST allowlist (Python) or the
+    constant-print statement grammar (Node/Ruby/Perl/PHP); returns False for all unrecognized structures.
+    """
+    if not code_text or not code_text.strip():
+        return True
+    exe = (runner_exe or "").lower()
+    if exe in ('python', 'python2', 'python3', 'py') or exe.startswith(('python2.', 'python3.')):
+        return _is_recognized_harmless_python_code(code_text)
+    if exe in ('node', 'nodejs', 'deno', 'bun'):
+        return _is_recognized_harmless_const_print_code(code_text, "js")
+    if exe in ('ruby', 'irb'):
+        return _is_recognized_harmless_const_print_code(code_text, "ruby")
+    if exe == 'perl':
+        return _is_recognized_harmless_const_print_code(code_text, "perl")
+    if exe == 'php':
+        return _is_recognized_harmless_const_print_code(code_text, "php")
+    if not exe:
+        return (
+            _is_recognized_harmless_python_code(code_text)
+            or _is_recognized_harmless_const_print_code(code_text, "js")
+            or _is_recognized_harmless_const_print_code(code_text, "ruby")
+            or _is_recognized_harmless_const_print_code(code_text, "perl")
+            or _is_recognized_harmless_const_print_code(code_text, "php")
+        )
+    return False
 
 
 def check_curl_or_wget_uncertain_write(
@@ -1024,6 +1598,7 @@ def should_block_bulk_send(
     _inherited_static_vars: dict[str, str] | None = None,
     _inherited_unresolved_vars: set[str] | None = None,
     _inherited_bulk_signal: bool = False,
+    _inherited_exported_vars: set[str] | None = None,
 ) -> str:
     # 1. Kiểm tra công cụ MCP
     if tool_name.startswith("mcp__") or tool_name.startswith("mcp_"):
@@ -1068,9 +1643,12 @@ def should_block_bulk_send(
             if ("batch=" in cmd_joined or "relative_url" in cmd_joined) and any(ep in cmd_joined for ep in ('messages', 'feed', 'comments', 'photos')):
                 return "Phát hiện batch request gửi dữ liệu qua graph.facebook.com. Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-        # 2e. Kiểm tra thân heredoc thực thi (chảy vào python/node/sh hoặc ghi-rồi-chạy — H15 & PCN ĐK 1)
+        # 2e. Kiểm tra thân heredoc thực thi (chảy vào python/node/sh hoặc ghi-rồi-chạy — H15, H37 & PCN ĐK 1)
+        raw_has_ruby_runner = bool(re.search(r'\b(?:ruby|irb)\b', raw_cmd))
         for hd_body in bash_parser.extract_executed_heredocs(raw_cmd):
             if SMTP_PATTERN.search(hd_body):
+                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+            if (raw_has_ruby_runner or is_ruby_runner_or_script(content=hd_body)) and RUBY_SMTP_PATTERN.search(hd_body):
                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
             for endpoint in BULK_SEND_ENDPOINTS:
                 if endpoint.search(hd_body):
@@ -1079,11 +1657,12 @@ def should_block_bulk_send(
             if uncertain_hd_reason:
                 return uncertain_hd_reason
 
-        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a, H19, H23, H24, H27, H28)
+        # 2f. Tách câu lệnh thành các pipeline bằng bộ phân tích tôn trọng nháy của bash_parser (H16a, H19, H23, H24, H27, H28 & H36)
         pipelines = split_clauses_and_pipelines_safe(cmd_joined)
         cur_cwd = base_cwd
         static_vars: dict[str, str] = dict(_inherited_static_vars) if _inherited_static_vars else {}
         unresolved_vars: set[str] = set(_inherited_unresolved_vars) if _inherited_unresolved_vars else set()
+        exported_vars: set[str] = set(_inherited_exported_vars) if _inherited_exported_vars else set()
         chain_has_bulk_send_signal: bool = bool(_inherited_bulk_signal) or has_bulk_send_signal(cmd_joined)
 
         for pipe_subs in pipelines:
@@ -1108,6 +1687,7 @@ def should_block_bulk_send(
                         static_vars,
                         unresolved_vars,
                         chain_has_bulk_send_signal,
+                        exported_vars,
                     )
                     if subst_reason:
                         return subst_reason
@@ -1121,6 +1701,7 @@ def should_block_bulk_send(
                         static_vars,
                         unresolved_vars,
                         chain_has_bulk_send_signal,
+                        exported_vars,
                     )
                     if inner_reason:
                         return inner_reason
@@ -1134,10 +1715,10 @@ def should_block_bulk_send(
 
                 sc = parse_simple_command_safe(sub, cur_cwd)
 
-                # H19 (v05), H23 (v06) & H27 (v07): Cập nhật bảng gán biến shell của CHA (static_vars) và dựng bảng môi trường
-                # của TIẾN TRÌNH CON (child_static_vars = static_vars + prefix assignments áp đè lên; không ghi ngược vào cha).
-                prefix_has_signal, child_static_vars, child_unresolved_vars = update_shell_var_bindings(
-                    sub, sc, static_vars, unresolved_vars
+                # H19 (v05), H23 (v06), H27 (v07) & H36 (v10): Cập nhật bảng gán biến shell của CHA (static_vars / exported_vars)
+                # và dựng bảng môi trường của TIẾN TRÌNH CON (child_static_vars / child_exported_vars).
+                prefix_has_signal, child_static_vars, child_unresolved_vars, child_exported_vars = update_shell_var_bindings(
+                    sub, sc, static_vars, unresolved_vars, exported_vars
                 )
                 if prefix_has_signal:
                     chain_has_bulk_send_signal = True
@@ -1159,8 +1740,9 @@ def should_block_bulk_send(
                                 exec_sc = parse_simple_command_safe(exec_raw_cmd, cur_cwd)
                                 exec_child_static = dict(child_static_vars)
                                 exec_child_unres = set(child_unresolved_vars)
-                                exec_prefix_sig, exec_child_static, exec_child_unres = update_shell_var_bindings(
-                                    exec_raw_cmd, exec_sc, exec_child_static, exec_child_unres
+                                exec_child_exp = set(child_exported_vars)
+                                exec_prefix_sig, exec_child_static, exec_child_unres, exec_child_exp = update_shell_var_bindings(
+                                    exec_raw_cmd, exec_sc, exec_child_static, exec_child_unres, exec_child_exp
                                 )
                                 if exec_prefix_sig:
                                     chain_has_bulk_send_signal = True
@@ -1185,6 +1767,7 @@ def should_block_bulk_send(
                                                 exec_child_static,
                                                 exec_child_unres,
                                                 chain_has_bulk_send_signal,
+                                                exec_child_exp,
                                             )
                                             if inner_reason:
                                                 return inner_reason
@@ -1197,6 +1780,7 @@ def should_block_bulk_send(
                                         exec_child_static,
                                         exec_child_unres,
                                         chain_has_bulk_send_signal,
+                                        exec_child_exp,
                                     )
                                     if inner_reason:
                                         return inner_reason
@@ -1229,6 +1813,7 @@ def should_block_bulk_send(
                                     child_static_vars,
                                     child_unresolved_vars,
                                     chain_has_bulk_send_signal,
+                                    child_exported_vars,
                                 )
                                 if inner_reason:
                                     return inner_reason
@@ -1258,6 +1843,7 @@ def should_block_bulk_send(
                             child_static_vars,
                             child_unresolved_vars,
                             chain_has_bulk_send_signal,
+                            child_exported_vars,
                         )
                         if inner_reason:
                             return inner_reason
@@ -1270,8 +1856,22 @@ def should_block_bulk_send(
                     return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
                 # (b1) For inline code runners (-c/-e/--eval/-p/--print/-r), expand variables respecting quotes (H24)
-                # and scan for SMTP/nodemailer patterns, bulk endpoints, uncertain network writes (PCN-1), and H34 (v09) fail-closed rule
-                env_has_signal = prefix_has_signal or any(has_bulk_send_signal(v) for v in child_static_vars.values())
+                # and scan for SMTP/nodemailer patterns, bulk endpoints, uncertain network writes (PCN-1), and H34/H35/H36/H37 (v10) rules
+                expanded_cmd_vars: set[str] = set()
+                if sc and getattr(sc, "raw_words", None):
+                    for rw in sc.raw_words:
+                        expanded_cmd_vars.update(extract_expanded_var_names_in_raw_token(rw))
+                else:
+                    expanded_cmd_vars.update(extract_expanded_var_names_in_raw_token(sub))
+
+                reachable_vars = child_exported_vars | expanded_cmd_vars
+                env_has_signal = prefix_has_signal or any(
+                    (k in child_static_vars and has_bulk_send_signal(child_static_vars[k]))
+                    or (k in child_unresolved_vars and chain_has_bulk_send_signal)
+                    for k in reachable_vars
+                )
+                sub_is_ruby = is_ruby_runner_or_script(sub_cmd=sub, sc=sc)
+                runner_exe_name = sc.executable if sc is not None else ""
                 inline_code_pairs = extract_inline_code_raw_args(sc) if sc is not None else []
                 if inline_code_pairs:
                     if env_has_signal and has_unsafe_inline_runner_flags(sc):
@@ -1281,7 +1881,7 @@ def should_block_bulk_send(
                             raw_code_arg, static_vars, unresolved_vars
                         )
                         for candidate_code in (code_arg, expanded_code):
-                            if SMTP_PATTERN.search(candidate_code):
+                            if SMTP_PATTERN.search(candidate_code) or (sub_is_ruby and RUBY_SMTP_PATTERN.search(candidate_code)):
                                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                             for endpoint in BULK_SEND_ENDPOINTS:
                                 if endpoint.search(candidate_code):
@@ -1289,14 +1889,14 @@ def should_block_bulk_send(
                             uncertain_code_reason = check_inline_code_uncertain_network_write(candidate_code)
                             if uncertain_code_reason:
                                 return uncertain_code_reason
-                            if env_has_signal and not is_provably_harmless_inline_runner_code(candidate_code):
+                            if env_has_signal and not is_provably_harmless_inline_runner_code(candidate_code, runner_exe_name):
                                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                         if code_unresolved and (chain_has_bulk_send_signal or env_has_signal):
                             return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
                 elif prefix_has_signal and is_code_or_smtp_runner(sub):
                     return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-                # (b2) Check SMTP on command argv / subcommand words after stripping prefix env assignments (H13, H16a, H19, H24 & H32d)
+                # (b2) Check SMTP on command argv / subcommand words after stripping prefix env assignments (H13, H16a, H19, H24, H32d & H37)
                 sc_joined_words = " ".join(sc.words) if (sc and sc.words) else sub
                 if sc and getattr(sc, "raw_words", None):
                     expanded_word_list = [
@@ -1308,9 +1908,13 @@ def should_block_bulk_send(
                     expanded_words = sc_joined_words
 
                 has_argv_smtp = (
-                    (SMTP_PATTERN.search(sc_joined_words) or SMTP_PATTERN.search(expanded_words))
+                    (
+                        SMTP_PATTERN.search(sc_joined_words)
+                        or SMTP_PATTERN.search(expanded_words)
+                        or (sub_is_ruby and (RUBY_SMTP_PATTERN.search(sc_joined_words) or RUBY_SMTP_PATTERN.search(expanded_words)))
+                    )
                     if (sc and sc.words)
-                    else SMTP_PATTERN.search(sub)
+                    else (SMTP_PATTERN.search(sub) or (sub_is_ruby and RUBY_SMTP_PATTERN.search(sub)))
                 )
                 if has_argv_smtp:
                     _, sub_base = extract_subcommand_executable(sub)

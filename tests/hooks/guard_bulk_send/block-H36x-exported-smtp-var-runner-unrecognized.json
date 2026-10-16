@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "export X='msmtp -a default u@e.com'; python3 -c 'import os; os.system(os.environ[\"X\"])'"
+  }
+}

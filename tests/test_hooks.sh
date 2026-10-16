@@ -458,6 +458,10 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-H34f-prefix-smtp-python-environ-alias.json"
     "guard_bulk_send:block-H34g-prefix-smtp-python-dunder-import.json"
     "guard_bulk_send:block-H34h-prefix-smtp-perl-eval-env.json"
+    "guard_bulk_send:block-H36x-exported-smtp-var-runner-unrecognized.json"
+    "guard_bulk_send:block-H37c-ruby-net-smtp-send.json"
+    "guard_bulk_send:block-H35d-node-spliced-identifiers.json"
+    "guard_bulk_send:block-H35e-python-spliced-getattr.json"
 )
 
 saved_total=$TOTAL

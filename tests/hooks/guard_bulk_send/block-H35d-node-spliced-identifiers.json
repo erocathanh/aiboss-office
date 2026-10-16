@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "CODE='require(\"nodemailer\").createTransport({host:\"localhost\",port:2525}).sendMail({from:\"a@example.invalid\",to:\"b@example.invalid\",text:\"m\"})' node -e 'globalThis[\"ev\"+\"al\"](globalThis[\"pro\"+\"cess\"][\"en\"+\"v\"].CODE)'"
+  }
+}
