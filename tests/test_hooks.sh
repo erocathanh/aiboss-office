@@ -409,6 +409,7 @@ POS_CONTROL_CASES=(
     "lock_raw_inputs:block-F60d-py-multiline-while-header.json"
     "lock_raw_inputs:block-F64c-py-with-assign-inputs-write.json"
     "lock_raw_inputs:block-F64d-py-def-assign-inputs-write.json"
+    "lock_raw_inputs:block-F65-py-class-body-assign-not-method-binding.json"
     "block_secret_leak:block-bash-cat-envrc.json"
     "block_secret_leak:block-bash-cat-env-prod.json"
     "block_secret_leak:block-bash-cat-env-backup.json"

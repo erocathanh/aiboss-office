@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\ndef outer():\n    p = 'wip/a'\n    def inner():\n        open(p, 'w').write('x')\n    inner()\nouter()\nPY"}}
