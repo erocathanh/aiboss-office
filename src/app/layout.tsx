@@ -46,7 +46,7 @@ export default async function BoCucGoc({ children }: { children: React.ReactNode
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var v=localStorage.getItem('aiboss-office.text-size');var s=v==='medium'?'medium':'large';document.documentElement.setAttribute('data-text-size',s);document.documentElement.setAttribute('data-co-chu',s==='large'?'lon':'vua');}catch(e){document.documentElement.setAttribute('data-text-size','large');document.documentElement.setAttribute('data-co-chu','lon');}try{var l=localStorage.getItem('aiboss-office.ui-language');if(l==='en'||l==='vi'){document.cookie='aiboss-office.ui-language='+l+'; Path=/; Max-Age=31536000; SameSite=Lax';}}catch(e){}`,
+            __html: `try{var v=localStorage.getItem('aiboss-office.text-size');var s=v==='medium'?'medium':'large';document.documentElement.setAttribute('data-text-size',s);document.documentElement.setAttribute('data-co-chu',s==='large'?'lon':'vua');}catch(e){document.documentElement.setAttribute('data-text-size','large');document.documentElement.setAttribute('data-co-chu','lon');}try{var l=localStorage.getItem('aiboss-office.ui-language');if(l==='en'||l==='vi'){document.documentElement.setAttribute('data-ui-lang',l);document.documentElement.lang=l;document.cookie='aiboss-office.ui-language='+l+'; Path=/; Max-Age=31536000; SameSite=Lax';}}catch(e){}`,
           }}
         />
       </head>

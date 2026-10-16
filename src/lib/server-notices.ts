@@ -161,37 +161,15 @@ export function classifyAgentError(
   return buildServerNotice('run.failed', { detail: trimmed.slice(0, 300) }, lang);
 }
 
-function classifyRawClientText(
-  rawText: string,
-  translateFn: (key: string, params?: Record<string, string | number>) => string,
-): { code?: string; params?: ServerNoticeParams; text: string } | null {
-  const trimmed = rawText.trim();
-  if (!trimmed) return null;
-  if (OAUTH_EXPIRED_RE.test(trimmed)) {
-    const code = 'auth.expired';
-    return { code, text: translateFn(`system.${code}`) };
-  }
-  if (NOT_AUTHENTICATED_RE.test(trimmed)) {
-    const code = 'auth.notAuthenticated';
-    return { code, text: translateFn(`system.${code}`) };
-  }
-  if (INTERRUPTED_TOOL_USE_RE.test(trimmed)) {
-    const code = 'run.interruptedToolUse';
-    return { code, text: translateFn(`system.${code}`) };
-  }
-  return null;
-}
-
 /**
- * Resolves a server notice payload or raw error object on the client using the active UI language `translateFn`.
+ * Resolves a server notice payload on the client using the active UI language `translateFn`.
+ * Only translates when a structured `code` is present; raw text without `code` is preserved verbatim.
  */
 export function resolveClientNotice(
   input: unknown,
   translateFn: (key: string, params?: Record<string, string | number>) => string,
 ): { code?: string; params?: ServerNoticeParams; text: string } {
   if (typeof input === 'string') {
-    const matched = classifyRawClientText(input, translateFn);
-    if (matched) return matched;
     return { text: input };
   }
 
@@ -222,11 +200,6 @@ export function resolveClientNotice(
       (typeof obj.thong_diep === 'string' && obj.thong_diep) ||
       (typeof obj.loi === 'string' && obj.loi) ||
       '';
-
-    if (fallbackText) {
-      const matched = classifyRawClientText(fallbackText, translateFn);
-      if (matched) return matched;
-    }
 
     return { text: fallbackText };
   }

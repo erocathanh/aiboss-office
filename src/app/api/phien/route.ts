@@ -3,7 +3,7 @@ import { dsPhien, lichSuPhien, phienCoTienTrinhSong } from '@/lib/doc-phien';
 import { layO } from '@/lib/kho-phien';
 import { timNhanSu } from '@/lib/nhan-su';
 import { readOwnership } from '@/lib/so-so-huu';
-import { serverNoticeJson } from '@/lib/server-notices';
+import { resolveRequestUiLanguage, serverNoticeJson } from '@/lib/server-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
       const troTho = q.get('truoc_byte');
       const troSo = troTho === null ? NaN : Number(troTho);
       const tro = Number.isFinite(troSo) && troSo >= 0 ? troSo : undefined;
-      const kq = await lichSuPhien(maNhanSu, maPhien, tro);
+      const lang = resolveRequestUiLanguage(req);
+      const kq = await lichSuPhien(maNhanSu, maPhien, tro, lang);
       return Response.json({
         lich_su: kq.tin,
         con_nua: kq.con_nua,

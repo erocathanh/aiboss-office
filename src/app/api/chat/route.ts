@@ -3,7 +3,16 @@ import { chayAgent } from '@/lib/chay-agent';
 import { CAU_HINH, loiDanHeThong } from '@/lib/cau-hinh';
 import { xinLuot, moLuot, dongLuot, nhanDangKhach } from '@/lib/chan-muc-dung';
 import { layO, datO, ghiMocKetThuc } from '@/lib/kho-phien';
-import { thuMucAgent, dangChay, coPhien, mocTepPhien, NGUONG_SONG_PHUT, luuMetadataPhien } from '@/lib/doc-phien';
+import {
+  thuMucAgent,
+  dangChay,
+  coPhien,
+  mocTepPhien,
+  NGUONG_SONG_PHUT,
+  luuMetadataPhien,
+  gopThongBaoLuot,
+  type ThongBaoLichSuPhien,
+} from '@/lib/doc-phien';
 import { isViewerGoneGuardDisabledForTest, isBypassSlotGateForTest } from '@/lib/test-seams';
 import { dangKyViec, xoaViec, dsViec, xacMinhDong, datCho, traCho, giayTuEp } from '@/lib/kho-tien-trinh';
 import { generateRunOrWakeId, recordRun, updateRun } from '@/lib/runs-ledger';
@@ -18,6 +27,7 @@ import {
   formatServerNotice,
   resolveRequestUiLanguage,
   serverNoticeJson,
+  type ServerNoticeParams,
 } from '@/lib/server-notices';
 
 export const runtime = 'nodejs'; // cần spawn tiến trình con → ⛔ không chạy edge
@@ -288,6 +298,34 @@ export async function POST(req: NextRequest) {
       let daThoat = false;
       let daCoLoi = false;
       let rejectReason: 'tu_choi_dong_cu_con_song' | null = null;
+      let thongBaoLuot: ThongBaoLichSuPhien[] = [];
+
+      const ghiNhanThongBao = (
+        code: string | undefined,
+        params: ServerNoticeParams | undefined,
+        text: string,
+      ) => {
+        if (!code) return;
+        const now = Date.now();
+        const gio = new Date(now).toLocaleTimeString('vi-VN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+        thongBaoLuot = gopThongBaoLuot(thongBaoLuot, {
+          run_id: runId,
+          code,
+          ...(params && Object.keys(params).length > 0 ? { params } : {}),
+          text,
+          gio,
+          luc: now,
+        });
+        if (maPhienDaDung && !rejectReason) {
+          try {
+            luuMetadataPhien(maNhanSu, maPhienDaDung, cauHoi, runId, thongBaoLuot);
+          } catch { /* ignore */ }
+        }
+      };
 
       const guiSSE = (chunk: Uint8Array) => {
         if (viewerGone) return;
@@ -313,6 +351,7 @@ export async function POST(req: NextRequest) {
         // ⛔ Không im lặng: báo thẳng là đã mất bản ghi phiên cũ.
         if (matBanGhi) {
           const missingNotice = buildServerNotice('chat.missingTranscript', undefined, reqLang);
+          ghiNhanThongBao(missingNotice.code, missingNotice.params, missingNotice.text);
           guiSSE(goi({
             loai: 'mat-ban-ghi',
             thong_diep: missingNotice.text,
@@ -395,6 +434,7 @@ export async function POST(req: NextRequest) {
                 { detail: `[stdin error] ${msg}`.slice(0, 300) },
                 reqLang,
               );
+              ghiNhanThongBao(stdinNotice.code, stdinNotice.params, stdinNotice.text);
               guiSSE(goi({
                 loai: 'loi',
                 thong_diep: stdinNotice.text,
@@ -467,7 +507,7 @@ export async function POST(req: NextRequest) {
                 cwd: thuMucAgent(maNhanSu),
               });
               // Durable metadata persistence immediately upon session ID receipt (Hermes v2 finding 6)
-              try { luuMetadataPhien(maNhanSu, mau.ma_phien, cauHoi, runId); } catch { /* ignore */ }
+              try { luuMetadataPhien(maNhanSu, mau.ma_phien, cauHoi, runId, thongBaoLuot); } catch { /* ignore */ }
               guiSSE(goi({ loai: 'da-noi-mach', noi_tiep: Boolean(maPhienCu) }));
             }
             try { updateRun(runId, { sessionId: mau.ma_phien }); } catch { /* ignore */ }
@@ -480,6 +520,7 @@ export async function POST(req: NextRequest) {
             const resolvedText = mau.code
               ? formatServerNotice(mau.code, mau.params, reqLang)
               : (mau.text ?? mau.thong_diep);
+            ghiNhanThongBao(mau.code, mau.params, resolvedText);
             guiSSE(goi({
               loai: 'loi',
               thong_diep: resolvedText,
@@ -515,6 +556,7 @@ export async function POST(req: NextRequest) {
             e instanceof Error
               ? buildServerNotice('run.failed', { detail: e.message.slice(0, 300) }, reqLang)
               : buildServerNotice('chat.unknownError', undefined, reqLang);
+          ghiNhanThongBao(fallbackNotice.code, fallbackNotice.params, fallbackNotice.text);
           guiSSE(
             goi({
               loai: 'loi',
@@ -534,7 +576,7 @@ export async function POST(req: NextRequest) {
         if (maPhienDaDung && !rejectReason) {
           const maP = maPhienDaDung;
           const ghiLai = () => {
-            luuMetadataPhien(maNhanSu, maP, cauHoi, runId);
+            luuMetadataPhien(maNhanSu, maP, cauHoi, runId, thongBaoLuot);
             const m = mocTepPhien(maNhanSu, maP);
             if (m !== null) ghiMocKetThuc(maO, m);
           };

@@ -99,6 +99,15 @@ export function UiLanguageProvider({
       const next = isUiLanguage(custom.detail?.lang)
         ? custom.detail.lang
         : readUiLanguage();
+      setCurrentUiLanguage(next);
+      if (typeof document !== 'undefined' && document.documentElement) {
+        if (document.documentElement.getAttribute(UI_LANGUAGE_DATA_ATTR) !== next) {
+          document.documentElement.setAttribute(UI_LANGUAGE_DATA_ATTR, next);
+        }
+        if (document.documentElement.lang !== next) {
+          document.documentElement.lang = next;
+        }
+      }
       setLangState(next);
     };
 
@@ -109,13 +118,45 @@ export function UiLanguageProvider({
       }
     };
 
+    let observer: MutationObserver | null = null;
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.documentElement) {
+      observer = new MutationObserver(() => {
+        const active = getCurrentUiLanguage();
+        const el = document.documentElement;
+        if (!el) return;
+        if (el.getAttribute(UI_LANGUAGE_DATA_ATTR) !== active) {
+          el.setAttribute(UI_LANGUAGE_DATA_ATTR, active);
+        }
+        if (el.lang !== active) {
+          el.lang = active;
+        }
+      });
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: [UI_LANGUAGE_DATA_ATTR, 'lang'],
+      });
+    }
+
     window.addEventListener(UI_LANGUAGE_CHANGE_EVENT, onCustomChange);
     window.addEventListener('storage', onStorage);
     return () => {
+      observer?.disconnect();
       window.removeEventListener(UI_LANGUAGE_CHANGE_EVENT, onCustomChange);
       window.removeEventListener('storage', onStorage);
     };
   }, []);
+
+  useEffect(() => {
+    setCurrentUiLanguage(lang);
+    if (typeof document !== 'undefined' && document.documentElement) {
+      if (document.documentElement.getAttribute(UI_LANGUAGE_DATA_ATTR) !== lang) {
+        document.documentElement.setAttribute(UI_LANGUAGE_DATA_ATTR, lang);
+      }
+      if (document.documentElement.lang !== lang) {
+        document.documentElement.lang = lang;
+      }
+    }
+  }, [lang]);
 
   return React.createElement(UiLanguageContext.Provider, { value: lang }, children);
 }

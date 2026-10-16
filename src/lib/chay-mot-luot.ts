@@ -43,7 +43,12 @@
 import { chayAgent } from '@/lib/chay-agent';
 import { loiDanHeThong } from '@/lib/cau-hinh';
 import { datO } from '@/lib/kho-phien';
-import { thuMucAgent } from '@/lib/doc-phien';
+import {
+  thuMucAgent,
+  luuMetadataPhien,
+  gopThongBaoLuot,
+  type ThongBaoLichSuPhien,
+} from '@/lib/doc-phien';
 import { dangKyViec, xoaViec } from '@/lib/kho-tien-trinh';
 import type { ChildProcess } from 'node:child_process';
 import { timNhanSu } from '@/lib/nhan-su';
@@ -165,6 +170,35 @@ export async function chayMotLuot(
   let rawResult: Record<string, unknown> | null = null;
   let loi: string | null = null;
   let exitSignal: string | null = null;
+  let thongBaoLuot: ThongBaoLichSuPhien[] = [];
+  const luotRunId = `luot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const ghiNhanThongBao = (
+    code: string | undefined,
+    params: ServerNoticeParams | undefined,
+    text: string,
+  ) => {
+    if (!code) return;
+    const now = Date.now();
+    const gio = new Date(now).toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    thongBaoLuot = gopThongBaoLuot(thongBaoLuot, {
+      run_id: luotRunId,
+      code,
+      ...(params && Object.keys(params).length > 0 ? { params } : {}),
+      text,
+      gio,
+      luc: now,
+    });
+    if (maPhien) {
+      try {
+        luuMetadataPhien(maNhanSu, maPhien, cauHoi, luotRunId, thongBaoLuot);
+      } catch { /* ignore */ }
+    }
+  };
 
   nhan({ loai: 'bat-dau', noi_tiep: Boolean(maPhienCu) });
 
@@ -229,6 +263,9 @@ export async function chayMotLuot(
           pid: process.pid,
           cwd: thuMucAgent(maNhanSu),
         });
+        try {
+          luuMetadataPhien(maNhanSu, mau.ma_phien, cauHoi, luotRunId, thongBaoLuot);
+        } catch { /* ignore */ }
         /**
          * ← MẮT XÍCH ③: buộc lượt vào ĐÚNG ô.
          * 🔴 PHẢI ĐỌC GIÁ TRỊ TRẢ VỀ (hermes vòng 2, NGOÀI ĐỀ ②).
@@ -244,6 +281,7 @@ export async function chayMotLuot(
             slotId: maO,
             sessionId: mau.ma_phien,
           });
+          ghiNhanThongBao(slotNotice.code, slotNotice.params, slotNotice.text);
           nhan({
             loai: 'loi',
             thong_diep: slotNotice.text,
@@ -257,6 +295,7 @@ export async function chayMotLuot(
         nhan({ loai: 'chu', chu: mau.chu });
       } else if (mau.loai === 'loi') {
         loi = mau.thong_diep;
+        ghiNhanThongBao(mau.code, mau.params, mau.text ?? mau.thong_diep);
         nhan({
           loai: 'loi',
           thong_diep: mau.thong_diep,
@@ -278,6 +317,9 @@ export async function chayMotLuot(
   } catch (e) {
     const fallbackNotice = buildServerNotice('chat.unknownError');
     const thongDiep = e instanceof Error ? e.message : fallbackNotice.text;
+    if (!(e instanceof Error)) {
+      ghiNhanThongBao(fallbackNotice.code, fallbackNotice.params, fallbackNotice.text);
+    }
     nhan({
       loai: 'loi',
       thong_diep: thongDiep,
@@ -285,6 +327,11 @@ export async function chayMotLuot(
     });
     return { maPhien, pid_de_hien_thi: pidDeHienThi, loi: thongDiep, buocOThatBai, exitCode: exitCode ?? 1, exitSignal, rawResult };
   } finally {
+    if (maPhien) {
+      try {
+        luuMetadataPhien(maNhanSu, maPhien, cauHoi, luotRunId, thongBaoLuot);
+      } catch { /* ignore */ }
+    }
     updateSeatActivePid(maNhanSu, null);
     // Rút khỏi sổ tiến trình — CHỈ rút đúng TAY CẦM của mình (xem `xoaViec`).
     if (tienDangChay !== null) xoaViec(maO, tienDangChay);

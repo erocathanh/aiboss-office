@@ -22,6 +22,7 @@ import {
   saveUiLanguage,
   applyUiLanguage,
   syncUiLanguageOnStorageEvent,
+  markClientInitialized,
   setCurrentUiLanguage,
   t,
   formatLocalTimestamp,
@@ -408,6 +409,32 @@ test('UI-2c: moTaHanFork(t), formatLocalTimestamp, Approvals actor/ttl formattin
       else process.env.PHONGBAN_PASS = prevPass;
     }
   } finally {
+    setCurrentUiLanguage('en');
+  }
+});
+
+test('UI-2g Nit 2: setCurrentUiLanguage updates document.documentElement data-ui-lang and lang live when clientInitialized is active', () => {
+  const prevDoc = globalThis.document;
+  const attrs = new Map([[UI_LANGUAGE_DATA_ATTR, 'en']]);
+  globalThis.document = {
+    documentElement: {
+      lang: 'en',
+      getAttribute: (k) => attrs.get(k) ?? null,
+      setAttribute: (k, v) => attrs.set(k, v),
+    },
+  };
+  try {
+    markClientInitialized();
+    setCurrentUiLanguage('vi');
+    assert.equal(globalThis.document.documentElement.getAttribute('data-ui-lang'), 'vi');
+    assert.equal(globalThis.document.documentElement.lang, 'vi');
+
+    setCurrentUiLanguage('en');
+    assert.equal(globalThis.document.documentElement.getAttribute('data-ui-lang'), 'en');
+    assert.equal(globalThis.document.documentElement.lang, 'en');
+  } finally {
+    if (prevDoc === undefined) delete globalThis.document;
+    else globalThis.document = prevDoc;
     setCurrentUiLanguage('en');
   }
 });

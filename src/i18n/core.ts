@@ -310,6 +310,17 @@ export function markClientInitialized(): void {
 export function setCurrentUiLanguage(lang: UiLanguage): UiLanguage {
   const normalized: UiLanguage = isUiLanguage(lang) ? lang : FALLBACK_UI_LANGUAGE;
   currentLanguageState = normalized;
+  if (clientInitialized && typeof document !== 'undefined') {
+    const el = document.documentElement;
+    if (el) {
+      if (el.getAttribute(UI_LANGUAGE_DATA_ATTR) !== normalized) {
+        el.setAttribute(UI_LANGUAGE_DATA_ATTR, normalized);
+      }
+      if (el.lang !== normalized) {
+        el.lang = normalized;
+      }
+    }
+  }
   return normalized;
 }
 

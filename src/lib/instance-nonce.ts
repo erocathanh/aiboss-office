@@ -29,6 +29,17 @@ export interface InstanceNonceEntry extends InstanceNonceRecord {
   isTestSeam?: boolean;
 }
 
+/**
+ * Options for `initInstanceNonce` (F50, F55):
+ * - `port`: Valid startup target port parameter. When CLI (`--port`/`-p`) or env
+ *   (`AIBOSS_OFFICE_PORT`/`PORT`) also specifies a port, `options.port` is cross-checked
+ *   against `resolveExplicitConfiguredPort` (mismatch -> `null` + 1 log line). Still
+ *   requires a single verified listening socket on that port in the current process
+ *   unless `NODE_ENV=test` + `AIBOSS_NONCE_TEST_LISTENER=1` is enabled.
+ * - `host`: Synthetic test-only listener host hint, ignored unless both `NODE_ENV=test`
+ *   and `AIBOSS_NONCE_TEST_LISTENER=1` are set. When a real listening socket exists,
+ *   the socket's actual bound address always wins over `options.host`.
+ */
 export interface InitInstanceNonceOptions {
   host?: string;
   port?: number;
@@ -518,13 +529,16 @@ function verifyEntrySocketLive(entry: InstanceNonceEntry): boolean {
 
 /**
  * Initialize the server's instance-<port>.json file once at startup for a verified
- * bound loopback socket (F42, F46, F47, F49, F50).
+ * bound loopback socket (F42, F46, F47, F49, F50, F53, F55).
  * - Requires a single verified listening socket on the target port (0 handles, not listening,
- *   inspection error, or >= 2 handles on the same port -> returns null without writing any file).
+ *   inspection error, or >= 2 handles on the same port -> returns null without writing any file,
+ *   and emits a single value-free log line per startup/target — F53).
  * - Never falls back to CLI/env/default 127.0.0.1 when no verified socket exists (F50).
- * - Cross-checks against any explicitly configured host (CLI -H / env); mismatch -> null + 1 log line.
- * - Synthetic host/port hints for unit tests are ignored unless both NODE_ENV=test and
- *   AIBOSS_NONCE_TEST_LISTENER=1 are set.
+ * - Cross-checks against any explicitly configured host/port (CLI / env); mismatch -> null + 1 log line.
+ * - `options.port` is a valid startup target port parameter (cross-checked against
+ *   `resolveExplicitConfiguredPort` when CLI/env specifies a port, and verified against a real
+ *   listening socket), whereas `options.host` is a synthetic listener host hint for unit tests
+ *   that is ignored unless both `NODE_ENV=test` and `AIBOSS_NONCE_TEST_LISTENER=1` are set (F55).
  */
 export function initInstanceNonce(options?: InitInstanceNonceOptions): InstanceNonceEntry | null {
   const state = getGlobalState();
@@ -576,6 +590,11 @@ export function initInstanceNonce(options?: InitInstanceNonceOptions): InstanceN
     state.activeEntry = null;
     return null;
   } else if (inspection.status === 'inspection_error') {
+    const errKey = `${configDir}|inspection_error|${port}`;
+    if (!state.attemptedTargets.has(errKey)) {
+      state.attemptedTargets.set(errKey, null);
+      console.error('[instance-nonce] Failed to inspect listening sockets; Basic Auth proof disabled');
+    }
     state.activeEntry = null;
     return null;
   } else {
@@ -584,6 +603,11 @@ export function initInstanceNonce(options?: InitInstanceNonceOptions): InstanceN
       rawSocketHost = options.host.trim();
       usingTestSeam = true;
     } else {
+      const noListenerKey = `${configDir}|no_listener|${port}`;
+      if (!state.attemptedTargets.has(noListenerKey)) {
+        state.attemptedTargets.set(noListenerKey, null);
+        console.error('[instance-nonce] No verified listening socket found on port; Basic Auth proof disabled');
+      }
       state.activeEntry = null;
       return null;
     }
@@ -662,9 +686,15 @@ export function initInstanceNonce(options?: InitInstanceNonceOptions): InstanceN
 /**
  * Schedule startup instance nonce initialization after the HTTP server socket finishes
  * binding (`listen`). Called from the server startup lifecycle (`instrumentation.ts` /
- * `khoi-dong-nen.ts`), never at module import time (F50).
+ * `khoi-dong-nen.ts`), never at module import time (F50, F53).
+ * - Does not log during polling ticks while waiting for `listen()`.
+ * - If `maxAttempts` expires without a verified listening socket, settles and emits
+ *   exactly one value-free log line via `initInstanceNonce()` (F53).
  */
-export function scheduleInstanceNonceStartup(): void {
+export function scheduleInstanceNonceStartup(options?: {
+  maxAttempts?: number;
+  intervalMs?: number;
+}): void {
   const state = getGlobalState();
   if (state.shuttingDown || state.startupSettled) {
     return;
@@ -698,17 +728,29 @@ export function scheduleInstanceNonceStartup(): void {
   state.startupScheduled = true;
 
   let attempts = 0;
-  const maxAttempts = 200; // 200 * 25ms = 5s max wait for server.listen()
+  const maxAttempts =
+    typeof options?.maxAttempts === 'number' && options.maxAttempts >= 1
+      ? Math.floor(options.maxAttempts)
+      : 200; // 200 * 25ms = 5s max wait for server.listen()
+  const intervalMs =
+    typeof options?.intervalMs === 'number' && options.intervalMs >= 1
+      ? Math.floor(options.intervalMs)
+      : 25;
   const timer = setInterval(() => {
     attempts += 1;
-    if (tryStartupInitOnce() || attempts >= maxAttempts) {
+    const settled = tryStartupInitOnce();
+    if (settled || attempts >= maxAttempts) {
       if (state.startupTimer) {
         clearInterval(state.startupTimer);
         state.startupTimer = null;
       }
       state.startupScheduled = false;
+      if (!settled) {
+        state.startupSettled = true;
+        initInstanceNonce();
+      }
     }
-  }, 25);
+  }, intervalMs);
   timer.unref?.();
   state.startupTimer = timer;
 }

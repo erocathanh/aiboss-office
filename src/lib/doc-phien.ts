@@ -5,6 +5,14 @@ import os from 'node:os';
 import { CAU_HINH } from './cau-hinh';
 import { timNhanSu } from './nhan-su';
 import { getRunsWithMetadata } from './runs-ledger';
+import {
+  formatServerNotice,
+  normalizeNoticeCode,
+  normalizeNoticeSignature,
+  type ServerNoticeParams,
+  type SystemNoticeRef,
+} from './server-notices';
+import type { UiLanguage } from '../i18n/core';
 
 /**
  * ĐỌC KHO PHIÊN THẬT của Claude Code trên máy.
@@ -224,6 +232,54 @@ export function timTepPhien(maNhanSuHoacPhien: string, maPhienTuyChon?: string):
   return null;
 }
 
+export interface ThongBaoLichSuPhien {
+  run_id?: string;
+  code: string;
+  params?: ServerNoticeParams;
+  text: string;
+  gio: string;
+  luc?: number;
+  so_lan_lap?: number;
+}
+
+export function gopThongBaoLuot(
+  danhSach: readonly ThongBaoLichSuPhien[],
+  moi: ThongBaoLichSuPhien,
+): ThongBaoLichSuPhien[] {
+  const tiep = [...danhSach];
+  const cuoi = tiep[tiep.length - 1];
+  if (cuoi) {
+    const sigCuoi = normalizeNoticeSignature({
+      code: cuoi.code,
+      params: cuoi.params,
+      chu: cuoi.text,
+    });
+    const sigMoi = normalizeNoticeSignature({
+      code: moi.code,
+      params: moi.params,
+      chu: moi.text,
+    });
+    if (sigCuoi === sigMoi) {
+      const demCu =
+        typeof cuoi.so_lan_lap === 'number' && cuoi.so_lan_lap >= 1 ? cuoi.so_lan_lap : 1;
+      const demMoi =
+        typeof moi.so_lan_lap === 'number' && moi.so_lan_lap >= 1 ? moi.so_lan_lap : 1;
+      tiep[tiep.length - 1] = {
+        ...cuoi,
+        text: moi.text || cuoi.text,
+        params: moi.params ?? cuoi.params,
+        so_lan_lap: demCu + demMoi,
+      };
+      return tiep;
+    }
+  }
+  tiep.push({
+    ...moi,
+    code: normalizeNoticeCode(moi.code),
+  });
+  return tiep;
+}
+
 export interface MetadataPhien {
   ma: string;
   ma_nhan_su: string;
@@ -234,6 +290,7 @@ export interface MetadataPhien {
   cau_hoi: string;
   size_bytes: number;
   cap_nhat: number;
+  thong_bao_he_thong?: ThongBaoLichSuPhien[];
 }
 
 /**
@@ -246,6 +303,7 @@ export function luuMetadataPhien(
   maPhien: string,
   cauHoi?: string,
   runId?: string,
+  thongBaoLuot?: readonly ThongBaoLichSuPhien[],
 ): void {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) return;
   try {
@@ -277,6 +335,15 @@ export function luuMetadataPhien(
       }
     }
 
+    const cuThongBao = Array.isArray(cu.thong_bao_he_thong) ? cu.thong_bao_he_thong : [];
+    let thongBaoHopNhat = cuThongBao;
+    if (Array.isArray(thongBaoLuot) && thongBaoLuot.length > 0) {
+      const giuLai = runId
+        ? cuThongBao.filter((item) => item && item.run_id !== runId)
+        : cuThongBao;
+      thongBaoHopNhat = [...giuLai, ...thongBaoLuot];
+    }
+
     const now = Date.now();
     const meta: MetadataPhien = {
       ma: maPhien,
@@ -288,6 +355,7 @@ export function luuMetadataPhien(
       cau_hoi: cauHoi || cu.cau_hoi || '',
       size_bytes: st?.size ?? cu.size_bytes ?? 0,
       cap_nhat: now,
+      ...(thongBaoHopNhat.length > 0 ? { thong_bao_he_thong: thongBaoHopNhat } : {}),
     };
 
     const tempFile = `${metaPath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
@@ -305,8 +373,9 @@ export function saoChepBanGhiPhien(
   maPhien: string,
   cauHoi?: string,
   runId?: string,
+  thongBaoLuot?: readonly ThongBaoLichSuPhien[],
 ): void {
-  luuMetadataPhien(maNhanSu, maPhien, cauHoi, runId);
+  luuMetadataPhien(maNhanSu, maPhien, cauHoi, runId, thongBaoLuot);
 }
 
 export interface TomTatPhien {
@@ -332,6 +401,12 @@ interface DongPhien {
   type?: string;
   userType?: string;
   timestamp?: string;
+  isApiErrorMessage?: boolean;
+  code?: string;
+  params?: ServerNoticeParams;
+  thongBaoHeThong?: SystemNoticeRef;
+  soLanLap?: number;
+  loi?: boolean;
   message?: { content?: unknown };
 }
 
@@ -741,6 +816,9 @@ export interface TinLichSu {
    *    ⛔ chưa đổi một ly nào ở bước này.
    */
   luc?: number;
+  loi?: boolean;
+  thongBaoHeThong?: SystemNoticeRef;
+  soLanLap?: number;
 }
 
 /**
@@ -789,46 +867,111 @@ export type KetQuaLichSu = {
   cat_dong_qua_dai: boolean;
 };
 
+function chuyenThongBaoLichSu(tb: ThongBaoLichSuPhien, lang: UiLanguage): TinLichSu {
+  const normCode = normalizeNoticeCode(tb.code.trim());
+  const params =
+    tb.params && typeof tb.params === 'object' && !Array.isArray(tb.params)
+      ? tb.params
+      : undefined;
+  const translated = formatServerNotice(normCode, params, lang);
+  return {
+    ai: 'ho',
+    chu: translated || tb.text || '',
+    gio: tb.gio || gioNgan(tb.luc ? new Date(tb.luc).toISOString() : undefined),
+    ...(typeof tb.luc === 'number' ? { luc: tb.luc } : {}),
+    loi: true,
+    thongBaoHeThong: {
+      code: normCode,
+      ...(params && Object.keys(params).length > 0 ? { params } : {}),
+    },
+    ...(typeof tb.so_lan_lap === 'number' && tb.so_lan_lap > 1
+      ? { soLanLap: tb.so_lan_lap }
+      : {}),
+  };
+}
+
+function dayThongBaoVaoLichSu(ds: TinLichSu[], moi: TinLichSu): void {
+  const cuoi = ds[ds.length - 1];
+  if (cuoi && cuoi.ai === 'ho' && cuoi.loi) {
+    const sigCuoi = normalizeNoticeSignature({
+      code: cuoi.thongBaoHeThong?.code,
+      params: cuoi.thongBaoHeThong?.params,
+      chu: cuoi.chu,
+    });
+    const sigMoi = normalizeNoticeSignature({
+      code: moi.thongBaoHeThong?.code,
+      params: moi.thongBaoHeThong?.params,
+      chu: moi.chu,
+    });
+    if (sigCuoi === sigMoi) {
+      const demCu = typeof cuoi.soLanLap === 'number' && cuoi.soLanLap >= 1 ? cuoi.soLanLap : 1;
+      const demMoi = typeof moi.soLanLap === 'number' && moi.soLanLap >= 1 ? moi.soLanLap : 1;
+      cuoi.soLanLap = demCu + demMoi;
+      return;
+    }
+  }
+  ds.push(moi);
+}
+
 export async function lichSuPhien(
   maNhanSu: string,
   maPhien: string,
   truocByte?: number,
+  lang: UiLanguage = 'en',
 ): Promise<KetQuaLichSu> {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(maPhien)) throw new Error('Mã phiên không hợp lệ.');
+
+  const metaPath = path.join(layThuMucData(), 'sessions', maNhanSu, `${maPhien}.json`);
+  let metaDoc: Partial<MetadataPhien> | null = null;
+  if (fs.existsSync(metaPath)) {
+    try {
+      metaDoc = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    } catch { /* bỏ qua lỗi */ }
+  }
+  const thongBaoMeta: ThongBaoLichSuPhien[] = Array.isArray(metaDoc?.thong_bao_he_thong)
+    ? metaDoc!.thong_bao_he_thong!.filter(
+        (tb): tb is ThongBaoLichSuPhien =>
+          Boolean(tb && typeof tb.code === 'string' && tb.code.trim().length > 0),
+      )
+    : [];
+
   const p = timTepPhien(maNhanSu, maPhien);
   if (!p || !fs.existsSync(p)) {
     // Thử đọc từ tệp metadata nếu có
-    const metaPath = path.join(layThuMucData(), 'sessions', maNhanSu, `${maPhien}.json`);
-    if (fs.existsSync(metaPath)) {
-      try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        if (meta.cwd) {
-          try {
-            if (fs.realpathSync(meta.cwd) !== fs.realpathSync(thuMucAgent(maNhanSu))) {
-              return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
-            }
-          } catch {
-            if (path.resolve(meta.cwd) !== path.resolve(thuMucAgent(maNhanSu))) {
-              return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
-            }
+    if (metaDoc) {
+      if (metaDoc.cwd) {
+        try {
+          if (fs.realpathSync(metaDoc.cwd) !== fs.realpathSync(thuMucAgent(maNhanSu))) {
+            return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
+          }
+        } catch {
+          if (path.resolve(metaDoc.cwd) !== path.resolve(thuMucAgent(maNhanSu))) {
+            return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
           }
         }
-        if (meta && meta.cau_hoi) {
-          const startedAt = typeof meta.started_at === 'number' ? meta.started_at : Date.now();
-          return {
-            tin: [{
-              ai: 'toi',
-              chu: String(meta.cau_hoi),
-              gio: gioNgan(new Date(startedAt).toISOString()),
-              luc: startedAt,
-            }],
-            con_nua: false,
-            vi_tri: 0,
-            tong_byte: 0,
-            cat_dong_qua_dai: false,
-          };
+      }
+      if (metaDoc.cau_hoi || thongBaoMeta.length > 0) {
+        const startedAt = typeof metaDoc.started_at === 'number' ? metaDoc.started_at : Date.now();
+        const tinMeta: TinLichSu[] = [];
+        if (metaDoc.cau_hoi) {
+          tinMeta.push({
+            ai: 'toi',
+            chu: String(metaDoc.cau_hoi),
+            gio: gioNgan(new Date(startedAt).toISOString()),
+            luc: startedAt,
+          });
         }
-      } catch { /* bỏ qua lỗi */ }
+        for (const tb of thongBaoMeta) {
+          dayThongBaoVaoLichSu(tinMeta, chuyenThongBaoLichSu(tb, lang));
+        }
+        return {
+          tin: tinMeta,
+          con_nua: false,
+          vi_tri: 0,
+          tong_byte: 0,
+          cat_dong_qua_dai: false,
+        };
+      }
     }
     return { tin: [], con_nua: false, vi_tri: 0, tong_byte: 0, cat_dong_qua_dai: false };
   }
@@ -865,6 +1008,9 @@ export async function lichSuPhien(
    */
   const viTri = met > 0 ? cua.batDau : 0;
   const ra: TinLichSu[] = [];
+  const pendingMeta = met === tong ? [...thongBaoMeta] : [];
+  let lastUserLuc: number | undefined;
+
   for (const d of tho.split('\n')) {
     const st = d.trim();
     if (!st.startsWith('{')) continue;
@@ -874,14 +1020,77 @@ export async function lichSuPhien(
     } catch {
       continue;
     }
+
+    const lineCodeRaw =
+      (typeof j.thongBaoHeThong?.code === 'string' && j.thongBaoHeThong.code.trim()) ||
+      (typeof j.code === 'string' && j.code.trim()) ||
+      '';
+    if (lineCodeRaw) {
+      const normCode = normalizeNoticeCode(lineCodeRaw);
+      const rawParams =
+        (j.thongBaoHeThong?.params &&
+          typeof j.thongBaoHeThong.params === 'object' &&
+          !Array.isArray(j.thongBaoHeThong.params)
+          ? j.thongBaoHeThong.params
+          : undefined) ??
+        (j.params && typeof j.params === 'object' && !Array.isArray(j.params)
+          ? j.params
+          : undefined);
+      const fallbackText = bocChu(j.message?.content).trim();
+      const translated = formatServerNotice(normCode, rawParams, lang);
+      ra.push({
+        ai: 'ho',
+        chu: translated || fallbackText,
+        gio: gioNgan(j.timestamp),
+        luc: mocMs(j.timestamp),
+        loi: true,
+        thongBaoHeThong: {
+          code: normCode,
+          ...(rawParams && Object.keys(rawParams).length > 0 ? { params: rawParams } : {}),
+        },
+        ...(typeof j.soLanLap === 'number' && j.soLanLap > 1 ? { soLanLap: j.soLanLap } : {}),
+      });
+      continue;
+    }
+
     const chu = bocChu(j.message?.content).trim();
     if (!chu) continue;
+    const dongLuc = mocMs(j.timestamp);
+
     if (j.type === 'user' && j.userType === 'external') {
-      ra.push({ ai: 'toi', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
+      if (dongLuc !== undefined && pendingMeta.length > 0) {
+        while (
+          pendingMeta.length > 0 &&
+          typeof pendingMeta[0].luc === 'number' &&
+          pendingMeta[0].luc <= dongLuc
+        ) {
+          const tb = pendingMeta.shift()!;
+          dayThongBaoVaoLichSu(ra, chuyenThongBaoLichSu(tb, lang));
+        }
+      }
+      lastUserLuc = dongLuc;
+      ra.push({ ai: 'toi', chu, gio: gioNgan(j.timestamp), luc: dongLuc });
     } else if (j.type === 'assistant') {
-      ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp), luc: mocMs(j.timestamp) });
+      const coThongBaoCungLuot =
+        j.isApiErrorMessage === true &&
+        pendingMeta.some(
+          (tb) =>
+            lastUserLuc === undefined ||
+            typeof tb.luc !== 'number' ||
+            tb.luc >= lastUserLuc - 5000,
+        );
+      if (coThongBaoCungLuot) {
+        continue;
+      }
+      ra.push({ ai: 'ho', chu, gio: gioNgan(j.timestamp), luc: dongLuc });
     }
   }
+
+  while (pendingMeta.length > 0) {
+    const tb = pendingMeta.shift()!;
+    dayThongBaoVaoLichSu(ra, chuyenThongBaoLichSu(tb, lang));
+  }
+
   return { tin: ra, con_nua: viTri > 0, vi_tri: viTri, tong_byte: tong, cat_dong_qua_dai: catDai };
 }
 

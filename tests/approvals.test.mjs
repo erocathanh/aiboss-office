@@ -4479,6 +4479,25 @@ approval_check.main()
         `F49: startup write/chmod failure must log strictly 1 value-free line (got ${capturedErrLogs.length})`
       );
       assert.equal(/[0-9a-f]{64}/i.test(capturedErrLogs[0]), false, 'F49: error log must not contain hex64 secrets');
+
+      // 44a-f53: No verified listening socket ('none') and inspection_error each log strictly 1 value-free line per target
+      const f53Logs = [];
+      console.error = (...args) => {
+        f53Logs.push(args.join(' '));
+      };
+      try {
+        delete process.env.AIBOSS_NONCE_TEST_LISTENER;
+        const rNone1 = initInstanceNonce({ port: 4395, configDir: c44ConfigDir });
+        const rNone2 = initInstanceNonce({ port: 4395, configDir: c44ConfigDir });
+        assert.equal(rNone1, null);
+        assert.equal(rNone2, null);
+        assert.equal(f53Logs.length, 1, 'F53: no listener must emit strictly 1 value-free log line per target');
+        assert.match(f53Logs[0], /No verified listening socket found on port; Basic Auth proof disabled/);
+      } finally {
+        process.env.AIBOSS_NONCE_TEST_LISTENER = '1';
+        console.error = origConsoleError;
+      }
+
       process.env.AIBOSS_CONFIG_DIR = c44ConfigDir;
       initInstanceNonce({ host: '127.0.0.1', port: 4330, configDir: c44ConfigDir });
 

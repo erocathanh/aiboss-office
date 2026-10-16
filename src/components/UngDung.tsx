@@ -63,6 +63,8 @@ export default function UngDung({
   tong: { nhan_su: number; phong_ban: number; truong_phong: number };
 }) {
   const { t, lang } = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   /* 👑 Ghế ghim (TỔNG GIÁM ĐỐC) — LUẬT CỨNG: ô 1 là nó, ở CẢ 3 chế độ. */
   const ongTrum = useMemo(() => nhanSu.find((n) => n.ghim) ?? null, [nhanSu]);
 
@@ -503,7 +505,29 @@ export default function UngDung({
     }
     // 🔑 Đóng dấu mã NGAY TẠI CỬA VÀO — mọi tin trong bộ nhớ đều phải có mã.
     // 📜 Đóng dấu «đến từ lịch sử» NGAY TẠI CỬA VÀO — đây là chỗ DUY NHẤT tin từ máy chủ đi qua.
-    return (th as Tin[]).map((t) => ({ ...t, ma: datMa(), tuLichSu: true }));
+    return (th as Tin[]).map((item) => {
+      if (item.thongBaoHeThong?.code) {
+        const resolved = resolveClientNotice(
+          {
+            code: item.thongBaoHeThong.code,
+            params: item.thongBaoHeThong.params,
+            text: item.chu,
+          },
+          tRef.current,
+        );
+        return {
+          ...item,
+          chu: resolved.text || item.chu,
+          loi: item.loi ?? true,
+          thongBaoHeThong: resolved.code
+            ? { code: resolved.code, ...(resolved.params ? { params: resolved.params } : {}) }
+            : item.thongBaoHeThong,
+          ma: datMa(),
+          tuLichSu: true,
+        };
+      }
+      return { ...item, ma: datMa(), tuLichSu: true };
+    });
   }, []);
 
   /**
@@ -3190,9 +3214,7 @@ export default function UngDung({
                                       },
                                       t,
                                     )
-                                  : tin.loi
-                                    ? resolveClientNotice(tin.chu, t)
-                                    : { text: tin.chu };
+                                  : { text: tin.chu };
                                 const soLap = tin.soLanLap && tin.soLanLap > 1 ? tin.soLanLap : undefined;
                                 return (
                                   <BongBong
