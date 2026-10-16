@@ -351,7 +351,7 @@ function createLoginHarness(
         };
       }
       if (name === './config.cjs') {
-        return { resolvePort: () => 4330, APP_BASIC_REALM: 'aiboss-office' };
+        return { resolvePort: () => options.port || 4330, APP_BASIC_REALM: 'aiboss-office' };
       }
       if (name === './server-manager.cjs') {
         return { ensureServerReady: async () => ({ ok: true }), stopSpawnedServer: () => {}, probeServer: async () => true };
@@ -1042,16 +1042,18 @@ test('F46 (j): 401 when authInfo.host is localhost or ::1 cancels via callback()
   const ipv4Proof = computeTestInstanceProof(defaultNonce, '127.0.0.1', 4330, 'aiboss-office');
   for (const nonIpv4Host of ['localhost', '::1', '[::1]']) {
     const proofForHost = computeTestInstanceProof(defaultNonce, nonIpv4Host, 4330, 'aiboss-office');
-    const res = fire(
-      `http://${nonIpv4Host === '::1' ? '[::1]' : nonIpv4Host}:4330/api/approvals/req-f46-j/decision`,
-      { host: nonIpv4Host, port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
-      {
-        url: `http://${nonIpv4Host === '::1' ? '[::1]' : nonIpv4Host}:4330/api/approvals/req-f46-j/decision`,
-        responseHeaders: { 'X-AIBOSS-Instance': ipv4Proof || proofForHost },
-      },
-    );
-    assert.equal(res.prevented, false, `must not preventDefault for host=${nonIpv4Host}`);
-    assert.deepEqual(res.cbCalls, [[]], `must cancel via callback() for host=${nonIpv4Host}`);
+    for (const candidateProof of [ipv4Proof, proofForHost]) {
+      const res = fire(
+        `http://${nonIpv4Host === '::1' ? '[::1]' : nonIpv4Host}:4330/api/approvals/req-f46-j/decision`,
+        { host: nonIpv4Host, port: 4330, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+        {
+          url: `http://${nonIpv4Host === '::1' ? '[::1]' : nonIpv4Host}:4330/api/approvals/req-f46-j/decision`,
+          responseHeaders: { 'X-AIBOSS-Instance': candidateProof },
+        },
+      );
+      assert.equal(res.prevented, false, `must not preventDefault for host=${nonIpv4Host}`);
+      assert.deepEqual(res.cbCalls, [[]], `must cancel via callback() for host=${nonIpv4Host}`);
+    }
   }
   assert.ok(logs.some((l) => l.includes('non-IPv4 loopback host rejected')));
 });
@@ -1103,3 +1105,143 @@ test('F46 (k): same-port IPv4<->IPv6 proxy relay mock (proxy on 127.0.0.1:4330 r
     false,
   );
 });
+
+test('F50 (l): verified listener requirement — 0 handles, handle not listening, inspection error, and 2 listeners on same port return null with 0 files; 1 verified listener emits proof', async () => {
+  const net = require('node:net');
+  const { pathToFileURL } = require('node:url');
+  const f50CfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'f50-desktop-test-'));
+  const prevCfgDir = process.env.AIBOSS_CONFIG_DIR;
+  const prevTestSeam = process.env.AIBOSS_NONCE_TEST_LISTENER;
+  process.env.AIBOSS_CONFIG_DIR = f50CfgDir;
+  delete process.env.AIBOSS_NONCE_TEST_LISTENER;
+
+  const listenOn = (port, host) =>
+    new Promise((resolve, reject) => {
+      const srv = net.createServer();
+      srv.on('error', reject);
+      srv.listen(port, host, () => resolve(srv));
+    });
+  const closeSrv = (srv) => new Promise((resolve) => srv.close(() => resolve()));
+
+  try {
+    const nonceModPath = path.join(__dirname, '..', 'src', 'lib', 'instance-nonce.ts');
+    const nonceMod = await import(pathToFileURL(nonceModPath).href);
+
+    // F50e: importing module writes 0 files
+    assert.deepEqual(fs.readdirSync(f50CfgDir), [], 'F50e: importing instance-nonce.ts must write 0 files');
+
+    // F50a/b: 0 handles -> null record, null proof, 0 files
+    const recNoHandle = nonceMod.initInstanceNonce({ port: 4346, host: '127.0.0.1', configDir: f50CfgDir });
+    const sigNoHandle = nonceMod.buildInstanceProofHeader('aiboss-office');
+    assert.equal(recNoHandle, null, 'F50a: 0 handles must return null record');
+    assert.equal(sigNoHandle, null, 'F50b: 0 handles must return null proof');
+    assert.deepEqual(fs.readdirSync(f50CfgDir), [], 'F50a/b: 0 handles must write 0 files');
+
+    // Handle not listening (listening: false) and inspection error
+    const origGetHandles = process._getActiveHandles;
+    try {
+      process._getActiveHandles = () => [
+        { listening: false, address: () => ({ address: '127.0.0.1', port: 4346 }) },
+      ];
+      assert.equal(
+        nonceMod.initInstanceNonce({ port: 4346, host: '127.0.0.1', configDir: f50CfgDir }),
+        null,
+        'F50: handle with listening=false must return null',
+      );
+      assert.equal(nonceMod.buildInstanceProofHeader('aiboss-office'), null);
+
+      process._getActiveHandles = () => {
+        throw new Error('simulated_handle_inspection_error');
+      };
+      assert.equal(
+        nonceMod.initInstanceNonce({ port: 4346, host: '127.0.0.1', configDir: f50CfgDir }),
+        null,
+        'F50: inspection error must return null',
+      );
+      assert.equal(nonceMod.buildInstanceProofHeader('aiboss-office'), null);
+      assert.deepEqual(fs.readdirSync(f50CfgDir), [], 'F50: unverified handle/error must write 0 files');
+    } finally {
+      process._getActiveHandles = origGetHandles;
+    }
+
+    // F50c: 1 real listener on 127.0.0.1:4349 with conflicting hint ::1 -> socket wins, signs 127.0.0.1
+    const s1 = await listenOn(4349, '127.0.0.1');
+    try {
+      const recValid = nonceMod.initInstanceNonce({ port: 4349, host: '::1', configDir: f50CfgDir });
+      assert.ok(recValid, 'F50c: 1 verified listener must return record');
+      assert.equal(recValid.host, '127.0.0.1', 'F50c: real socket address 127.0.0.1 must override hint ::1');
+      const sigValid = nonceMod.buildInstanceProofHeader('aiboss-office');
+      const expectedSig4349 = computeTestInstanceProof(recValid.nonce, '127.0.0.1', 4349, 'aiboss-office');
+      assert.equal(sigValid, expectedSig4349, 'F50c: proof must be signed for 127.0.0.1:4349');
+
+      // Verify Electron accepts this verified 127.0.0.1:4349 proof from the real instance-4349.json file
+      const harness4349 = createLoginHarness(
+        {
+          PHONGBAN_USER: 'owner-u',
+          PHONGBAN_PASS: 'owner-p',
+          AIBOSS_OFFICE_PORT: '4349',
+          AIBOSS_CONFIG_DIR: f50CfgDir,
+        },
+        { now: 1_700_000_000_000 },
+        { port: 4349, skipNonceFile: true },
+      );
+      const resValid = harness4349.fire(
+        'http://127.0.0.1:4349/api/approvals/req-f50-c/decision',
+        { host: '127.0.0.1', port: 4349, realm: 'aiboss-office', scheme: 'basic', isProxy: false },
+        {
+          url: 'http://127.0.0.1:4349/api/approvals/req-f50-c/decision',
+          responseHeaders: { 'X-AIBOSS-Instance': sigValid },
+        },
+      );
+      assert.equal(resValid.prevented, true);
+      assert.deepEqual(resValid.cbCalls, [['owner-u', 'owner-p']]);
+    } finally {
+      await closeSrv(s1);
+    }
+
+    // After s1 closes, buildInstanceProofHeader must immediately return null (F50 §1.3)
+    assert.equal(
+      nonceMod.buildInstanceProofHeader('aiboss-office'),
+      null,
+      'F50: closing the listener socket must immediately disable buildInstanceProofHeader',
+    );
+
+    // F50d: 2 listeners on the same port 4344 (127.0.0.1 + ::1) -> ambiguous -> null
+    const s2 = await listenOn(4344, '127.0.0.1');
+    const s3 = await listenOn(4344, '::1');
+    try {
+      const recAmb = nonceMod.initInstanceNonce({ port: 4344, host: '::1', configDir: f50CfgDir });
+      const sigAmb = nonceMod.buildInstanceProofHeader('aiboss-office');
+      assert.equal(recAmb, null, 'F50d: 2 listeners on same port must return null record');
+      assert.equal(sigAmb, null, 'F50d: 2 listeners on same port must return null proof');
+      assert.equal(
+        fs.existsSync(path.join(f50CfgDir, 'instance-4344.json')),
+        false,
+        'F50d: ambiguous listeners must NOT create instance-4344.json',
+      );
+    } finally {
+      await closeSrv(s2);
+      await closeSrv(s3);
+    }
+
+    // F50f: 1 real listener on ::1:4348 -> signs ::1:4348:aiboss-office
+    const s4 = await listenOn(4348, '::1');
+    try {
+      const recIpv6 = nonceMod.initInstanceNonce({ port: 4348, configDir: f50CfgDir });
+      assert.ok(recIpv6, 'F50f: single ::1 listener must initialize record');
+      assert.equal(recIpv6.host, '::1');
+      const sigIpv6 = nonceMod.buildInstanceProofHeader('aiboss-office');
+      const expectedSig4348 = computeTestInstanceProof(recIpv6.nonce, '::1', 4348, 'aiboss-office');
+      assert.equal(sigIpv6, expectedSig4348, 'F50f: single ::1 listener must sign ::1:4348:aiboss-office');
+    } finally {
+      await closeSrv(s4);
+    }
+  } finally {
+    if (prevCfgDir === undefined) delete process.env.AIBOSS_CONFIG_DIR;
+    else process.env.AIBOSS_CONFIG_DIR = prevCfgDir;
+    if (prevTestSeam === undefined) delete process.env.AIBOSS_NONCE_TEST_LISTENER;
+    else process.env.AIBOSS_NONCE_TEST_LISTENER = prevTestSeam;
+    fs.rmSync(f50CfgDir, { recursive: true, force: true });
+  }
+});
+

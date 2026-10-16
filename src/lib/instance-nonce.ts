@@ -15,10 +15,18 @@ export interface InstanceNonceRecord {
   startedAt: string;
 }
 
+interface ActiveServerHandle {
+  listening?: boolean;
+  address?: () => { address?: string; family?: string; port?: number } | string | null;
+  closeIdleConnections?: () => void;
+}
+
 export interface InstanceNonceEntry extends InstanceNonceRecord {
   filePath: string;
   ino: number;
   dev: number;
+  handle?: ActiveServerHandle | null;
+  isTestSeam?: boolean;
 }
 
 export interface InitInstanceNonceOptions {
@@ -30,35 +38,47 @@ export interface InitInstanceNonceOptions {
 }
 
 interface GlobalNonceState {
-  nonce: string;
-  startedAt: string;
+  nonce: string | null;
+  startedAt: string | null;
   attemptedTargets: Map<string, InstanceNonceEntry | null>;
   initializedTargets: Map<string, InstanceNonceEntry>;
   activeEntry: InstanceNonceEntry | null;
   cleanupRegistered: boolean;
   shuttingDown: boolean;
+  startupScheduled: boolean;
+  startupSettled: boolean;
+  startupTimer: ReturnType<typeof setInterval> | null;
   nonLoopbackLogged: boolean;
+  ambiguousLogged: boolean;
   runtimeMissingLogged: boolean;
 }
 
-const GLOBAL_KEY = '__aibossInstanceNonceStateV3';
+const GLOBAL_KEY = '__aibossInstanceNonceStateV4';
 
 function getGlobalState(): GlobalNonceState {
   const g = globalThis as unknown as Record<string, GlobalNonceState | undefined>;
   if (!g[GLOBAL_KEY]) {
     g[GLOBAL_KEY] = {
-      nonce: crypto.randomBytes(32).toString('hex'),
-      startedAt: new Date().toISOString(),
+      nonce: null,
+      startedAt: null,
       attemptedTargets: new Map<string, InstanceNonceEntry | null>(),
       initializedTargets: new Map<string, InstanceNonceEntry>(),
       activeEntry: null,
       cleanupRegistered: false,
       shuttingDown: false,
+      startupScheduled: false,
+      startupSettled: false,
+      startupTimer: null,
       nonLoopbackLogged: false,
+      ambiguousLogged: false,
       runtimeMissingLogged: false,
     };
   }
   return g[GLOBAL_KEY]!;
+}
+
+function isTestListenerSeamEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === 'test' && env.AIBOSS_NONCE_TEST_LISTENER === '1';
 }
 
 /**
@@ -89,81 +109,162 @@ export function getInstanceConfigDir(env: NodeJS.ProcessEnv = process.env): stri
 }
 
 function parseCliPort(argv: string[] = process.argv): number | null {
+  let found: number | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' || argv[i] === '-p') {
       const val = Number.parseInt(argv[i + 1] || '', 10);
       if (Number.isInteger(val) && val > 0 && val <= 65535) {
-        return val;
+        found = val;
       }
     }
-    if (typeof argv[i] === 'string' && argv[i].startsWith('--port=') ) {
+    if (typeof argv[i] === 'string' && argv[i].startsWith('--port=')) {
       const val = Number.parseInt(argv[i].split('=')[1] || '', 10);
       if (Number.isInteger(val) && val > 0 && val <= 65535) {
-        return val;
+        found = val;
       }
     }
   }
-  return null;
+  return found;
 }
 
 function parseCliHost(argv: string[] = process.argv): string | null {
+  let found: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     if ((argv[i] === '--hostname' || argv[i] === '-H') && typeof argv[i + 1] === 'string') {
       const val = argv[i + 1].trim();
       if (val.length > 0) {
-        return val;
+        found = val;
       }
     }
     if (typeof argv[i] === 'string' && argv[i].startsWith('--hostname=')) {
       const val = argv[i].slice('--hostname='.length).trim();
       if (val.length > 0) {
-        return val;
+        found = val;
       }
     }
   }
-  return null;
+  return found;
 }
 
-interface ActiveServerHandleInfo {
-  address: string;
-  port: number;
-  closeIdleConnections?: () => void;
-}
+type SocketInspectionResult =
+  | {
+      status: 'verified';
+      handle: ActiveServerHandle;
+      address: string;
+      port: number;
+    }
+  | { status: 'none' }
+  | { status: 'ambiguous'; count: number }
+  | { status: 'inspection_error' };
 
-function findListeningServerAddress(targetPort?: number): ActiveServerHandleInfo | null {
+/**
+ * Inspect active libuv handles in the current process for listening TCP/HTTP servers
+ * on `targetPort` (F50).
+ * - Returns 'verified' ONLY when strictly ONE active listening server handle is bound to `targetPort`.
+ * - Returns 'ambiguous' when >= 2 handles are listening on `targetPort` (e.g., IPv4 + IPv6).
+ * - Returns 'none' when 0 handles are listening on `targetPort` (or handle is not listening yet).
+ * - Returns 'inspection_error' if `_getActiveHandles` is unavailable or throws.
+ */
+function inspectListeningSocketForPort(targetPort: number): SocketInspectionResult {
+  if (!Number.isInteger(targetPort) || targetPort <= 0 || targetPort > 65535) {
+    return { status: 'none' };
+  }
+  let rawHandles: unknown;
   try {
     const getHandles = (process as unknown as { _getActiveHandles?: () => unknown[] })._getActiveHandles;
     if (typeof getHandles !== 'function') {
-      return null;
+      return { status: 'inspection_error' };
     }
+    rawHandles = getHandles.call(process);
+    if (!Array.isArray(rawHandles)) {
+      return { status: 'inspection_error' };
+    }
+  } catch {
+    return { status: 'inspection_error' };
+  }
+
+  const seen = new Set<object>();
+  const matches: Array<{
+    handle: ActiveServerHandle;
+    address: string;
+    port: number;
+  }> = [];
+
+  try {
+    for (const h of rawHandles) {
+      if (!h || typeof h !== 'object') continue;
+      if (seen.has(h)) continue;
+      seen.add(h);
+
+      const srv = h as ActiveServerHandle;
+      if (srv.listening !== true || typeof srv.address !== 'function') {
+        continue;
+      }
+      const addr = srv.address();
+      if (!addr || typeof addr !== 'object') {
+        continue;
+      }
+      if (typeof addr.address !== 'string' || typeof addr.port !== 'number') {
+        continue;
+      }
+      if (addr.port === targetPort) {
+        matches.push({
+          handle: srv,
+          address: addr.address,
+          port: addr.port,
+        });
+      }
+    }
+  } catch {
+    return { status: 'inspection_error' };
+  }
+
+  if (matches.length === 0) {
+    return { status: 'none' };
+  }
+  if (matches.length > 1) {
+    return { status: 'ambiguous', count: matches.length };
+  }
+  return {
+    status: 'verified',
+    handle: matches[0].handle,
+    address: matches[0].address,
+    port: matches[0].port,
+  };
+}
+
+function closeAllListeningIdleConnections(): void {
+  try {
+    const getHandles = (process as unknown as { _getActiveHandles?: () => unknown[] })._getActiveHandles;
+    if (typeof getHandles !== 'function') return;
     const handles = getHandles.call(process);
-    if (!Array.isArray(handles)) {
-      return null;
-    }
+    if (!Array.isArray(handles)) return;
     for (const h of handles) {
       if (!h || typeof h !== 'object') continue;
-      const srv = h as {
-        listening?: boolean;
-        address?: () => { address?: string; port?: number } | string | null;
-        closeIdleConnections?: () => void;
-      };
-      if (srv.listening !== true || typeof srv.address !== 'function') continue;
-      const addr = srv.address();
-      if (addr && typeof addr === 'object' && typeof addr.address === 'string' && typeof addr.port === 'number') {
-        if (targetPort === undefined || addr.port === targetPort) {
-          return {
-            address: addr.address,
-            port: addr.port,
-            closeIdleConnections:
-              typeof srv.closeIdleConnections === 'function'
-                ? () => srv.closeIdleConnections!()
-                : undefined,
-          };
+      const srv = h as ActiveServerHandle;
+      if (srv.listening === true && typeof srv.closeIdleConnections === 'function') {
+        try {
+          srv.closeIdleConnections();
+        } catch {
+          // Ignore closeIdleConnections error
         }
       }
     }
   } catch {
-    // Ignore handle inspection errors
+    // Ignore handle inspection errors during shutdown
+  }
+}
+
+function resolveExplicitConfiguredPort(options?: InitInstanceNonceOptions): number | null {
+  const argv = options?.argv ?? process.argv;
+  const env = options?.env ?? process.env;
+  const cliPort = parseCliPort(argv);
+  if (cliPort !== null) {
+    return cliPort;
+  }
+  const envPort = Number.parseInt(env.AIBOSS_OFFICE_PORT || env.PORT || '', 10);
+  if (Number.isInteger(envPort) && envPort > 0 && envPort <= 65535) {
+    return envPort;
   }
   return null;
 }
@@ -177,15 +278,9 @@ export function resolveConfiguredServerPort(options?: InitInstanceNonceOptions):
   ) {
     return options.port;
   }
-  const argv = options?.argv ?? process.argv;
-  const env = options?.env ?? process.env;
-  const cliPort = parseCliPort(argv);
-  if (cliPort !== null) {
-    return cliPort;
-  }
-  const envPort = Number.parseInt(env.AIBOSS_OFFICE_PORT || env.PORT || '', 10);
-  if (Number.isInteger(envPort) && envPort > 0 && envPort <= 65535) {
-    return envPort;
+  const explicitPort = resolveExplicitConfiguredPort(options);
+  if (explicitPort !== null) {
+    return explicitPort;
   }
   try {
     const cfgPath = path.join(process.cwd(), 'config', 'office.json');
@@ -200,19 +295,21 @@ export function resolveConfiguredServerPort(options?: InitInstanceNonceOptions):
   return 4330;
 }
 
+/**
+ * Resolve any explicitly configured server host from CLI flags (--hostname / -H)
+ * or environment variables (AIBOSS_OFFICE_HOST, HOSTNAME).
+ * Used strictly for cross-checking against a verified listening socket (F50).
+ * Never returns a default '127.0.0.1' fallback and never replaces socket verification.
+ */
 export function resolveConfiguredServerHost(
-  port: number = resolveConfiguredServerPort(),
+  _port?: number,
   options?: InitInstanceNonceOptions,
-): string {
-  if (typeof options?.host === 'string' && options.host.trim().length > 0) {
-    return options.host.trim();
-  }
-  const liveSocket = findListeningServerAddress(port);
-  if (liveSocket && liveSocket.address) {
-    return liveSocket.address;
-  }
+): string | null {
   const argv = options?.argv ?? process.argv;
   const env = options?.env ?? process.env;
+  if (isTestListenerSeamEnabled(env) && typeof options?.host === 'string' && options.host.trim().length > 0) {
+    return options.host.trim();
+  }
   const cliHost = parseCliHost(argv);
   if (cliHost !== null) {
     return cliHost;
@@ -227,17 +324,7 @@ export function resolveConfiguredServerHost(
   ) {
     return env.HOSTNAME.trim();
   }
-  try {
-    const cfgPath = path.join(process.cwd(), 'config', 'office.json');
-    const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    const cfgHost = raw?.service?.host ?? raw?.server?.host;
-    if (typeof cfgHost === 'string' && cfgHost.trim().length > 0) {
-      return cfgHost.trim();
-    }
-  } catch {
-    // Fallback to default 127.0.0.1
-  }
-  return IPV4_LOOPBACK_HOST;
+  return null;
 }
 
 export function getInstanceNonceFilePath(
@@ -250,6 +337,10 @@ export function getInstanceNonceFilePath(
 export function cleanupInstanceNonceFiles(): void {
   const state = getGlobalState();
   state.shuttingDown = true;
+  if (state.startupTimer) {
+    clearInterval(state.startupTimer);
+    state.startupTimer = null;
+  }
   for (const [key, entry] of state.initializedTargets.entries()) {
     let fd: number | null = null;
     try {
@@ -297,14 +388,7 @@ function registerShutdownCleanupOnce(): void {
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => {
       cleanupInstanceNonceFiles();
-      const liveSocket = findListeningServerAddress();
-      if (liveSocket && typeof liveSocket.closeIdleConnections === 'function') {
-        try {
-          liveSocket.closeIdleConnections();
-        } catch {
-          // Ignore closeIdleConnections error
-        }
-      }
+      closeAllListeningIdleConnections();
       if (process.listenerCount(sig) <= 1) {
         process.exit(0);
       }
@@ -318,6 +402,8 @@ function writeConfiguredInstanceNonceFile(
   configDir: string,
   nonce: string,
   startedAt: string,
+  handle: ActiveServerHandle | null,
+  isTestSeam: boolean,
 ): InstanceNonceEntry {
   fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
   const dirModeInitial = fs.statSync(configDir).mode & 0o777;
@@ -382,7 +468,14 @@ function writeConfiguredInstanceNonceFile(
     throw err;
   }
 
-  const entry: InstanceNonceEntry = { ...record, filePath, ino, dev };
+  const entry: InstanceNonceEntry = {
+    ...record,
+    filePath,
+    ino,
+    dev,
+    handle,
+    isTestSeam,
+  };
   const state = getGlobalState();
   state.initializedTargets.set(`${configDir}:${port}`, entry);
   registerShutdownCleanupOnce();
@@ -390,58 +483,169 @@ function writeConfiguredInstanceNonceFile(
   return entry;
 }
 
+function verifyEntrySocketLive(entry: InstanceNonceEntry): boolean {
+  if (entry.isTestSeam && isTestListenerSeamEnabled()) {
+    return true;
+  }
+  const inspection = inspectListeningSocketForPort(entry.port);
+  if (inspection.status === 'ambiguous') {
+    const state = getGlobalState();
+    if (!state.ambiguousLogged) {
+      state.ambiguousLogged = true;
+      console.error('[instance-nonce] Ambiguous multiple listeners on port; Basic Auth proof disabled');
+    }
+    return false;
+  }
+  if (inspection.status !== 'verified') {
+    return false;
+  }
+  if (entry.handle && inspection.handle !== entry.handle) {
+    return false;
+  }
+  const liveBindHost = classifyLoopbackBindHost(inspection.address);
+  if (!liveBindHost || liveBindHost !== entry.host) {
+    if (!liveBindHost) {
+      const state = getGlobalState();
+      if (!state.nonLoopbackLogged) {
+        state.nonLoopbackLogged = true;
+        console.error('[instance-nonce] Non-loopback bind address; Basic Auth proof disabled');
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
 /**
- * Initialize the server's instance-<port>.json file once at startup for the actual bound
- * loopback host and port.
- * - Never accepts a request-supplied Host/port (F42).
- * - Signs only for numeric loopback bind addresses 127.0.0.1 or ::1; disables proof for
- *   wildcard (0.0.0.0, ::) or non-loopback binds (F46).
- * - Writes strictly once per startup configuration and logs at most one value-free line
- *   on error (F47, F49).
+ * Initialize the server's instance-<port>.json file once at startup for a verified
+ * bound loopback socket (F42, F46, F47, F49, F50).
+ * - Requires a single verified listening socket on the target port (0 handles, not listening,
+ *   inspection error, or >= 2 handles on the same port -> returns null without writing any file).
+ * - Never falls back to CLI/env/default 127.0.0.1 when no verified socket exists (F50).
+ * - Cross-checks against any explicitly configured host (CLI -H / env); mismatch -> null + 1 log line.
+ * - Synthetic host/port hints for unit tests are ignored unless both NODE_ENV=test and
+ *   AIBOSS_NONCE_TEST_LISTENER=1 are set.
  */
 export function initInstanceNonce(options?: InitInstanceNonceOptions): InstanceNonceEntry | null {
   const state = getGlobalState();
+  const env = options?.env ?? process.env;
+  const allowTestSeam = isTestListenerSeamEnabled(env);
+
   if (state.shuttingDown && !options) {
     return null;
   }
   if (options) {
     state.shuttingDown = false;
   }
+
   const port = resolveConfiguredServerPort(options);
-  const rawHost = resolveConfiguredServerHost(port, options);
   const configDir = options?.configDir
     ? path.resolve(options.configDir)
-    : getInstanceConfigDir(options?.env ?? process.env);
-  const targetKey = `${configDir}|${rawHost}|${port}`;
+    : getInstanceConfigDir(env);
 
-  if (state.attemptedTargets.has(targetKey)) {
-    const prev = state.attemptedTargets.get(targetKey) ?? null;
-    state.activeEntry = prev;
-    return prev;
+  const explicitPort = resolveExplicitConfiguredPort(options);
+  if (
+    !allowTestSeam &&
+    explicitPort !== null &&
+    typeof options?.port === 'number' &&
+    options.port !== explicitPort
+  ) {
+    const mismatchKey = `${configDir}|port_mismatch|${port}`;
+    if (!state.attemptedTargets.has(mismatchKey)) {
+      state.attemptedTargets.set(mismatchKey, null);
+      console.error('[instance-nonce] Configured port does not match listening socket; Basic Auth proof disabled');
+    }
+    state.activeEntry = null;
+    return null;
   }
 
-  const bindHost = classifyLoopbackBindHost(rawHost);
-  if (!bindHost) {
-    state.attemptedTargets.set(targetKey, null);
+  const inspection = inspectListeningSocketForPort(port);
+  let rawSocketHost: string | null = null;
+  let verifiedHandle: ActiveServerHandle | null = null;
+  let usingTestSeam = false;
+
+  if (inspection.status === 'verified') {
+    rawSocketHost = inspection.address;
+    verifiedHandle = inspection.handle;
+  } else if (inspection.status === 'ambiguous') {
+    const ambKey = `${configDir}|ambiguous|${port}`;
+    if (!state.attemptedTargets.has(ambKey)) {
+      state.attemptedTargets.set(ambKey, null);
+      console.error('[instance-nonce] Ambiguous multiple listeners on port; Basic Auth proof disabled');
+    }
     state.activeEntry = null;
-    console.error('[instance-nonce] Non-loopback bind address; Basic Auth proof disabled');
+    return null;
+  } else if (inspection.status === 'inspection_error') {
+    state.activeEntry = null;
+    return null;
+  } else {
+    // inspection.status === 'none'
+    if (allowTestSeam && typeof options?.host === 'string' && options.host.trim().length > 0) {
+      rawSocketHost = options.host.trim();
+      usingTestSeam = true;
+    } else {
+      state.activeEntry = null;
+      return null;
+    }
+  }
+
+  const bindHost = classifyLoopbackBindHost(rawSocketHost);
+  if (!bindHost) {
+    const nonLoopKey = `${configDir}|non_loopback|${rawSocketHost}|${port}`;
+    if (!state.attemptedTargets.has(nonLoopKey)) {
+      state.attemptedTargets.set(nonLoopKey, null);
+      console.error('[instance-nonce] Non-loopback bind address; Basic Auth proof disabled');
+    }
+    state.activeEntry = null;
+    return null;
+  }
+
+  const configuredHost = resolveConfiguredServerHost(port, options);
+  if (configuredHost !== null) {
+    const configuredBindHost = classifyLoopbackBindHost(configuredHost);
+    if (!configuredBindHost || configuredBindHost !== bindHost) {
+      const hostMismatchKey = `${configDir}|host_mismatch|${configuredHost}|${bindHost}|${port}`;
+      if (!state.attemptedTargets.has(hostMismatchKey)) {
+        state.attemptedTargets.set(hostMismatchKey, null);
+        console.error('[instance-nonce] Configured host does not match listening socket; Basic Auth proof disabled');
+      }
+      state.activeEntry = null;
+      return null;
+    }
+  }
+
+  const targetKey = `${configDir}|${bindHost}|${port}`;
+  if (state.attemptedTargets.has(targetKey)) {
+    const prev = state.attemptedTargets.get(targetKey) ?? null;
+    if (prev) {
+      try {
+        const st = fs.statSync(prev.filePath);
+        if (st.ino === prev.ino && st.dev === prev.dev && (st.mode & 0o777) === 0o600 && verifyEntrySocketLive(prev)) {
+          state.activeEntry = prev;
+          return prev;
+        }
+      } catch {
+        // File missing or replaced at runtime; do not rewrite (F47)
+      }
+    }
+    state.activeEntry = null;
     return null;
   }
 
   try {
-    const isFirstTarget = state.attemptedTargets.size === 0;
-    const targetNonce = isFirstTarget ? state.nonce : crypto.randomBytes(32).toString('hex');
-    const targetStartedAt = isFirstTarget ? state.startedAt : new Date().toISOString();
-    if (!isFirstTarget) {
-      state.nonce = targetNonce;
-      state.startedAt = targetStartedAt;
-    }
+    const targetNonce = crypto.randomBytes(32).toString('hex');
+    const targetStartedAt = new Date().toISOString();
+    state.nonce = targetNonce;
+    state.startedAt = targetStartedAt;
+
     const entry = writeConfiguredInstanceNonceFile(
       bindHost,
       port,
       configDir,
       targetNonce,
       targetStartedAt,
+      verifiedHandle,
+      usingTestSeam,
     );
     state.attemptedTargets.set(targetKey, entry);
     state.activeEntry = entry;
@@ -455,8 +659,62 @@ export function initInstanceNonce(options?: InitInstanceNonceOptions): InstanceN
   }
 }
 
+/**
+ * Schedule startup instance nonce initialization after the HTTP server socket finishes
+ * binding (`listen`). Called from the server startup lifecycle (`instrumentation.ts` /
+ * `khoi-dong-nen.ts`), never at module import time (F50).
+ */
+export function scheduleInstanceNonceStartup(): void {
+  const state = getGlobalState();
+  if (state.shuttingDown || state.startupSettled) {
+    return;
+  }
+
+  const tryStartupInitOnce = (): boolean => {
+    if (state.shuttingDown || state.startupSettled) {
+      return true;
+    }
+    const port = resolveConfiguredServerPort();
+    const inspection = inspectListeningSocketForPort(port);
+    if (inspection.status === 'none') {
+      return false;
+    }
+    state.startupSettled = true;
+    if (state.startupTimer) {
+      clearInterval(state.startupTimer);
+      state.startupTimer = null;
+    }
+    initInstanceNonce();
+    return true;
+  };
+
+  if (tryStartupInitOnce()) {
+    return;
+  }
+
+  if (state.startupScheduled) {
+    return;
+  }
+  state.startupScheduled = true;
+
+  let attempts = 0;
+  const maxAttempts = 200; // 200 * 25ms = 5s max wait for server.listen()
+  const timer = setInterval(() => {
+    attempts += 1;
+    if (tryStartupInitOnce() || attempts >= maxAttempts) {
+      if (state.startupTimer) {
+        clearInterval(state.startupTimer);
+        state.startupTimer = null;
+      }
+      state.startupScheduled = false;
+    }
+  }, 25);
+  timer.unref?.();
+  state.startupTimer = timer;
+}
+
 export function getInstanceNonce(): string {
-  return getGlobalState().nonce;
+  return getGlobalState().activeEntry?.nonce ?? '';
 }
 
 export function computeInstanceProof(
@@ -472,11 +730,12 @@ export function computeInstanceProof(
 }
 
 /**
- * Build the X-AIBOSS-Instance header strictly bound to the server's actual bound loopback
- * address ('127.0.0.1' or '::1') and listener port.
+ * Build the X-AIBOSS-Instance header strictly bound to the server's verified live
+ * loopback socket ('127.0.0.1' or '::1') and listener port (F42, F46, F47, F50).
+ * - Re-verifies the live listening socket on every call; if the socket is closed, missing,
+ *   ambiguous (>= 2 listeners on the same port), or non-loopback, returns null immediately
+ *   and never signs using stale file metadata (F50).
  * - Never calls initInstanceNonce() again or rewrites missing files at runtime (F47).
- * - Returns null if the instance nonce file was not initialized at startup, was removed/replaced
- *   at runtime, or if the live listener is bound to a non-loopback/wildcard address (F45, F46, F47).
  */
 export function buildInstanceProofHeader(realm: string): string | null {
   const state = getGlobalState();
@@ -488,18 +747,9 @@ export function buildInstanceProofHeader(realm: string): string | null {
     return null;
   }
 
-  const liveSocket = findListeningServerAddress(entry.port);
-  if (liveSocket && liveSocket.address) {
-    const liveBindHost = classifyLoopbackBindHost(liveSocket.address);
-    if (!liveBindHost) {
-      state.activeEntry = null;
-      if (!state.nonLoopbackLogged) {
-        state.nonLoopbackLogged = true;
-        console.error('[instance-nonce] Non-loopback bind address; Basic Auth proof disabled');
-      }
-      return null;
-    }
-    entry.host = liveBindHost;
+  if (!verifyEntrySocketLive(entry)) {
+    state.activeEntry = null;
+    return null;
   }
 
   try {
@@ -519,11 +769,4 @@ export function buildInstanceProofHeader(realm: string): string | null {
   }
 
   return computeInstanceProof(entry.nonce, entry.host, entry.port, realm);
-}
-
-const isUnitTestRunner = process.argv.some(
-  (arg) => typeof arg === 'string' && (arg.endsWith('.test.mjs') || arg.endsWith('.test.cjs') || arg.endsWith('-probe.cjs')),
-);
-if (!isUnitTestRunner) {
-  initInstanceNonce();
 }

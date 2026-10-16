@@ -86,7 +86,7 @@
  *    Nó đi rồi thì KHÔNG cần mẹo nào nữa. **Đừng giữ một mẹo sau khi lý do của nó đã hết.**
  */
 import { startOfficeRunner } from '@/lib/office-runner';
-import { initInstanceNonce } from '@/lib/instance-nonce';
+import { scheduleInstanceNonceStartup } from '@/lib/instance-nonce';
 
 /**
  * 🔴 HAI CỜ, KHÔNG PHẢI MỘT — `claude-phong-ban-pm` bắt 01/09.
@@ -113,7 +113,7 @@ export function batMotLan(): void {
 
   setImmediate(async () => {
     try {
-      initInstanceNonce();
+      scheduleInstanceNonceStartup();
     } catch {
       // Startup error logging is handled once inside initInstanceNonce (F49)
     }
