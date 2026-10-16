@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "CODE='import smtplib; smtplib.SMTP(\"localhost\",2525).sendmail(\"a\",\"b\",\"m\")' python3 -c 'exec(__import__(\"os\").environ[\"CODE\"])'"
+  }
+}

@@ -63,7 +63,7 @@ BULK_SEND_ENDPOINTS = [
 
 # Mẫu SMTP cần chặn duyệt (trong Python/Node chỉ chặn khi thật sự import/dùng smtplib/nodemailer, hoặc gọi client thật)
 SMTP_PATTERN = re.compile(
-    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|\bnodemailer\b|\bcreateTransport\b|smtps?://|--mail-rcpt\b|\bsendmail\b|\bmsmtp\b|\bswaks\b)',
+    r'(?:\bimport\s+smtplib\b|\bfrom\s+smtplib\b|\bsmtplib\.SMTP\b|\bnodemailer\b|\bcreateTransport\b|\bnet/smtp\b|\bNet::SMTP\b|smtps?://|--mail-rcpt\b|\bsendmail\b|\bmsmtp\b|\bswaks\b)',
     re.IGNORECASE,
 )
 
@@ -184,7 +184,20 @@ def extract_inline_code_raw_args(sc: bash_parser.SimpleCommand) -> list[tuple[st
             pairs.append((words[i + 1], nxt_raw))
             i += 2
             continue
+        if exe == 'deno' and w == 'eval' and i + 1 < len(words):
+            j = i + 1
+            while j < len(words) and words[j].startswith('-') and j + 1 < len(words):
+                j += 1
+            nxt_raw = raw_words[j] if j < len(raw_words) else words[j]
+            pairs.append((words[j], nxt_raw))
+            i = j + 1
+            continue
         if exe.startswith(('python', 'py')) and w.startswith('-') and not w.startswith('--') and w.endswith('c') and len(w) > 2 and i + 1 < len(words):
+            nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
+            pairs.append((words[i + 1], nxt_raw))
+            i += 2
+            continue
+        if exe in ('perl', 'ruby', 'node', 'bun') and w.startswith('-') and not w.startswith('--') and w.endswith(('e', 'E', 'p')) and len(w) > 2 and i + 1 < len(words):
             nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
             pairs.append((words[i + 1], nxt_raw))
             i += 2
@@ -836,6 +849,105 @@ def check_inline_code_uncertain_network_write(code_text: str) -> str:
     return ""
 
 
+SAFE_PRINT_IMPORT_MODULES = {"sys", "math", "json", "re", "datetime"}
+SAFE_PRINT_FROM_IMPORT_MODULES = {"math", "json", "re", "datetime"}
+SAFE_NODE_REQUIRE_MODULES = {"util", "math", "json", "assert", "path"}
+FORBIDDEN_INLINE_RUNNER_RE = re.compile(
+    r"(?:"
+    r"\b(?:exec|eval|compile|__import__|importlib|runpy|instance_eval|class_eval|module_eval|send|public_send|__send__|getattr|globals|locals|vars|load|autoload|require_relative|dofile|loadfile|loadstring|const_get|const_set|method|syscall|passthru|shell_exec|proc_open|pcntl_exec|create_function|include|include_once|require_once|fsockopen|stream_socket_client|mail|readpipe|use|breakpoint|input)\b"
+    r"|\b(?:builtins|__builtins__|__subclasses__|__globals__|__code__|__dict__|__class__|Kernel|ObjectSpace|TOPLEVEL_BINDING|Reflect|globalThis|global|constructor|Deno|Bun|modules|_getframe|stdin)\b"
+    r"|\bgetenv(?:\b|\s*\()"
+    r"|\benviron\b"
+    r"|\bENV(?:\b|\s*[\[\.\(])"
+    r"|[\$@%]ENV(?:\b|\s*[\{\[])"
+    r"|\$_(?:ENV|SERVER)\b"
+    r"|\bprocess\b"
+    r"|\bos\s*\."
+    r"|\bsubprocess\b"
+    r"|\bsystem\b"
+    r"|\b(?:popen|spawn|spawnSync|execSync|execFile|execFileSync|fork)\b"
+    r"|\bopen(?:\b|\s*\()"
+    r"|\b(?:read|readFile|readFileSync|createReadStream)\b"
+    r"|\bFunction\s*\("
+    r"|\bvm\s*\."
+    r"|\bchild_process\b"
+    r"|\bopen3\b"
+    r"|\bsys\s*\.\s*(?:modules|__dict__|stdin|_getframe)\b"
+    r"|`|\bqx\b|%x[\(\[\{<]"
+    r")"
+)
+
+
+def has_unsafe_inline_runner_flags(sc: bash_parser.SimpleCommand | None) -> bool:
+    """H34 (v09): Detect module preload flags (`-M...` in Perl, `-r...` in Ruby/Node/Bun, `--require`/`--import`)
+    that execute or load external code before running an inline snippet.
+    """
+    if sc is None or not sc.words:
+        return False
+    exe = sc.executable
+    for w in sc.words[1:]:
+        if exe == 'perl' and (w.startswith('-M') or w.startswith('-m')):
+            return True
+        if exe in ('ruby', 'node', 'bun') and (
+            w in ('-r', '--require', '--import')
+            or (w.startswith('-r') and not w.startswith('--'))
+            or w.startswith(('--require=', '--import='))
+        ):
+            return True
+    return False
+
+
+def is_provably_harmless_inline_runner_code(code_text: str) -> bool:
+    """H34 (v09): Fail-closed allowlist check for direct inline code runners (`python3 -c`, `node -e`, `ruby -e`,
+    `perl -e`, `php -r`, `deno eval`, `bun -e`) when prefix/environment bindings contain a bulk-send signal.
+    Only returns True when `code_text` contains NO dynamic evaluation, environment access, OS/process/file/network
+    operations, or non-print module imports/requires from the closed forbidden list.
+    """
+    if not code_text or not code_text.strip():
+        return True
+    if FORBIDDEN_INLINE_RUNNER_RE.search(code_text):
+        return False
+
+    # Validate Python/JS `import` statements: only allow `import sys/math/json/re/datetime` (or `from <safe> import ...`)
+    if re.search(r"\bimport\b", code_text):
+        if re.search(r"\bimport\s*\(", code_text):
+            return False
+        total_import_kw = len(re.findall(r"\bimport\b", code_text))
+        matched_import_kw = 0
+        for m_from in re.finditer(r"(?:^|[;\n])\s*from\s+([A-Za-z0-9_.]+)\s+import\s+([A-Za-z0-9_,\s]+)", code_text):
+            mod_name = m_from.group(1).strip()
+            if mod_name not in SAFE_PRINT_FROM_IMPORT_MODULES:
+                return False
+            matched_import_kw += 1
+        for m_imp in re.finditer(r"(?:^|[;\n])\s*import\s+([^;\n]+)", code_text):
+            clauses = [c.strip() for c in m_imp.group(1).split(",") if c.strip()]
+            if not clauses:
+                return False
+            for clause in clauses:
+                m_c = re.match(r"^([A-Za-z0-9_.]+)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$", clause)
+                if not m_c or m_c.group(1) not in SAFE_PRINT_IMPORT_MODULES:
+                    return False
+            matched_import_kw += 1
+        if matched_import_kw != total_import_kw:
+            return False
+
+    # Validate Node/Ruby `require`: forbid Ruby `require '...'` and allow only `require('<safe>')`
+    if re.search(r"\brequire\b", code_text):
+        total_req_kw = len(re.findall(r"\brequire\b", code_text))
+        matched_req_kw = 0
+        for m_req in re.finditer(r"\brequire\s*\(\s*(['\"])([^'\"]+)\1\s*\)", code_text):
+            mod_name = m_req.group(2).strip()
+            if mod_name.startswith("node:"):
+                mod_name = mod_name[5:]
+            if mod_name not in SAFE_NODE_REQUIRE_MODULES:
+                return False
+            matched_req_kw += 1
+        if matched_req_kw != total_req_kw:
+            return False
+
+    return True
+
+
 def check_curl_or_wget_uncertain_write(
     sub_cmd: str,
     sc: bash_parser.SimpleCommand | None,
@@ -1157,10 +1269,14 @@ def should_block_bulk_send(
                 if check_script_dong_y(sub):
                     return "Phát hiện lệnh chạy script với cờ gửi/đăng thật (--dong-y). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
-                # (b1) Với runner có cờ mã nội tuyến (-c/-e/--eval/-p/--print/-r), mở rộng biến có tôn trọng vùng nháy (H24)
-                # và quét mẫu SMTP/nodemailer + endpoint + ghi mạng không chắc đích (PCN ĐK 1)
-                if sc is not None:
-                    for code_arg, raw_code_arg in extract_inline_code_raw_args(sc):
+                # (b1) For inline code runners (-c/-e/--eval/-p/--print/-r), expand variables respecting quotes (H24)
+                # and scan for SMTP/nodemailer patterns, bulk endpoints, uncertain network writes (PCN-1), and H34 (v09) fail-closed rule
+                env_has_signal = prefix_has_signal or any(has_bulk_send_signal(v) for v in child_static_vars.values())
+                inline_code_pairs = extract_inline_code_raw_args(sc) if sc is not None else []
+                if inline_code_pairs:
+                    if env_has_signal and has_unsafe_inline_runner_flags(sc):
+                        return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                    for code_arg, raw_code_arg in inline_code_pairs:
                         expanded_code, code_unresolved = expand_shell_vars_in_raw_token(
                             raw_code_arg, static_vars, unresolved_vars
                         )
@@ -1173,12 +1289,12 @@ def should_block_bulk_send(
                             uncertain_code_reason = check_inline_code_uncertain_network_write(candidate_code)
                             if uncertain_code_reason:
                                 return uncertain_code_reason
-                            if prefix_has_signal and re.search(
-                                r'\b(?:os\.environ|os\.getenv|process\.env|ENV\[)\b', candidate_code
-                            ):
-                                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (smtplib/smtp/sendmail). Lệnh bị chặn và cần chủ trực tiếp duyệt."
-                        if code_unresolved and chain_has_bulk_send_signal:
+                            if env_has_signal and not is_provably_harmless_inline_runner_code(candidate_code):
+                                return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                        if code_unresolved and (chain_has_bulk_send_signal or env_has_signal):
                             return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
+                elif prefix_has_signal and is_code_or_smtp_runner(sub):
+                    return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
                 # (b2) Check SMTP on command argv / subcommand words after stripping prefix env assignments (H13, H16a, H19, H24 & H32d)
                 sc_joined_words = " ".join(sc.words) if (sc and sc.words) else sub

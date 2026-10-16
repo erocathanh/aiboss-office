@@ -452,6 +452,12 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-H27c-prefix-assign-bash-c-smtp.json"
     "guard_bulk_send:block-H28-xargs-harmless-then-smtp.json"
     "guard_bulk_send:block-H28d-xargs-harmless-and-sendmail.json"
+    "guard_bulk_send:block-H34-prefix-smtp-python-from-os-import-getenv-exec.json"
+    "guard_bulk_send:block-H34b-prefix-smtp-ruby-eval-env.json"
+    "guard_bulk_send:block-H34e-prefix-smtp-python-os-alias-environ.json"
+    "guard_bulk_send:block-H34f-prefix-smtp-python-environ-alias.json"
+    "guard_bulk_send:block-H34g-prefix-smtp-python-dunder-import.json"
+    "guard_bulk_send:block-H34h-prefix-smtp-perl-eval-env.json"
 )
 
 saved_total=$TOTAL
