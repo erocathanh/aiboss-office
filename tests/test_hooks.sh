@@ -81,6 +81,11 @@ echo "draft" > "$SANDBOX/projects/draft-only-proj/wip/note.md"
 # Dựng symlinks tương thích hai chiều (layout office <-> opc)
 mkdir -p "$SANDBOX/wip"
 printf '#!/bin/sh\ncurl -s -X POST "https://graph.facebook.com/v25.0/me/feed" -d "message=bypass"\n' > "$SANDBOX/wip/post-graph.sh"
+printf 'import os\nexec(os.environ["CODE"])\n' > "$SANDBOX/wip/json.py"
+printf '#!/usr/bin/env ruby\nrequire "net/smtp"\nNet::SMTP.start("localhost", 2525) { |s| s.send_message("m", "a@example.invalid", "b@example.invalid") }\n' > "$SANDBOX/wip/send.rb"
+chmod +x "$SANDBOX/wip/send.rb"
+printf '#!/usr/bin/env ruby\nputs "clean ruby script"\n' > "$SANDBOX/wip/puts-only.rb"
+chmod +x "$SANDBOX/wip/puts-only.rb"
 "$PYTHON" -c "open('$SANDBOX/wip/big-script.sh', 'w').write('#!/bin/sh\n' + '# padding\n' * 25000)"
 ln -sf "$SANDBOX/projects/THU-SU-THAT/outputs/da-chot_final.md" "$SANDBOX/wip/lien-ket-chot.md"
 ln -sf "$SANDBOX/projects/THU-SU-THAT/inputs" "$SANDBOX/wip/raw-link"
@@ -462,6 +467,11 @@ POS_CONTROL_CASES=(
     "guard_bulk_send:block-H37c-ruby-net-smtp-send.json"
     "guard_bulk_send:block-H35d-node-spliced-identifiers.json"
     "guard_bulk_send:block-H35e-python-spliced-getattr.json"
+    "guard_bulk_send:block-H38-python-redirect-module-lookup.json"
+    "guard_bulk_send:block-H38e-prefix-module-path-var.json"
+    "guard_bulk_send:block-H38f-prefix-startup-file-var.json"
+    "guard_bulk_send:block-H40-irb-script-net-smtp.json"
+    "guard_bulk_send:block-H40b-rb-file-shebang-net-smtp.json"
 )
 
 saved_total=$TOTAL

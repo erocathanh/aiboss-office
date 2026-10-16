@@ -173,12 +173,14 @@ def extract_subcommand_executable(sub_cmd: str) -> tuple[str, str]:
 
 
 def extract_inline_code_raw_args(sc: bash_parser.SimpleCommand) -> list[tuple[str, str]]:
-    """H16a (v04) & H24 (v06): Với runner (`python*`, `node`, `deno`, `bun`, `perl`, `ruby`, `php`, `osascript`, `bash`/`sh`/`zsh`),
+    """H16a (v04), H24 (v06) & H38 (v11): Với runner (`python*`, `node`, `deno`, `bun`, `perl`, `ruby`, `php`, `osascript`, `bash`/`sh`/`zsh`),
     lấy các cặp `(unquoted_code, raw_code)` của `-c` / `-e` / `-E` / `--eval` / `-p` / `--print` / `-r` từ `sc.words` và `sc.raw_words`.
+    Với Python, dừng ngay khi gặp `-m` (chạy theo tên module, không phải mã inline) hoặc sau `-c <code>` (phần sau là `sys.argv`).
     """
     exe = sc.executable
     if not (exe in INLINE_CODE_RUNNERS or exe.startswith(('python2.', 'python3.'))):
         return []
+    is_py = exe in ('python', 'python2', 'python3', 'py') or exe.startswith(('python2.', 'python3.'))
     pairs: list[tuple[str, str]] = []
     words = sc.words
     raw_words = getattr(sc, "raw_words", None) or words
@@ -186,7 +188,38 @@ def extract_inline_code_raw_args(sc: bash_parser.SimpleCommand) -> list[tuple[st
     while i < len(words):
         w = words[i]
         raw_w = raw_words[i] if i < len(raw_words) else w
+        if is_py:
+            if w in ('-W', '-X') and i + 1 < len(words):
+                i += 2
+                continue
+            if w.startswith(('-W', '-X')) and len(w) > 2:
+                i += 1
+                continue
+            if w == '-m' or (w.startswith('-') and not w.startswith('--') and 'm' in w[1:] and 'c' not in w[1:]):
+                break
+            if w == '-c' and i + 1 < len(words):
+                nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
+                pairs.append((words[i + 1], nxt_raw))
+                break
+            if w.startswith('-') and not w.startswith('--') and w.endswith('c') and len(w) > 2 and 'm' not in w[1:] and i + 1 < len(words):
+                nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
+                pairs.append((words[i + 1], nxt_raw))
+                break
+            if w.startswith('-c') and not w.startswith('--') and len(w) > 2:
+                raw_attached = raw_w[2:] if raw_w.startswith('-c') else w[2:]
+                pairs.append((w[2:], raw_attached))
+                break
+            if not w.startswith('-'):
+                break
+            i += 1
+            continue
         if w in ('-c', '-e', '-E', '--eval', '-p', '--print', '-r') and i + 1 < len(words):
+            if w == '-r' and exe in ('ruby', 'irb', 'node', 'nodejs', 'bun'):
+                i += 2
+                continue
+            if w == '-c' and exe in ('php', 'deno'):
+                i += 2
+                continue
             nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
             pairs.append((words[i + 1], nxt_raw))
             i += 2
@@ -199,12 +232,7 @@ def extract_inline_code_raw_args(sc: bash_parser.SimpleCommand) -> list[tuple[st
             pairs.append((words[j], nxt_raw))
             i = j + 1
             continue
-        if exe.startswith(('python', 'py')) and w.startswith('-') and not w.startswith('--') and w.endswith('c') and len(w) > 2 and i + 1 < len(words):
-            nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
-            pairs.append((words[i + 1], nxt_raw))
-            i += 2
-            continue
-        if exe in ('perl', 'ruby', 'node', 'bun') and w.startswith('-') and not w.startswith('--') and w.endswith(('e', 'E', 'p')) and len(w) > 2 and i + 1 < len(words):
+        if exe in ('perl', 'ruby', 'irb', 'node', 'nodejs', 'bun') and w.startswith('-') and not w.startswith('--') and w.endswith(('e', 'E', 'p')) and len(w) > 2 and i + 1 < len(words):
             nxt_raw = raw_words[i + 1] if (i + 1) < len(raw_words) else words[i + 1]
             pairs.append((words[i + 1], nxt_raw))
             i += 2
@@ -215,6 +243,12 @@ def extract_inline_code_raw_args(sc: bash_parser.SimpleCommand) -> list[tuple[st
             i += 2
             continue
         if w.startswith(('-c', '-e', '-r')) and not w.startswith('--') and len(w) > 2:
+            if w.startswith('-r') and exe in ('ruby', 'irb', 'node', 'nodejs', 'bun'):
+                i += 1
+                continue
+            if w.startswith('-c') and exe in ('php', 'deno'):
+                i += 1
+                continue
             raw_attached = raw_w[2:] if raw_w.startswith(('-c', '-e', '-r')) else w[2:]
             pairs.append((w[2:], raw_attached))
             i += 1
@@ -460,11 +494,110 @@ def scan_script_content(content: str, label: str, sub_cmd: str = "") -> str:
     return ""
 
 
+def _resolve_ruby_script_arg(
+    sub_cmd: str,
+    current_cwd: str,
+    heredoc_written_files: dict[str, str] | None = None,
+) -> str:
+    """H40 (v11): Khi `bash_parser.get_executed_script_arg` trả rỗng (hoặc trượt do cờ nhận đối số của Ruby),
+    nhận diện trực tiếp `irb <tệp>`, `ruby ... <tệp>`, tệp `.rb` chạy trực tiếp và tệp thực thi có shebang Ruby.
+    """
+    sc = parse_simple_command_safe(sub_cmd, current_cwd)
+    if sc and sc.words:
+        tokens = sc.words
+        first_token = sc.raw_executable.strip('\'"')
+        base_cmd = sc.executable
+    else:
+        raw_tokens = split_tokens(sub_cmd)
+        if not raw_tokens:
+            return ""
+        idx = 0
+        while idx < len(raw_tokens):
+            tok = raw_tokens[idx].strip('\'"')
+            if '=' in tok and not tok.startswith('-'):
+                idx += 1
+                continue
+            base = os.path.basename(tok).lower()
+            if base in COMMAND_WRAPPERS:
+                idx += 1
+                while idx < len(raw_tokens) and raw_tokens[idx].strip('\'"').startswith('-'):
+                    idx += 1
+                continue
+            break
+        if idx >= len(raw_tokens):
+            return ""
+        tokens = raw_tokens[idx:]
+        first_token = tokens[0].strip('\'"')
+        base_cmd = os.path.basename(first_token).lower()
+
+    if not tokens or not base_cmd or base_cmd in EXEMPT_PRINT_COMMANDS:
+        return ""
+
+    if base_cmd in ('irb', 'ruby'):
+        req_arg = ""
+        i = 1
+        while i < len(tokens):
+            arg = tokens[i].strip('\'"')
+            if arg == '--':
+                if i + 1 < len(tokens):
+                    cand = tokens[i + 1].strip('\'"')
+                    if cand and cand != '-':
+                        return cand
+                break
+            if arg in ('-e', '--eval') or (arg.startswith('-e') and not arg.startswith('--') and len(arg) > 2):
+                return req_arg
+            if arg in ('-I', '-C', '-E', '-K', '-U') and i + 1 < len(tokens):
+                i += 2
+                continue
+            if arg in ('-r', '--require') and i + 1 < len(tokens):
+                req_arg = tokens[i + 1].strip('\'"')
+                i += 2
+                continue
+            if arg.startswith('-r') and not arg.startswith('--') and len(arg) > 2:
+                req_arg = arg[2:].strip('\'"')
+                i += 1
+                continue
+            if arg.startswith('--require='):
+                req_arg = arg.split('=', 1)[1].strip('\'"')
+                i += 1
+                continue
+            if arg.startswith('-'):
+                i += 1
+                continue
+            if arg and arg != '-':
+                return arg
+            i += 1
+        return req_arg
+
+    if first_token.lower().endswith('.rb') or base_cmd.endswith('.rb'):
+        return first_token
+
+    if base_cmd not in SCRIPT_RUNNERS and base_cmd not in SMTP_CLIENT_BINARIES:
+        if heredoc_written_files:
+            hd_body = bash_parser.find_heredoc_body_for_script(first_token, heredoc_written_files)
+            if hd_body and is_ruby_runner_or_script(content=hd_body):
+                return first_token
+        expanded = os.path.expanduser(first_token)
+        cand_path = os.path.normpath(expanded if os.path.isabs(expanded) else os.path.join(current_cwd, expanded))
+        try:
+            if os.path.isfile(cand_path) and os.path.getsize(cand_path) < MAX_SCRIPT_SIZE:
+                with open(cand_path, "r", encoding="utf-8", errors="ignore") as f:
+                    first_line = f.readline(256)
+                if is_ruby_runner_or_script(content=first_line):
+                    return first_token
+        except OSError:
+            pass
+
+    return ""
+
+
 def check_script_file_bulk_send(sub_cmd: str, current_cwd: str, heredoc_written_files=None) -> str:
     """Nếu lệnh chạy một tệp kịch bản (< 1MB hoặc vừa được ghi bởi heredoc trong cùng lệnh),
     đọc ruột tệp và xét các mẫu địa chỉ gửi.
     """
     script_arg = bash_parser.get_executed_script_arg(sub_cmd)
+    if not script_arg:
+        script_arg = _resolve_ruby_script_arg(sub_cmd, current_cwd, heredoc_written_files)
     if not script_arg:
         return ""
 
@@ -482,6 +615,21 @@ def check_script_file_bulk_send(sub_cmd: str, current_cwd: str, heredoc_written_
         script_path = os.path.normpath(expanded)
     else:
         script_path = os.path.normpath(os.path.join(current_cwd, expanded))
+
+    if not os.path.isfile(script_path):
+        alt_arg = _resolve_ruby_script_arg(sub_cmd, current_cwd, heredoc_written_files)
+        if alt_arg and alt_arg != script_arg:
+            script_arg = alt_arg
+            if heredoc_written_files:
+                hd_body = bash_parser.find_heredoc_body_for_script(script_arg, heredoc_written_files)
+                if hd_body:
+                    clean_arg = script_arg.strip('\'"')
+                    base_arg = os.path.basename(clean_arg)
+                    reason = scan_script_content(hd_body, base_arg or clean_arg, sub_cmd=sub_cmd)
+                    if reason:
+                        return reason
+            expanded = os.path.expanduser(script_arg)
+            script_path = os.path.normpath(expanded if os.path.isabs(expanded) else os.path.join(current_cwd, expanded))
 
     if is_exempt_repo_script(script_path, current_cwd):
         return ""
@@ -969,10 +1117,112 @@ SAFE_PY_BUILTINS = {
     "print", "len", "sum", "range", "str", "int", "float", "repr",
     "sorted", "min", "max", "abs", "round", "enumerate", "zip",
 }
-FORBIDDEN_MODULE_ATTRS = {
-    "modules", "stdin", "audithook", "breakpointhook",
-    "displayhook", "excepthook", "setprofile", "settrace", "addaudithook", "exit",
-    "monitoring", "codecs", "copyreg", "functools", "enum", "sre_compile", "sre_parse", "scanner",
+SAFE_SYS_READONLY_ATTRS = {
+    "argv",
+    "version",
+    "version_info",
+    "platform",
+    "executable",
+    "maxsize",
+    "byteorder",
+    "prefix",
+    "base_prefix",
+    "exec_prefix",
+    "hexversion",
+    "api_version",
+    "float_info",
+    "int_info",
+    "implementation",
+}
+SAFE_SYS_STRUCT_SUBATTRS = {
+    "major",
+    "minor",
+    "micro",
+    "releaselevel",
+    "serial",
+    "name",
+}
+SAFE_PY_MODULE_CONSTANTS: dict[str, set[str]] = {
+    "sys": SAFE_SYS_READONLY_ATTRS,
+    "math": {"pi", "e", "tau", "inf", "nan"},
+    "re": {"IGNORECASE", "I", "MULTILINE", "M", "DOTALL", "S", "ASCII", "A", "VERBOSE", "X"},
+    "datetime": {"MINYEAR", "MAXYEAR", "UTC"},
+}
+SAFE_PY_MODULE_CALLABLES: dict[str, set[str]] = {
+    "json": {"dumps", "loads"},
+    "math": {
+        "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh",
+        "cbrt", "ceil", "comb", "copysign", "cos", "cosh", "degrees",
+        "dist", "erf", "erfc", "exp", "exp2", "expm1", "fabs", "factorial",
+        "floor", "fmod", "frexp", "fsum", "gamma", "gcd", "hypot",
+        "isclose", "isfinite", "isinf", "isnan", "isqrt", "lcm", "ldexp",
+        "lgamma", "log", "log1p", "log2", "log10", "modf", "nextafter",
+        "perm", "pow", "prod", "radians", "remainder", "sin", "sinh",
+        "sqrt", "tan", "tanh", "trunc", "ulp",
+    },
+    "re": {
+        "compile", "escape", "findall", "fullmatch", "match",
+        "search", "split", "sub", "subn",
+    },
+    "datetime": {"date", "time", "datetime", "timedelta", "timezone"},
+}
+SAFE_PY_SUBMODULE_CALLABLES: dict[tuple[str, str], set[str]] = {
+    ("datetime", "date"): {"today", "fromisoformat", "fromtimestamp", "fromordinal"},
+    ("datetime", "datetime"): {
+        "now", "utcnow", "today", "fromisoformat",
+        "fromtimestamp", "utcfromtimestamp", "combine", "strptime",
+    },
+    ("datetime", "time"): {"fromisoformat"},
+}
+FORBIDDEN_CALL_KWARGS = {
+    "default", "object_hook", "object_pairs_hook",
+    "parse_float", "parse_int", "parse_constant", "cls", "key",
+}
+INTERPRETER_CODE_LOAD_ENV_VARS = {
+    # Python (docs.python.org/3/using/cmdline.html#environment-variables)
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONHOME",
+    "PYTHONUSERBASE",
+    "PYTHONEXECUTABLE",
+    "PYTHONINSPECT",
+    "PYTHONBREAKPOINT",
+    "VIRTUAL_ENV",
+    # Node.js / Deno / Bun (nodejs.org/api/cli.html#environment-variables, docs.deno.com, bun.sh)
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "NODE_REPL_EXTERNAL_MODULE",
+    "DENO_DIR",
+    "DENO_IMPORT_MAP",
+    "DENO_CONFIG",
+    "BUN_INSTALL",
+    "BUN_CONFIG_FILE",
+    # Ruby (ruby manpage / docs.ruby-lang.org)
+    "RUBYLIB",
+    "RUBYOPT",
+    "RUBYPATH",
+    "RUBYSHELL",
+    "GEM_HOME",
+    "GEM_PATH",
+    "BUNDLE_GEMFILE",
+    # Perl (perldoc perlrun)
+    "PERL5LIB",
+    "PERL5OPT",
+    "PERLLIB",
+    "PERL5DB",
+    "PERL5DB_THREADED",
+    # PHP (php.net/manual/en/configuration.file.php)
+    "PHPRC",
+    "PHP_INI_SCAN_DIR",
+    # OS dynamic loader / shell startup env
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    "BASH_ENV",
+    "ENV",
+    "ZDOTDIR",
 }
 ALLOWED_PY_BINOPS = (
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow,
@@ -986,26 +1236,69 @@ ALLOWED_PY_CMPOPS = (
 
 
 def has_unsafe_inline_runner_flags(sc: bash_parser.SimpleCommand | None) -> bool:
-    """H34 (v09): Detect module preload flags (`-M...` in Perl, `-r...` in Ruby/Node/Bun, `--require`/`--import`)
-    that execute or load external code before running an inline snippet.
+    """H34 (v09) & H38 (v11): Detect interpreter flags that load external modules/files or select code by module name
+    rather than pure inline code (`-m`/`-i` in Python, `-M`/`-m`/`-I`/`-d`/`-P`/`-S` in Perl,
+    `-r`/`-I`/`-S`/`-s` in Ruby/IRB, `-r`/`--require`/`--import`/`--loader`/`--import-map` in Node/Bun/Deno,
+    `-c`/`-d`/`-f` in PHP).
     """
     if sc is None or not sc.words:
         return False
     exe = sc.executable
-    for w in sc.words[1:]:
-        if exe == 'perl' and (w.startswith('-M') or w.startswith('-m')):
-            return True
-        if exe in ('ruby', 'node', 'bun') and (
-            w in ('-r', '--require', '--import')
-            or (w.startswith('-r') and not w.startswith('--'))
-            or w.startswith(('--require=', '--import='))
+    is_py = exe in ('python', 'python2', 'python3', 'py') or exe.startswith(('python2.', 'python3.'))
+    words = sc.words
+    i = 1
+    while i < len(words):
+        w = words[i]
+        if w == '--':
+            break
+        if is_py:
+            if w in ('-W', '-X') and i + 1 < len(words):
+                i += 2
+                continue
+            if w.startswith(('-W', '-X')) and len(w) > 2:
+                i += 1
+                continue
+            if w in ('-m', '-i') or w.startswith(('-m', '-i')):
+                return True
+            if w.startswith('-') and not w.startswith('--'):
+                flags_part = w[1:]
+                if 'm' in flags_part or 'i' in flags_part:
+                    return True
+                if flags_part == 'c' or flags_part.endswith('c'):
+                    break
+            elif not w.startswith('-'):
+                break
+            i += 1
+            continue
+        if exe == 'perl' and (
+            w in ('-M', '-m', '-I', '-d', '-P', '-S')
+            or w.startswith(('-M', '-m', '-I', '-d', '-D', '-P', '-S'))
         ):
             return True
+        if exe in ('ruby', 'irb') and (
+            w in ('-r', '-I', '-S', '-s', '--require')
+            or (w.startswith(('-r', '-I', '-S')) and not w.startswith('--'))
+            or w.startswith('--require=')
+        ):
+            return True
+        if exe in ('node', 'nodejs', 'bun', 'deno') and (
+            w in ('-r', '--require', '--import', '--loader', '--experimental-loader', '--import-map', '--env-file')
+            or (w.startswith('-r') and not w.startswith('--'))
+            or w.startswith(('--require=', '--import=', '--loader=', '--experimental-loader=', '--import-map=', '--env-file='))
+        ):
+            return True
+        if exe == 'php' and (
+            w in ('-c', '-d', '-f', '--php-ini', '--define', '--file')
+            or (w.startswith(('-c', '-d', '-f')) and not w.startswith('--'))
+            or w.startswith(('--php-ini=', '--define=', '--file='))
+        ):
+            return True
+        i += 1
     return False
 
 
 def _get_py_attr_chain_root(node: ast.Attribute) -> tuple[ast.Name | None, list[str]]:
-    """H35 (v10): Walk an `ast.Attribute` chain (`a.b.c`) and return `(root_name_node, [attr1, attr2, ...])`
+    """H35 (v10) & H38 (v11): Walk an `ast.Attribute` chain (`a.b.c`) and return `(root_name_node, [attr1, attr2, ...])`
     only when every link is a Load Attribute with no leading `_` and the base is a Load Name with no leading `_`.
     """
     attrs: list[str] = []
@@ -1022,10 +1315,14 @@ def _get_py_attr_chain_root(node: ast.Attribute) -> tuple[ast.Name | None, list[
 
 
 def _is_recognized_harmless_python_code(code_text: str) -> bool:
-    """H35 (v10): Closed-allowlist AST recognizer for Python (`python`/`python3 -c`) inline code when a send signal
+    """H35 (v10) & H38 (v11): Closed-allowlist AST recognizer for Python (`python`/`python3 -c`) inline code when a send signal
     is present in reachable environment bindings.
-    Only returns True if `ast.parse` succeeds and every statement/expression node belongs to the closed allowlist.
-    Any unrecognized node, attribute, call target, or syntax error returns False.
+    Proves "pure print" ONLY when there is no path to alter module lookup or execute external code:
+    1. All `Import` / `ImportFrom` statements appear at the very top of `tree.body` before any `Assign` or `Expr`/`Call`.
+    2. `sys` is strictly read-only within `SAFE_SYS_READONLY_ATTRS`; no `Call` may have root `sys`.
+    3. Callable module functions are restricted to pure modules (`json`, `math`, `re`, `datetime`) with an explicit
+       closed function set (`SAFE_PY_MODULE_CALLABLES` / `SAFE_PY_SUBMODULE_CALLABLES`); arguments cannot contain callables
+       or module objects; no attribute/subscript assignment is allowed.
     """
     if not code_text or not code_text.strip():
         return True
@@ -1038,7 +1335,8 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
         return False
 
     imported_modules: dict[str, str] = {}
-    imported_callables: set[str] = set()
+    imported_callables: dict[str, tuple[str, str]] = {}
+    imported_constants: set[str] = set()
     assigned_names: set[str] = set()
 
     def is_valid_expr(expr: ast.AST) -> bool:
@@ -1048,12 +1346,7 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
         if isinstance(expr, ast.Name):
             if not isinstance(expr.ctx, ast.Load) or not expr.id or expr.id.startswith("_"):
                 return False
-            return (
-                expr.id in SAFE_PY_BUILTINS
-                or expr.id in imported_modules
-                or expr.id in imported_callables
-                or expr.id in assigned_names
-            )
+            return expr.id in assigned_names or expr.id in imported_constants
 
         if isinstance(expr, ast.Attribute):
             root_name, attr_chain = _get_py_attr_chain_root(expr)
@@ -1061,13 +1354,19 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
                 return False
             rid = root_name.id
             if rid in imported_modules:
-                if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
-                    return False
-                return True
-            if rid in assigned_names or rid in imported_callables:
-                if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
-                    return False
-                return True
+                mod_name = imported_modules[rid]
+                if len(attr_chain) == 1:
+                    return attr_chain[0] in SAFE_PY_MODULE_CONSTANTS.get(mod_name, set())
+                if len(attr_chain) == 2:
+                    if (
+                        mod_name == "sys"
+                        and attr_chain[0] in ("version_info", "implementation")
+                        and attr_chain[1] in SAFE_SYS_STRUCT_SUBATTRS
+                    ):
+                        return True
+                    if mod_name == "datetime" and attr_chain[0] == "timezone" and attr_chain[1] == "utc":
+                        return True
+                return False
             return False
 
         if isinstance(expr, ast.Call):
@@ -1075,7 +1374,12 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
                 if isinstance(arg, ast.Starred) or not is_valid_expr(arg):
                     return False
             for kw in expr.keywords:
-                if not isinstance(kw, ast.keyword) or kw.arg is None or kw.arg.startswith("_"):
+                if (
+                    not isinstance(kw, ast.keyword)
+                    or kw.arg is None
+                    or kw.arg.startswith("_")
+                    or kw.arg in FORBIDDEN_CALL_KWARGS
+                ):
                     return False
                 if not is_valid_expr(kw.value):
                     return False
@@ -1091,13 +1395,17 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
                     return False
                 rid = root_name.id
                 if rid in imported_modules:
-                    if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
-                        return False
-                    return True
+                    mod_name = imported_modules[rid]
+                    if len(attr_chain) == 1:
+                        return attr_chain[0] in SAFE_PY_MODULE_CALLABLES.get(mod_name, set())
+                    if len(attr_chain) == 2:
+                        return attr_chain[1] in SAFE_PY_SUBMODULE_CALLABLES.get((mod_name, attr_chain[0]), set())
+                    return False
                 if rid in imported_callables:
-                    if any(a in FORBIDDEN_MODULE_ATTRS for a in attr_chain):
-                        return False
-                    return True
+                    mod_name, member_name = imported_callables[rid]
+                    if len(attr_chain) == 1:
+                        return attr_chain[0] in SAFE_PY_SUBMODULE_CALLABLES.get((mod_name, member_name), set())
+                    return False
                 return False
             return False
 
@@ -1148,45 +1456,74 @@ def _is_recognized_harmless_python_code(code_text: str) -> bool:
 
         return False
 
+    seen_non_import = False
     for stmt in tree.body:
         if isinstance(stmt, ast.Import):
-            if not stmt.names:
+            if seen_non_import or not stmt.names:
                 return False
             for alias in stmt.names:
                 if not isinstance(alias, ast.alias) or alias.name not in SAFE_PY_IMPORT_MODULES:
                     return False
                 bound = alias.asname if alias.asname else alias.name
-                if not bound or bound.startswith("_") or "." in bound:
+                if (
+                    not bound
+                    or bound.startswith("_")
+                    or "." in bound
+                    or bound in SAFE_PY_BUILTINS
+                    or bound in assigned_names
+                    or bound in imported_callables
+                    or bound in imported_constants
+                ):
                     return False
                 imported_modules[bound] = alias.name
         elif isinstance(stmt, ast.ImportFrom):
-            if stmt.level != 0 or not stmt.module or stmt.module not in SAFE_PY_IMPORT_MODULES or not stmt.names:
+            if (
+                seen_non_import
+                or stmt.level != 0
+                or not stmt.module
+                or stmt.module not in SAFE_PY_IMPORT_MODULES
+                or not stmt.names
+            ):
                 return False
+            mod_name = stmt.module
             for alias in stmt.names:
                 if not isinstance(alias, ast.alias) or not alias.name or alias.name == "*" or alias.name.startswith("_"):
                     return False
-                if alias.name in FORBIDDEN_MODULE_ATTRS:
-                    return False
                 bound = alias.asname if alias.asname else alias.name
-                if not bound or bound.startswith("_"):
+                if (
+                    not bound
+                    or bound.startswith("_")
+                    or bound in SAFE_PY_BUILTINS
+                    or bound in imported_modules
+                    or bound in assigned_names
+                ):
                     return False
-                if stmt.module == "sys":
-                    assigned_names.add(bound)
+                if alias.name in SAFE_PY_MODULE_CONSTANTS.get(mod_name, set()):
+                    imported_constants.add(bound)
+                elif alias.name in SAFE_PY_MODULE_CALLABLES.get(mod_name, set()):
+                    imported_callables[bound] = (mod_name, alias.name)
                 else:
-                    imported_callables.add(bound)
-                    assigned_names.add(bound)
+                    return False
         elif isinstance(stmt, ast.Assign):
+            seen_non_import = True
             if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
                 return False
             target_name = stmt.targets[0].id
-            if not target_name or target_name.startswith("_") or not isinstance(stmt.targets[0].ctx, ast.Store):
+            if (
+                not target_name
+                or target_name.startswith("_")
+                or not isinstance(stmt.targets[0].ctx, ast.Store)
+                or target_name in SAFE_PY_BUILTINS
+                or target_name in imported_modules
+                or target_name in imported_callables
+                or target_name in imported_constants
+            ):
                 return False
             if not is_valid_expr(stmt.value):
                 return False
-            if isinstance(stmt.value, ast.Name) and stmt.value.id in imported_modules:
-                imported_modules[target_name] = imported_modules[stmt.value.id]
             assigned_names.add(target_name)
         elif isinstance(stmt, ast.Expr):
+            seen_non_import = True
             if not is_valid_expr(stmt.value):
                 return False
         else:
@@ -1865,6 +2202,11 @@ def should_block_bulk_send(
                     expanded_cmd_vars.update(extract_expanded_var_names_in_raw_token(sub))
 
                 reachable_vars = child_exported_vars | expanded_cmd_vars
+                sc_env_keys = set(getattr(sc, "env_vars", {}).keys()) if sc is not None else set()
+                sc_raw_env_keys = {k for k, _, _ in getattr(sc, "raw_env_assignments", [])} if sc is not None else set()
+                code_load_vars_active = bool(
+                    (reachable_vars | sc_env_keys | sc_raw_env_keys) & INTERPRETER_CODE_LOAD_ENV_VARS
+                )
                 env_has_signal = prefix_has_signal or any(
                     (k in child_static_vars and has_bulk_send_signal(child_static_vars[k]))
                     or (k in child_unresolved_vars and chain_has_bulk_send_signal)
@@ -1874,7 +2216,7 @@ def should_block_bulk_send(
                 runner_exe_name = sc.executable if sc is not None else ""
                 inline_code_pairs = extract_inline_code_raw_args(sc) if sc is not None else []
                 if inline_code_pairs:
-                    if env_has_signal and has_unsafe_inline_runner_flags(sc):
+                    if env_has_signal and (has_unsafe_inline_runner_flags(sc) or code_load_vars_active):
                         return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                     for code_arg, raw_code_arg in inline_code_pairs:
                         expanded_code, code_unresolved = expand_shell_vars_in_raw_token(
@@ -1893,7 +2235,7 @@ def should_block_bulk_send(
                                 return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
                         if code_unresolved and (chain_has_bulk_send_signal or env_has_signal):
                             return "Phát hiện lệnh thực thi mã qua biến shell chưa giải tĩnh trong chuỗi lệnh có mẫu gửi tin/SMTP. Lệnh bị chặn và cần chủ trực tiếp duyệt."
-                elif prefix_has_signal and is_code_or_smtp_runner(sub):
+                elif (prefix_has_signal or (env_has_signal and (has_unsafe_inline_runner_flags(sc) or code_load_vars_active))) and is_code_or_smtp_runner(sub):
                     return "Phát hiện lệnh kết nối/gửi email qua giao thức SMTP (gán đầu lệnh có mẫu gửi, mã inline không chắc vô hại). Lệnh bị chặn và cần chủ trực tiếp duyệt."
 
                 # (b2) Check SMTP on command argv / subcommand words after stripping prefix env assignments (H13, H16a, H19, H24, H32d & H37)
