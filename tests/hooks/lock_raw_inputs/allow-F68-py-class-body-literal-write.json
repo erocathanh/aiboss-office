@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\nclass Export:\n    p = 'wip/a'\n    open(p, 'w').write('x')\nPY"}}

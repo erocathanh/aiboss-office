@@ -2627,14 +2627,22 @@ def _resolve_py_target_scope(
     decls: Dict[Tuple[int, str], str],
     raw_sid: int,
     var_name: str,
+    local_vars_by_scope: Optional[Dict[int, set]] = None,
 ) -> Tuple[int, bool]:
     decl = decls.get((raw_sid, var_name))
     if decl == 'global':
         return 0, (raw_sid != 0)
     if decl == 'nonlocal':
         chain = _enclosing_py_scope_chain(scopes, scopes[raw_sid][0], scopes[raw_sid][1])
-        for sid in reversed(chain):
-            if sid != raw_sid and scopes[sid][4] == 'def':
+        enclosing_defs = [sid for sid in reversed(chain) if sid != raw_sid and scopes[sid][4] == 'def']
+        if local_vars_by_scope is not None:
+            for sid in enclosing_defs:
+                if decls.get((sid, var_name)) in ('global', 'nonlocal'):
+                    continue
+                if var_name in local_vars_by_scope.get(sid, set()):
+                    return sid, True
+        for sid in enclosing_defs:
+            if decls.get((sid, var_name)) not in ('global', 'nonlocal'):
                 return sid, True
         return 0, True
     return raw_sid, False
@@ -2694,6 +2702,98 @@ def _parse_py_class_header(header_expr: str) -> Tuple[Optional[str], bool]:
     bases_str = (m_cls.group(2) or '').strip()
     has_custom_base = bool(bases_str and bases_str != 'object')
     return cls_name, has_custom_base
+
+
+def _def_decorators_in_scope(text: str, def_h_start: int, bound_start: int) -> List[str]:
+    """
+    S17q (F69): Extract decorator expressions (`@...`) attached immediately before `def` at `def_h_start`
+    within `text[bound_start:def_h_start]`, joining multi-line decorators across open parens or `\\`.
+    """
+    prefix = text[max(0, bound_start):def_h_start]
+    logical_lines: List[str] = []
+    cur_buf: List[str] = []
+    s_depth = 0
+    s_quote: Optional[str] = None
+    s_bs = False
+    for raw_line in prefix.splitlines(keepends=True):
+        if not cur_buf and s_depth == 0 and s_quote is None and not s_bs:
+            stripped = raw_line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+        cur_buf.append(raw_line)
+        s_depth, s_quote, s_bs = _update_py_line_continuation_state(raw_line, s_depth, s_quote)
+        if s_depth == 0 and s_quote is None and not s_bs:
+            joined = _strip_py_comments_and_continuations(''.join(cur_buf)).strip()
+            if joined:
+                logical_lines.append(joined)
+            cur_buf = []
+    if cur_buf:
+        joined = _strip_py_comments_and_continuations(''.join(cur_buf)).strip()
+        if joined:
+            logical_lines.append(joined)
+    decorators: List[str] = []
+    for ll in reversed(logical_lines):
+        if ll.startswith('@'):
+            decorators.append(ll[1:].strip())
+        else:
+            break
+    decorators.reverse()
+    return decorators
+
+
+def _mask_py_strings_and_comments(text: str) -> str:
+    """
+    S17q (F70): Replace Python string literal interiors and `#...` comments with spaces so regex
+    searches for identifier references/calls do not match inside string literals or comments.
+    """
+    out = list(text)
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == '#':
+            while i < n and text[i] != '\n':
+                out[i] = ' '
+                i += 1
+            continue
+        if ch in ('"', "'"):
+            q3 = text[i:i + 3]
+            if q3 in ('"""', "'''"):
+                out[i] = out[i + 1] = out[i + 2] = ' '
+                i += 3
+                while i < n and text[i:i + 3] != q3:
+                    if text[i] == '\\' and i + 1 < n:
+                        out[i] = ' '
+                        if text[i + 1] != '\n':
+                            out[i + 1] = ' '
+                        i += 2
+                        continue
+                    if text[i] != '\n':
+                        out[i] = ' '
+                    i += 1
+                if i < n:
+                    for k in range(min(3, n - i)):
+                        out[i + k] = ' '
+                    i += 3
+                continue
+            q = ch
+            out[i] = ' '
+            i += 1
+            while i < n and text[i] != q and text[i] != '\n':
+                if text[i] == '\\' and i + 1 < n:
+                    out[i] = ' '
+                    if text[i + 1] != '\n':
+                        out[i + 1] = ' '
+                    i += 2
+                    continue
+                out[i] = ' '
+                i += 1
+            if i < n and text[i] == q:
+                out[i] = ' '
+                i += 1
+            continue
+        i += 1
+    return ''.join(out)
 
 
 def _iter_dotted_attr_assignments_with_pos(text: str) -> List[Tuple[str, str, str, int, int]]:
@@ -2996,6 +3096,7 @@ def _extract_simple_var_multi_env(
         scope_envs: Dict[int, Dict[str, List[str]]] = {sid: {} for sid in range(len(py_scopes))}
         scope_uncond: Dict[int, set] = {sid: set() for sid in range(len(py_scopes))}
         reassigned_in_scope: Dict[int, set] = {sid: set() for sid in range(len(py_scopes))}
+        local_vars_by_scope: Dict[int, set] = {sid: set() for sid in range(len(py_scopes))}
         cls_sids_by_name: Dict[str, List[int]] = {}
         cls_has_custom_base: Dict[str, bool] = {}
 
@@ -3006,12 +3107,18 @@ def _extract_simple_var_multi_env(
                 for p_name in p_list:
                     scope_envs[sid][p_name] = [f"$DYNAMIC_WRITE:{p_name}"]
                     scope_uncond[sid].add(p_name)
+                    local_vars_by_scope[sid].add(p_name)
             elif kw_s == 'class':
                 c_name, has_base = _parse_py_class_header(py_scopes[sid][5])
                 if c_name:
                     cls_sids_by_name.setdefault(c_name, []).append(sid)
                     if has_base:
                         cls_has_custom_base[c_name] = True
+
+        for v_n, _rhs_n, c_s_n, c_e_n in all_assigns:
+            r_sid = _enclosing_py_scope_chain(py_scopes, c_s_n, c_e_n)[-1]
+            if py_decls.get((r_sid, v_n)) not in ('global', 'nonlocal'):
+                local_vars_by_scope[r_sid].add(v_n)
 
         has_dynamic_attr_ops = bool(
             re.search(r'\b(?:setattr|delattr)\s*\(|__dict__|\bdel\s+[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*', text)
@@ -3047,7 +3154,7 @@ def _extract_simple_var_multi_env(
                 for v, cands in scope_envs[s].items():
                     if s == 0:
                         env[v] = list(cands)
-                    elif v in scope_uncond[s] and py_scopes[s][4] != 'class':
+                    elif v in scope_uncond[s]:
                         env[v] = list(cands)
                     else:
                         if v not in env:
@@ -3056,12 +3163,16 @@ def _extract_simple_var_multi_env(
                             if c not in env[v]:
                                 env[v].append(c)
             if not has_dynamic_attr_ops:
+                cls_attr_env: Dict[Tuple[str, str], List[str]] = {}
                 for c_name, c_sids in cls_sids_by_name.items():
                     if cls_has_custom_base.get(c_name, False):
                         continue
                     all_attrs: set = set()
                     for c_sid in c_sids:
                         all_attrs.update(scope_envs[c_sid].keys())
+                    is_shadowed_cls = (c_name in reassigned_in_scope[0]) or any(
+                        c_name in scope_envs[s] for s in vis if s != 0
+                    )
                     for attr in all_attrs:
                         combined: List[str] = []
                         if len(c_sids) > 1:
@@ -3085,7 +3196,9 @@ def _extract_simple_var_multi_env(
                             if mut_val not in combined:
                                 combined.append(mut_val)
                         if combined:
-                            env[f"{c_name}.{attr}"] = combined
+                            cls_attr_env[(c_name, attr)] = combined
+                            if not is_shadowed_cls:
+                                env[f"{c_name}.{attr}"] = combined
 
                 if py_scopes[sid][4] == 'def':
                     sid_chain = _enclosing_py_scope_chain(py_scopes, py_scopes[sid][0], py_scopes[sid][1])
@@ -3093,17 +3206,21 @@ def _extract_simple_var_multi_env(
                     if py_scopes[parent_sid][4] == 'class':
                         c_name, has_base = _parse_py_class_header(py_scopes[parent_sid][5])
                         first_p, _ = _parse_py_def_params(py_scopes[sid][5])
+                        decs = _def_decorators_in_scope(
+                            text, py_scopes[sid][0], py_scopes[parent_sid][2]
+                        )
+                        is_receiver_method = all(d in ('classmethod', 'property') for d in decs)
                         if (
                             c_name
                             and not has_base
+                            and is_receiver_method
                             and first_p
                             and first_p not in reassigned_in_scope[sid]
                             and len(cls_sids_by_name.get(c_name, [])) == 1
                         ):
                             for attr in scope_envs[parent_sid]:
-                                cls_key = f"{c_name}.{attr}"
-                                if cls_key in env:
-                                    env[f"{first_p}.{attr}"] = list(env[cls_key])
+                                if (c_name, attr) in cls_attr_env:
+                                    env[f"{first_p}.{attr}"] = list(cls_attr_env[(c_name, attr)])
             return env
 
         def _apply_scoped_assignment(
@@ -3112,9 +3229,16 @@ def _extract_simple_var_multi_env(
             c_start: int,
             c_end: int,
             force_union: bool = False,
+            eval_sid_override: Optional[int] = None,
         ) -> None:
-            raw_sid = _enclosing_py_scope_chain(py_scopes, c_start, c_end)[-1]
-            target_sid, _ = _resolve_py_target_scope(py_scopes, py_decls, raw_sid, var_name)
+            raw_sid = (
+                eval_sid_override
+                if eval_sid_override is not None
+                else _enclosing_py_scope_chain(py_scopes, c_start, c_end)[-1]
+            )
+            target_sid, _ = _resolve_py_target_scope(
+                py_scopes, py_decls, raw_sid, var_name, local_vars_by_scope
+            )
             reassigned_in_scope[target_sid].add(var_name)
             t_env = scope_envs[target_sid]
             if py_scopes[target_sid][4] == 'class':
@@ -3180,33 +3304,166 @@ def _extract_simple_var_multi_env(
                     if ac not in dest_list:
                         dest_list.append(ac)
 
-        if not enclosing_loops:
+        def _expand_scoped_assigns() -> List[Tuple[str, str, int, int, bool, int]]:
+            """
+            S17q (F70): Expand `all_assigns` so that `global`/`nonlocal` assignments inside a `def` body
+            do not take effect at the `def` definition site for outer callers, but instead take effect
+            (with `force_union=True`) at every call/invocation site of that function (including aliased
+            calls `g = f; g()` and indirect references).
+            """
+            def_names: Dict[int, str] = {}
+            def_parent: Dict[int, int] = {}
+            for s_idx, sc in enumerate(py_scopes):
+                if s_idx > 0 and sc[4] == 'def':
+                    m_dn = re.match(
+                        r'^([A-Za-z_][A-Za-z0-9_]*)\s*\(',
+                        _strip_py_comments_and_continuations(sc[5]).strip(),
+                    )
+                    if m_dn:
+                        def_names[s_idx] = m_dn.group(1)
+                        def_parent[s_idx] = _enclosing_py_scope_chain(py_scopes, sc[0], sc[1])[-1]
+
+            def_cross_writes: Dict[int, List[Tuple[str, str, int]]] = {}
+            normal_assigns: List[Tuple[str, str, int, int, bool, int]] = []
             for var_name, rhs, c_start, c_end in all_assigns:
                 raw_sid = _enclosing_py_scope_chain(py_scopes, c_start, c_end)[-1]
-                target_sid, _ = _resolve_py_target_scope(py_scopes, py_decls, raw_sid, var_name)
+                target_sid, is_cross = _resolve_py_target_scope(
+                    py_scopes, py_decls, raw_sid, var_name, local_vars_by_scope
+                )
+                if is_cross and py_scopes[raw_sid][4] == 'def':
+                    def_cross_writes.setdefault(raw_sid, []).append((var_name, rhs, raw_sid))
+                    if raw_sid in call_chain:
+                        normal_assigns.append((var_name, rhs, c_start, c_end, False, raw_sid))
+                else:
+                    normal_assigns.append((var_name, rhs, c_start, c_end, False, raw_sid))
+
+            if not def_cross_writes:
+                return normal_assigns
+
+            masked_code = _mask_py_strings_and_comments(text)
+            alias_to_defs: Dict[str, List[int]] = {}
+            for fn_sid, fn_name in def_names.items():
+                alias_to_defs.setdefault(fn_name, []).append(fn_sid)
+            for _pass_a in range(3):
+                for var_name, rhs, _c_s, _c_e in all_assigns:
+                    rhs_clean = rhs.strip()
+                    if _SIMPLE_IDENT_RE.match(rhs_clean) and rhs_clean in alias_to_defs:
+                        dest_l = alias_to_defs.setdefault(var_name, [])
+                        for f_s in alias_to_defs[rhs_clean]:
+                            if f_s not in dest_l:
+                                dest_l.append(f_s)
+
+            def _find_invocation_spans_for_def(fn_sid: int) -> List[Tuple[int, int]]:
+                fn_name = def_names.get(fn_sid)
+                if not fn_name:
+                    return []
+                h_s, _c_a, b_s, b_e, _kw, _he = py_scopes[fn_sid]
+                p_sid = def_parent.get(fn_sid, 0)
+                p_b_s = py_scopes[p_sid][2]
+                p_b_e = py_scopes[p_sid][3]
+                names_for_fn = [alias_n for alias_n, sids in alias_to_defs.items() if fn_sid in sids]
+                spans: List[Tuple[int, int]] = []
+                decs = _def_decorators_in_scope(text, h_s, p_b_s)
+                if any(d not in ('staticmethod', 'classmethod', 'property') for d in decs):
+                    spans.append((b_e, b_e))
+                for cand_name in names_for_fn:
+                    call_pat = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(cand_name)}\s*\(')
+                    for m_c in call_pat.finditer(masked_code):
+                        pos = m_c.start()
+                        if h_s <= pos < b_s:
+                            continue
+                        if p_sid != 0 and py_scopes[p_sid][4] == 'def' and not (p_b_s <= pos <= p_b_e):
+                            continue
+                        _, end_p = _scan_balanced_paren_args(masked_code, m_c.end())
+                        c_end_pos = end_p if end_p > m_c.end() else m_c.end()
+                        spans.append((pos, c_end_pos))
+                    ref_pat = re.compile(rf'(?<![A-Za-z0-9_.]){re.escape(cand_name)}(?![A-Za-z0-9_]|\s*\()')
+                    for m_r in ref_pat.finditer(masked_code):
+                        r_pos = m_r.start()
+                        r_end = m_r.end()
+                        if h_s <= r_pos < b_s:
+                            continue
+                        if p_sid != 0 and py_scopes[p_sid][4] == 'def' and not (p_b_s <= r_pos <= p_b_e):
+                            continue
+                        if any(
+                            a_s <= r_pos and r_end <= a_e and a_rhs.strip() == cand_name
+                            for _av, a_rhs, a_s, a_e in all_assigns
+                        ):
+                            continue
+                        spans.append((r_pos, r_end))
+                for m_dyn in re.finditer(r'\b(?:globals|locals|getattr)\s*\(', masked_code):
+                    spans.append((m_dyn.start(), m_dyn.end()))
+                return spans
+
+            for _pass_p in range(3):
+                for fn_sid in list(def_cross_writes.keys()):
+                    for inv_s, inv_e in _find_invocation_spans_for_def(fn_sid):
+                        caller_sid = _enclosing_py_scope_chain(py_scopes, inv_s, inv_e)[-1]
+                        if caller_sid != fn_sid and py_scopes[caller_sid][4] == 'def':
+                            dest_cw = def_cross_writes.setdefault(caller_sid, [])
+                            for cw_item in def_cross_writes[fn_sid]:
+                                if cw_item not in dest_cw:
+                                    dest_cw.append(cw_item)
+
+            for fn_sid, cw_list in def_cross_writes.items():
+                for inv_s, inv_e in _find_invocation_spans_for_def(fn_sid):
+                    inv_chain = _enclosing_py_scope_chain(py_scopes, inv_s, inv_e)
+                    inv_sid = inv_chain[-1]
+                    for var_name, rhs, orig_raw_sid in cw_list:
+                        target_sid, _ = _resolve_py_target_scope(
+                            py_scopes, py_decls, orig_raw_sid, var_name, local_vars_by_scope
+                        )
+                        if target_sid in inv_chain and (inv_sid == target_sid or inv_sid in call_chain):
+                            normal_assigns.append((var_name, rhs, inv_s, inv_e, True, orig_raw_sid))
+
+            normal_assigns.sort(key=lambda x: (x[2], x[3]))
+            return normal_assigns
+
+        scoped_assigns = _expand_scoped_assigns()
+
+        if not enclosing_loops:
+            for var_name, rhs, c_start, c_end, syn_union, orig_sid in scoped_assigns:
+                target_sid, _ = _resolve_py_target_scope(
+                    py_scopes, py_decls, orig_sid, var_name, local_vars_by_scope
+                )
                 if c_end <= call_pos:
-                    _apply_scoped_assignment(var_name, rhs, c_start, c_end)
-                elif py_scopes[target_sid][4] == 'class':
-                    _apply_scoped_assignment(var_name, rhs, c_start, c_end, force_union=True)
+                    _apply_scoped_assignment(
+                        var_name, rhs, c_start, c_end, force_union=syn_union, eval_sid_override=orig_sid
+                    )
+                elif py_scopes[target_sid][4] == 'class' and call_sid != target_sid:
+                    _apply_scoped_assignment(
+                        var_name, rhs, c_start, c_end, force_union=True, eval_sid_override=orig_sid
+                    )
                 elif (
                     call_sid != 0
                     and py_scopes[call_sid][4] == 'def'
                     and target_sid in visible_call_scopes
                     and var_name not in scope_uncond[call_sid]
                 ):
-                    _apply_scoped_assignment(var_name, rhs, c_start, c_end, force_union=True)
+                    _apply_scoped_assignment(
+                        var_name, rhs, c_start, c_end, force_union=True, eval_sid_override=orig_sid
+                    )
             _collect_dotted_attr_mutations()
             return _build_lookup_env(call_sid)
 
         outer_h_start_s = enclosing_loops[0][0]
         outer_b_end_s = enclosing_loops[0][2]
-        for var_name, rhs, c_start, c_end in all_assigns:
-            raw_sid = _enclosing_py_scope_chain(py_scopes, c_start, c_end)[-1]
-            target_sid, _ = _resolve_py_target_scope(py_scopes, py_decls, raw_sid, var_name)
+        for var_name, rhs, c_start, c_end, syn_union, orig_sid in scoped_assigns:
+            target_sid, _ = _resolve_py_target_scope(
+                py_scopes, py_decls, orig_sid, var_name, local_vars_by_scope
+            )
             if c_end <= outer_h_start_s:
-                _apply_scoped_assignment(var_name, rhs, c_start, c_end)
-            elif py_scopes[target_sid][4] == 'class' and (c_end < outer_h_start_s or c_start > outer_b_end_s):
-                _apply_scoped_assignment(var_name, rhs, c_start, c_end, force_union=True)
+                _apply_scoped_assignment(
+                    var_name, rhs, c_start, c_end, force_union=syn_union, eval_sid_override=orig_sid
+                )
+            elif (
+                py_scopes[target_sid][4] == 'class'
+                and call_sid != target_sid
+                and (c_end < outer_h_start_s or c_start > outer_b_end_s)
+            ):
+                _apply_scoped_assignment(
+                    var_name, rhs, c_start, c_end, force_union=True, eval_sid_override=orig_sid
+                )
 
         _collect_dotted_attr_mutations()
         iter_vars_cands_s: Dict[str, List[str]] = {}
@@ -3240,14 +3497,14 @@ def _extract_simple_var_multi_env(
             lp_sid, lvl_iters = level_iter_vars_s[idx]
             is_innermost = idx == num_levels_s - 1
             if is_innermost:
-                pre_assigns = [a for a in all_assigns if h_start <= a[2] and a[3] <= call_pos]
-                post_assigns = [a for a in all_assigns if call_pos < a[2] and a[3] <= b_end]
+                pre_assigns = [a for a in scoped_assigns if h_start <= a[2] and a[3] <= call_pos]
+                post_assigns = [a for a in scoped_assigns if call_pos < a[2] and a[3] <= b_end]
                 max_passes = 3
             else:
                 child_h_start = enclosing_loops[idx + 1][0]
                 child_b_end = enclosing_loops[idx + 1][2]
-                pre_assigns = [a for a in all_assigns if h_start <= a[2] and a[3] <= child_h_start]
-                post_assigns = [a for a in all_assigns if child_b_end < a[2] and a[3] <= b_end]
+                pre_assigns = [a for a in scoped_assigns if h_start <= a[2] and a[3] <= child_h_start]
+                post_assigns = [a for a in scoped_assigns if child_b_end < a[2] and a[3] <= b_end]
                 max_passes = 2
 
             for _pass in range(max_passes):
@@ -3259,9 +3516,11 @@ def _extract_simple_var_multi_env(
                         if c not in existing_iv:
                             existing_iv.append(c)
 
-                for var_name, rhs, c_start, c_end in pre_assigns:
-                    force_u = var_name in iter_vars_cands_s
-                    _apply_scoped_assignment(var_name, rhs, c_start, c_end, force_union=force_u)
+                for var_name, rhs, c_start, c_end, syn_union, orig_sid in pre_assigns:
+                    force_u = syn_union or (var_name in iter_vars_cands_s)
+                    _apply_scoped_assignment(
+                        var_name, rhs, c_start, c_end, force_union=force_u, eval_sid_override=orig_sid
+                    )
 
                 if is_innermost:
                     cur_call_env = _build_lookup_env(call_sid)
@@ -3277,14 +3536,17 @@ def _extract_simple_var_multi_env(
                     break
 
                 cur_call_env_post = _build_lookup_env(call_sid)
-                for var_name, rhs, c_start, c_end in post_assigns:
-                    raw_sid_p = _enclosing_py_scope_chain(py_scopes, c_start, c_end)[-1]
-                    target_sid_p, _ = _resolve_py_target_scope(py_scopes, py_decls, raw_sid_p, var_name)
+                for var_name, rhs, c_start, c_end, syn_union, orig_sid in post_assigns:
+                    target_sid_p, _ = _resolve_py_target_scope(
+                        py_scopes, py_decls, orig_sid, var_name, local_vars_by_scope
+                    )
                     if _pass == 0 and var_name not in cur_call_env_post and var_name not in scope_envs[target_sid_p]:
                         scope_envs[target_sid_p][var_name] = [f"$DYNAMIC_WRITE:{var_name}"]
                     has_jump_before = bool(jump_re_s.search(text[call_pos:c_start]))
-                    force_u = (var_name in iter_vars_cands_s) or has_jump_before
-                    _apply_scoped_assignment(var_name, rhs, c_start, c_end, force_union=force_u)
+                    force_u = syn_union or (var_name in iter_vars_cands_s) or has_jump_before
+                    _apply_scoped_assignment(
+                        var_name, rhs, c_start, c_end, force_union=force_u, eval_sid_override=orig_sid
+                    )
 
         _simulate_scoped_loop_level(0)
         return reaching_at_call_s

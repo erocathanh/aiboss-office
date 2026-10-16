@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\ndef select_input():\n    global p\n    p = 'projects/THU-SU-THAT/inputs/a.md'\n\np = 'wip/a'\nopen(p, 'w').write('x')\nPY"}}

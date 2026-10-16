@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\nclass Export:\n    p = 'wip/a'\n\n    @staticmethod\n    def run():\n        open(Export.p, 'w').write('x')\n\nExport.run()\nPY"}}
