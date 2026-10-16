@@ -1,0 +1,1 @@
+{"tool_name": "Bash", "tool_input": {"command": "python3 - <<'PY'\np = 'wip/a'\n\ndef noop():\n    pass\n\nclass Bootstrap:\n    noop()\n\nopen(p, 'w').write('x')\nPY"}}
